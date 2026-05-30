@@ -55,13 +55,16 @@ impl SqliteStore {
         }
 
         let conn = Connection::open(db_path)
-            .map_err(|e| BrainError::Internal(format!("SQLite 打开失敗: {e}")))?;
+            .map_err(|e| BrainError::Internal(format!("SQLite 打开失败: {e}")))?;
 
         conn.execute_batch("PRAGMA journal_mode=WAL;")
             .map_err(|e| BrainError::Internal(format!("WAL 设置失败: {e}")))?;
 
         conn.execute_batch("PRAGMA busy_timeout=5000;")
             .map_err(|e| BrainError::Internal(format!("busy_timeout 设置失败: {e}")))?;
+
+        conn.execute_batch("PRAGMA foreign_keys=ON;")
+            .map_err(|e| BrainError::Internal(format!("foreign_keys 设置失败: {e}")))?;
 
         let store = SqliteStore {
             conn: Arc::new(Mutex::new(conn)),
@@ -90,21 +93,42 @@ impl SqliteStore {
             )
             .unwrap_or(0);
 
-        for migration in MIGRATIONS {
-            if migration.version > current_version {
-                tracing::info!("执行迁移 v{}: {}", migration.version, migration.description);
-                conn.execute_batch(migration.sql).map_err(|e| {
-                    BrainError::Internal(format!("迁移 v{} 执行失败: {e}", migration.version))
-                })?;
-                conn.execute(
-                    "INSERT INTO _migrations (version, description) VALUES (?1, ?2)",
-                    params![migration.version, migration.description],
-                )
-                .map_err(|e| {
-                    BrainError::Internal(format!("迁移 v{} 记录失败: {e}", migration.version))
-                })?;
+        let pending: Vec<&Migration> = MIGRATIONS
+            .iter()
+            .filter(|m| m.version > current_version)
+            .collect();
+
+        if pending.is_empty() {
+            return Ok(());
+        }
+
+        // Wrap all pending migrations in a single transaction
+        conn.execute_batch("BEGIN IMMEDIATE;")
+            .map_err(|e| BrainError::Internal(format!("迁移事务开始失败: {e}")))?;
+
+        for migration in &pending {
+            tracing::info!("执行迁移 v{}: {}", migration.version, migration.description);
+            if let Err(e) = conn.execute_batch(migration.sql) {
+                let _ = conn.execute_batch("ROLLBACK;");
+                return Err(BrainError::Internal(format!(
+                    "迁移 v{} 执行失败: {e}",
+                    migration.version
+                )));
+            }
+            if let Err(e) = conn.execute(
+                "INSERT INTO _migrations (version, description) VALUES (?1, ?2)",
+                params![migration.version, migration.description],
+            ) {
+                let _ = conn.execute_batch("ROLLBACK;");
+                return Err(BrainError::Internal(format!(
+                    "迁移 v{} 记录失败: {e}",
+                    migration.version
+                )));
             }
         }
+
+        conn.execute_batch("COMMIT;")
+            .map_err(|e| BrainError::Internal(format!("迁移事务提交失败: {e}")))?;
 
         Ok(())
     }
@@ -162,7 +186,8 @@ impl SqliteStore {
     /// Check if the store is healthy (can execute a simple query).
     pub fn health_check(&self) -> bool {
         let conn = self.conn.lock().unwrap();
-        conn.execute_batch("SELECT 1;").is_ok()
+        conn.query_row("SELECT 1", [], |_| Ok(true))
+            .unwrap_or(false)
     }
 }
 
