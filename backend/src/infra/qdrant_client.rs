@@ -7,7 +7,6 @@ use crate::config::QdrantConfig;
 use crate::error::BrainError;
 
 /// Qdrant vector store client (REST API).
-#[allow(dead_code)]
 pub struct QdrantStore {
     client: Client,
     base_url: String,
@@ -46,7 +45,6 @@ pub struct ChunkPayload {
     pub updated_at: String,
 }
 
-#[allow(dead_code)]
 impl QdrantStore {
     pub fn new(config: &QdrantConfig) -> Result<Self, BrainError> {
         let client = Client::builder()

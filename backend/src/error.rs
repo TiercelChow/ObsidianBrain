@@ -6,7 +6,6 @@ use std::path::PathBuf;
 
 /// Unified error type for the entire application.
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code)]
 pub enum BrainError {
     #[error("Configuration error: {0}")]
     ConfigError(String),
@@ -48,7 +47,6 @@ pub enum BrainError {
     Internal(String),
 }
 
-#[allow(dead_code)]
 impl BrainError {
     /// Returns a machine-readable error code string.
     fn error_code(&self) -> &'static str {

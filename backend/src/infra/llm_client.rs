@@ -9,14 +9,12 @@ use crate::config::LlmConfig;
 use crate::error::BrainError;
 
 /// A single chat message.
-#[allow(dead_code)] // Public API for future tasks (Phase 1+)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: MessageRole,
     pub content: String,
 }
 
-#[allow(dead_code)] // Public API for future tasks (Phase 1+)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MessageRole {
@@ -26,7 +24,6 @@ pub enum MessageRole {
 }
 
 /// Complete chat response.
-#[allow(dead_code)] // Public API for future tasks (Phase 1+)
 #[derive(Debug, Clone)]
 pub struct ChatResponse {
     pub content: String,
@@ -34,7 +31,6 @@ pub struct ChatResponse {
     pub usage: TokenUsage,
 }
 
-#[allow(dead_code)] // Public API for future tasks (Phase 1+)
 #[derive(Debug, Clone)]
 pub struct TokenUsage {
     pub prompt_tokens: u32,
@@ -43,7 +39,6 @@ pub struct TokenUsage {
 }
 
 /// A single chunk from a streaming response.
-#[allow(dead_code)] // Public API for future tasks (Phase 1+)
 #[derive(Debug, Clone)]
 pub struct StreamChunk {
     pub content: String,
@@ -51,7 +46,6 @@ pub struct StreamChunk {
 }
 
 /// Unified LLM interface.
-#[allow(dead_code)] // Public API for future tasks (Phase 1+)
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     async fn chat(&self, messages: &[ChatMessage]) -> Result<ChatResponse, BrainError>;
@@ -85,7 +79,6 @@ pub trait LlmProvider: Send + Sync {
 
 // ── OpenAI ──
 
-#[allow(dead_code)] // Public API for future tasks (Phase 1+)
 pub struct OpenAiProvider {
     client: Client,
     api_key: String,
@@ -151,7 +144,6 @@ fn role_to_string(role: &MessageRole) -> String {
 }
 
 impl OpenAiProvider {
-    #[allow(dead_code)] // Public API for future tasks (Phase 1+)
     pub fn new(config: &LlmConfig) -> Result<Self, BrainError> {
         let api_key = config
             .api_key_env
@@ -336,7 +328,6 @@ impl LlmProvider for OpenAiProvider {
 
 // ── Ollama ──
 
-#[allow(dead_code)] // Public API for future tasks (Phase 1+)
 pub struct OllamaProvider {
     client: Client,
     model: String,
@@ -344,7 +335,6 @@ pub struct OllamaProvider {
 }
 
 impl OllamaProvider {
-    #[allow(dead_code)] // Public API for future tasks (Phase 1+)
     pub fn new(config: &LlmConfig) -> Result<Self, BrainError> {
         let client = Client::builder()
             .timeout(Duration::from_secs(120))
@@ -438,11 +428,9 @@ impl LlmProvider for OllamaProvider {
 
 // ── Factory ──
 
-#[allow(dead_code)] // Public API for future tasks (Phase 1+)
 pub struct LlmClientFactory;
 
 impl LlmClientFactory {
-    #[allow(dead_code)] // Public API for future tasks (Phase 1+)
     pub fn create(config: &LlmConfig) -> Result<Box<dyn LlmProvider>, BrainError> {
         match config.provider.as_str() {
             "openai" => Ok(Box::new(OpenAiProvider::new(config)?)),

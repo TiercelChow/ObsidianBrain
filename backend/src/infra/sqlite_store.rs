@@ -5,19 +5,17 @@ use std::sync::{Arc, Mutex};
 use crate::error::BrainError;
 
 /// SQLite metadata store with WAL mode and versioned migrations.
-#[allow(dead_code)] // Public API for future tasks (Phase 1+)
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
 }
 
-#[allow(dead_code)] // Used by migrations, only referenced in this file
+#[allow(dead_code)] // Internal helper for migrations
 struct Migration {
     version: u32,
     description: &'static str,
     sql: &'static str,
 }
 
-#[allow(dead_code)] // Referenced by run_migrations at runtime
 const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
@@ -46,7 +44,6 @@ const MIGRATIONS: &[Migration] = &[
     },
 ];
 
-#[allow(dead_code)] // Public API for future tasks (Phase 1+)
 impl SqliteStore {
     /// Open (or create) the database at `db_path`, enable WAL, run pending migrations.
     pub fn new(db_path: &Path) -> Result<Self, BrainError> {

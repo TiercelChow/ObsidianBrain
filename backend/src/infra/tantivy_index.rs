@@ -105,7 +105,6 @@ pub struct TantivySearchResult {
 }
 
 /// Tantivy full-text search index with Chinese (jieba) support.
-#[allow(dead_code)]
 pub struct TantivyIndex {
     index: Index,
     fields: FieldMap,
@@ -113,7 +112,6 @@ pub struct TantivyIndex {
     reader: IndexReader,
 }
 
-#[allow(dead_code)]
 impl TantivyIndex {
     fn build_schema() -> (Schema, FieldMap) {
         let mut schema_builder = Schema::builder();

@@ -7,7 +7,6 @@ use crate::config::EmbeddingConfig;
 use crate::error::BrainError;
 
 /// Unified interface for embedding text into vectors.
-#[allow(dead_code)] // Public API for future tasks (Phase 1+)
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
     async fn embed_text(&self, text: &str) -> Result<Vec<f32>, BrainError>;
@@ -17,7 +16,6 @@ pub trait EmbeddingProvider: Send + Sync {
 
 // ── OpenAI ──
 
-#[allow(dead_code)] // Public API for future tasks (Phase 1+)
 pub struct OpenAiEmbedder {
     client: Client,
     api_key: String,
@@ -48,7 +46,6 @@ struct EmbeddingData {
 }
 
 impl OpenAiEmbedder {
-    #[allow(dead_code)] // Public API for future tasks (Phase 1+)
     pub fn new(config: &EmbeddingConfig) -> Result<Self, BrainError> {
         let api_key = config
             .api_key_env
@@ -149,7 +146,6 @@ impl EmbeddingProvider for OpenAiEmbedder {
 
 // ── Ollama ──
 
-#[allow(dead_code)] // Public API for future tasks (Phase 1+)
 pub struct OllamaEmbedder {
     client: Client,
     model: String,
@@ -170,7 +166,6 @@ struct OllamaEmbedResponse {
 }
 
 impl OllamaEmbedder {
-    #[allow(dead_code)] // Public API for future tasks (Phase 1+)
     pub fn new(config: &EmbeddingConfig) -> Result<Self, BrainError> {
         let client = Client::builder()
             .timeout(Duration::from_secs(60))
@@ -230,11 +225,9 @@ impl EmbeddingProvider for OllamaEmbedder {
 
 // ── Factory ──
 
-#[allow(dead_code)] // Public API for future tasks (Phase 1+)
 pub struct EmbeddingFactory;
 
 impl EmbeddingFactory {
-    #[allow(dead_code)] // Public API for future tasks (Phase 1+)
     pub fn create(config: &EmbeddingConfig) -> Result<Box<dyn EmbeddingProvider>, BrainError> {
         match config.provider.as_str() {
             "openai" => Ok(Box::new(OpenAiEmbedder::new(config)?)),
