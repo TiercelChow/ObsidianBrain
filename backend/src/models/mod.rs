@@ -1,6 +1,13 @@
-// 共享数据模型
-// TODO: Phase 1 实现
-// pub mod note;    // 笔记模型
-// pub mod memory;  // 记忆模型
-// pub mod repo;    // 代码仓模型
-// pub mod radar;   // 雷达条目模型
+#[allow(unused_imports)]
+pub mod memory;
+#[allow(unused_imports)]
+pub mod note;
+#[allow(unused_imports)]
+pub mod search;
+
+#[allow(unused_imports)]
+pub use memory::{MemoryChunk, MemoryStats};
+#[allow(unused_imports)]
+pub use note::{CodeBlock, NoteSummary, ParsedDocument, Section};
+#[allow(unused_imports)]
+pub use search::HybridSearchResult;
