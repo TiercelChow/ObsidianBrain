@@ -40,7 +40,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("ObsidianBrain 启动中...");
 
     // 2. 加载配置
-    let config = AppConfig::load();
+    let config = AppConfig::load().unwrap_or_else(|e| {
+        tracing::warn!("配置加载失败: {e}，使用默认配置");
+        AppConfig::default()
+    });
     let addr = SocketAddr::from(([127, 0, 0, 1], config.server.port));
     tracing::info!("配置加载完成: {}:{}", addr.ip(), addr.port());
 

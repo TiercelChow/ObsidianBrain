@@ -129,6 +129,24 @@ impl BrainError {
     }
 }
 
+impl From<rusqlite::Error> for BrainError {
+    fn from(e: rusqlite::Error) -> Self {
+        BrainError::Internal(format!("SQLite 错误: {e}"))
+    }
+}
+
+impl From<reqwest::Error> for BrainError {
+    fn from(e: reqwest::Error) -> Self {
+        if e.is_timeout() {
+            BrainError::Internal(format!("HTTP 超时: {e}"))
+        } else if e.is_connect() {
+            BrainError::Internal(format!("连接失败: {e}"))
+        } else {
+            BrainError::Internal(format!("HTTP 错误: {e}"))
+        }
+    }
+}
+
 /// Axum IntoResponse implementation — returns JSON error envelope.
 impl IntoResponse for BrainError {
     fn into_response(self) -> Response {

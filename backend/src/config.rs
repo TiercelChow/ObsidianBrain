@@ -1,8 +1,12 @@
+use config::{Config, Environment, File};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Top-level application configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+use crate::error::BrainError;
+
+// ── Top-level ──
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub server: ServerConfig,
@@ -23,172 +27,222 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    /// Load configuration.
-    ///
-    /// TODO: When the `config` or `toml` crate is added, read `config/default.toml`
-    /// and merge with environment variable overrides. For now, returns defaults.
-    pub fn load() -> Self {
-        let config_path = PathBuf::from("config/default.toml");
-        if config_path.exists() {
-            tracing::info!(
-                path = %config_path.display(),
-                "Config file found but TOML parsing not yet available; using defaults"
+    pub fn load() -> Result<Self, BrainError> {
+        let builder = Config::builder()
+            .add_source(File::with_name("config/default").required(false))
+            .add_source(File::with_name("config/local").required(false))
+            .add_source(
+                Environment::with_prefix("OBRAIN")
+                    .separator("__")
+                    .try_parsing(true),
             );
-        } else {
-            tracing::info!("No config file found, using default configuration");
+
+        let config = builder
+            .build()
+            .map_err(|e| BrainError::ConfigError(format!("配置加载失败: {e}")))?;
+
+        let app_config: AppConfig = config
+            .try_deserialize()
+            .map_err(|e| BrainError::ConfigError(format!("配置解析失败: {e}")))?;
+
+        app_config.validate()?;
+        Ok(app_config)
+    }
+
+    pub fn validate(&self) -> Result<(), BrainError> {
+        if self.server.port < 1024 {
+            return Err(BrainError::ConfigError(format!(
+                "端口号不能低于 1024: {}",
+                self.server.port
+            )));
         }
-        Self::default()
+        if self.memory.chunk_min_tokens >= self.memory.chunk_max_tokens {
+            return Err(BrainError::ConfigError(
+                "chunk_min_tokens 必须小于 chunk_max_tokens".to_string(),
+            ));
+        }
+        if self.qdrant.vector_size == 0 {
+            return Err(BrainError::ConfigError("向量维度不能为 0".to_string()));
+        }
+        Ok(())
     }
 }
 
-/// HTTP server bind configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// ── Sub-configs ──
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ServerConfig {
+    #[serde(default = "default_host")]
     pub host: String,
+    #[serde(default = "default_port")]
     pub port: u16,
 }
-
 impl Default for ServerConfig {
-    fn default() -> Self {
-        Self {
-            host: "127.0.0.1".to_string(),
-            port: 9876,
-        }
-    }
+    fn default() -> Self { Self { host: default_host(), port: default_port() } }
 }
 
-/// Obsidian vault configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VaultConfig {
-    pub path: String,
+    #[serde(default)]
+    pub path: PathBuf,
+    #[serde(default = "default_vault_name")]
     pub name: String,
+    #[serde(default = "default_true")]
     pub watch_enabled: bool,
+    #[serde(default = "default_exclude_patterns")]
     pub exclude_patterns: Vec<String>,
 }
-
 impl Default for VaultConfig {
     fn default() -> Self {
-        Self {
-            path: "~/Documents/ObsidianVault".to_string(),
-            name: "MyVault".to_string(),
-            watch_enabled: true,
-            exclude_patterns: vec![
-                ".obsidian".to_string(),
-                ".trash".to_string(),
-                "node_modules".to_string(),
-            ],
-        }
+        Self { path: PathBuf::new(), name: default_vault_name(), watch_enabled: true, exclude_patterns: default_exclude_patterns() }
     }
 }
 
-/// Qdrant vector database configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct QdrantConfig {
+    #[serde(default = "default_qdrant_url")]
     pub url: String,
+    #[serde(default = "default_collection_name")]
     pub collection_name: String,
+    #[serde(default = "default_vector_size")]
     pub vector_size: usize,
 }
-
 impl Default for QdrantConfig {
     fn default() -> Self {
-        Self {
-            url: "http://localhost:6333".to_string(),
-            collection_name: "obsidian_brain".to_string(),
-            vector_size: 1536,
-        }
+        Self { url: default_qdrant_url(), collection_name: default_collection_name(), vector_size: default_vector_size() }
     }
 }
 
-/// Embedding provider configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct EmbeddingConfig {
+    #[serde(default = "default_openai")]
     pub provider: String,
+    #[serde(default = "default_embedding_model")]
     pub model: String,
-    pub api_key_env: String,
-    pub base_url: String,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default = "default_batch_size")]
+    pub batch_size: usize,
 }
-
 impl Default for EmbeddingConfig {
     fn default() -> Self {
-        Self {
-            provider: "openai".to_string(),
-            model: "text-embedding-3-small".to_string(),
-            api_key_env: "OPENAI_API_KEY".to_string(),
-            base_url: "https://api.openai.com/v1".to_string(),
-        }
+        Self { provider: default_openai(), model: default_embedding_model(), api_key_env: None, base_url: None, batch_size: default_batch_size() }
     }
 }
 
-/// LLM provider configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LlmConfig {
+    #[serde(default = "default_openai")]
     pub provider: String,
+    #[serde(default = "default_llm_model")]
     pub model: String,
-    pub api_key_env: String,
-    pub base_url: String,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default = "default_max_tokens")]
     pub max_tokens: u32,
-    pub temperature: f32,
+    #[serde(default = "default_temperature")]
+    pub temperature: f64,
 }
-
 impl Default for LlmConfig {
     fn default() -> Self {
-        Self {
-            provider: "openai".to_string(),
-            model: "gpt-4o-mini".to_string(),
-            api_key_env: "OPENAI_API_KEY".to_string(),
-            base_url: "https://api.openai.com/v1".to_string(),
-            max_tokens: 4096,
-            temperature: 0.7,
-        }
+        Self { provider: default_openai(), model: default_llm_model(), api_key_env: None, base_url: None, max_tokens: default_max_tokens(), temperature: default_temperature() }
     }
 }
 
-/// Memory engine configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MemoryConfig {
+    #[serde(default = "default_chunk_min")]
     pub chunk_min_tokens: usize,
+    #[serde(default = "default_chunk_max")]
     pub chunk_max_tokens: usize,
+    #[serde(default = "default_top_k")]
     pub search_top_k: usize,
 }
-
 impl Default for MemoryConfig {
     fn default() -> Self {
-        Self {
-            chunk_min_tokens: 100,
-            chunk_max_tokens: 512,
-            search_top_k: 10,
-        }
+        Self { chunk_min_tokens: default_chunk_min(), chunk_max_tokens: default_chunk_max(), search_top_k: default_top_k() }
     }
 }
 
-/// Storage paths configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StorageConfig {
-    pub db_path: String,
-    pub index_path: String,
+    #[serde(default = "default_db_path")]
+    pub db_path: PathBuf,
+    #[serde(default = "default_index_path")]
+    pub index_path: PathBuf,
 }
-
 impl Default for StorageConfig {
-    fn default() -> Self {
-        Self {
-            db_path: "data/obsidian_brain.db".to_string(),
-            index_path: "data/tantivy_index".to_string(),
-        }
-    }
+    fn default() -> Self { Self { db_path: default_db_path(), index_path: default_index_path() } }
 }
 
-/// Logging configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LoggingConfig {
+    #[serde(default = "default_log_level")]
     pub level: String,
-    pub file: Option<String>,
+    #[serde(default)]
+    pub file: Option<PathBuf>,
+}
+impl Default for LoggingConfig {
+    fn default() -> Self { Self { level: default_log_level(), file: None } }
 }
 
-impl Default for LoggingConfig {
-    fn default() -> Self {
-        Self {
-            level: "info".to_string(),
-            file: None,
-        }
+// ── Default value functions ──
+
+fn default_host() -> String { "127.0.0.1".to_string() }
+fn default_port() -> u16 { 9876 }
+fn default_vault_name() -> String { "brain".to_string() }
+fn default_true() -> bool { true }
+fn default_exclude_patterns() -> Vec<String> {
+    vec![".obsidian/".to_string(), "templates/".to_string(), ".trash/".to_string()]
+}
+fn default_qdrant_url() -> String { "http://127.0.0.1:6333".to_string() }
+fn default_collection_name() -> String { "obsidian_brain".to_string() }
+fn default_vector_size() -> usize { 1536 }
+fn default_openai() -> String { "openai".to_string() }
+fn default_embedding_model() -> String { "text-embedding-3-small".to_string() }
+fn default_llm_model() -> String { "gpt-4o-mini".to_string() }
+fn default_max_tokens() -> u32 { 2048 }
+fn default_temperature() -> f64 { 0.7 }
+fn default_batch_size() -> usize { 100 }
+fn default_chunk_min() -> usize { 300 }
+fn default_chunk_max() -> usize { 800 }
+fn default_top_k() -> usize { 5 }
+fn default_db_path() -> PathBuf { PathBuf::from("./data/brain.db") }
+fn default_index_path() -> PathBuf { PathBuf::from("./data/tantivy_index") }
+fn default_log_level() -> String { "info".to_string() }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config_is_valid() {
+        let config = AppConfig::default();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_invalid_port_rejected() {
+        let mut config = AppConfig::default();
+        config.server.port = 80;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_chunk_params_rejected_when_min_ge_max() {
+        let mut config = AppConfig::default();
+        config.memory.chunk_min_tokens = 1000;
+        config.memory.chunk_max_tokens = 500;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_load_falls_back_to_defaults() {
+        let config = AppConfig::load();
+        assert!(config.is_ok());
     }
 }
