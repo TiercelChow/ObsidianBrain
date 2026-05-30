@@ -72,9 +72,7 @@ impl BrainError {
     /// Returns an optional user-facing suggestion for recovery.
     fn suggestion(&self) -> Option<&'static str> {
         match self {
-            Self::ConfigError(_) => {
-                Some("Check config/default.toml or environment variables")
-            }
+            Self::ConfigError(_) => Some("Check config/default.toml or environment variables"),
             Self::VaultNotFound(_) => {
                 Some("Verify the vault path in configuration and ensure the directory exists")
             }
@@ -88,25 +86,17 @@ impl BrainError {
             Self::EmbeddingError(_) => {
                 Some("Check your embedding API key and network connectivity")
             }
-            Self::RepoNotFound(_) => {
-                Some("Register the repository first via the code_repo tools")
-            }
+            Self::RepoNotFound(_) => Some("Register the repository first via the code_repo tools"),
             Self::GitError { .. } => {
                 Some("Ensure the repository is a valid git repo and git is accessible")
             }
-            Self::QdrantError(_) => {
-                Some("Ensure Qdrant is running: docker compose up -d")
-            }
+            Self::QdrantError(_) => Some("Ensure Qdrant is running: docker compose up -d"),
             Self::LlmApiError { .. } => {
                 Some("Check your LLM API key, model name, and network connectivity")
             }
-            Self::FetchError { .. } => {
-                Some("Check the URL and your network connection")
-            }
+            Self::FetchError { .. } => Some("Check the URL and your network connection"),
             Self::IoError(_) => Some("Check file permissions and disk space"),
-            Self::Internal(_) => {
-                Some("This is a bug — please report it with the error details")
-            }
+            Self::Internal(_) => Some("This is a bug — please report it with the error details"),
         }
     }
 

@@ -989,15 +989,16 @@ enum BrainError {
 
 ## 10. 实施路线图
 
-### Phase 0: 基础设施搭建（1 周）
+### Phase 0: 基础设施搭建（详细计划见 `docs/superpowers/plans/2026-05-30-phase0-infrastructure.md`）
 
-- [ ] 项目初始化：Cargo workspace、目录结构、CI
-- [ ] 配置系统：config crate + TOML 加载
-- [ ] Axum 服务骨架：路由、中间件、健康检查
-- [ ] SQLite 初始化 + 迁移
-- [ ] Qdrant Docker + 客户端连接
-- [ ] 日志系统 (tracing)
-- [ ] 统一错误类型
+- [ ] Task 1: 配置系统（config crate + TOML 解析 + 环境变量覆盖 + 校验）
+- [ ] Task 2: SQLite 元数据存储（rusqlite WAL + 迁移框架 + 5 张表）
+- [ ] Task 3: 文件监控（notify + 300ms 防抖 + .md 过滤）
+- [ ] Task 4: Qdrant 客户端（REST API + collection 管理 + 向量操作）
+- [ ] Task 5: Embedding Provider（trait + OpenAI + Ollama + 批量 + 重试）
+- [ ] Task 6: LLM Client（trait + OpenAI + Ollama + 流式 SSE）
+- [ ] Task 7: Tantivy 全文索引（jieba 中文分词 + schema + 搜索）
+- [ ] Task 8: 集成到 AppContext + 健康检查
 
 ### Phase 1: 核心引擎 MVP（2-3 周）
 

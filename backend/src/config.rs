@@ -78,7 +78,12 @@ pub struct ServerConfig {
     pub port: u16,
 }
 impl Default for ServerConfig {
-    fn default() -> Self { Self { host: default_host(), port: default_port() } }
+    fn default() -> Self {
+        Self {
+            host: default_host(),
+            port: default_port(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -94,7 +99,12 @@ pub struct VaultConfig {
 }
 impl Default for VaultConfig {
     fn default() -> Self {
-        Self { path: PathBuf::new(), name: default_vault_name(), watch_enabled: true, exclude_patterns: default_exclude_patterns() }
+        Self {
+            path: PathBuf::new(),
+            name: default_vault_name(),
+            watch_enabled: default_true(),
+            exclude_patterns: default_exclude_patterns(),
+        }
     }
 }
 
@@ -109,7 +119,11 @@ pub struct QdrantConfig {
 }
 impl Default for QdrantConfig {
     fn default() -> Self {
-        Self { url: default_qdrant_url(), collection_name: default_collection_name(), vector_size: default_vector_size() }
+        Self {
+            url: default_qdrant_url(),
+            collection_name: default_collection_name(),
+            vector_size: default_vector_size(),
+        }
     }
 }
 
@@ -128,7 +142,13 @@ pub struct EmbeddingConfig {
 }
 impl Default for EmbeddingConfig {
     fn default() -> Self {
-        Self { provider: default_openai(), model: default_embedding_model(), api_key_env: None, base_url: None, batch_size: default_batch_size() }
+        Self {
+            provider: default_openai(),
+            model: default_embedding_model(),
+            api_key_env: None,
+            base_url: None,
+            batch_size: default_batch_size(),
+        }
     }
 }
 
@@ -149,7 +169,14 @@ pub struct LlmConfig {
 }
 impl Default for LlmConfig {
     fn default() -> Self {
-        Self { provider: default_openai(), model: default_llm_model(), api_key_env: None, base_url: None, max_tokens: default_max_tokens(), temperature: default_temperature() }
+        Self {
+            provider: default_openai(),
+            model: default_llm_model(),
+            api_key_env: None,
+            base_url: None,
+            max_tokens: default_max_tokens(),
+            temperature: default_temperature(),
+        }
     }
 }
 
@@ -164,7 +191,11 @@ pub struct MemoryConfig {
 }
 impl Default for MemoryConfig {
     fn default() -> Self {
-        Self { chunk_min_tokens: default_chunk_min(), chunk_max_tokens: default_chunk_max(), search_top_k: default_top_k() }
+        Self {
+            chunk_min_tokens: default_chunk_min(),
+            chunk_max_tokens: default_chunk_max(),
+            search_top_k: default_top_k(),
+        }
     }
 }
 
@@ -176,7 +207,12 @@ pub struct StorageConfig {
     pub index_path: PathBuf,
 }
 impl Default for StorageConfig {
-    fn default() -> Self { Self { db_path: default_db_path(), index_path: default_index_path() } }
+    fn default() -> Self {
+        Self {
+            db_path: default_db_path(),
+            index_path: default_index_path(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -187,33 +223,80 @@ pub struct LoggingConfig {
     pub file: Option<PathBuf>,
 }
 impl Default for LoggingConfig {
-    fn default() -> Self { Self { level: default_log_level(), file: None } }
+    fn default() -> Self {
+        Self {
+            level: default_log_level(),
+            file: None,
+        }
+    }
 }
 
 // ── Default value functions ──
 
-fn default_host() -> String { "127.0.0.1".to_string() }
-fn default_port() -> u16 { 9876 }
-fn default_vault_name() -> String { "brain".to_string() }
-fn default_true() -> bool { true }
-fn default_exclude_patterns() -> Vec<String> {
-    vec![".obsidian/".to_string(), "templates/".to_string(), ".trash/".to_string()]
+fn default_host() -> String {
+    "127.0.0.1".to_string()
 }
-fn default_qdrant_url() -> String { "http://127.0.0.1:6333".to_string() }
-fn default_collection_name() -> String { "obsidian_brain".to_string() }
-fn default_vector_size() -> usize { 1536 }
-fn default_openai() -> String { "openai".to_string() }
-fn default_embedding_model() -> String { "text-embedding-3-small".to_string() }
-fn default_llm_model() -> String { "gpt-4o-mini".to_string() }
-fn default_max_tokens() -> u32 { 2048 }
-fn default_temperature() -> f64 { 0.7 }
-fn default_batch_size() -> usize { 100 }
-fn default_chunk_min() -> usize { 300 }
-fn default_chunk_max() -> usize { 800 }
-fn default_top_k() -> usize { 5 }
-fn default_db_path() -> PathBuf { PathBuf::from("./data/brain.db") }
-fn default_index_path() -> PathBuf { PathBuf::from("./data/tantivy_index") }
-fn default_log_level() -> String { "info".to_string() }
+fn default_port() -> u16 {
+    9876
+}
+fn default_vault_name() -> String {
+    "brain".to_string()
+}
+fn default_true() -> bool {
+    true
+}
+fn default_exclude_patterns() -> Vec<String> {
+    vec![
+        ".obsidian/".to_string(),
+        "templates/".to_string(),
+        ".trash/".to_string(),
+    ]
+}
+fn default_qdrant_url() -> String {
+    "http://127.0.0.1:6333".to_string()
+}
+fn default_collection_name() -> String {
+    "obsidian_brain".to_string()
+}
+fn default_vector_size() -> usize {
+    1536
+}
+fn default_openai() -> String {
+    "openai".to_string()
+}
+fn default_embedding_model() -> String {
+    "text-embedding-3-small".to_string()
+}
+fn default_llm_model() -> String {
+    "gpt-4o-mini".to_string()
+}
+fn default_max_tokens() -> u32 {
+    2048
+}
+fn default_temperature() -> f64 {
+    0.7
+}
+fn default_batch_size() -> usize {
+    100
+}
+fn default_chunk_min() -> usize {
+    300
+}
+fn default_chunk_max() -> usize {
+    800
+}
+fn default_top_k() -> usize {
+    5
+}
+fn default_db_path() -> PathBuf {
+    PathBuf::from("./data/brain.db")
+}
+fn default_index_path() -> PathBuf {
+    PathBuf::from("./data/tantivy_index")
+}
+fn default_log_level() -> String {
+    "info".to_string()
+}
 
 #[cfg(test)]
 mod tests {

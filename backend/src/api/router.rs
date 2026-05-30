@@ -34,12 +34,9 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
             path = %frontend_dist.display(),
             "Serving frontend static files"
         );
-        app.fallback_service(
-            tower_http::services::ServeDir::new(frontend_dist)
-                .fallback(tower_http::services::ServeFile::new(
-                    frontend_dist.join("index.html"),
-                )),
-        )
+        app.fallback_service(tower_http::services::ServeDir::new(frontend_dist).fallback(
+            tower_http::services::ServeFile::new(frontend_dist.join("index.html")),
+        ))
     } else {
         tracing::warn!(
             path = %frontend_dist.display(),
