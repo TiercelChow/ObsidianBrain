@@ -1,16 +1,13 @@
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// A single result from hybrid (fulltext + semantic) search, fused via RRF.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct HybridSearchResult {
     /// ID of the matching memory chunk.
     pub chunk_id: Uuid,
     /// Path of the source note.
-    pub note_path: PathBuf,
+    pub note_path: String,
     /// Title of the source note.
     pub note_title: String,
     /// Chunk content that matched the query.
@@ -41,7 +38,7 @@ mod tests {
     fn test_hybrid_search_result_roundtrip() {
         let result = HybridSearchResult {
             chunk_id: Uuid::new_v4(),
-            note_path: PathBuf::from("notes/rust-guide.md"),
+            note_path: "notes/rust-guide.md".to_string(),
             note_title: "Rust Guide".to_string(),
             content: "Rust is a systems programming language.".to_string(),
             breadcrumb: "Introduction".to_string(),
@@ -74,7 +71,7 @@ mod tests {
         // Result matched only via fulltext search (no semantic hit).
         let result = HybridSearchResult {
             chunk_id: Uuid::new_v4(),
-            note_path: PathBuf::from("notes/search.md"),
+            note_path: "notes/search.md".to_string(),
             note_title: "Search Guide".to_string(),
             content: "How to search.".to_string(),
             breadcrumb: "Search".to_string(),
@@ -98,7 +95,7 @@ mod tests {
         // Result matched only via semantic search (no fulltext hit).
         let result = HybridSearchResult {
             chunk_id: Uuid::new_v4(),
-            note_path: PathBuf::from("notes/concept.md"),
+            note_path: "notes/concept.md".to_string(),
             note_title: "Concept Note".to_string(),
             content: "A conceptual overview.".to_string(),
             breadcrumb: "Concepts".to_string(),

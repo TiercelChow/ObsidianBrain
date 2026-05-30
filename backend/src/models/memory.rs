@@ -1,16 +1,13 @@
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// A single chunk of a note stored in the memory engine (vector + fulltext index).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct MemoryChunk {
     /// Unique identifier for this chunk.
     pub id: Uuid,
     /// Path of the source Obsidian note.
-    pub note_path: PathBuf,
+    pub note_path: String,
     /// Position of this chunk within the note (0-based).
     pub chunk_index: usize,
     /// Chunk text content.
@@ -25,11 +22,14 @@ pub struct MemoryChunk {
     pub token_count: usize,
     /// Whether this chunk contains at least one code block.
     pub has_code_block: bool,
+    /// 1-based line number where this chunk starts in the source note.
+    pub line_start: usize,
+    /// 1-based line number where this chunk ends in the source note.
+    pub line_end: usize,
 }
 
 /// Aggregated statistics about the memory engine's indexed content.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct MemoryStats {
     /// Total number of indexed chunks.
     pub total_chunks: usize,
@@ -47,7 +47,7 @@ mod tests {
     fn test_memory_chunk_roundtrip() {
         let chunk = MemoryChunk {
             id: Uuid::new_v4(),
-            note_path: PathBuf::from("notes/rust-guide.md"),
+            note_path: "notes/rust-guide.md".to_string(),
             chunk_index: 0,
             content: "Rust is a systems programming language.".to_string(),
             breadcrumb: vec!["Introduction".to_string()],
@@ -55,6 +55,8 @@ mod tests {
             note_title: "Rust Guide".to_string(),
             token_count: 8,
             has_code_block: false,
+            line_start: 1,
+            line_end: 50,
         };
         let json = serde_json::to_string(&chunk).unwrap();
         let parsed: MemoryChunk = serde_json::from_str(&json).unwrap();
@@ -67,13 +69,15 @@ mod tests {
         assert_eq!(parsed.note_title, chunk.note_title);
         assert_eq!(parsed.token_count, chunk.token_count);
         assert_eq!(parsed.has_code_block, chunk.has_code_block);
+        assert_eq!(parsed.line_start, chunk.line_start);
+        assert_eq!(parsed.line_end, chunk.line_end);
     }
 
     #[test]
     fn test_memory_chunk_with_code_block_roundtrip() {
         let chunk = MemoryChunk {
             id: Uuid::new_v4(),
-            note_path: PathBuf::from("code/example.md"),
+            note_path: "code/example.md".to_string(),
             chunk_index: 2,
             content: "Here is a code sample:\n```rust\nfn main() {}\n```".to_string(),
             breadcrumb: vec!["Code".to_string(), "Examples".to_string()],
@@ -81,6 +85,8 @@ mod tests {
             note_title: "Code Examples".to_string(),
             token_count: 15,
             has_code_block: true,
+            line_start: 10,
+            line_end: 25,
         };
         let json = serde_json::to_string(&chunk).unwrap();
         let parsed: MemoryChunk = serde_json::from_str(&json).unwrap();
@@ -92,7 +98,7 @@ mod tests {
     fn test_memory_chunk_empty_breadcrumb_and_tags() {
         let chunk = MemoryChunk {
             id: Uuid::new_v4(),
-            note_path: PathBuf::from("untitled.md"),
+            note_path: "untitled.md".to_string(),
             chunk_index: 0,
             content: "Just a plain paragraph.".to_string(),
             breadcrumb: vec![],
@@ -100,6 +106,8 @@ mod tests {
             note_title: "Untitled".to_string(),
             token_count: 5,
             has_code_block: false,
+            line_start: 1,
+            line_end: 3,
         };
         let json = serde_json::to_string(&chunk).unwrap();
         let parsed: MemoryChunk = serde_json::from_str(&json).unwrap();

@@ -1,14 +1,12 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// A fully parsed Obsidian note, including frontmatter and section decomposition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct ParsedDocument {
-    pub path: PathBuf,
+    pub path: String,
     pub frontmatter: HashMap<String, serde_json::Value>,
     pub title: String,
     pub tags: Vec<String>,
@@ -19,7 +17,6 @@ pub struct ParsedDocument {
 
 /// A section within a parsed document, representing a heading-level block.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct Section {
     /// Heading level (1–6).
     pub level: u8,
@@ -39,7 +36,6 @@ pub struct Section {
 
 /// A fenced code block extracted from a section.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct CodeBlock {
     /// Language annotation (e.g. "rust", "python"), `None` if unspecified.
     pub language: Option<String>,
@@ -53,7 +49,6 @@ pub struct CodeBlock {
 
 /// Lightweight summary of a note, used in listing and search result previews.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct NoteSummary {
     pub path: String,
     pub title: String,
@@ -68,7 +63,7 @@ mod tests {
     #[test]
     fn test_parsed_document_roundtrip() {
         let doc = ParsedDocument {
-            path: PathBuf::from("notes/project.md"),
+            path: "notes/project.md".to_string(),
             frontmatter: HashMap::from([
                 (
                     "status".to_string(),
@@ -175,7 +170,7 @@ mod tests {
     #[test]
     fn test_parsed_document_empty_frontmatter() {
         let doc = ParsedDocument {
-            path: PathBuf::from("simple.md"),
+            path: "simple.md".to_string(),
             frontmatter: HashMap::new(),
             title: "Simple Note".to_string(),
             tags: vec![],
