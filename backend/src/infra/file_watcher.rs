@@ -7,6 +7,10 @@ use tokio::sync::mpsc;
 
 use crate::error::BrainError;
 
+/// Default debounce window in milliseconds.
+#[allow(dead_code)]
+pub const DEFAULT_DEBOUNCE_MS: u64 = 300;
+
 /// Type of filesystem change.
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)] // Public API for future tasks (Phase 1+)
