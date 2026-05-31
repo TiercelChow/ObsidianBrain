@@ -1,7 +1,7 @@
-pub mod embedding;
+#[allow(dead_code)]
 pub mod file_watcher;
+#[allow(dead_code)]
 pub mod llm_client;
 pub mod obsidian_client;
-pub mod qdrant_client;
+#[allow(dead_code)]
 pub mod sqlite_store;
-pub mod tantivy_index;

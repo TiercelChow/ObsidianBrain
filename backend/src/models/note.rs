@@ -53,7 +53,8 @@ pub struct NoteSummary {
     pub path: String,
     pub title: String,
     pub tags: Vec<String>,
-    pub updated_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 #[cfg(test)]
@@ -158,7 +159,7 @@ mod tests {
             path: "test.md".to_string(),
             title: "Test".to_string(),
             tags: vec!["tag1".to_string()],
-            updated_at: Utc::now(),
+            updated_at: Some(Utc::now()),
         };
         let json = serde_json::to_string(&summary).unwrap();
         let parsed: NoteSummary = serde_json::from_str(&json).unwrap();

@@ -11,26 +11,8 @@ pub async fn health_check(State(ctx): State<Arc<AppContext>>) -> Json<Value> {
         let components = ctx.components.lock().unwrap();
         (
             components.server.clone(),
-            components.sqlite.clone(),
-            components.qdrant.clone(),
-            components.tantivy.clone(),
-            components.embedding.clone(),
-            components.llm.clone(),
             components.obsidian.clone(),
         )
-    };
-
-    // Live check on SQLite and Tantivy
-    let sqlite_status = if ctx.db.health_check() {
-        component_snapshot.1.clone()
-    } else {
-        "unhealthy".to_string()
-    };
-
-    let tantivy_status = if ctx.tantivy.health_check() {
-        component_snapshot.3.clone()
-    } else {
-        "unhealthy".to_string()
     };
 
     // Vault status
@@ -50,17 +32,11 @@ pub async fn health_check(State(ctx): State<Arc<AppContext>>) -> Json<Value> {
         "uptime_seconds": uptime_seconds,
         "components": {
             "server": component_snapshot.0,
-            "sqlite": sqlite_status,
-            "qdrant": component_snapshot.2,
-            "tantivy": tantivy_status,
-            "embedding": component_snapshot.4,
-            "llm": component_snapshot.5,
-            "obsidian": component_snapshot.6,
+            "obsidian": component_snapshot.1,
         },
         "vault": {
             "path": vault_path_str,
             "exists": vault_exists,
-            "watching": ctx.vault_watcher.is_some(),
         }
     }))
 }
