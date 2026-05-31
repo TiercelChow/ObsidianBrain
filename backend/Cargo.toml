@@ -25,9 +25,8 @@ jieba-rs = "0.7"
 async-trait = "0.1"
 futures = "0.3"
 
-# TODO: Phase 1+ — uncomment as modules are implemented
-# pulldown-cmark = "0.10"
-# gray_matter = "0.2"
+pulldown-cmark = "0.10"
+gray_matter = "0.2"
 # git2 = "0.19"
 # feed-rs = "1"
 # tokio-cron-scheduler = "0.10"
