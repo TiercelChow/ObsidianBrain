@@ -282,9 +282,9 @@ mod test_helpers {
     }
 
     /// Create an AppContext with minimal stubs for unit/integration tests.
-    /// Only the tool_registry is real; all other components are stubs.
+    /// Returns (Arc<AppContext>, TempDir, vault_path) — caller must keep TempDir alive.
     impl AppContext {
-        pub fn for_test(tool_registry: Arc<ToolRegistry>) -> Self {
+        pub fn for_test() -> (Arc<Self>, tempfile::TempDir, std::path::PathBuf) {
             let dir = tempfile::tempdir().expect("tempdir creation");
             let db_path = dir.path().join("test.db");
             let index_path = dir.path().join("tantivy_index");
@@ -313,15 +313,11 @@ mod test_helpers {
                 "TestVault".to_string(),
             ));
 
-            // Leak the TempDir so it persists for the test duration.
-            // This is acceptable in tests since they're short-lived.
-            std::mem::forget(dir);
-
             let mut config = AppConfig::default();
-            config.vault.path = vault_path;
+            config.vault.path = vault_path.clone();
             config.vault.name = "TestVault".to_string();
 
-            AppContext {
+            let ctx = Arc::new(AppContext {
                 config: Arc::new(config),
                 db,
                 embedding,
@@ -329,10 +325,12 @@ mod test_helpers {
                 qdrant,
                 tantivy,
                 components: Arc::new(std::sync::Mutex::new(ComponentStatus::default())),
-                tool_registry,
+                tool_registry: Arc::new(ToolRegistry::new()),
                 memory_service,
                 search_engine,
-            }
+            });
+
+            (ctx, dir, vault_path)
         }
     }
 

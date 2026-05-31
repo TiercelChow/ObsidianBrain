@@ -176,7 +176,6 @@ pub async fn call_tool(
 mod tests {
     use super::*;
     use crate::error::BrainError;
-    use crate::tools::registry::ToolRegistry;
     use crate::tools::traits::ToolHandler;
     use async_trait::async_trait;
     use axum::body::Body;
@@ -251,15 +250,14 @@ mod tests {
     }
 
     /// Helper to create a minimal AppContext for tests.
-    fn create_test_app(registry: Arc<ToolRegistry>) -> Router {
-        let ctx = Arc::new(crate::AppContext::for_test(registry));
+    fn create_test_app() -> Router {
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
         crate::api::router::create_router(ctx)
     }
 
     #[tokio::test]
     async fn test_list_tools_empty() {
-        let registry = Arc::new(ToolRegistry::new());
-        let app = create_test_app(registry);
+        let app = create_test_app();
 
         let response = app
             .oneshot(
@@ -283,9 +281,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_tools_with_registered_tool() {
-        let registry = Arc::new(ToolRegistry::new());
-        registry.register(Arc::new(EchoTool)).await;
-        let app = create_test_app(registry);
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
+        ctx.tool_registry.register(Arc::new(EchoTool)).await;
+        let app = crate::api::router::create_router(ctx);
 
         let response = app
             .oneshot(
@@ -310,8 +308,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_call_tool_not_found() {
-        let registry = Arc::new(ToolRegistry::new());
-        let app = create_test_app(registry);
+        let app = create_test_app();
 
         let request_body = json!({
             "tool": "nonexistent",
@@ -343,9 +340,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_call_tool_success() {
-        let registry = Arc::new(ToolRegistry::new());
-        registry.register(Arc::new(EchoTool)).await;
-        let app = create_test_app(registry);
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
+        ctx.tool_registry.register(Arc::new(EchoTool)).await;
+        let app = crate::api::router::create_router(ctx);
 
         let request_body = json!({
             "tool": "echo",
@@ -377,9 +374,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_call_tool_no_arguments() {
-        let registry = Arc::new(ToolRegistry::new());
-        registry.register(Arc::new(NoArgsTool)).await;
-        let app = create_test_app(registry);
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
+        ctx.tool_registry.register(Arc::new(NoArgsTool)).await;
+        let app = crate::api::router::create_router(ctx);
 
         // Omit "arguments" entirely — serde(default) should make it Value::Null
         let request_body = json!({
@@ -411,9 +408,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_call_tool_invalid_params() {
-        let registry = Arc::new(ToolRegistry::new());
-        registry.register(Arc::new(EchoTool)).await;
-        let app = create_test_app(registry);
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
+        ctx.tool_registry.register(Arc::new(EchoTool)).await;
+        let app = crate::api::router::create_router(ctx);
 
         // Missing required "message" field
         let request_body = json!({

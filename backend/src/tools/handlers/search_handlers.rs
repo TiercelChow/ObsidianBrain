@@ -37,8 +37,8 @@ impl ToolHandler for SearchNotesHandler {
         let query = args
             .get("query")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| BrainError::Internal("缺少必需参数 'query'".to_string()))?;
 
         let top_k = args
             .get("top_k")
@@ -54,12 +54,35 @@ impl ToolHandler for SearchNotesHandler {
 
         tracing::debug!(query = %query, top_k, "search_notes 调用");
 
+        // Search with higher limit to allow aggregation by note_path.
         let results = ctx
             .search_engine
-            .search(&query, top_k, tags.as_deref())
+            .search(query, top_k * 3, tags.as_deref())
             .await?;
 
-        let notes: Vec<Value> = results
+        // Aggregate by note_path: keep highest-scoring chunk per note.
+        use std::collections::HashMap;
+        let mut note_map: HashMap<&str, &crate::models::HybridSearchResult> = HashMap::new();
+        for r in &results {
+            note_map
+                .entry(&r.note_path)
+                .and_modify(|existing| {
+                    if r.rrf_score > existing.rrf_score {
+                        *existing = r;
+                    }
+                })
+                .or_insert(r);
+        }
+
+        let mut notes: Vec<&crate::models::HybridSearchResult> = note_map.into_values().collect();
+        notes.sort_by(|a, b| {
+            b.rrf_score
+                .partial_cmp(&a.rrf_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        notes.truncate(top_k);
+
+        let notes_json: Vec<Value> = notes
             .iter()
             .map(|r| {
                 json!({
@@ -67,13 +90,13 @@ impl ToolHandler for SearchNotesHandler {
                     "title": r.note_title,
                     "snippet": r.content,
                     "score": r.rrf_score,
-                    "obsidian_uri": r.obsidian_uri
+                    "obsidian_uri": r.obsidian_uri,
                 })
             })
             .collect();
 
-        tracing::debug!(total = notes.len(), "search_notes 返回结果");
-        Ok(json!({ "notes": notes, "total": notes.len() }))
+        tracing::debug!(total = notes_json.len(), "search_notes 返回结果");
+        Ok(json!({ "notes": notes_json, "total": notes_json.len() }))
     }
 }
 
@@ -102,12 +125,12 @@ impl ToolHandler for GetNoteHandler {
         let path = args
             .get("path")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| BrainError::Internal("缺少必需参数 'path'".to_string()))?;
 
         tracing::debug!(path = %path, "get_note 调用");
 
-        let content = ctx.memory_service.get_note(&path).await?;
+        let content = ctx.memory_service.get_note(path).await?;
 
         // Derive title from filename stem (consistent with MemoryService behavior).
         let title = Path::new(&path)
@@ -173,122 +196,6 @@ impl ToolHandler for ListRecentNotesHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AppConfig;
-    use crate::config::QdrantConfig;
-    use crate::core::memory_service::MemoryService;
-    use crate::core::search_engine::HybridSearchEngine;
-    use crate::infra::embedding::EmbeddingProvider;
-    use crate::infra::llm_client::{
-        ChatMessage, ChatResponse, LlmProvider, StreamChunk, TokenUsage,
-    };
-    use crate::infra::qdrant_client::QdrantStore;
-    use crate::infra::sqlite_store::SqliteStore;
-    use crate::infra::tantivy_index::TantivyIndex;
-    use crate::tools::registry::ToolRegistry;
-    use crate::ComponentStatus;
-    use async_trait::async_trait;
-    use tokio::sync::mpsc;
-
-    // ── Stub providers ──
-
-    struct StubEmbedder;
-
-    #[async_trait]
-    impl EmbeddingProvider for StubEmbedder {
-        async fn embed_text(&self, _text: &str) -> Result<Vec<f32>, BrainError> {
-            Ok(vec![0.0; 1536])
-        }
-        async fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, BrainError> {
-            Ok(texts.iter().map(|_| vec![0.0; 1536]).collect())
-        }
-        fn dimensions(&self) -> usize {
-            1536
-        }
-    }
-
-    struct StubLlm;
-
-    #[async_trait]
-    impl LlmProvider for StubLlm {
-        async fn chat(&self, _messages: &[ChatMessage]) -> Result<ChatResponse, BrainError> {
-            Ok(ChatResponse {
-                content: "stub".to_string(),
-                model: "stub".to_string(),
-                usage: TokenUsage {
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                    total_tokens: 0,
-                },
-            })
-        }
-        async fn chat_stream(
-            &self,
-            _messages: &[ChatMessage],
-        ) -> Result<mpsc::Receiver<StreamChunk>, BrainError> {
-            let (tx, rx) = mpsc::channel(4);
-            let _ = tx
-                .send(StreamChunk {
-                    content: "stub".to_string(),
-                    is_final: true,
-                })
-                .await;
-            Ok(rx)
-        }
-    }
-
-    // ── Test context helper ──
-
-    /// Build a real AppContext with stub infrastructure and a temp vault directory.
-    /// Returns (AppContext, vault_path) so tests can create files in the vault.
-    fn setup_test_context() -> (Arc<AppContext>, std::path::PathBuf) {
-        let dir = tempfile::tempdir().expect("tempdir creation");
-        let db_path = dir.path().join("test.db");
-        let index_path = dir.path().join("tantivy_index");
-        let vault_path = dir.path().join("vault");
-        std::fs::create_dir_all(&vault_path).expect("vault dir creation");
-
-        let db = Arc::new(SqliteStore::new(&db_path).expect("SQLite stub"));
-        let tantivy = Arc::new(TantivyIndex::new(&index_path).expect("Tantivy stub"));
-        let qdrant = Arc::new(QdrantStore::new(&QdrantConfig::default()).expect("Qdrant stub"));
-        let embedding: Arc<dyn EmbeddingProvider> = Arc::new(StubEmbedder);
-
-        let memory_service = Arc::new(MemoryService::new(
-            tantivy.clone(),
-            qdrant.clone(),
-            embedding.clone(),
-            vault_path.clone(),
-            "TestVault".to_string(),
-        ));
-
-        let search_engine = Arc::new(HybridSearchEngine::new(
-            tantivy.clone(),
-            qdrant.clone(),
-            embedding.clone(),
-            "TestVault".to_string(),
-        ));
-
-        // Leak tempdir so paths persist for the test duration.
-        std::mem::forget(dir);
-
-        let mut config = AppConfig::default();
-        config.vault.path = vault_path.clone();
-        config.vault.name = "TestVault".to_string();
-
-        let ctx = Arc::new(AppContext {
-            config: Arc::new(config),
-            db,
-            embedding,
-            llm: Arc::new(StubLlm),
-            qdrant,
-            tantivy,
-            components: Arc::new(std::sync::Mutex::new(ComponentStatus::default())),
-            tool_registry: Arc::new(ToolRegistry::new()),
-            memory_service,
-            search_engine,
-        });
-
-        (ctx, vault_path)
-    }
 
     fn write_vault_file(vault_path: &std::path::Path, relative_path: &str, content: &str) {
         let full_path = vault_path.join(relative_path);
@@ -302,7 +209,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_notes_handler_returns_notes_structure() {
-        let (ctx, _vault) = setup_test_context();
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
 
         // Add a memory so there's something to search for.
         ctx.memory_service
@@ -335,7 +242,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_notes_handler_with_top_k_and_tags() {
-        let (ctx, _vault) = setup_test_context();
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
 
         ctx.memory_service
             .add_memory(
@@ -356,7 +263,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_notes_handler_empty_query() {
-        let (ctx, _vault) = setup_test_context();
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
 
         let handler = SearchNotesHandler;
         let args = json!({ "query": "nonexistent_xyzzy" });
@@ -367,8 +274,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_search_notes_handler_missing_query_rejected() {
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
+
+        let handler = SearchNotesHandler;
+        let args = json!({});
+
+        let result = handler.handle(args, &ctx).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn test_get_note_handler_returns_content() {
-        let (ctx, vault) = setup_test_context();
+        let (ctx, _dir, vault) = crate::AppContext::for_test();
 
         write_vault_file(&vault, "hello.md", "# Hello World\nThis is a test note.");
 
@@ -383,7 +301,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_note_handler_nonexistent_file() {
-        let (ctx, _vault) = setup_test_context();
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
 
         let handler = GetNoteHandler;
         let args = json!({ "path": "nonexistent.md" });
@@ -393,8 +311,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_get_note_handler_missing_path_rejected() {
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
+
+        let handler = GetNoteHandler;
+        let args = json!({});
+
+        let result = handler.handle(args, &ctx).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn test_list_recent_notes_handler_returns_notes() {
-        let (ctx, vault) = setup_test_context();
+        let (ctx, _dir, vault) = crate::AppContext::for_test();
 
         write_vault_file(
             &vault,
@@ -428,7 +357,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_recent_notes_handler_default_args() {
-        let (ctx, _vault) = setup_test_context();
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
 
         // No vault files, but the handler should still succeed with empty results.
         let handler = ListRecentNotesHandler;

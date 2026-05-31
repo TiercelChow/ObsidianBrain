@@ -38,8 +38,8 @@ impl ToolHandler for SearchMemoryHandler {
         let query = args
             .get("query")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| BrainError::Internal("缺少必需参数 'query'".to_string()))?;
 
         let top_k = args
             .get("top_k")
@@ -57,7 +57,7 @@ impl ToolHandler for SearchMemoryHandler {
 
         let results = ctx
             .search_engine
-            .search(&query, top_k, tags.as_deref())
+            .search(query, top_k, tags.as_deref())
             .await?;
 
         let chunks: Vec<Value> = results
@@ -103,14 +103,14 @@ impl ToolHandler for AddMemoryHandler {
         let note_path = args
             .get("note_path")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| BrainError::Internal("缺少必需参数 'note_path'".to_string()))?;
 
         let content = args
             .get("content")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| BrainError::Internal("缺少必需参数 'content'".to_string()))?;
 
         let tags: Option<Vec<String>> = args.get("tags").and_then(|v| v.as_array()).map(|arr| {
             arr.iter()
@@ -122,7 +122,7 @@ impl ToolHandler for AddMemoryHandler {
 
         let memory_id = ctx
             .memory_service
-            .add_memory(&note_path, &content, tags)
+            .add_memory(note_path, content, tags)
             .await?;
 
         tracing::debug!(memory_id = %memory_id, "add_memory 成功");
@@ -160,13 +160,13 @@ impl ToolHandler for UpdateMemoryHandler {
         let content = args
             .get("content")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| BrainError::Internal("缺少必需参数 'content'".to_string()))?;
 
         tracing::debug!(memory_id = %memory_id, content_len = content.len(), "update_memory 调用");
 
         ctx.memory_service
-            .update_memory(memory_id, &content)
+            .update_memory(memory_id, content)
             .await?;
 
         tracing::debug!(memory_id = %memory_id, "update_memory 成功");
@@ -252,123 +252,12 @@ impl ToolHandler for GetMemoryStatsHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AppConfig;
-    use crate::config::QdrantConfig;
-    use crate::core::memory_service::MemoryService;
-    use crate::core::search_engine::HybridSearchEngine;
-    use crate::infra::embedding::EmbeddingProvider;
-    use crate::infra::llm_client::{
-        ChatMessage, ChatResponse, LlmProvider, StreamChunk, TokenUsage,
-    };
-    use crate::infra::qdrant_client::QdrantStore;
-    use crate::infra::sqlite_store::SqliteStore;
-    use crate::infra::tantivy_index::TantivyIndex;
-    use crate::tools::registry::ToolRegistry;
-    use crate::ComponentStatus;
-    use async_trait::async_trait;
-    use tokio::sync::mpsc;
-
-    // ── Stub providers ──
-
-    struct StubEmbedder;
-
-    #[async_trait]
-    impl EmbeddingProvider for StubEmbedder {
-        async fn embed_text(&self, _text: &str) -> Result<Vec<f32>, BrainError> {
-            Ok(vec![0.0; 1536])
-        }
-        async fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, BrainError> {
-            Ok(texts.iter().map(|_| vec![0.0; 1536]).collect())
-        }
-        fn dimensions(&self) -> usize {
-            1536
-        }
-    }
-
-    struct StubLlm;
-
-    #[async_trait]
-    impl LlmProvider for StubLlm {
-        async fn chat(&self, _messages: &[ChatMessage]) -> Result<ChatResponse, BrainError> {
-            Ok(ChatResponse {
-                content: "stub".to_string(),
-                model: "stub".to_string(),
-                usage: TokenUsage {
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                    total_tokens: 0,
-                },
-            })
-        }
-        async fn chat_stream(
-            &self,
-            _messages: &[ChatMessage],
-        ) -> Result<mpsc::Receiver<StreamChunk>, BrainError> {
-            let (tx, rx) = mpsc::channel(4);
-            let _ = tx
-                .send(StreamChunk {
-                    content: "stub".to_string(),
-                    is_final: true,
-                })
-                .await;
-            Ok(rx)
-        }
-    }
-
-    // ── Test context helper ──
-
-    fn setup_test_context() -> Arc<AppContext> {
-        let dir = tempfile::tempdir().expect("tempdir creation");
-        let db_path = dir.path().join("test.db");
-        let index_path = dir.path().join("tantivy_index");
-        let vault_path = dir.path().join("vault");
-        std::fs::create_dir_all(&vault_path).expect("vault dir creation");
-
-        let db = Arc::new(SqliteStore::new(&db_path).expect("SQLite stub"));
-        let tantivy = Arc::new(TantivyIndex::new(&index_path).expect("Tantivy stub"));
-        let qdrant = Arc::new(QdrantStore::new(&QdrantConfig::default()).expect("Qdrant stub"));
-        let embedding: Arc<dyn EmbeddingProvider> = Arc::new(StubEmbedder);
-
-        let memory_service = Arc::new(MemoryService::new(
-            tantivy.clone(),
-            qdrant.clone(),
-            embedding.clone(),
-            vault_path.clone(),
-            "TestVault".to_string(),
-        ));
-
-        let search_engine = Arc::new(HybridSearchEngine::new(
-            tantivy.clone(),
-            qdrant.clone(),
-            embedding.clone(),
-            "TestVault".to_string(),
-        ));
-
-        std::mem::forget(dir);
-
-        let mut config = AppConfig::default();
-        config.vault.path = vault_path;
-        config.vault.name = "TestVault".to_string();
-
-        Arc::new(AppContext {
-            config: Arc::new(config),
-            db,
-            embedding,
-            llm: Arc::new(StubLlm),
-            qdrant,
-            tantivy,
-            components: Arc::new(std::sync::Mutex::new(ComponentStatus::default())),
-            tool_registry: Arc::new(ToolRegistry::new()),
-            memory_service,
-            search_engine,
-        })
-    }
 
     // ── Handler tests ──
 
     #[tokio::test]
     async fn test_add_memory_handler_returns_created_status() {
-        let ctx = setup_test_context();
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
         let handler = AddMemoryHandler;
 
         let args = json!({
@@ -387,7 +276,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_memory_handler_no_tags() {
-        let ctx = setup_test_context();
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
         let handler = AddMemoryHandler;
 
         let args = json!({
@@ -400,8 +289,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_add_memory_handler_missing_note_path_rejected() {
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
+        let handler = AddMemoryHandler;
+
+        let args = json!({
+            "content": "Some content."
+        });
+
+        let result = handler.handle(args, &ctx).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_add_memory_handler_missing_content_rejected() {
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
+        let handler = AddMemoryHandler;
+
+        let args = json!({
+            "note_path": "manual/test.md"
+        });
+
+        let result = handler.handle(args, &ctx).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn test_search_memory_handler_returns_chunks_structure() {
-        let ctx = setup_test_context();
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
 
         // Add a memory so there's something to find.
         ctx.memory_service
@@ -433,8 +348,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_search_memory_handler_missing_query_rejected() {
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
+        let handler = SearchMemoryHandler;
+
+        let args = json!({});
+
+        let result = handler.handle(args, &ctx).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn test_update_memory_handler_returns_updated_status() {
-        let ctx = setup_test_context();
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
 
         // First add a memory.
         let memory_id = ctx
@@ -456,7 +382,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_memory_handler_invalid_uuid() {
-        let ctx = setup_test_context();
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
         let handler = UpdateMemoryHandler;
 
         let args = json!({
@@ -469,8 +395,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_update_memory_handler_missing_content_rejected() {
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
+
+        let memory_id = ctx
+            .memory_service
+            .add_memory("manual/update2.md", "Old content.", None)
+            .await
+            .unwrap();
+
+        let handler = UpdateMemoryHandler;
+        let args = json!({
+            "memory_id": memory_id.to_string()
+        });
+
+        let result = handler.handle(args, &ctx).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn test_forget_memory_handler_returns_deleted_flag() {
-        let ctx = setup_test_context();
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
 
         // Add a memory first.
         let memory_id = ctx
@@ -489,7 +434,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_forget_memory_handler_nonexistent_returns_false() {
-        let ctx = setup_test_context();
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
         let handler = ForgetMemoryHandler;
 
         let fake_id = Uuid::new_v4();
@@ -502,7 +447,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_forget_memory_handler_invalid_uuid() {
-        let ctx = setup_test_context();
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
         let handler = ForgetMemoryHandler;
 
         let args = json!({ "memory_id": "bad-uuid" });
@@ -513,7 +458,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_memory_stats_handler_returns_statistics() {
-        let ctx = setup_test_context();
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
 
         // Add two memories so stats reflect them.
         ctx.memory_service
@@ -536,7 +481,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_memory_stats_handler_empty_vault() {
-        let ctx = setup_test_context();
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
 
         let handler = GetMemoryStatsHandler;
         let args = json!({});
