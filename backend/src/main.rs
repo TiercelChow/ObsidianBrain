@@ -38,6 +38,8 @@ pub struct AppContext {
     pub search_engine: Arc<HybridSearchEngine>,
     /// FileWatcher handle — must be kept alive for filesystem watching to work.
     pub vault_watcher: Option<FileWatcher>,
+    /// Server start time — used to compute uptime in health endpoint.
+    pub start_time: chrono::DateTime<chrono::Utc>,
 }
 
 /// Tracks which components are operational.
@@ -63,6 +65,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     tracing::info!("ObsidianBrain 启动中...");
+
+    // Record start time for uptime calculation
+    let start_time = chrono::Utc::now();
 
     // 2. Load config
     let config = AppConfig::load().unwrap_or_else(|e| {
@@ -232,6 +237,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         memory_service,
         search_engine,
         vault_watcher,
+        start_time,
     });
 
     register_all_tools(&tool_registry, ctx.clone()).await;
@@ -284,7 +290,7 @@ mod test_helpers {
     use async_trait::async_trait;
 
     /// Stub EmbeddingProvider for tests.
-    struct StubEmbedder;
+    pub struct StubEmbedder;
 
     #[async_trait]
     impl EmbeddingProvider for StubEmbedder {
@@ -380,6 +386,7 @@ mod test_helpers {
                 memory_service,
                 search_engine,
                 vault_watcher: None,
+                start_time: chrono::Utc::now(),
             });
 
             (ctx, dir, vault_path)
@@ -387,4 +394,398 @@ mod test_helpers {
     }
 
     use crate::config::QdrantConfig;
+}
+
+// ── Integration tests ──
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::config::QdrantConfig;
+    use crate::core::search_engine::HybridSearchEngine;
+    use crate::tools::handlers::register_all_tools;
+    use crate::tools::traits::ToolHandler;
+    use serde_json::json;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    // ── Helper: write a .md file into a vault directory ──
+
+    fn write_vault_file(vault_path: &PathBuf, relative_path: &str, content: &str) {
+        let full_path = vault_path.join(relative_path);
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&full_path, content).unwrap();
+    }
+
+    // ══════════════════════════════════════════════
+    // Test 1: End-to-end index and search
+    // ══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn test_end_to_end_index_and_search() {
+        let (ctx, _dir, vault_path) = AppContext::for_test();
+
+        // 1. Create sample notes in vault
+        write_vault_file(
+            &vault_path,
+            "rust-async.md",
+            r#"---
+title: Rust 异步编程
+tags: [rust, async, tokio]
+---
+
+# Rust 异步编程
+
+Tokio 是 Rust 生态中最流行的异步运行时框架。
+
+## 核心概念
+
+- Future: 表示一个异步计算
+- async/await: 语法糖，简化 Future 的使用
+- Runtime: 执行 Future 的调度器
+"#,
+        );
+
+        write_vault_file(
+            &vault_path,
+            "python-ml.md",
+            r#"---
+title: Python 机器学习
+tags: [python, ml, tensorflow]
+---
+
+# Python 机器学习
+
+TensorFlow 和 PyTorch 是最流行的深度学习框架。
+
+## 核心概念
+
+- 张量 (Tensor): 多维数组
+- 模型: 神经网络结构
+- 训练: 通过数据调整参数
+"#,
+        );
+
+        write_vault_file(
+            &vault_path,
+            "daily-note.md",
+            r#"---
+title: 每日笔记
+tags: [daily]
+---
+
+# 今日学习
+
+今天学习了 Rust 的所有权系统和生命周期。
+也复习了 Python 的装饰器语法。
+"#,
+        );
+
+        // 2. Run full index via memory_service
+        let report = ctx.memory_service.full_index().await.unwrap();
+        assert_eq!(report.indexed_files, 3, "Should index all 3 files");
+        assert!(report.total_chunks > 0, "Should produce at least 1 chunk");
+        assert!(report.failed_files.is_empty(), "No files should fail");
+
+        // 3. Search for "Rust 异步" — should find rust-async.md
+        let results = ctx
+            .search_engine
+            .search("Rust 异步", 5, None)
+            .await
+            .unwrap();
+        assert!(!results.is_empty(), "Search should return results");
+
+        let top_result = &results[0];
+        assert!(
+            top_result.note_path.contains("rust-async"),
+            "Top result should be rust-async.md, got: {}",
+            top_result.note_path
+        );
+
+        // 4. Search for "机器学习" — should find python-ml.md
+        let results = ctx.search_engine.search("机器学习", 5, None).await.unwrap();
+        assert!(
+            !results.is_empty(),
+            "Search for 机器学习 should return results"
+        );
+        assert!(
+            results[0].note_path.contains("python-ml"),
+            "Top result should be python-ml.md, got: {}",
+            results[0].note_path
+        );
+
+        // 5. Test memory stats
+        let stats = ctx.memory_service.get_memory_stats().await.unwrap();
+        assert!(stats.total_chunks > 0, "Stats should report chunks");
+        assert!(
+            stats.total_notes >= 3,
+            "Stats should report at least 3 notes, got {}",
+            stats.total_notes
+        );
+
+        // 6. Test note reading
+        let content = ctx.memory_service.get_note("rust-async.md").await.unwrap();
+        assert!(content.contains("Tokio"), "Content should mention Tokio");
+        assert!(
+            content.contains("异步编程"),
+            "Content should mention 异步编程"
+        );
+
+        // 7. Test list recent notes
+        let notes = ctx
+            .memory_service
+            .list_recent_notes(None, None)
+            .await
+            .unwrap();
+        assert_eq!(notes.len(), 3, "Should list 3 notes");
+    }
+
+    // ══════════════════════════════════════════════
+    // Test 2: Tool API end-to-end (register + call)
+    // ══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn test_tool_api_search_notes_e2e() {
+        let (ctx, _dir, vault_path) = AppContext::for_test();
+
+        // Create a test note
+        write_vault_file(
+            &vault_path,
+            "test-note.md",
+            "# Test\nThis is a test note about Rust programming.",
+        );
+
+        // Index it
+        ctx.memory_service.full_index().await.unwrap();
+
+        // Register all tools
+        register_all_tools(&ctx.tool_registry, ctx.clone()).await;
+
+        // Verify tools are registered (8 core tools)
+        let tool_count = ctx.tool_registry.count().await;
+        assert_eq!(tool_count, 8, "Should have 8 registered tools");
+
+        // Call search_notes tool via the registry
+        let handler = ctx.tool_registry.get("search_notes").await.unwrap();
+        let result = handler
+            .handle(json!({ "query": "Rust programming" }), &ctx)
+            .await
+            .unwrap();
+
+        assert!(result["notes"].is_array(), "Result should have notes array");
+        let notes = result["notes"].as_array().unwrap();
+        assert!(!notes.is_empty(), "search_notes should find the test note");
+    }
+
+    // ══════════════════════════════════════════════
+    // Test 3: Degraded mode — Qdrant unavailable, fulltext works
+    // ══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn test_degraded_mode_qdrant_unavailable_fulltext_works() {
+        // Set up a vault with a single note
+        let vault_dir = TempDir::new().unwrap();
+        std::fs::write(
+            vault_dir.path().join("note.md"),
+            "# Hello\nThis note is about databases and indexing.",
+        )
+        .unwrap();
+
+        // Set up Tantivy (real) + Qdrant (intentionally unreachable)
+        let index_dir = TempDir::new().unwrap();
+        let tantivy = Arc::new(TantivyIndex::new(index_dir.path()).unwrap());
+        let qdrant_config = QdrantConfig {
+            url: "http://127.0.0.1:53333".to_string(), // unreachable
+            collection_name: "test".to_string(),
+            vector_size: 1536,
+        };
+        let qdrant = Arc::new(QdrantStore::new(&qdrant_config).unwrap());
+
+        let embedding: Arc<dyn EmbeddingProvider> = Arc::new(test_helpers::StubEmbedder);
+
+        let memory_service = Arc::new(MemoryService::new(
+            tantivy.clone(),
+            qdrant.clone(),
+            embedding.clone(),
+            vault_dir.path().to_path_buf(),
+            "test".to_string(),
+        ));
+
+        // Index should succeed despite Qdrant being unreachable
+        let report = memory_service.full_index().await.unwrap();
+        assert_eq!(report.indexed_files, 1, "Should index 1 file");
+
+        // Search should work in fulltext-only mode (Qdrant unreachable)
+        let search_engine = Arc::new(HybridSearchEngine::new(
+            tantivy,
+            qdrant,
+            embedding,
+            "test".to_string(),
+        ));
+
+        let results = search_engine.search("databases", 5, None).await.unwrap();
+        assert!(
+            !results.is_empty(),
+            "Fulltext search should work without Qdrant"
+        );
+
+        // All results should have fulltext rank but no semantic rank
+        for result in &results {
+            assert!(
+                result.fulltext_rank.is_some(),
+                "Degraded results should have fulltext rank"
+            );
+            assert!(
+                result.semantic_rank.is_none(),
+                "Degraded results should NOT have semantic rank"
+            );
+        }
+    }
+
+    // ══════════════════════════════════════════════
+    // Test 4: Health endpoint data — tools_count and uptime_seconds
+    // ══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn test_health_includes_tools_count_and_uptime() {
+        let (ctx, _dir, _vault) = AppContext::for_test();
+
+        // Initially no tools registered
+        assert_eq!(ctx.tool_registry.count().await, 0);
+
+        // Register tools
+        register_all_tools(&ctx.tool_registry, ctx.clone()).await;
+
+        // Verify count
+        assert_eq!(ctx.tool_registry.count().await, 8);
+
+        // Verify uptime_seconds is accessible and reasonable
+        let uptime = chrono::Utc::now()
+            .signed_duration_since(ctx.start_time)
+            .num_seconds();
+        assert!(uptime >= 0, "Uptime should be non-negative");
+    }
+
+    // ══════════════════════════════════════════════
+    // Test 5: Full CRUD lifecycle via Tool API
+    // ══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn test_tool_api_full_crud_lifecycle() {
+        let (ctx, _dir, _vault) = AppContext::for_test();
+        register_all_tools(&ctx.tool_registry, ctx.clone()).await;
+
+        // 1. add_memory
+        let add_handler = ctx.tool_registry.get("add_memory").await.unwrap();
+        let add_result = add_handler
+            .handle(
+                json!({
+                    "note_path": "lifecycle/test.md",
+                    "content": "Lifecycle test content about Rust async patterns.",
+                    "tags": ["rust", "async"]
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(add_result["status"], "created");
+        let memory_id = add_result["memory_id"].as_str().unwrap();
+
+        // 2. search_memory — should find the added chunk
+        let search_handler = ctx.tool_registry.get("search_memory").await.unwrap();
+        let search_result = search_handler
+            .handle(json!({ "query": "Rust async patterns" }), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            search_result["total"].as_u64().unwrap() > 0,
+            "Should find the added memory"
+        );
+
+        // 3. update_memory
+        let update_handler = ctx.tool_registry.get("update_memory").await.unwrap();
+        let update_result = update_handler
+            .handle(
+                json!({
+                    "memory_id": memory_id,
+                    "content": "Updated content about Tokio runtime internals."
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(update_result["status"], "updated");
+
+        // 4. search_memory again — should find updated content
+        let search_result2 = search_handler
+            .handle(json!({ "query": "Tokio runtime" }), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            search_result2["total"].as_u64().unwrap() > 0,
+            "Should find updated memory"
+        );
+
+        // 5. forget_memory
+        let forget_handler = ctx.tool_registry.get("forget_memory").await.unwrap();
+        let forget_result = forget_handler
+            .handle(json!({ "memory_id": memory_id }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(forget_result["deleted"], true);
+
+        // 6. get_memory_stats — the chunk should no longer appear
+        let stats_handler = ctx.tool_registry.get("get_memory_stats").await.unwrap();
+        let stats_result = stats_handler.handle(json!({}), &ctx).await.unwrap();
+        assert!(
+            stats_result["total_chunks"].as_u64().unwrap()
+                < search_result["total"].as_u64().unwrap() + 1,
+            "Chunks should decrease after forget"
+        );
+    }
+
+    // ══════════════════════════════════════════════
+    // Test 6: Tag-filtered search via Tool API
+    // ══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn test_tag_filtered_search_via_tool_api() {
+        let (ctx, _dir, vault_path) = AppContext::for_test();
+        register_all_tools(&ctx.tool_registry, ctx.clone()).await;
+
+        // Create two notes with different tags
+        write_vault_file(
+            &vault_path,
+            "rust-note.md",
+            "---\ntitle: Rust Note\ntags: [rust]\n---\n# Rust\nRust ownership and borrowing.",
+        );
+        write_vault_file(
+            &vault_path,
+            "python-note.md",
+            "---\ntitle: Python Note\ntags: [python]\n---\n# Python\nPython decorators and generators.",
+        );
+
+        // Index
+        ctx.memory_service.full_index().await.unwrap();
+
+        // Search with tag filter
+        let handler = ctx.tool_registry.get("search_notes").await.unwrap();
+        let result = handler
+            .handle(json!({ "query": "programming", "tags": ["rust"] }), &ctx)
+            .await
+            .unwrap();
+
+        let notes = result["notes"].as_array().unwrap();
+        // Results should only contain rust-tagged notes
+        for note in notes {
+            let path = note["path"].as_str().unwrap();
+            assert!(
+                path.contains("rust-note"),
+                "Filtered search should only return rust-tagged notes, got: {}",
+                path
+            );
+        }
+    }
 }

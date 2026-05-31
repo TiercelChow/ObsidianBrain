@@ -76,12 +76,15 @@ pub struct ServerConfig {
     pub host: String,
     #[serde(default = "default_port")]
     pub port: u16,
+    #[serde(default = "default_protocol")]
+    pub protocol: String, // "mcp" | "http" | "both"
 }
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             host: default_host(),
             port: default_port(),
+            protocol: default_protocol(),
         }
     }
 }
@@ -239,6 +242,9 @@ fn default_host() -> String {
 fn default_port() -> u16 {
     9876
 }
+fn default_protocol() -> String {
+    "http".to_string()
+}
 fn default_vault_name() -> String {
     "brain".to_string()
 }
@@ -327,5 +333,11 @@ mod tests {
     fn test_load_falls_back_to_defaults() {
         let config = AppConfig::load();
         assert!(config.is_ok());
+    }
+
+    #[test]
+    fn test_server_config_default_protocol_is_http() {
+        let config = ServerConfig::default();
+        assert_eq!(config.protocol, "http");
     }
 }

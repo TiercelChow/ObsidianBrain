@@ -487,7 +487,7 @@ impl TantivyIndex {
 /// Generate a text snippet around the first query match.
 fn make_snippet(content: &str, query: &str, max_len: usize) -> String {
     if query.is_empty() {
-        let end = max_len.min(content.len());
+        let end = ceil_char_boundary(content, max_len.min(content.len()));
         return format!("{}...", content[..end].trim());
     }
 
@@ -495,13 +495,40 @@ fn make_snippet(content: &str, query: &str, max_len: usize) -> String {
     let query_lower = query.to_lowercase();
 
     if let Some(pos) = lower.find(&query_lower) {
-        let start = pos.saturating_sub(max_len / 3);
-        let end = (pos + query.len() + max_len * 2 / 3).min(content.len());
+        let start = floor_char_boundary(content, pos.saturating_sub(max_len / 3));
+        let end = ceil_char_boundary(
+            content,
+            (pos + query.len() + max_len * 2 / 3).min(content.len()),
+        );
         format!("...{}...", content[start..end].trim())
     } else {
-        let end = max_len.min(content.len());
+        let end = ceil_char_boundary(content, max_len.min(content.len()));
         format!("{}...", content[..end].trim())
     }
+}
+
+/// Find the nearest char boundary at or before the given byte index.
+fn floor_char_boundary(s: &str, i: usize) -> usize {
+    if i >= s.len() {
+        return s.len();
+    }
+    let mut idx = i;
+    while !s.is_char_boundary(idx) && idx > 0 {
+        idx -= 1;
+    }
+    idx
+}
+
+/// Find the nearest char boundary at or after the given byte index.
+fn ceil_char_boundary(s: &str, i: usize) -> usize {
+    if i >= s.len() {
+        return s.len();
+    }
+    let mut idx = i;
+    while !s.is_char_boundary(idx) && idx < s.len() {
+        idx += 1;
+    }
+    idx
 }
 
 #[cfg(test)]

@@ -165,9 +165,7 @@ impl ToolHandler for UpdateMemoryHandler {
 
         tracing::debug!(memory_id = %memory_id, content_len = content.len(), "update_memory 调用");
 
-        ctx.memory_service
-            .update_memory(memory_id, content)
-            .await?;
+        ctx.memory_service.update_memory(memory_id, content).await?;
 
         tracing::debug!(memory_id = %memory_id, "update_memory 成功");
         Ok(json!({ "memory_id": memory_id.to_string(), "status": "updated" }))
