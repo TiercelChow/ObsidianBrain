@@ -185,9 +185,23 @@ impl TantivyIndex {
             .tokenizers()
             .register("simple", tantivy::tokenizer::SimpleTokenizer::default());
 
-        let writer = index
-            .writer::<TantivyDocument>(50_000_000)
-            .map_err(|e| BrainError::SearchError(format!("Writer 创建失败: {e}")))?;
+        // Try to create writer, with automatic stale lock recovery
+        let writer = match index.writer::<TantivyDocument>(50_000_000) {
+            Ok(w) => w,
+            Err(e) if e.to_string().contains("LockBusy") => {
+                // Stale lock from previous crash — remove and retry
+                let lock_path = index_path.join(".tantivy-writer.lock");
+                if lock_path.exists() {
+                    tracing::warn!("检测到残留锁文件，尝试清理: {:?}", lock_path);
+                    std::fs::remove_file(&lock_path)?;
+                    index.writer::<TantivyDocument>(50_000_000)
+                        .map_err(|e| BrainError::SearchError(format!("Writer 创建失败 (重试后): {e}")))?
+                } else {
+                    return Err(BrainError::SearchError(format!("Writer 创建失败: {e}")));
+                }
+            }
+            Err(e) => return Err(BrainError::SearchError(format!("Writer 创建失败: {e}"))),
+        };
 
         let reader = index
             .reader_builder()
