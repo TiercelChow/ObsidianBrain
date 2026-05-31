@@ -76,6 +76,17 @@ impl MemoryService {
     /// - File read / parse / Tantivy failure → return `Err`
     /// - Embedding / Qdrant failure → log warning, continue (degraded mode)
     pub async fn index_file(&self, path: &Path) -> Result<usize, BrainError> {
+        self.index_file_inner(path, false).await
+    }
+
+    /// Inner implementation with optional embedding skip.
+    /// When `skip_embedding` is true, only Tantivy indexing is performed (used by full_index
+    /// to avoid repeated embedding timeouts after first failure).
+    async fn index_file_inner(
+        &self,
+        path: &Path,
+        skip_embedding: bool,
+    ) -> Result<usize, BrainError> {
         // 1. Read file content
         let content = std::fs::read_to_string(path).map_err(|e| {
             tracing::error!(path = %path.display(), error = %e, "文件读取失败");
@@ -123,6 +134,10 @@ impl MemoryService {
         self.tantivy.commit()?;
 
         // 6. Embed chunks (degraded if embedding fails)
+        if skip_embedding {
+            tracing::debug!("跳过 Embedding (已降级)");
+            return Ok(chunks.len());
+        }
         let texts: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
         let embeddings = match self.embedding.embed_batch(&texts).await {
             Ok(vecs) => vecs,
@@ -192,26 +207,57 @@ impl MemoryService {
     /// Returns a `FullIndexReport` with statistics about the indexing run.
     pub async fn full_index(&self) -> Result<FullIndexReport, BrainError> {
         let md_files = walk_vault_for_md(&self.vault_path)?;
+        let total = md_files.len();
 
         let mut indexed_files = 0;
         let mut failed_files: Vec<(PathBuf, String)> = Vec::new();
         let mut total_chunks = 0;
 
-        for file_path in &md_files {
-            match self.index_file(file_path).await {
+        // Probe embedding availability before starting bulk indexing
+        let skip_embedding = match self.embedding.embed_text("probe").await {
+            Ok(_) => {
+                tracing::info!("Embedding 服务可用，将启用向量化");
+                false
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Embedding 服务不可用，全量索引将跳过向量化 (仅全文索引)");
+                true
+            }
+        };
+
+        tracing::info!(total_files = total, skip_embedding, "开始全量索引...");
+
+        for (i, file_path) in md_files.iter().enumerate() {
+            match self.index_file_inner(file_path, skip_embedding).await {
                 Ok(chunk_count) => {
                     indexed_files += 1;
                     total_chunks += chunk_count;
                 }
                 Err(e) => {
-                    tracing::error!(path = %file_path.display(), error = %e, "索引失败");
+                    tracing::error!(
+                        path = %file_path.display(),
+                        error = %e,
+                        "索引失败 ({}/{})",
+                        i + 1,
+                        total
+                    );
                     failed_files.push((file_path.clone(), e.to_string()));
                 }
+            }
+
+            // Progress logging every 50 files
+            if (i + 1) % 50 == 0 || i + 1 == total {
+                tracing::info!(
+                    progress = format!("{}/{}", i + 1, total),
+                    indexed = indexed_files,
+                    failed = failed_files.len(),
+                    "全量索引进度"
+                );
             }
         }
 
         tracing::info!(
-            total_files = md_files.len(),
+            total_files = total,
             indexed_files,
             failed_files = failed_files.len(),
             total_chunks,
@@ -219,7 +265,7 @@ impl MemoryService {
         );
 
         Ok(FullIndexReport {
-            total_files: md_files.len(),
+            total_files: total,
             indexed_files,
             failed_files,
             total_chunks,

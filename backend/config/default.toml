@@ -16,7 +16,7 @@ port = 9876
 # ── Obsidian Vault 配置 ─────────────────────────────────────────────────────
 [vault]
 # Vault 根目录路径（请修改为你的实际 Obsidian Vault 路径）
-path = ""
+path = "/Users/tiercelchow/Documents/Obsidian/TiercelChow's Blog"
 # Vault 名称（用于日志和标识）
 name = "brain"
 # 是否启用文件监控（自动检测笔记变更并更新索引）
