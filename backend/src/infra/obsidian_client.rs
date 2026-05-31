@@ -55,30 +55,8 @@ pub struct NoteResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SearchResult {
-    #[serde(default)]
     pub filename: String,
-    #[serde(default)]
-    pub score: f64,
-    #[serde(default, rename = "matches")]
-    pub matches: Vec<SearchMatch>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct SearchMatch {
-    #[serde(default)]
-    pub content: String,
-    #[serde(default)]
-    pub context: Option<String>,
-    #[serde(default)]
-    pub match_: Option<MatchPosition>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct MatchPosition {
-    #[serde(default)]
-    pub start: usize,
-    #[serde(default)]
-    pub end: usize,
+    pub result: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -321,13 +299,24 @@ impl ObsidianClient {
 
     // ── Search ──
 
-    /// Simple text search across the vault.
-    pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, BrainError> {
+    /// Search across the vault using JsonLogic query.
+    /// Note: The `limit` parameter is not supported by the API, results are returned as-is.
+    pub async fn search(&self, query: &str, _limit: usize) -> Result<Vec<SearchResult>, BrainError> {
+        // Build JsonLogic query: search for query in content
+        let json_logic = serde_json::json!({
+            "and": [
+                {"var": "content"},
+                query
+            ]
+        });
+
         let resp = self
             .request(
-                reqwest::Method::GET,
-                &format!("/search/simple?q={}&limit={}", urlencoding::encode(query), limit),
+                reqwest::Method::POST,
+                "/search/",
             )
+            .header("Content-Type", "application/vnd.olrapi.jsonlogic+json")
+            .json(&json_logic)
             .send()
             .await
             .map_err(|e| self.map_error("搜索", e))?;
