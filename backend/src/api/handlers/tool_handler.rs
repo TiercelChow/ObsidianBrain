@@ -93,7 +93,8 @@ pub async fn call_tool(
             Ok(compiled) => {
                 let validation_result = compiled.validate(&req.arguments);
                 if let Err(errors) = validation_result {
-                    let error_messages: Vec<String> = errors.take(5).map(|e| e.to_string()).collect();
+                    let error_messages: Vec<String> =
+                        errors.take(5).map(|e| e.to_string()).collect();
                     tracing::warn!(
                         tool = %tool_name,
                         errors = ?error_messages,
@@ -440,6 +441,9 @@ mod tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "error");
         assert_eq!(json["error"]["code"], "INVALID_PARAMS");
-        assert!(json["error"]["message"].as_str().unwrap().contains("参数校验失败"));
+        assert!(json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("参数校验失败"));
     }
 }
