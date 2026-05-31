@@ -61,6 +61,10 @@ impl HybridSearchEngine {
         top_k: usize,
         tag_filter: Option<&[String]>,
     ) -> Result<Vec<HybridSearchResult>, BrainError> {
+        if top_k == 0 {
+            return Ok(Vec::new());
+        }
+
         // Clone Arcs for use in spawned tasks and async blocks.
         let tantivy_arc = self.tantivy.clone();
         let embedding_arc = self.embedding.clone();
@@ -78,10 +82,20 @@ impl HybridSearchEngine {
         let (tantivy_result, qdrant_result) = tokio::join!(
             tokio::task::spawn_blocking(move || tantivy_arc.search(&tantivy_params)),
             async {
-                let vector = embedding_arc.embed_text(query).await?;
-                qdrant_arc
-                    .search(&vector, SEARCH_LIMIT, qdrant_filter)
-                    .await
+                let vector = match embedding_arc.embed_text(query).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!("Embedding 失败: {e}");
+                        return Err(e);
+                    }
+                };
+                match qdrant_arc.search(&vector, SEARCH_LIMIT, qdrant_filter).await {
+                    Ok(r) => Ok(r),
+                    Err(e) => {
+                        tracing::warn!("Qdrant 不可用: {e}");
+                        Err(e)
+                    }
+                }
             }
         );
 
@@ -102,7 +116,7 @@ impl HybridSearchEngine {
         let (qdrant_results, qdrant_failed) = match qdrant_result {
             Ok(results) => (results, false),
             Err(e) => {
-                tracing::warn!(error = %e, "Qdrant 不可用或 Embedding 失败，降级为全文搜索");
+                tracing::warn!(error = %e, "Qdrant/Embedding 不可用，降级为全文搜索");
                 (Vec::new(), true)
             }
         };
@@ -243,7 +257,8 @@ fn build_qdrant_tag_filter(tags: Option<&[String]>) -> Option<serde_json::Value>
                 serde_json::json!({
                     "key": "tags",
                     "match": {
-                        "value": tag
+                        "value": tag,
+                        "type": "keyword"
                     }
                 })
             }).collect::<Vec<_>>()
@@ -606,10 +621,9 @@ mod tests {
         assert_eq!(must.len(), 1);
         let entry = &must[0];
         assert_eq!(entry.get("key").unwrap().as_str(), Some("tags"));
-        assert_eq!(
-            entry.get("match").unwrap().get("value").unwrap().as_str(),
-            Some("rust")
-        );
+        let match_obj = entry.get("match").unwrap();
+        assert_eq!(match_obj.get("value").unwrap().as_str(), Some("rust"));
+        assert_eq!(match_obj.get("type").unwrap().as_str(), Some("keyword"));
     }
 
     #[test]
