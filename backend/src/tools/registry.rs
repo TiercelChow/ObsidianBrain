@@ -1,13 +1,15 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use crate::tools::traits::{ToolDefinition, ToolHandler};
 
 /// Central registry for all available tool handlers.
 ///
 /// Tools are registered at startup and can be looked up by name at runtime.
-/// The registry uses interior mutability (RwLock) so tools can be registered
+/// The registry uses interior mutability (tokio RwLock) so tools can be registered
 /// after the AppContext is constructed, while still allowing concurrent reads.
+/// Using tokio::sync::RwLock avoids blocking the async runtime on lock acquisition.
 pub struct ToolRegistry {
     tools: RwLock<HashMap<String, Arc<dyn ToolHandler>>>,
 }
@@ -22,22 +24,22 @@ impl ToolRegistry {
 
     /// Register a tool handler. If a tool with the same name already exists,
     /// it will be replaced.
-    pub fn register(&self, handler: Arc<dyn ToolHandler>) {
+    pub async fn register(&self, handler: Arc<dyn ToolHandler>) {
         let name = handler.name().to_string();
         tracing::debug!(tool = %name, "注册工具");
-        let mut tools = self.tools.write().unwrap();
+        let mut tools = self.tools.write().await;
         tools.insert(name, handler);
     }
 
     /// Look up a tool handler by name.
-    pub fn get(&self, name: &str) -> Option<Arc<dyn ToolHandler>> {
-        let tools = self.tools.read().unwrap();
+    pub async fn get(&self, name: &str) -> Option<Arc<dyn ToolHandler>> {
+        let tools = self.tools.read().await;
         tools.get(name).cloned()
     }
 
     /// List all registered tools as ToolDefinition metadata.
-    pub fn list(&self) -> Vec<ToolDefinition> {
-        let tools = self.tools.read().unwrap();
+    pub async fn list(&self) -> Vec<ToolDefinition> {
+        let tools = self.tools.read().await;
         tools
             .values()
             .map(|h| ToolDefinition::from_handler(h.as_ref()))
@@ -45,8 +47,8 @@ impl ToolRegistry {
     }
 
     /// Return the number of registered tools.
-    pub fn count(&self) -> usize {
-        let tools = self.tools.read().unwrap();
+    pub async fn count(&self) -> usize {
+        let tools = self.tools.read().await;
         tools.len()
     }
 }
@@ -63,7 +65,6 @@ mod tests {
     use crate::error::BrainError;
     use async_trait::async_trait;
     use serde_json::{json, Value};
-    use std::sync::Arc;
 
     /// A minimal mock tool for testing the registry.
     struct MockTool {
@@ -115,62 +116,62 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_registry_register_and_list() {
+    #[tokio::test]
+    async fn test_registry_register_and_list() {
         let registry = ToolRegistry::new();
         let tool = Arc::new(make_mock_tool("search_notes"));
-        registry.register(tool);
+        registry.register(tool).await;
 
-        let list = registry.list();
+        let list = registry.list().await;
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].name, "search_notes");
         assert_eq!(list[0].module, "test");
     }
 
-    #[test]
-    fn test_registry_get_existing_tool() {
+    #[tokio::test]
+    async fn test_registry_get_existing_tool() {
         let registry = ToolRegistry::new();
         let tool = Arc::new(make_mock_tool("get_note"));
-        registry.register(tool);
+        registry.register(tool).await;
 
-        let found = registry.get("get_note");
+        let found = registry.get("get_note").await;
         assert!(found.is_some());
         assert_eq!(found.unwrap().name(), "get_note");
     }
 
-    #[test]
-    fn test_registry_get_missing_tool() {
+    #[tokio::test]
+    async fn test_registry_get_missing_tool() {
         let registry = ToolRegistry::new();
-        let found = registry.get("nonexistent");
+        let found = registry.get("nonexistent").await;
         assert!(found.is_none());
     }
 
-    #[test]
-    fn test_registry_register_replaces_existing() {
+    #[tokio::test]
+    async fn test_registry_register_replaces_existing() {
         let registry = ToolRegistry::new();
-        registry.register(Arc::new(make_mock_tool("my_tool")));
-        registry.register(Arc::new(make_mock_tool("my_tool")));
+        registry.register(Arc::new(make_mock_tool("my_tool"))).await;
+        registry.register(Arc::new(make_mock_tool("my_tool"))).await;
 
-        assert_eq!(registry.count(), 1);
+        assert_eq!(registry.count().await, 1);
     }
 
-    #[test]
-    fn test_registry_multiple_tools() {
+    #[tokio::test]
+    async fn test_registry_multiple_tools() {
         let registry = ToolRegistry::new();
-        registry.register(Arc::new(make_mock_tool("tool_a")));
-        registry.register(Arc::new(make_mock_tool("tool_b")));
-        registry.register(Arc::new(make_mock_tool("tool_c")));
+        registry.register(Arc::new(make_mock_tool("tool_a"))).await;
+        registry.register(Arc::new(make_mock_tool("tool_b"))).await;
+        registry.register(Arc::new(make_mock_tool("tool_c"))).await;
 
-        assert_eq!(registry.count(), 3);
-        let list = registry.list();
+        assert_eq!(registry.count().await, 3);
+        let list = registry.list().await;
         let names: Vec<&str> = list.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"tool_a"));
         assert!(names.contains(&"tool_b"));
         assert!(names.contains(&"tool_c"));
     }
 
-    #[test]
-    fn test_tool_definition_from_handler() {
+    #[tokio::test]
+    async fn test_tool_definition_from_handler() {
         let tool = make_mock_tool("search_notes");
         let def = ToolDefinition::from_handler(&tool);
         assert_eq!(def.name, "search_notes");
@@ -179,9 +180,9 @@ mod tests {
         assert!(def.input_schema.is_object());
     }
 
-    #[test]
-    fn test_registry_default_is_empty() {
+    #[tokio::test]
+    async fn test_registry_default_is_empty() {
         let registry = ToolRegistry::default();
-        assert_eq!(registry.count(), 0);
+        assert_eq!(registry.count().await, 0);
     }
 }
