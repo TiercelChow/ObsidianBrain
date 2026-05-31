@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use crate::api::handlers::health::health_check;
+use crate::api::handlers::tool_handler::{call_tool, list_tools};
 use crate::AppContext;
 
 /// Create the application router with all routes, middleware, and fallbacks.
@@ -19,6 +20,8 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
     // API routes under /v1 prefix.
     let api_routes = Router::new()
         .route("/health", get(health_check))
+        .route("/tools", get(list_tools))
+        .route("/tools/call", post(call_tool))
         .with_state(ctx);
 
     // Compose the main router with middleware.

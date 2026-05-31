@@ -49,7 +49,7 @@ pub enum BrainError {
 
 impl BrainError {
     /// Returns a machine-readable error code string.
-    fn error_code(&self) -> &'static str {
+    pub(crate) fn error_code(&self) -> &'static str {
         match self {
             Self::ConfigError(_) => "CONFIG_ERROR",
             Self::VaultNotFound(_) => "VAULT_NOT_FOUND",
@@ -68,7 +68,7 @@ impl BrainError {
     }
 
     /// Returns an optional user-facing suggestion for recovery.
-    fn suggestion(&self) -> Option<&'static str> {
+    pub(crate) fn suggestion(&self) -> Option<&'static str> {
         match self {
             Self::ConfigError(_) => Some("Check config/default.toml or environment variables"),
             Self::VaultNotFound(_) => {

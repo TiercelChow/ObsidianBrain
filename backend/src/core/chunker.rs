@@ -275,7 +275,9 @@ impl SmartChunker {
             .iter()
             .filter_map(|cb| {
                 let fenced = build_fenced_code_block_text(cb);
-                content.find(&fenced).map(|start| (start, start + fenced.len(), cb))
+                content
+                    .find(&fenced)
+                    .map(|start| (start, start + fenced.len(), cb))
             })
             .collect();
 
