@@ -16,6 +16,7 @@ pub async fn health_check(State(ctx): State<Arc<AppContext>>) -> Json<Value> {
             components.tantivy.clone(),
             components.embedding.clone(),
             components.llm.clone(),
+            components.obsidian.clone(),
         )
     };
 
@@ -54,6 +55,7 @@ pub async fn health_check(State(ctx): State<Arc<AppContext>>) -> Json<Value> {
             "tantivy": tantivy_status,
             "embedding": component_snapshot.4,
             "llm": component_snapshot.5,
+            "obsidian": component_snapshot.6,
         },
         "vault": {
             "path": vault_path_str,

@@ -18,6 +18,7 @@ use crate::core::search_engine::HybridSearchEngine;
 use crate::infra::embedding::{EmbeddingFactory, EmbeddingProvider};
 use crate::infra::file_watcher::{FileWatcher, DEFAULT_DEBOUNCE_MS};
 use crate::infra::llm_client::{LlmClientFactory, LlmProvider};
+use crate::infra::obsidian_client::ObsidianClient;
 use crate::infra::qdrant_client::QdrantStore;
 use crate::infra::sqlite_store::SqliteStore;
 use crate::infra::tantivy_index::TantivyIndex;
@@ -36,6 +37,8 @@ pub struct AppContext {
     pub tool_registry: Arc<ToolRegistry>,
     pub memory_service: Arc<MemoryService>,
     pub search_engine: Arc<HybridSearchEngine>,
+    /// Obsidian Local REST API client (optional — only if plugin is enabled).
+    pub obsidian: Option<Arc<ObsidianClient>>,
     /// FileWatcher handle — must be kept alive for filesystem watching to work.
     pub vault_watcher: Option<FileWatcher>,
     /// Server start time — used to compute uptime in health endpoint.
@@ -51,6 +54,7 @@ pub struct ComponentStatus {
     pub tantivy: String,
     pub embedding: String,
     pub llm: String,
+    pub obsidian: String,
 }
 
 #[tokio::main]
@@ -157,6 +161,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     tracing::info!("LLM 初始化完成: {}", config.llm.provider);
 
+    // Obsidian Local REST API (optional)
+    let obsidian = if config.obsidian.enabled {
+        match ObsidianClient::new(&config.obsidian) {
+            Ok(client) => {
+                let client = Arc::new(client);
+                // Async health check
+                if client.health_check().await {
+                    components.obsidian = "ok".to_string();
+                    tracing::info!("Obsidian API 连接成功: {}", config.obsidian.url);
+                } else {
+                    components.obsidian = "degraded: 无法连接".to_string();
+                    tracing::warn!(
+                        "Obsidian API 无法连接: {} (插件是否已启用?)",
+                        config.obsidian.url
+                    );
+                }
+                Some(client)
+            }
+            Err(e) => {
+                components.obsidian = format!("error: {e}");
+                tracing::warn!("Obsidian API 客户端创建失败: {e}");
+                None
+            }
+        }
+    } else {
+        components.obsidian = "disabled".to_string();
+        tracing::info!("Obsidian API 客户端未启用");
+        None
+    };
+
     // 4. Create core services
     let memory_service = Arc::new(MemoryService::new(
         tantivy.clone(),
@@ -236,6 +270,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tool_registry: tool_registry.clone(),
         memory_service,
         search_engine,
+        obsidian,
         vault_watcher,
         start_time,
     });
@@ -385,6 +420,7 @@ mod test_helpers {
                 tool_registry: Arc::new(ToolRegistry::new()),
                 memory_service,
                 search_engine,
+                obsidian: None,
                 vault_watcher: None,
                 start_time: chrono::Utc::now(),
             });

@@ -24,6 +24,8 @@ pub struct AppConfig {
     pub storage: StorageConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
+    #[serde(default)]
+    pub obsidian: ObsidianApiConfig,
 }
 
 impl AppConfig {
@@ -234,6 +236,28 @@ impl Default for LoggingConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ObsidianApiConfig {
+    /// Whether to enable the Obsidian Local REST API client.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Base URL of the Obsidian Local REST API (HTTP).
+    #[serde(default = "default_obsidian_url")]
+    pub url: String,
+    /// API key for authentication (Bearer token).
+    #[serde(default)]
+    pub api_key: Option<String>,
+}
+impl Default for ObsidianApiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: default_obsidian_url(),
+            api_key: None,
+        }
+    }
+}
+
 // ── Default value functions ──
 
 fn default_host() -> String {
@@ -302,6 +326,9 @@ fn default_index_path() -> PathBuf {
 }
 fn default_log_level() -> String {
     "info".to_string()
+}
+fn default_obsidian_url() -> String {
+    "http://127.0.0.1:27123".to_string()
 }
 
 #[cfg(test)]

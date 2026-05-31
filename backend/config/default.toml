@@ -83,3 +83,15 @@ index_path = "./data/tantivy_index"
 level = "info"
 # 日志文件路径（留空则仅输出到 stdout）
 # file = "./data/obsidianbrain.log"
+
+# ── Obsidian Local REST API 配置 ─────────────────────────────────────────────
+# 需要先安装 Obsidian 插件: obsidian-local-rest-api
+# 插件地址: https://github.com/coddingtonbear/obsidian-local-rest-api
+[obsidian]
+# 是否启用 Obsidian API 客户端
+# 启用后可通过 API 操作 vault 文件、搜索、执行命令、管理周期性笔记等
+enabled = false
+# Obsidian Local REST API 地址（HTTP 模式，默认端口 27123）
+url = "http://127.0.0.1:27123"
+# API Key（在 Obsidian 设置 → Local REST API 中查看）
+# api_key = "your-api-key-here"
