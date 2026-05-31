@@ -142,7 +142,9 @@ impl SmartChunker {
             return;
         }
 
-        let token_count = estimate_tokens(&content);
+        // buffer.token_count is maintained incrementally and is accurate —
+        // trimming only removes whitespace which contributes zero tokens.
+        let token_count = buffer.token_count;
         let has_code_block = contains_code_block(&content);
 
         chunks.push(MemoryChunk {
@@ -259,73 +261,37 @@ impl SmartChunker {
     }
 
     /// Extract segments (paragraphs + code blocks) from a section, preserving ordering.
+    ///
+    /// Uses `section.code_blocks` as the authoritative source for code block positions,
+    /// avoiding fragile re-scanning of ``` markers in raw text.
     fn extract_segments_from_section(section: &crate::models::Section) -> Vec<Segment> {
         let content = &section.content;
         let mut segments = Vec::new();
 
-        // Find all code block positions in the content
-        let code_block_positions: Vec<(usize, usize)> = section
+        // Build the full fenced text for each code block (```lang\ncode\n```)
+        // and locate its byte range within section.content.
+        let code_block_ranges: Vec<(usize, usize, &crate::models::CodeBlock)> = section
             .code_blocks
             .iter()
-            .map(|cb| (cb.line_start, cb.line_end))
+            .filter_map(|cb| {
+                let fenced = build_fenced_code_block_text(cb);
+                content.find(&fenced).map(|start| (start, start + fenced.len(), cb))
+            })
             .collect();
 
-        // Split content by ``` boundaries to extract text segments and code block segments
-        let mut remaining = content.as_str();
-        let mut code_block_idx = 0;
+        // Walk through content, splitting into alternating text/code segments
+        let mut cursor = 0;
+        for (block_start, block_end, cb) in &code_block_ranges {
+            // Ensure we don't go backwards (overlapping matches shouldn't happen,
+            // but guard against malformed content)
+            if *block_start < cursor {
+                continue;
+            }
 
-        while !remaining.is_empty() {
-            // Find the next code block opening fence
-            let fence_pos = remaining.find("```");
-
-            if let Some(pos) = fence_pos {
-                // Text before the code block
-                let text_before = remaining[..pos].trim();
-                if !text_before.is_empty() {
-                    // Split the text before into paragraphs
-                    for para in split_by_paragraphs(text_before) {
-                        segments.push(Segment {
-                            text: para.to_string(),
-                            is_code_block: false,
-                            line_start: section.line_start,
-                            line_end: section.line_end,
-                        });
-                    }
-                }
-
-                // Find the closing fence
-                let after_opening = &remaining[pos + 3..];
-                // Skip the language line (first newline after opening fence)
-                let closing_pos = after_opening.find("```");
-
-                if let Some(closing) = closing_pos {
-                    let code_text = remaining[..pos + 3 + closing + 3].trim();
-                    let (cb_line_start, cb_line_end) =
-                        if code_block_idx < code_block_positions.len() {
-                            (
-                                code_block_positions[code_block_idx].0,
-                                code_block_positions[code_block_idx].1,
-                            )
-                        } else {
-                            (section.line_start, section.line_end)
-                        };
-
-                    segments.push(Segment {
-                        text: code_text.to_string(),
-                        is_code_block: true,
-                        line_start: cb_line_start,
-                        line_end: cb_line_end,
-                    });
-
-                    remaining = &remaining[pos + 3 + closing + 3..];
-                    code_block_idx += 1;
-                } else {
-                    // No closing fence found — treat rest as text
-                    break;
-                }
-            } else {
-                // No more code blocks — add remaining text as paragraphs
-                for para in split_by_paragraphs(remaining) {
+            // Text segment before this code block
+            let text_before = content[cursor..*block_start].trim();
+            if !text_before.is_empty() {
+                for para in split_by_paragraphs(text_before) {
                     segments.push(Segment {
                         text: para.to_string(),
                         is_code_block: false,
@@ -333,7 +299,31 @@ impl SmartChunker {
                         line_end: section.line_end,
                     });
                 }
-                break;
+            }
+
+            // Code block segment
+            segments.push(Segment {
+                text: content[*block_start..*block_end].trim().to_string(),
+                is_code_block: true,
+                line_start: cb.line_start,
+                line_end: cb.line_end,
+            });
+
+            cursor = *block_end;
+        }
+
+        // Remaining text after the last code block
+        if cursor < content.len() {
+            let text_after = content[cursor..].trim();
+            if !text_after.is_empty() {
+                for para in split_by_paragraphs(text_after) {
+                    segments.push(Segment {
+                        text: para.to_string(),
+                        is_code_block: false,
+                        line_start: section.line_start,
+                        line_end: section.line_end,
+                    });
+                }
             }
         }
 
@@ -420,16 +410,19 @@ impl ChunkBuffer {
     }
 
     fn push(&mut self, text: &str, section: &crate::models::Section) {
+        let separator = if self.content.is_empty() { "" } else { "\n\n" };
+        let new_tokens = estimate_tokens(text) + estimate_tokens(separator);
+
         if self.content.is_empty() {
             self.line_start = section.line_start;
             self.breadcrumb = section.breadcrumb.clone();
         }
 
         if !self.content.is_empty() {
-            self.content.push_str("\n\n");
+            self.content.push_str(separator);
         }
         self.content.push_str(text);
-        self.token_count = estimate_tokens(&self.content);
+        self.token_count += new_tokens;
         self.line_end = section.line_end;
     }
 }
@@ -479,6 +472,16 @@ fn get_last_sentence(text: &str) -> String {
 #[allow(dead_code)]
 fn contains_code_block(text: &str) -> bool {
     text.contains("```")
+}
+
+/// Build the full fenced text representation of a `CodeBlock` as it appears in
+/// markdown source: ```lang\ncode\n```.
+fn build_fenced_code_block_text(cb: &crate::models::CodeBlock) -> String {
+    let lang_prefix = match &cb.language {
+        Some(lang) => format!("```{}", lang),
+        None => "```".to_string(),
+    };
+    format!("{}\n{}\n```", lang_prefix, cb.code)
 }
 
 #[cfg(test)]
