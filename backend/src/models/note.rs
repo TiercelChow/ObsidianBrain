@@ -55,6 +55,8 @@ pub struct NoteSummary {
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
 }
 
 #[cfg(test)]
@@ -160,12 +162,14 @@ mod tests {
             title: "Test".to_string(),
             tags: vec!["tag1".to_string()],
             updated_at: Some(Utc::now()),
+            snippet: Some("A snippet of text...".to_string()),
         };
         let json = serde_json::to_string(&summary).unwrap();
         let parsed: NoteSummary = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.path, summary.path);
         assert_eq!(parsed.title, summary.title);
         assert_eq!(parsed.tags, summary.tags);
+        assert_eq!(parsed.snippet, summary.snippet);
     }
 
     #[test]

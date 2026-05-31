@@ -19,8 +19,8 @@
         <span class="stat-label">笔记</span>
       </div>
       <div class="stat-chip">
-        <span class="stat-num">{{ stats.total_chunks }}</span>
-        <span class="stat-label">分块</span>
+        <span class="stat-num">{{ stats.total_files }}</span>
+        <span class="stat-label">文件</span>
       </div>
       <div class="stat-chip">
         <span class="stat-num">{{ stats.tags?.length || 0 }}</span>
@@ -142,7 +142,7 @@ const recentNotes = ref<NoteItem[]>([])
 const searching = ref(false)
 const statsLoading = ref(false)
 const hasSearched = ref(false)
-const stats = ref<{ total_chunks: number; total_notes: number; tags: string[] } | null>(null)
+const stats = ref<{ total_notes: number; total_files: number; tags: string[] } | null>(null)
 
 async function doSearch() {
   if (!searchQuery.value.trim()) return
@@ -166,8 +166,8 @@ async function doSearch() {
 async function loadStats() {
   statsLoading.value = true
   try {
-    const res = await getMemoryStats() as unknown as { result: { total_chunks: number; total_notes: number; tags: string[] } }
-    const data = res.result || res as unknown as { total_chunks: number; total_notes: number; tags: string[] }
+    const res = await getMemoryStats() as unknown as { result: { total_notes: number; total_files: number; tags: string[] } }
+    const data = res.result || res as unknown as { total_notes: number; total_files: number; tags: string[] }
     stats.value = data
     allTags.value = data.tags || []
   } catch {

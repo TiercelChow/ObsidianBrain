@@ -56,6 +56,7 @@ impl ToolHandler for SearchNotesHandler {
                 json!({
                     "path": note.path,
                     "title": note.title,
+                    "snippet": note.snippet,
                     "tags": note.tags,
                 })
             })

@@ -39,12 +39,16 @@ impl ToolHandler for GetMemoryStatsHandler {
         let stats = ctx.memory_service.get_stats().await?;
 
         tracing::debug!(
+            total_notes = stats.total_notes,
             total_files = stats.total_files,
+            tags_count = stats.tags.len(),
             vault_name = %stats.vault_name,
             "get_memory_stats 结果"
         );
         Ok(json!({
+            "total_notes": stats.total_notes,
             "total_files": stats.total_files,
+            "tags": stats.tags,
             "vault_path": stats.vault_path,
             "vault_name": stats.vault_name,
         }))

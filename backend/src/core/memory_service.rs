@@ -54,7 +54,7 @@ impl MemoryService {
         let notes: Vec<NoteSummary> = results
             .into_iter()
             .map(|r| {
-                let path = PathBuf::from(&r.filename);
+                let path = std::path::PathBuf::from(&r.filename);
                 NoteSummary {
                     path: r.filename,
                     title: path
@@ -62,8 +62,11 @@ impl MemoryService {
                         .and_then(|s| s.to_str())
                         .unwrap_or("")
                         .to_string(),
-                    tags: vec![], // Obsidian search doesn't return tags
+                    tags: vec![],
                     updated_at: None,
+                    snippet: Some(
+                        r.result.as_str().unwrap_or("").to_string()
+                    ),
                 }
             })
             .collect();
@@ -93,9 +96,9 @@ impl MemoryService {
         self.client()?.delete_file(path).await
     }
 
-    /// List all files in the vault.
+    /// List all files in the vault (recursive).
     pub async fn list_files(&self) -> Result<Vec<String>, BrainError> {
-        self.client()?.list_files(None).await
+        self.client()?.list_all_files().await
     }
 
     // ── Metadata ──
@@ -105,8 +108,36 @@ impl MemoryService {
         let files = self.list_files().await?;
         let md_files: Vec<&String> = files.iter().filter(|f| f.ends_with(".md")).collect();
 
+        // Try to collect tags by reading a sample of notes (up to 50)
+        let mut all_tags = std::collections::HashSet::new();
+        for path in md_files.iter().take(50) {
+            if let Ok(content) = self.client()?.read_file(path).await {
+                // Extract tags from frontmatter (simple parsing)
+                if let Some(tags_start) = content.find("tags:") {
+                    let tags_section = &content[tags_start..];
+                    if let Some(tags_end) = tags_section.find('\n') {
+                        let tags_line = &tags_section[..tags_end];
+                        // Parse [tag1, tag2] format
+                        if let Some(bracket_start) = tags_line.find('[') {
+                            if let Some(bracket_end) = tags_line.find(']') {
+                                let tags_str = &tags_line[bracket_start + 1..bracket_end];
+                                for tag in tags_str.split(',') {
+                                    let tag = tag.trim().trim_matches('"').trim_matches('\'');
+                                    if !tag.is_empty() {
+                                        all_tags.insert(tag.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(MemoryStats {
-            total_files: md_files.len(),
+            total_notes: md_files.len(),
+            total_files: files.len(),
+            tags: all_tags.into_iter().collect(),
             vault_path: self.vault_path.to_string_lossy().to_string(),
             vault_name: self.vault_name.clone(),
         })

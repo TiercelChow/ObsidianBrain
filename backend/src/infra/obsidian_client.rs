@@ -56,7 +56,7 @@ pub struct NoteResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SearchResult {
     pub filename: String,
-    pub result: String,
+    pub result: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -243,24 +243,23 @@ impl ObsidianClient {
         Ok(())
     }
 
-    /// List files in the vault root or a subdirectory.
+    /// List files in the vault root or a subdirectory (non-recursive).
     pub async fn list_files(&self, dir: Option<&str>) -> Result<Vec<String>, BrainError> {
         let path = dir.unwrap_or("");
-        let url = if path.is_empty() {
-            format!("{}/vault/", self.base_url)
+        let url_path = if path.is_empty() {
+            "/vault/".to_string()
         } else {
-            format!("{}/vault/{}", self.base_url, encode_path(path))
+            format!("/vault/{}", encode_path(path))
         };
 
         let resp = self
-            .request(reqwest::Method::GET, &url.replace(&self.base_url, ""))
+            .request(reqwest::Method::GET, &url_path)
             .send()
             .await
             .map_err(|e| self.map_error("列出文件", e))?;
 
         self.check_response(&resp)?;
 
-        // Response is a JSON object with "files" array
         let body: serde_json::Value = resp
             .json()
             .await
@@ -274,6 +273,34 @@ impl ObsidianClient {
                     .collect()
             })
             .ok_or_else(|| BrainError::Internal("响应中缺少 files 字段".to_string()))
+    }
+
+    /// Recursively list all files in the vault (walks directories).
+    pub async fn list_all_files(&self) -> Result<Vec<String>, BrainError> {
+        let mut all_files = Vec::new();
+        let mut dirs_to_walk = vec![String::new()];
+
+        while let Some(dir) = dirs_to_walk.pop() {
+            let entries = self
+                .list_files(if dir.is_empty() { None } else { Some(&dir) })
+                .await?;
+
+            for entry in entries {
+                let full_path = if dir.is_empty() {
+                    entry.clone()
+                } else {
+                    format!("{}{}", dir, entry)
+                };
+
+                if entry.ends_with('/') {
+                    dirs_to_walk.push(full_path);
+                } else {
+                    all_files.push(full_path);
+                }
+            }
+        }
+
+        Ok(all_files)
     }
 
     // ── Active file ──
@@ -300,21 +327,16 @@ impl ObsidianClient {
     // ── Search ──
 
     /// Search across the vault using JsonLogic query.
-    /// Note: The `limit` parameter is not supported by the API, results are returned as-is.
-    pub async fn search(&self, query: &str, _limit: usize) -> Result<Vec<SearchResult>, BrainError> {
-        // Build JsonLogic query: search for query in content
+    /// Uses `in` operator for substring matching on file content.
+    /// Results are truncated client-side to `limit`.
+    pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, BrainError> {
+        // Build JsonLogic query: check if query string is a substring of content
         let json_logic = serde_json::json!({
-            "and": [
-                {"var": "content"},
-                query
-            ]
+            "in": [query, {"var": "content"}]
         });
 
         let resp = self
-            .request(
-                reqwest::Method::POST,
-                "/search/",
-            )
+            .request(reqwest::Method::POST, "/search/")
             .header("Content-Type", "application/vnd.olrapi.jsonlogic+json")
             .json(&json_logic)
             .send()
@@ -322,9 +344,15 @@ impl ObsidianClient {
             .map_err(|e| self.map_error("搜索", e))?;
 
         self.check_response(&resp)?;
-        resp.json()
+
+        let mut results: Vec<SearchResult> = resp
+            .json()
             .await
-            .map_err(|e| BrainError::Internal(format!("解析搜索结果失败: {e}")))
+            .map_err(|e| BrainError::Internal(format!("解析搜索结果失败: {e}")))?;
+
+        // Truncate to limit client-side (API doesn't support limit)
+        results.truncate(limit);
+        Ok(results)
     }
 
     // ── Periodic notes ──
