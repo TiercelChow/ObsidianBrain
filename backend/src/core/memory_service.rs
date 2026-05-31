@@ -17,7 +17,7 @@ use crate::models::{MemoryStats, NoteSummary};
 /// Core service for vault operations via Obsidian API.
 #[allow(dead_code)]
 pub struct MemoryService {
-    obsidian: Arc<ObsidianClient>,
+    obsidian: Option<Arc<ObsidianClient>>,
     vault_path: PathBuf,
     vault_name: String,
 }
@@ -25,12 +25,19 @@ pub struct MemoryService {
 #[allow(dead_code)]
 impl MemoryService {
     /// Create a new `MemoryService`.
-    pub fn new(obsidian: Arc<ObsidianClient>, vault_path: PathBuf, vault_name: String) -> Self {
+    pub fn new(obsidian: Option<Arc<ObsidianClient>>, vault_path: PathBuf, vault_name: String) -> Self {
         Self {
             obsidian,
             vault_path,
             vault_name,
         }
+    }
+
+    /// Helper to get the Obsidian client or return an error if not available.
+    fn client(&self) -> Result<&Arc<ObsidianClient>, BrainError> {
+        self.obsidian.as_ref().ok_or_else(|| {
+            BrainError::ConfigError("Obsidian API 客户端未启用，请在配置中设置 obsidian.enabled = true".to_string())
+        })
     }
 
     // ── Search ──
@@ -41,7 +48,8 @@ impl MemoryService {
         query: &str,
         limit: usize,
     ) -> Result<Vec<NoteSummary>, BrainError> {
-        let results = self.obsidian.search(query, limit).await?;
+        let client = self.client()?;
+        let results = client.search(query, limit).await?;
 
         let notes: Vec<NoteSummary> = results
             .into_iter()
@@ -67,27 +75,27 @@ impl MemoryService {
 
     /// Read a note's content.
     pub async fn read_note(&self, path: &str) -> Result<String, BrainError> {
-        self.obsidian.read_file(path).await
+        self.client()?.read_file(path).await
     }
 
     /// Write content to a note (creates or overwrites).
     pub async fn write_note(&self, path: &str, content: &str) -> Result<(), BrainError> {
-        self.obsidian.write_file(path, content).await
+        self.client()?.write_file(path, content).await
     }
 
     /// Append content to a note.
     pub async fn append_note(&self, path: &str, content: &str) -> Result<(), BrainError> {
-        self.obsidian.append_file(path, content).await
+        self.client()?.append_file(path, content).await
     }
 
     /// Delete a note.
     pub async fn delete_note(&self, path: &str) -> Result<(), BrainError> {
-        self.obsidian.delete_file(path).await
+        self.client()?.delete_file(path).await
     }
 
     /// List all files in the vault.
     pub async fn list_files(&self) -> Result<Vec<String>, BrainError> {
-        self.obsidian.list_files(None).await
+        self.client()?.list_files(None).await
     }
 
     // ── Metadata ──

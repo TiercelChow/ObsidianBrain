@@ -97,14 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Create core services
     let memory_service = Arc::new(MemoryService::new(
-        obsidian.unwrap_or_else(|| {
-            // Create a disabled client as fallback
-            Arc::new(
-                ObsidianClient::new(&config.obsidian).unwrap_or_else(|_| {
-                    panic!("Obsidian client creation should not fail with valid config")
-                }),
-            )
-        }),
+        obsidian,
         config.vault.path.clone(),
         config.vault.name.clone(),
     ));
@@ -195,7 +188,7 @@ mod test_helpers {
             );
 
             let memory_service = Arc::new(MemoryService::new(
-                obsidian,
+                Some(obsidian),
                 vault_path.clone(),
                 "TestVault".to_string(),
             ));
