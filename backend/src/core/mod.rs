@@ -1,4 +1,5 @@
 // 核心服务层
+pub mod chunker; // 智能分块器
 pub mod markdown_parser; // Markdown 解析器
                          // TODO: Phase 1-3 实现
                          // pub mod memory;       // 记忆引擎
