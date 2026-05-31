@@ -254,4 +254,24 @@ impl QdrantStore {
 
         Ok(())
     }
+
+    /// Delete all points matching a filter (no vector needed).
+    pub async fn delete_by_filter(&self, filter: Value) -> Result<(), BrainError> {
+        #[derive(Serialize)]
+        struct DeleteByFilterReq {
+            filter: Value,
+        }
+
+        self.client
+            .post(format!(
+                "{}/collections/{}/points/delete",
+                self.base_url, self.collection_name
+            ))
+            .json(&DeleteByFilterReq { filter })
+            .send()
+            .await
+            .map_err(|e| BrainError::QdrantError(format!("按条件删除失败: {e}")))?;
+
+        Ok(())
+    }
 }

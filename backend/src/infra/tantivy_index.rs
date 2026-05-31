@@ -415,6 +415,68 @@ impl TantivyIndex {
         Ok(results)
     }
 
+    /// Look up a single document by its chunk_id (exact match via TermQuery).
+    pub fn get_by_chunk_id(
+        &self,
+        chunk_id: &str,
+    ) -> Result<Option<TantivySearchResult>, BrainError> {
+        let searcher = self.reader.searcher();
+        let term = Term::from_field_text(self.fields.chunk_id, chunk_id);
+        let query = TermQuery::new(term, IndexRecordOption::Basic);
+
+        let top_docs = searcher
+            .search(&query, &TopDocs::with_limit(1))
+            .map_err(|e| BrainError::SearchError(format!("chunk_id 查询失败: {e}")))?;
+
+        if top_docs.is_empty() {
+            return Ok(None);
+        }
+
+        let (_, doc_address) = top_docs[0];
+        let doc: TantivyDocument = searcher
+            .doc(doc_address)
+            .map_err(|e| BrainError::SearchError(format!("文档获取失败: {e}")))?;
+
+        let path = doc
+            .get_first(self.fields.path)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let title = doc
+            .get_first(self.fields.title)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let content = doc
+            .get_first(self.fields.content)
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let tags_text = doc
+            .get_first(self.fields.tags)
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let chunk_id_val = doc
+            .get_first(self.fields.chunk_id)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let note_path = doc
+            .get_first(self.fields.note_path)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        Ok(Some(TantivySearchResult {
+            path,
+            title,
+            snippet: content.to_string(),
+            score: 1.0,
+            tags: tags_text.split_whitespace().map(String::from).collect(),
+            chunk_id: chunk_id_val,
+            note_path,
+        }))
+    }
+
     /// Check if the index is operational.
     pub fn health_check(&self) -> bool {
         let searcher = self.reader.searcher();
@@ -424,6 +486,11 @@ impl TantivyIndex {
 
 /// Generate a text snippet around the first query match.
 fn make_snippet(content: &str, query: &str, max_len: usize) -> String {
+    if query.is_empty() {
+        let end = max_len.min(content.len());
+        return format!("{}...", content[..end].trim());
+    }
+
     let lower = content.to_lowercase();
     let query_lower = query.to_lowercase();
 
@@ -540,6 +607,32 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert!(results[0].path.contains("rust"));
+    }
+
+    #[test]
+    fn test_get_by_chunk_id() {
+        let dir = TempDir::new().unwrap();
+        let index = TantivyIndex::new(dir.path()).unwrap();
+
+        let doc = NoteDocument {
+            title: "Test".to_string(),
+            content: "Test content for chunk lookup".to_string(),
+            path: "test.md".to_string(),
+            tags: vec![],
+            chunk_id: "abc-123-def".to_string(),
+            note_path: "test.md".to_string(),
+        };
+        index.add_document(&doc).unwrap();
+        index.commit().unwrap();
+
+        // Found
+        let result = index.get_by_chunk_id("abc-123-def").unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().note_path, "test.md");
+
+        // Not found
+        let result = index.get_by_chunk_id("nonexistent").unwrap();
+        assert!(result.is_none());
     }
 
     #[test]

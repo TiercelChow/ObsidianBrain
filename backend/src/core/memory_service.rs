@@ -18,7 +18,7 @@ use crate::core::markdown_parser::MarkdownParser;
 use crate::error::BrainError;
 use crate::infra::embedding::EmbeddingProvider;
 use crate::infra::qdrant_client::{ChunkPayload, QdrantStore, VectorPoint};
-use crate::infra::tantivy_index::{NoteDocument, SearchParams, TantivyIndex};
+use crate::infra::tantivy_index::{NoteDocument, TantivyIndex};
 use crate::models::{MemoryChunk, MemoryStats, NoteSummary};
 
 /// Report from a full vault indexing run.
@@ -172,30 +172,15 @@ impl MemoryService {
         self.tantivy.delete_by_note_path(&path_str)?;
         self.tantivy.commit()?;
 
-        // Delete from Qdrant: search for all points with this note_path
-        // Best-effort: skip if Qdrant is unavailable
-        let dimensions = self.embedding.dimensions();
-        let zero_vector = vec![0.0; dimensions];
-
+        // Best-effort: delete from Qdrant using filter
         let filter = serde_json::json!({
             "must": [{
                 "key": "note_path",
-                "match": {
-                    "value": path_str,
-                    "type": "keyword"
-                }
+                "match": { "value": path_str, "type": "keyword" }
             }]
         });
-
-        if let Ok(search_results) = self.qdrant.search(&zero_vector, 100, Some(filter)).await {
-            let ids: Vec<String> = search_results.iter().map(|r| r.id.clone()).collect();
-            if !ids.is_empty() {
-                if let Err(e) = self.qdrant.delete_points(&ids).await {
-                    tracing::warn!(error = %e, "Qdrant 删除失败，降级处理");
-                }
-            }
-        } else {
-            tracing::debug!("Qdrant 不可用，跳过向量索引删除");
+        if let Err(e) = self.qdrant.delete_by_filter(filter).await {
+            tracing::warn!("Qdrant 按路径删除失败: {e}");
         }
 
         Ok(())
@@ -326,89 +311,69 @@ impl MemoryService {
         memory_id: Uuid,
         new_content: &str,
     ) -> Result<(), BrainError> {
-        let chunk_id_str = memory_id.to_string();
+        let chunk_id = memory_id.to_string();
 
-        // Search Tantivy for the existing chunk to find its note_path and tags
-        let search_results = self.tantivy.search(&SearchParams {
-            query: new_content
-                .split_whitespace()
-                .next()
-                .unwrap_or("content")
-                .to_string(),
-            top_k: 100,
-            tag_filter: None,
+        // Find old chunk using direct TermQuery lookup
+        let old_chunk = self.tantivy.get_by_chunk_id(&chunk_id)?.ok_or_else(|| {
+            BrainError::NoteNotFound(format!("chunk {} not found", chunk_id).into())
         })?;
 
-        // Find the document with matching chunk_id
-        let old_doc = search_results.iter().find(|r| r.chunk_id == chunk_id_str);
+        // Delete old chunk from Tantivy (no commit yet — batch with add)
+        self.tantivy.delete_by_chunk_id(&chunk_id)?;
 
-        if old_doc.is_none() {
-            return Err(BrainError::NoteNotFound(PathBuf::from(format!(
-                "memory chunk {}",
-                chunk_id_str
-            ))));
-        }
-
-        let old_result = old_doc.unwrap();
-
-        // Delete old entry from Tantivy using chunk_id
-        self.tantivy.delete_by_chunk_id(&chunk_id_str)?;
-        self.tantivy.commit()?;
-
-        // Create new chunk with updated content
+        // Build new chunk with same metadata but new content
         let new_chunk = MemoryChunk {
-            id: memory_id,
-            note_path: old_result.note_path.clone(),
+            id: memory_id, // keep same UUID
+            note_path: old_chunk.note_path.clone(),
             chunk_index: 0,
             content: new_content.to_string(),
-            breadcrumb: Vec::new(),
-            tags: old_result.tags.clone(),
-            note_title: old_result.title.clone(),
+            breadcrumb: vec![],
+            tags: old_chunk.tags.clone(),
+            note_title: old_chunk.title.clone(),
             token_count: crate::core::chunker::estimate_tokens(new_content),
             has_code_block: new_content.contains("```"),
             line_start: 0,
             line_end: 0,
         };
 
-        // Index new chunk in Tantivy
+        // Add new chunk to Tantivy
         let note_doc = NoteDocument {
             title: new_chunk.note_title.clone(),
             content: new_chunk.content.clone(),
             path: new_chunk.note_path.clone(),
             tags: new_chunk.tags.clone(),
-            chunk_id: new_chunk.id.to_string(),
+            chunk_id: chunk_id.clone(),
             note_path: new_chunk.note_path.clone(),
         };
         self.tantivy.add_document(&note_doc)?;
-        self.tantivy.commit()?;
+        self.tantivy.commit()?; // Single commit for delete + add
 
-        // Embed and upsert to Qdrant (degraded if fails)
-        let embedding_result = self.embedding.embed_text(new_content).await;
-        match embedding_result {
+        // Best-effort: re-embed and upsert to Qdrant
+        match self.embedding.embed_text(new_content).await {
             Ok(vector) => {
-                let now = Utc::now();
                 let payload = ChunkPayload {
                     note_path: new_chunk.note_path.clone(),
-                    chunk_index: new_chunk.chunk_index,
-                    content: new_chunk.content.clone(),
-                    title: new_chunk.note_title.clone(),
-                    tags: new_chunk.tags.clone(),
-                    heading_path: new_chunk.breadcrumb.clone(),
+                    chunk_index: 0,
+                    content: new_content.to_string(),
+                    title: new_chunk.note_title,
+                    tags: new_chunk.tags,
+                    heading_path: new_chunk.breadcrumb,
                     word_count: new_chunk.token_count,
-                    created_at: now.to_rfc3339(),
-                    updated_at: now.to_rfc3339(),
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    updated_at: chrono::Utc::now().to_rfc3339(),
                 };
                 let point = VectorPoint {
-                    id: memory_id.to_string(),
+                    id: chunk_id,
                     vector,
-                    payload: serde_json::to_value(payload).unwrap_or(serde_json::Value::Null),
+                    payload: serde_json::to_value(&payload)
+                        .map_err(|e| BrainError::Internal(format!("序列化 payload 失败: {e}")))?,
                 };
                 if let Err(e) = self.qdrant.upsert_points(vec![point]).await {
-                    tracing::warn!(error = %e, "Qdrant upsert 失败，降级为全文搜索模式");
+                    tracing::warn!("Qdrant upsert 更新失败: {e}");
                 }
             }
             Err(e) => {
-                tracing::warn!(error = %e, "Embedding 失败，降级为全文搜索模式");
+                tracing::warn!("Embedding 失败，跳过 Qdrant 更新: {e}");
             }
         }
 
@@ -419,41 +384,25 @@ impl MemoryService {
     ///
     /// Returns `true` if the chunk was found and deleted, `false` if not found.
     pub async fn forget_memory(&self, memory_id: Uuid) -> Result<bool, BrainError> {
-        let chunk_id_str = memory_id.to_string();
+        let chunk_id = memory_id.to_string();
 
-        // First verify the chunk exists by trying to find it in search results
-        // We need a broad search to find the chunk by its ID
-        // Search with a term that's likely to match the chunk's content
-        let found_via_search = self.tantivy.search(&SearchParams {
-            query: chunk_id_str.clone(),
-            top_k: 10,
-            tag_filter: None,
-        })?;
-
-        let found = found_via_search.iter().any(|r| r.chunk_id == chunk_id_str);
-
-        if !found {
-            // The UUID string won't match in fulltext search because it's only
-            // in the chunk_id field (STRING type), not in content/title.
-            // Try a broader approach: delete by chunk_id directly and check
-            // if any document was removed.
-            // Since we can't easily check before deletion in Tantivy,
-            // we just try deletion and report success.
-            // For now, try deleting and check by searching after.
-            self.tantivy.delete_by_chunk_id(&chunk_id_str)?;
-            self.tantivy.commit()?;
-
-            // If nothing was found in search, the chunk likely doesn't exist
+        // Check if chunk exists using direct TermQuery lookup
+        let exists = self.tantivy.get_by_chunk_id(&chunk_id)?;
+        if exists.is_none() {
             return Ok(false);
         }
 
-        // Delete from Tantivy using chunk_id field
-        self.tantivy.delete_by_chunk_id(&chunk_id_str)?;
+        // Delete from Tantivy
+        self.tantivy.delete_by_chunk_id(&chunk_id)?;
         self.tantivy.commit()?;
 
-        // Delete from Qdrant (degraded if fails)
-        if let Err(e) = self.qdrant.delete_points(&[chunk_id_str]).await {
-            tracing::warn!(error = %e, "Qdrant 删除失败，降级处理");
+        // Best-effort delete from Qdrant
+        if let Err(e) = self
+            .qdrant
+            .delete_points(std::slice::from_ref(&chunk_id))
+            .await
+        {
+            tracing::warn!("Qdrant 删除 chunk 失败: {e}");
         }
 
         Ok(true)
