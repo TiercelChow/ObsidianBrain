@@ -16,7 +16,7 @@ use crate::config::AppConfig;
 use crate::core::memory_service::MemoryService;
 use crate::core::search_engine::HybridSearchEngine;
 use crate::infra::embedding::{EmbeddingFactory, EmbeddingProvider};
-use crate::infra::file_watcher::DEFAULT_DEBOUNCE_MS;
+use crate::infra::file_watcher::{FileWatcher, DEFAULT_DEBOUNCE_MS};
 use crate::infra::llm_client::{LlmClientFactory, LlmProvider};
 use crate::infra::qdrant_client::QdrantStore;
 use crate::infra::sqlite_store::SqliteStore;
@@ -36,8 +36,8 @@ pub struct AppContext {
     pub tool_registry: Arc<ToolRegistry>,
     pub memory_service: Arc<MemoryService>,
     pub search_engine: Arc<HybridSearchEngine>,
-    /// Whether the file watcher is active.
-    pub vault_watching: bool,
+    /// FileWatcher handle — must be kept alive for filesystem watching to work.
+    pub vault_watcher: Option<FileWatcher>,
 }
 
 /// Tracks which components are operational.
@@ -193,7 +193,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("HybridSearchEngine 初始化完成");
 
     // 5. Start file watcher if enabled
-    let vault_watching = if config.vault.watch_enabled && vault_path_valid {
+    let vault_watcher = if config.vault.watch_enabled && vault_path_valid {
         tracing::info!("启动文件监控...");
         match MemoryService::start_file_watcher(
             memory_service.clone(),
@@ -203,18 +203,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await
         {
-            Ok(_watcher) => {
+            Ok(watcher) => {
                 tracing::info!("文件监控已启动: {:?}", config.vault.path);
-                true
+                Some(watcher)
             }
             Err(e) => {
                 tracing::warn!("文件监控启动失败: {e}");
-                false
+                None
             }
         }
     } else {
         tracing::info!("文件监控未启用或 Vault 路径不存在");
-        false
+        None
     };
 
     // 6. Build AppContext and register tools
@@ -231,7 +231,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tool_registry: tool_registry.clone(),
         memory_service,
         search_engine,
-        vault_watching,
+        vault_watcher,
     });
 
     register_all_tools(&tool_registry, ctx.clone()).await;
@@ -379,7 +379,7 @@ mod test_helpers {
                 tool_registry: Arc::new(ToolRegistry::new()),
                 memory_service,
                 search_engine,
-                vault_watching: false,
+                vault_watcher: None,
             });
 
             (ctx, dir, vault_path)

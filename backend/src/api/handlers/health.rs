@@ -39,7 +39,7 @@ pub async fn health_check(State(ctx): State<Arc<AppContext>>) -> Json<Value> {
         "vault": {
             "path": vault_path_str,
             "exists": vault_exists,
-            "watching": ctx.vault_watching,
+            "watching": ctx.vault_watcher.is_some(),
         }
     }))
 }
