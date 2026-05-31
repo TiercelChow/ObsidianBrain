@@ -16,6 +16,7 @@ use crate::config::AppConfig;
 use crate::core::memory_service::MemoryService;
 use crate::core::search_engine::HybridSearchEngine;
 use crate::infra::embedding::{EmbeddingFactory, EmbeddingProvider};
+use crate::infra::file_watcher::DEFAULT_DEBOUNCE_MS;
 use crate::infra::llm_client::{LlmClientFactory, LlmProvider};
 use crate::infra::qdrant_client::QdrantStore;
 use crate::infra::sqlite_store::SqliteStore;
@@ -35,6 +36,8 @@ pub struct AppContext {
     pub tool_registry: Arc<ToolRegistry>,
     pub memory_service: Arc<MemoryService>,
     pub search_engine: Arc<HybridSearchEngine>,
+    /// Whether the file watcher is active.
+    pub vault_watching: bool,
 }
 
 /// Tracks which components are operational.
@@ -159,6 +162,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     tracing::info!("MemoryService 初始化完成");
 
+    // Full index on startup
+    let vault_path_valid = config.vault.path.exists() && !config.vault.path.as_os_str().is_empty();
+    if vault_path_valid {
+        tracing::info!("执行全量索引...");
+        match memory_service.full_index().await {
+            Ok(report) => {
+                tracing::info!(
+                    total = report.total_files,
+                    indexed = report.indexed_files,
+                    failed = report.failed_files.len(),
+                    chunks = report.total_chunks,
+                    "全量索引完成"
+                );
+            }
+            Err(e) => {
+                tracing::warn!("全量索引失败: {e}");
+            }
+        }
+    } else {
+        tracing::info!("Vault 路径未配置或不存在，跳过全量索引");
+    }
+
     let search_engine = Arc::new(HybridSearchEngine::new(
         tantivy.clone(),
         qdrant.clone(),
@@ -167,7 +192,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     tracing::info!("HybridSearchEngine 初始化完成");
 
-    // 5. Build AppContext and register tools
+    // 5. Start file watcher if enabled
+    let vault_watching = if config.vault.watch_enabled && vault_path_valid {
+        tracing::info!("启动文件监控...");
+        match MemoryService::start_file_watcher(
+            memory_service.clone(),
+            config.vault.path.clone(),
+            config.vault.exclude_patterns.clone(),
+            DEFAULT_DEBOUNCE_MS,
+        )
+        .await
+        {
+            Ok(_watcher) => {
+                tracing::info!("文件监控已启动: {:?}", config.vault.path);
+                true
+            }
+            Err(e) => {
+                tracing::warn!("文件监控启动失败: {e}");
+                false
+            }
+        }
+    } else {
+        tracing::info!("文件监控未启用或 Vault 路径不存在");
+        false
+    };
+
+    // 6. Build AppContext and register tools
     let tool_registry = Arc::new(ToolRegistry::new());
 
     let ctx = Arc::new(AppContext {
@@ -181,12 +231,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tool_registry: tool_registry.clone(),
         memory_service,
         search_engine,
+        vault_watching,
     });
 
     register_all_tools(&tool_registry, ctx.clone()).await;
     tracing::info!("已注册 {} 个工具", ctx.tool_registry.count().await);
 
-    // 6. Build router and serve
+    // 7. Build router and serve
     let app = api::router::create_router(ctx);
 
     let listener = TcpListener::bind(addr).await?;
@@ -328,6 +379,7 @@ mod test_helpers {
                 tool_registry: Arc::new(ToolRegistry::new()),
                 memory_service,
                 search_engine,
+                vault_watching: false,
             });
 
             (ctx, dir, vault_path)

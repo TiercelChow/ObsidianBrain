@@ -17,6 +17,7 @@ use crate::core::chunker::SmartChunker;
 use crate::core::markdown_parser::MarkdownParser;
 use crate::error::BrainError;
 use crate::infra::embedding::EmbeddingProvider;
+use crate::infra::file_watcher::{FileChangeEvent, FileChangeType, FileWatcher};
 use crate::infra::qdrant_client::{ChunkPayload, QdrantStore, VectorPoint};
 use crate::infra::tantivy_index::{NoteDocument, TantivyIndex};
 use crate::models::{MemoryChunk, MemoryStats, NoteSummary};
@@ -511,6 +512,60 @@ impl MemoryService {
         summaries.truncate(limit);
 
         Ok(summaries)
+    }
+
+    // ── File Watcher Integration ──
+
+    /// Start the file watcher and process events in a background task.
+    /// Returns the FileWatcher handle (must be kept alive).
+    pub async fn start_file_watcher(
+        memory_service: Arc<Self>,
+        vault_path: PathBuf,
+        exclude_patterns: Vec<String>,
+        debounce_ms: u64,
+    ) -> Result<FileWatcher, BrainError> {
+        let watcher = FileWatcher::new(&vault_path, exclude_patterns, debounce_ms)?;
+
+        if let Some(mut rx) = watcher.take_receiver() {
+            tokio::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    memory_service.process_file_event(event).await;
+                }
+                tracing::info!("文件监控事件循环结束");
+            });
+        }
+
+        Ok(watcher)
+    }
+
+    /// Process a single file change event.
+    async fn process_file_event(&self, event: FileChangeEvent) {
+        let path_str = event.path.display().to_string();
+
+        match event.change_type {
+            FileChangeType::Created | FileChangeType::Modified => {
+                tracing::info!(path = %path_str, "文件变更，重新索引");
+                match self.index_file(&event.path).await {
+                    Ok(chunks) => {
+                        tracing::info!(path = %path_str, chunks = chunks, "索引完成");
+                    }
+                    Err(e) => {
+                        tracing::error!(path = %path_str, error = %e, "索引失败");
+                    }
+                }
+            }
+            FileChangeType::Deleted => {
+                tracing::info!(path = %path_str, "文件删除，移除索引");
+                match self.remove_file_index(&event.path).await {
+                    Ok(()) => {
+                        tracing::info!(path = %path_str, "索引移除完成");
+                    }
+                    Err(e) => {
+                        tracing::error!(path = %path_str, error = %e, "索引移除失败");
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1238,6 +1293,142 @@ Second section content about programming paradigms and patterns.
         assert!(
             results.is_empty(),
             "All chunks for the file should be deleted"
+        );
+    }
+
+    // ── Test: process_file_event Created indexes file ──
+
+    #[tokio::test]
+    async fn test_process_file_event_created_indexes_file() {
+        let (tantivy_dir, vault_dir, service) = setup_service(true);
+
+        let content = r#"---
+title: Watcher Test
+tags:
+  - watcher
+---
+# Watcher Created
+
+This content was created by the watcher test.
+"#;
+        let file_path = write_md_file(&vault_dir, "watcher_created.md", content);
+
+        let event = FileChangeEvent {
+            change_type: FileChangeType::Created,
+            path: file_path.clone(),
+            timestamp: chrono::Utc::now(),
+        };
+
+        service.process_file_event(event).await;
+
+        // Verify the file is now searchable
+        let results = service
+            .tantivy
+            .search(&SearchParams {
+                query: "watcher created test".to_string(),
+                top_k: 5,
+                tag_filter: None,
+            })
+            .unwrap();
+        assert!(
+            !results.is_empty(),
+            "File should be searchable after Created event"
+        );
+    }
+
+    // ── Test: process_file_event Modified re-indexes file ──
+
+    #[tokio::test]
+    async fn test_process_file_event_modified_reindexes_file() {
+        let (tantivy_dir, vault_dir, service) = setup_service(true);
+
+        let file_path = write_md_file(
+            &vault_dir,
+            "watcher_modified.md",
+            "# Original\nOriginal watcher content.",
+        );
+
+        // Index the file first
+        service.index_file(&file_path).await.unwrap();
+
+        // Update file content
+        std::fs::write(&file_path, "# Updated\nUpdated watcher content.").unwrap();
+
+        let event = FileChangeEvent {
+            change_type: FileChangeType::Modified,
+            path: file_path.clone(),
+            timestamp: chrono::Utc::now(),
+        };
+
+        service.process_file_event(event).await;
+
+        // Verify updated content is searchable
+        let results = service
+            .tantivy
+            .search(&SearchParams {
+                query: "updated watcher content".to_string(),
+                top_k: 5,
+                tag_filter: None,
+            })
+            .unwrap();
+        assert!(
+            !results.is_empty(),
+            "Updated content should be searchable after Modified event"
+        );
+    }
+
+    // ── Test: process_file_event Deleted removes index ──
+
+    #[tokio::test]
+    async fn test_process_file_event_deleted_removes_index() {
+        let (tantivy_dir, vault_dir, service) = setup_service(true);
+
+        let content = r#"---
+title: Delete Event Test
+---
+# Delete Event
+
+This content will be removed by a Deleted event.
+"#;
+        let file_path = write_md_file(&vault_dir, "watcher_deleted.md", content);
+
+        // First index the file
+        service.index_file(&file_path).await.unwrap();
+
+        // Verify it's searchable
+        let results_before = service
+            .tantivy
+            .search(&SearchParams {
+                query: "delete event removed".to_string(),
+                top_k: 5,
+                tag_filter: None,
+            })
+            .unwrap();
+        assert!(
+            !results_before.is_empty(),
+            "Should be searchable before Deleted event"
+        );
+
+        let event = FileChangeEvent {
+            change_type: FileChangeType::Deleted,
+            path: file_path.clone(),
+            timestamp: chrono::Utc::now(),
+        };
+
+        service.process_file_event(event).await;
+
+        // Verify it's no longer searchable
+        let results_after = service
+            .tantivy
+            .search(&SearchParams {
+                query: "delete event removed".to_string(),
+                top_k: 5,
+                tag_filter: None,
+            })
+            .unwrap();
+        assert!(
+            results_after.is_empty(),
+            "Should not be searchable after Deleted event"
         );
     }
 }

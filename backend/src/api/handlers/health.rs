@@ -21,6 +21,10 @@ pub async fn health_check(State(ctx): State<Arc<AppContext>>) -> Json<Value> {
         "unhealthy".to_string()
     };
 
+    // Vault status
+    let vault_path_str = ctx.config.vault.path.to_string_lossy().to_string();
+    let vault_exists = ctx.config.vault.path.exists();
+
     Json(json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
@@ -31,6 +35,11 @@ pub async fn health_check(State(ctx): State<Arc<AppContext>>) -> Json<Value> {
             "tantivy": tantivy_status,
             "embedding": components.embedding,
             "llm": components.llm,
+        },
+        "vault": {
+            "path": vault_path_str,
+            "exists": vault_exists,
+            "watching": ctx.vault_watching,
         }
     }))
 }
