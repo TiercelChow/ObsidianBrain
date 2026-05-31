@@ -13,11 +13,14 @@ use tokio::signal;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::AppConfig;
+use crate::core::memory_service::MemoryService;
+use crate::core::search_engine::HybridSearchEngine;
 use crate::infra::embedding::{EmbeddingFactory, EmbeddingProvider};
 use crate::infra::llm_client::{LlmClientFactory, LlmProvider};
 use crate::infra::qdrant_client::QdrantStore;
 use crate::infra::sqlite_store::SqliteStore;
 use crate::infra::tantivy_index::TantivyIndex;
+use crate::tools::handlers::register_all_tools;
 use crate::tools::registry::ToolRegistry;
 
 /// Application shared context — injected into all handlers.
@@ -30,6 +33,8 @@ pub struct AppContext {
     pub tantivy: Arc<TantivyIndex>,
     pub components: Arc<std::sync::Mutex<ComponentStatus>>,
     pub tool_registry: Arc<ToolRegistry>,
+    pub memory_service: Arc<MemoryService>,
+    pub search_engine: Arc<HybridSearchEngine>,
 }
 
 /// Tracks which components are operational.
@@ -144,9 +149,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     tracing::info!("LLM 初始化完成: {}", config.llm.provider);
 
-    // 4. Build AppContext
+    // 4. Create core services
+    let memory_service = Arc::new(MemoryService::new(
+        tantivy.clone(),
+        qdrant.clone(),
+        embedding.clone(),
+        config.vault.path.clone(),
+        config.vault.name.clone(),
+    ));
+    tracing::info!("MemoryService 初始化完成");
+
+    let search_engine = Arc::new(HybridSearchEngine::new(
+        tantivy.clone(),
+        qdrant.clone(),
+        embedding.clone(),
+        config.vault.name.clone(),
+    ));
+    tracing::info!("HybridSearchEngine 初始化完成");
+
+    // 5. Build AppContext and register tools
     let tool_registry = Arc::new(ToolRegistry::new());
-    // Task 7 will register handlers here
 
     let ctx = Arc::new(AppContext {
         config: Arc::new(config),
@@ -156,10 +178,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         qdrant,
         tantivy,
         components: Arc::new(std::sync::Mutex::new(components)),
-        tool_registry,
+        tool_registry: tool_registry.clone(),
+        memory_service,
+        search_engine,
     });
 
-    // 5. Build router and serve
+    register_all_tools(&tool_registry, ctx.clone()).await;
+    tracing::info!("已注册 {} 个工具", ctx.tool_registry.count().await);
+
+    // 6. Build router and serve
     let app = api::router::create_router(ctx);
 
     let listener = TcpListener::bind(addr).await?;
@@ -261,25 +288,50 @@ mod test_helpers {
             let dir = tempfile::tempdir().expect("tempdir creation");
             let db_path = dir.path().join("test.db");
             let index_path = dir.path().join("tantivy_index");
+            let vault_path = dir.path().join("vault");
+            std::fs::create_dir_all(&vault_path).expect("vault dir creation");
 
             let db = Arc::new(SqliteStore::new(&db_path).expect("SQLite stub creation"));
             let tantivy = Arc::new(TantivyIndex::new(&index_path).expect("Tantivy stub creation"));
             let qdrant =
                 Arc::new(QdrantStore::new(&QdrantConfig::default()).expect("Qdrant stub creation"));
 
+            let embedding: Arc<dyn EmbeddingProvider> = Arc::new(StubEmbedder);
+
+            let memory_service = Arc::new(MemoryService::new(
+                tantivy.clone(),
+                qdrant.clone(),
+                embedding.clone(),
+                vault_path.clone(),
+                "TestVault".to_string(),
+            ));
+
+            let search_engine = Arc::new(HybridSearchEngine::new(
+                tantivy.clone(),
+                qdrant.clone(),
+                embedding.clone(),
+                "TestVault".to_string(),
+            ));
+
             // Leak the TempDir so it persists for the test duration.
             // This is acceptable in tests since they're short-lived.
             std::mem::forget(dir);
 
+            let mut config = AppConfig::default();
+            config.vault.path = vault_path;
+            config.vault.name = "TestVault".to_string();
+
             AppContext {
-                config: Arc::new(AppConfig::default()),
+                config: Arc::new(config),
                 db,
-                embedding: Arc::new(StubEmbedder),
+                embedding,
                 llm: Arc::new(StubLlm),
                 qdrant,
                 tantivy,
                 components: Arc::new(std::sync::Mutex::new(ComponentStatus::default())),
                 tool_registry,
+                memory_service,
+                search_engine,
             }
         }
     }
