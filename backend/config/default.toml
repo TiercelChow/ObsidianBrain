@@ -92,6 +92,6 @@ level = "info"
 # 启用后可通过 API 操作 vault 文件、搜索、执行命令、管理周期性笔记等
 enabled = false
 # Obsidian Local REST API 地址（HTTP 模式，默认端口 27123）
-url = "http://127.0.0.1:27123"
+url = "http://127.0.0.1:27124"
 # API Key（在 Obsidian 设置 → Local REST API 中查看）
-# api_key = "your-api-key-here"
+# api_key = "Bearer 002b934c756527984b93dcf59e61cfa16aef9132a5249b2bc8ab2a4842a3473d"

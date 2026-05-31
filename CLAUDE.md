@@ -57,19 +57,13 @@ docs/
 |------|------|
 | 语言 | Rust (edition 2021) |
 | Web 框架 | Axum + Tokio |
-| 全文搜索 | Tantivy + jieba-rs |
-| 向量存储 | Qdrant (Docker, REST API) |
-| 元数据存储 | SQLite (rusqlite, WAL 模式) |
-| Embedding | OpenAI API → Ollama → ONNX (渐进切换) |
-| LLM 调用 | reqwest → OpenAI / Claude / Ollama |
-| Git 操作 | git2 crate |
-| 文件监控 | notify |
-| Markdown | pulldown-cmark + gray_matter |
-| RSS | feed-rs |
+| Obsidian 集成 | Obsidian Local REST API (HTTP) |
+| HTTP 客户端 | reqwest |
 | 配置 | config crate (TOML) |
 | 日志 | tracing + tracing-subscriber |
 | 序列化 | serde + serde_json |
-| 容器 | Docker Compose (Qdrant) |
+
+**注意**：项目已从混合搜索架构（Tantivy + Qdrant + Embedding）简化为直接使用 Obsidian Local REST API。不再需要本地索引、向量存储或 Embedding 服务。
 
 ---
 
@@ -337,22 +331,19 @@ docker compose down           # 停止
 
 | 决策 | 选择 | 理由 |
 |------|------|------|
-| 向量存储 | Qdrant (Docker) 而非内嵌 | 高性能、Rust 编写、REST API 简洁 |
-| 全文搜索 | Tantivy 而非 Elasticsearch | Rust 原生、零运维、嵌入式 |
-| 元数据 | SQLite 而非文件/PostgreSQL | 轻量嵌入式、无需额外进程 |
-| 混合检索 | RRF (k=60) 融合 | 无需调参、效果稳定 |
-| 工具协议 | MCP + HTTP 双模式 | MCP 适配 Claude Desktop，HTTP 通用 |
-| 文件监控 | notify + 防抖 300ms | 跨平台、合并高频变更 |
+| 笔记操作 | Obsidian Local REST API | 无需本地索引，直接利用 Obsidian 的搜索和存储能力 |
+| 工具协议 | HTTP REST API | 通用、易于集成 |
 | 错误处理 | 自定义 BrainError 枚举 | 统一类型、可降级、可映射错误码 |
+| 架构简化 | 移除 Tantivy/Qdrant/Embedding | 减少复杂度，无需额外服务，部署更简单 |
 
 ---
 
 ## 安全与隐私
 
 - **仅监听 127.0.0.1**，不暴露到外网
-- **所有数据本地存储**（SQLite、Tantivy 索引、Qdrant 数据卷）
+- **所有数据由 Obsidian 管理**，ObsidianBrain 仅通过 HTTP API 访问
 - **API Key 通过环境变量传入**，不硬编码在代码或配置文件中
-- **Vault 写入操作必须有路径校验**，防止目录穿越
+- **Vault 写入操作通过 Obsidian API**，由 Obsidian 处理路径校验
 
 ---
 
