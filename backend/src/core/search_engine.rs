@@ -89,7 +89,10 @@ impl HybridSearchEngine {
                         return Err(e);
                     }
                 };
-                match qdrant_arc.search(&vector, SEARCH_LIMIT, qdrant_filter).await {
+                match qdrant_arc
+                    .search(&vector, SEARCH_LIMIT, qdrant_filter)
+                    .await
+                {
                     Ok(r) => Ok(r),
                     Err(e) => {
                         tracing::warn!("Qdrant 不可用: {e}");
@@ -329,6 +332,8 @@ mod tests {
                 content: "Tokio 是 Rust 生态中最流行的异步运行时框架".to_string(),
                 path: "programming/rust-async.md".to_string(),
                 tags: vec!["rust".to_string(), "async".to_string()],
+                chunk_id: "chunk-rust-async".to_string(),
+                note_path: "programming/rust-async.md".to_string(),
             })
             .unwrap();
 
@@ -338,6 +343,8 @@ mod tests {
                 content: "Rust 的类型系统提供了强大的类型安全和零成本抽象".to_string(),
                 path: "programming/rust-types.md".to_string(),
                 tags: vec!["rust".to_string()],
+                chunk_id: "chunk-rust-types".to_string(),
+                note_path: "programming/rust-types.md".to_string(),
             })
             .unwrap();
 
@@ -347,6 +354,8 @@ mod tests {
                 content: "Pandas 是 Python 数据分析的利器".to_string(),
                 path: "programming/python-data.md".to_string(),
                 tags: vec!["python".to_string()],
+                chunk_id: "chunk-python-data".to_string(),
+                note_path: "programming/python-data.md".to_string(),
             })
             .unwrap();
 

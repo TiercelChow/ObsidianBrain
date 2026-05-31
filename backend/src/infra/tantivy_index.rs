@@ -1,8 +1,8 @@
 use std::path::Path;
 use tantivy::collector::TopDocs;
-use tantivy::query::{BooleanQuery, Occur, QueryParser, TermQuery};
+use tantivy::query::{AllQuery, BooleanQuery, Occur, QueryParser, TermQuery};
 use tantivy::schema::*;
-use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
+use tantivy::tokenizer::{LowerCaser, TextAnalyzer, Token, TokenStream, Tokenizer};
 use tantivy::{doc, Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Term};
 
 use crate::error::BrainError;
@@ -58,7 +58,7 @@ impl Tokenizer for JiebaTokenizer {
                 offset_from: word.start,
                 offset_to: word.end,
                 position: i,
-                text: word.word.to_string(),
+                text: word.word.to_lowercase(),
                 position_length: 1,
             })
             .collect();
@@ -75,6 +75,8 @@ struct FieldMap {
     content: Field,
     path: Field,
     tags: Field,
+    chunk_id: Field,
+    note_path: Field,
 }
 
 /// A document to be indexed.
@@ -84,6 +86,8 @@ pub struct NoteDocument {
     pub content: String,
     pub path: String,
     pub tags: Vec<String>,
+    pub chunk_id: String,
+    pub note_path: String,
 }
 
 /// Search parameters.
@@ -95,6 +99,7 @@ pub struct SearchParams {
 }
 
 /// A single search result.
+#[derive(Clone)]
 #[allow(dead_code)]
 pub struct TantivySearchResult {
     pub path: String,
@@ -102,6 +107,8 @@ pub struct TantivySearchResult {
     pub snippet: String,
     pub score: f32,
     pub tags: Vec<String>,
+    pub chunk_id: String,
+    pub note_path: String,
 }
 
 /// Tantivy full-text search index with Chinese (jieba) support.
@@ -129,6 +136,9 @@ impl TantivyIndex {
 
         let path = schema_builder.add_text_field("path", STRING | STORED);
 
+        let chunk_id = schema_builder.add_text_field("chunk_id", STRING | STORED);
+        let note_path = schema_builder.add_text_field("note_path", STRING | STORED);
+
         let tag_options = TextOptions::default()
             .set_indexing_options(
                 TextFieldIndexing::default()
@@ -144,6 +154,8 @@ impl TantivyIndex {
             content,
             path,
             tags,
+            chunk_id,
+            note_path,
         };
         (schema, fields)
     }
@@ -162,8 +174,11 @@ impl TantivyIndex {
                 .map_err(|e| BrainError::SearchError(format!("索引创建失败: {e}")))?
         };
 
-        // Register our jieba tokenizer
-        index.tokenizers().register("jieba", JiebaTokenizer::new());
+        // Register our jieba tokenizer with LowerCaser for case-insensitive search
+        let jieba_analyzer = TextAnalyzer::builder(JiebaTokenizer::new())
+            .filter(LowerCaser)
+            .build();
+        index.tokenizers().register("jieba", jieba_analyzer);
 
         // Register simple tokenizer (split on whitespace + punctuation)
         index
@@ -197,6 +212,8 @@ impl TantivyIndex {
                 self.fields.content => note.content.clone(),
                 self.fields.path => note.path.clone(),
                 self.fields.tags => note.tags.join(" "),
+                self.fields.chunk_id => note.chunk_id.clone(),
+                self.fields.note_path => note.note_path.clone(),
             ))
             .map_err(|e| BrainError::SearchError(format!("文档添加失败: {e}")))?;
         Ok(())
@@ -212,6 +229,23 @@ impl TantivyIndex {
     /// Delete a document by path.
     pub fn delete_document(&self, path: &str) -> Result<(), BrainError> {
         let term = Term::from_field_text(self.fields.path, path);
+        let writer = self.writer.lock().unwrap();
+        writer.delete_term(term);
+        Ok(())
+    }
+
+    /// Delete all documents belonging to a note (by note_path field).
+    /// This removes all chunks for a given file.
+    pub fn delete_by_note_path(&self, note_path: &str) -> Result<(), BrainError> {
+        let term = Term::from_field_text(self.fields.note_path, note_path);
+        let writer = self.writer.lock().unwrap();
+        writer.delete_term(term);
+        Ok(())
+    }
+
+    /// Delete a single chunk by its UUID (chunk_id field).
+    pub fn delete_by_chunk_id(&self, chunk_id: &str) -> Result<(), BrainError> {
+        let term = Term::from_field_text(self.fields.chunk_id, chunk_id);
         let writer = self.writer.lock().unwrap();
         writer.delete_term(term);
         Ok(())
@@ -289,6 +323,18 @@ impl TantivyIndex {
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
 
+            let chunk_id = doc
+                .get_first(self.fields.chunk_id)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let note_path = doc
+                .get_first(self.fields.note_path)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
             let snippet = make_snippet(content, &params.query, 200);
 
             results.push(TantivySearchResult {
@@ -297,6 +343,72 @@ impl TantivyIndex {
                 snippet,
                 score,
                 tags: tags_text.split_whitespace().map(String::from).collect(),
+                chunk_id,
+                note_path,
+            });
+        }
+
+        Ok(results)
+    }
+
+    /// Search all documents in the index using AllQuery.
+    /// Returns all documents with their field values.
+    pub fn search_all(&self) -> Result<Vec<TantivySearchResult>, BrainError> {
+        let searcher = self.reader.searcher();
+        let top_docs = searcher
+            .search(&AllQuery, &TopDocs::with_limit(10_000))
+            .map_err(|e| BrainError::SearchError(format!("全量搜索失败: {e}")))?;
+
+        let mut results = Vec::new();
+        for (score, doc_address) in top_docs {
+            let doc: TantivyDocument = searcher
+                .doc(doc_address)
+                .map_err(|e| BrainError::SearchError(format!("文档获取失败: {e}")))?;
+
+            let path = doc
+                .get_first(self.fields.path)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let title = doc
+                .get_first(self.fields.title)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let content = doc
+                .get_first(self.fields.content)
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            let tags_text = doc
+                .get_first(self.fields.tags)
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            let chunk_id = doc
+                .get_first(self.fields.chunk_id)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let note_path = doc
+                .get_first(self.fields.note_path)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let snippet = make_snippet(content, "", 200);
+
+            results.push(TantivySearchResult {
+                path,
+                title,
+                snippet,
+                score,
+                tags: tags_text.split_whitespace().map(String::from).collect(),
+                chunk_id,
+                note_path,
             });
         }
 
@@ -341,6 +453,8 @@ mod tests {
                 content: "Tokio 是 Rust 生态中最流行的异步运行时框架".to_string(),
                 path: "programming/rust-async.md".to_string(),
                 tags: vec!["rust".to_string(), "async".to_string()],
+                chunk_id: "chunk-1".to_string(),
+                note_path: "programming/rust-async.md".to_string(),
             })
             .unwrap();
 
@@ -369,6 +483,8 @@ mod tests {
                 content: "This should be deleted".to_string(),
                 path: "test.md".to_string(),
                 tags: vec![],
+                chunk_id: "chunk-del".to_string(),
+                note_path: "test.md".to_string(),
             })
             .unwrap();
         index.commit().unwrap();
@@ -398,6 +514,8 @@ mod tests {
                 content: "Rust programming language notes".to_string(),
                 path: "rust.md".to_string(),
                 tags: vec!["rust".to_string()],
+                chunk_id: "chunk-rust".to_string(),
+                note_path: "rust.md".to_string(),
             })
             .unwrap();
         index
@@ -406,6 +524,8 @@ mod tests {
                 content: "Python programming language notes".to_string(),
                 path: "python.md".to_string(),
                 tags: vec!["python".to_string()],
+                chunk_id: "chunk-python".to_string(),
+                note_path: "python.md".to_string(),
             })
             .unwrap();
         index.commit().unwrap();
