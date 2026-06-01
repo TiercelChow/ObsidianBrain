@@ -6,10 +6,12 @@
 //! - `code_repo_handlers` — add_code_repo, list_code_repos, get_repo_detail, link_note_to_repo, get_linked_notes, open_in_vscode
 //! - `timeline_handlers` — get_timeline
 //! - `inspiration_handlers` — get_inspiration
+//! - `radar_handlers` — get_radar, add_to_vault, dismiss_radar_item
 
 pub mod code_repo_handlers;
 pub mod inspiration_handlers;
 pub mod memory_handlers;
+pub mod radar_handlers;
 pub mod search_handlers;
 pub mod timeline_handlers;
 
@@ -18,6 +20,7 @@ use std::sync::Arc;
 use crate::tools::handlers::code_repo_handlers::*;
 use crate::tools::handlers::inspiration_handlers::*;
 use crate::tools::handlers::memory_handlers::GetMemoryStatsHandler;
+use crate::tools::handlers::radar_handlers::*;
 use crate::tools::handlers::search_handlers::*;
 use crate::tools::handlers::timeline_handlers::*;
 use crate::tools::registry::ToolRegistry;
@@ -49,4 +52,9 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
 
     // Inspiration module
     registry.register(Arc::new(GetInspirationHandler)).await;
+
+    // Radar module
+    registry.register(Arc::new(GetRadarHandler)).await;
+    registry.register(Arc::new(AddToVaultHandler)).await;
+    registry.register(Arc::new(DismissRadarItemHandler)).await;
 }

@@ -1,0 +1,32 @@
+# 智识雷达源配置
+
+[[sources]]
+name = "hackernews"
+type = "hackernews"
+enabled = true
+description = "HackerNews 高分技术文章"
+max_items = 20
+trust_weight = 0.9
+min_score = 50
+
+[[sources]]
+name = "tech-rss"
+type = "rss"
+enabled = true
+description = "技术博客 RSS 聚合"
+max_items = 25
+trust_weight = 0.8
+feeds = [
+    "https://blog.rust-lang.org/feed.xml",
+]
+
+[[sources]]
+name = "ai-news"
+type = "rss"
+enabled = false
+description = "AI 领域新闻"
+max_items = 20
+trust_weight = 0.85
+feeds = [
+    "https://huggingface.co/blog/feed.xml",
+]

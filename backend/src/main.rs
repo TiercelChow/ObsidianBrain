@@ -17,6 +17,7 @@ use crate::core::code_repo::manager::{RepoManager, RepoManagerConfig};
 use crate::core::code_repo::note_linker::NoteLinker;
 use crate::core::inspiration::InspirationService;
 use crate::core::memory_service::MemoryService;
+use crate::core::radar::RadarService;
 use crate::core::timeline::store::TimelineStore;
 use crate::core::timeline::{TimelineConfig, TimelineService};
 use crate::infra::obsidian_client::ObsidianClient;
@@ -34,6 +35,7 @@ pub struct AppContext {
     pub note_linker: Arc<NoteLinker>,
     pub timeline_service: Arc<TimelineService>,
     pub inspiration_service: Arc<InspirationService>,
+    pub radar_service: Arc<RadarService>,
     /// Server start time — used to compute uptime in health endpoint.
     pub start_time: chrono::DateTime<chrono::Utc>,
 }
@@ -165,6 +167,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     tracing::info!("InspirationService 初始化完成");
 
+    // 初始化雷达服务
+    let radar_config = crate::models::radar::RadarConfig {
+        sources_path: std::path::PathBuf::from("config/radar_sources.toml"),
+        ..Default::default()
+    };
+    let radar_service = match RadarService::new(db.clone(), obsidian.clone(), radar_config) {
+        Ok(service) => {
+            tracing::info!("RadarService 初始化完成");
+            Arc::new(service)
+        }
+        Err(e) => {
+            tracing::warn!("RadarService 初始化失败: {e}，雷达功能将不可用");
+            // 创建一个空的 RadarService 作为 fallback
+            let fallback_config = crate::models::radar::RadarConfig::default();
+            Arc::new(RadarService::new(db.clone(), obsidian, fallback_config)
+                .expect("Fallback RadarService creation failed"))
+        }
+    };
+
     // 6. Build AppContext and register tools
     let tool_registry = Arc::new(ToolRegistry::new());
 
@@ -177,6 +198,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         note_linker,
         timeline_service,
         inspiration_service,
+        radar_service,
         start_time,
     });
 
@@ -292,6 +314,14 @@ mod test_helpers {
                 crate::models::inspiration::InspirationConfig::default(),
             ));
 
+            let radar_config = crate::models::radar::RadarConfig {
+                sources_path: dir.path().join("radar_sources.toml"),
+                ..Default::default()
+            };
+            let radar_service = Arc::new(
+                RadarService::new(db.clone(), None, radar_config).expect("Test RadarService creation failed")
+            );
+
             let ctx = Arc::new(AppContext {
                 config: Arc::new(config),
                 components: Arc::new(std::sync::Mutex::new(ComponentStatus::default())),
@@ -301,6 +331,7 @@ mod test_helpers {
                 note_linker,
                 timeline_service,
                 inspiration_service,
+                radar_service,
                 start_time: chrono::Utc::now(),
             });
 

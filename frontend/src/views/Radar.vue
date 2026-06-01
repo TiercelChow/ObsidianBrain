@@ -1,75 +1,154 @@
 <template>
-  <div class="page">
+  <div class="radar-page">
     <header class="page-header">
-      <h1 class="page-title">智识雷达</h1>
-      <p class="page-subtitle">让外部信息来找你，基于个人知识图谱的个性化推荐</p>
+      <div>
+        <h1 class="page-title">智识雷达</h1>
+        <p class="page-subtitle">让外部信息来找你：基于个人知识图谱的个性化推荐</p>
+      </div>
+      <div class="header-actions">
+        <el-button @click="loadRadar" :loading="loading" size="small">
+          <el-icon><Refresh /></el-icon> 刷新
+        </el-button>
+      </div>
     </header>
 
-    <div class="features-grid">
+    <!-- 雷达文章列表 -->
+    <div class="radar-list" v-if="items.length > 0">
       <div
-        v-for="(feat, i) in features"
-        :key="feat.title"
-        class="feature-card"
-        :style="{ '--delay': `${i * 0.06}s` }"
+        v-for="item in items"
+        :key="item.id"
+        class="radar-card"
       >
-        <div class="feature-icon">
-          <el-icon :size="18"><component :is="feat.icon" /></el-icon>
+        <div class="radar-header">
+          <el-tag size="small" effect="plain">{{ item.source }}</el-tag>
+          <el-tag :type="statusType(item.status)" size="small" effect="plain">{{ statusLabel(item.status) }}</el-tag>
         </div>
-        <div class="feature-content">
-          <h3>{{ feat.title }}</h3>
-          <p>{{ feat.desc }}</p>
+        <h3 class="radar-title">
+          <a :href="item.url" target="_blank" rel="noopener">{{ item.title }}</a>
+        </h3>
+        <p class="radar-summary" v-if="item.summary">{{ item.summary }}</p>
+        <div class="radar-meta">
+          <span class="radar-date" v-if="item.published_at">{{ formatDate(item.published_at) }}</span>
+          <span class="radar-score" v-if="item.relevance_score">
+            相关度: {{ (item.relevance_score * 100).toFixed(0) }}%
+          </span>
+        </div>
+        <div class="radar-actions">
+          <el-button size="small" type="primary" @click="saveToVault(item.id)" :loading="item._saving">
+            <el-icon><Download /></el-icon> 保存到 Vault
+          </el-button>
+          <el-button size="small" @click="dismissItem(item.id)">忽略</el-button>
         </div>
       </div>
     </div>
 
-    <div class="empty-state">
-      <el-empty description="功能开发中..." :image-size="80" />
-    </div>
+    <el-empty v-else-if="!loading" description="暂无推荐文章" :image-size="80" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { Connection, TrendCharts, Download, Refresh } from '@element-plus/icons-vue'
+import { ref, onMounted } from 'vue'
+import { getRadar, addToVault, dismissRadarItem } from '@/api'
+import { Refresh, Download } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 
-const features = [
-  { icon: Connection, title: '多源聚合', desc: 'RSS、arXiv、HackerNews、Reddit 定时拉取更新' },
-  { icon: TrendCharts, title: '语义排序', desc: '与近期活跃笔记的向量相似度计算 + 多因子加权' },
-  { icon: Download, title: '一键纳藏', desc: '文章正文提取后生成 Obsidian 笔记，写入 Vault' },
-  { icon: Refresh, title: '状态管理', desc: 'New / Read / Saved / Dismissed 四态流转' },
-]
+interface RadarItem {
+  id: string
+  title: string
+  summary: string
+  source: string
+  url: string
+  relevance_score: number
+  published_at: string | null
+  status: string
+  _saving?: boolean
+}
+
+const items = ref<RadarItem[]>([])
+const loading = ref(false)
+
+async function loadRadar() {
+  loading.value = true
+  try {
+    const res = await getRadar(20) as unknown as { result: { items: RadarItem[] } }
+    items.value = (res.result?.items || []).map(item => ({ ...item, _saving: false }))
+  } catch (e) {
+    console.error('加载雷达失败:', e)
+    items.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+async function saveToVault(articleId: string) {
+  const item = items.value.find(i => i.id === articleId)
+  if (!item) return
+  item._saving = true
+  try {
+    await addToVault(articleId)
+    ElMessage.success(`已保存: ${item.title}`)
+    item.status = 'saved'
+  } catch (e) {
+    ElMessage.error('保存失败')
+  } finally {
+    item._saving = false
+  }
+}
+
+async function dismissItem(articleId: string) {
+  try {
+    await dismissRadarItem(articleId)
+    items.value = items.value.filter(i => i.id !== articleId)
+    ElMessage.success('已忽略')
+  } catch {
+    ElMessage.error('操作失败')
+  }
+}
+
+function statusType(status: string): string {
+  const map: Record<string, string> = { new: 'info', read: '', saved: 'success', dismissed: 'warning' }
+  return map[status] || 'info'
+}
+
+function statusLabel(status: string): string {
+  const map: Record<string, string> = { new: '新', read: '已读', saved: '已保存', dismissed: '已忽略' }
+  return map[status] || status
+}
+
+function formatDate(dateStr: string): string {
+  try {
+    return new Date(dateStr).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+  } catch { return dateStr }
+}
+
+onMounted(() => { loadRadar() })
 </script>
 
 <style scoped>
-.page-header { margin-bottom: 32px; }
+.radar-page { max-width: 100%; }
+.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
 .page-title { font-size: 22px; font-weight: 600; color: #18181b; letter-spacing: -0.3px; }
 .page-subtitle { margin-top: 4px; color: #a1a1aa; font-size: 14px; }
+.header-actions { display: flex; gap: 8px; }
 
-.features-grid {
-  display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 40px;
-}
-.feature-card {
-  display: flex; gap: 14px; padding: 18px 20px;
-  background: #fff; border: 1px solid #f0f0f0; border-radius: 16px;
-  animation: fade-in 0.4s ease both; animation-delay: var(--delay, 0s);
+.radar-list { display: flex; flex-direction: column; gap: 12px; }
+.radar-card {
+  padding: 20px; background: #fff; border: 1px solid #f0f0f0; border-radius: 16px;
   transition: box-shadow 0.2s ease;
 }
-.feature-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+.radar-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
 
-.feature-icon {
-  width: 38px; height: 38px; border-radius: 12px; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  background: #ecfeff; color: #06b6d4;
-}
-.feature-content h3 { font-size: 14px; font-weight: 600; color: #18181b; margin-bottom: 4px; }
-.feature-content p { font-size: 13px; color: #71717a; line-height: 1.5; }
+.radar-header { display: flex; gap: 8px; margin-bottom: 8px; }
+.radar-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+.radar-title a { color: #18181b; text-decoration: none; }
+.radar-title a:hover { color: #6366f1; }
 
-.empty-state {
-  padding: 48px; background: #fff; border: 1px solid #f0f0f0; border-radius: 16px;
-  animation: fade-in 0.4s ease both; animation-delay: 0.3s;
+.radar-summary { font-size: 13px; color: #52525b; line-height: 1.6; margin-bottom: 10px; }
+
+.radar-meta {
+  display: flex; gap: 16px; align-items: center;
+  font-size: 12px; color: #a1a1aa; margin-bottom: 12px;
 }
 
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+.radar-actions { display: flex; gap: 8px; }
 </style>

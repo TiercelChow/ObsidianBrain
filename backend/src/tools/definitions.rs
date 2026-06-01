@@ -212,3 +212,47 @@ pub fn get_inspiration_schema() -> Value {
         "additionalProperties": false
     })
 }
+
+// ── Radar Tools ──
+
+/// Schema for `get_radar` — get recommended articles.
+pub fn get_radar_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "default": 10,
+                "minimum": 1,
+                "maximum": 50,
+                "description": "返回结果数量"
+            }
+        },
+        "additionalProperties": false
+    })
+}
+
+/// Schema for `add_to_vault` — save article to vault.
+pub fn add_to_vault_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "article_id": { "type": "string", "description": "雷达条目 ID" },
+            "target_dir": { "type": "string", "description": "目标目录（默认 radar/）" }
+        },
+        "required": ["article_id"],
+        "additionalProperties": false
+    })
+}
+
+/// Schema for `dismiss_radar_item` — dismiss a radar item.
+pub fn dismiss_radar_item_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "article_id": { "type": "string", "description": "雷达条目 ID" }
+        },
+        "required": ["article_id"],
+        "additionalProperties": false
+    })
+}

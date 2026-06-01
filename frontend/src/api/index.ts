@@ -100,3 +100,19 @@ export function getInspiration(type?: string, notePath?: string) {
     ...(notePath ? { note_path: notePath } : {})
   })
 }
+
+// ── Radar ──
+export function getRadar(limit?: number) {
+  return callTool('get_radar', { ...(limit ? { limit } : {}) })
+}
+
+export function addToVault(articleId: string, targetDir?: string) {
+  return callTool('add_to_vault', {
+    article_id: articleId,
+    ...(targetDir ? { target_dir: targetDir } : {})
+  })
+}
+
+export function dismissRadarItem(articleId: string) {
+  return callTool('dismiss_radar_item', { article_id: articleId })
+}
