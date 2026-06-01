@@ -92,3 +92,11 @@ export function openInVscode(name: string) {
 export function getTimeline(startDate: string, endDate: string) {
   return callTool('get_timeline', { start_date: startDate, end_date: endDate })
 }
+
+// ── Inspiration ──
+export function getInspiration(type?: string, notePath?: string) {
+  return callTool('get_inspiration', {
+    ...(type ? { type } : {}),
+    ...(notePath ? { note_path: notePath } : {})
+  })
+}
