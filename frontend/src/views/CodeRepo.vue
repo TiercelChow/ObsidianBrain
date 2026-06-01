@@ -46,16 +46,25 @@
     </el-empty>
 
     <!-- 仓库详情对话框 -->
-    <el-dialog v-model="showDetailDialog" title="仓库详情" width="600px" v-if="selectedRepo">
+    <el-dialog v-model="showDetailDialog" title="仓库详情" width="720px" v-if="selectedRepo">
       <el-descriptions :column="2" border>
-        <el-descriptions-item label="名称">{{ selectedRepo.name }}</el-descriptions-item>
-        <el-descriptions-item label="分支">{{ selectedRepo.current_branch }}</el-descriptions-item>
-        <el-descriptions-item label="HEAD">{{ selectedRepo.head_hash?.substring(0, 7) }}</el-descriptions-item>
-        <el-descriptions-item label="总提交数">{{ selectedRepo.total_commits }}</el-descriptions-item>
+        <el-descriptions-item label="名称" :min-width="120">{{ selectedRepo.name }}</el-descriptions-item>
+        <el-descriptions-item label="分支" :min-width="120">{{ selectedRepo.current_branch }}</el-descriptions-item>
+        <el-descriptions-item label="HEAD" :min-width="120">{{ selectedRepo.head_hash?.substring(0, 7) || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="总提交数" :min-width="120">{{ selectedRepo.total_commits || 0 }}</el-descriptions-item>
         <el-descriptions-item label="贡献者" :span="2">
           {{ selectedRepo.contributors?.join(', ') || '无' }}
         </el-descriptions-item>
-        <el-descriptions-item label="路径" :span="2">{{ selectedRepo.path }}</el-descriptions-item>
+        <el-descriptions-item label="路径" :span="2">
+          <span class="detail-path">{{ selectedRepo.path }}</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="语言统计" :span="2" v-if="selectedRepo.languages && Object.keys(selectedRepo.languages).length > 0">
+          <div class="language-tags">
+            <el-tag v-for="(ratio, lang) in selectedRepo.languages" :key="lang" size="small" effect="plain">
+              {{ lang }} {{ (ratio * 100).toFixed(0) }}%
+            </el-tag>
+          </div>
+        </el-descriptions-item>
       </el-descriptions>
 
       <div class="commits-section">
@@ -103,6 +112,7 @@ interface RepoInfo {
   current_branch: string
   is_dirty: boolean
   languages: Record<string, number>
+  language_stats?: Record<string, number>
   linked_notes_count: number
 }
 
@@ -207,6 +217,50 @@ onMounted(() => { loadRepos() })
 .commit-author { color: #a1a1aa; font-size: 12px; }
 .no-commits { padding: 20px; text-align: center; }
 .detail-path { font-family: monospace; font-size: 12px; color: #6366f1; word-break: break-all; }
+.language-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* 弹窗表格样式 - 解决圆角缺口问题 */
+.detail-descriptions {
+  width: 100%;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+}
+
+.detail-descriptions .el-descriptions__table {
+  width: 100%;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+}
+
+.detail-descriptions .el-descriptions__cell {
+  padding: 12px 16px !important;
+  border: 1px solid #ebeef5 !important;
+}
+
+.detail-descriptions .el-descriptions__label {
+  min-width: 100px;
+  font-weight: 500;
+  background-color: #f5f7fa !important;
+}
+
+.detail-descriptions .el-descriptions__content {
+  min-width: 150px;
+  background-color: #fff !important;
+}
+
+/* 修复四角圆角 */
+.detail-descriptions .el-descriptions__body .el-descriptions__table .el-descriptions__cell:first-child {
+  border-top-left-radius: 12px !important;
+}
+.detail-descriptions .el-descriptions__body .el-descriptions__table .el-descriptions__cell:last-child {
+  border-top-right-radius: 12px !important;
+}
+.detail-descriptions .el-descriptions__body .el-descriptions__table tr:last-child .el-descriptions__cell:first-child {
+  border-bottom-left-radius: 12px !important;
+}
+.detail-descriptions .el-descriptions__body .el-descriptions__table tr:last-child .el-descriptions__cell:last-child {
+  border-bottom-right-radius: 12px !important;
+}
 </style>
 
 <style>
