@@ -152,6 +152,50 @@ pub struct InspirationRow {
     pub created_at: String,
 }
 
+/// 灵感结果（返回给前端）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum InspirationResult {
+    #[serde(rename = "concept_combo")]
+    ConceptCombo {
+        concept_a: ConceptRef,
+        concept_b: ConceptRef,
+        inspiration: String,
+        suggestions: Vec<String>,
+        experiment_idea: Option<String>,
+        generated_at: DateTime<Utc>,
+    },
+    #[serde(rename = "reverse_question")]
+    ReverseQuestion {
+        note: NoteRef,
+        questions: Vec<QuestionItem>,
+        generated_at: DateTime<Utc>,
+    },
+    #[serde(rename = "counterpoint")]
+    Counterpoint {
+        note: NoteRef,
+        counterpoints: Vec<CounterpointItem>,
+        overall_assessment: String,
+        related_notes: Vec<String>,
+        generated_at: DateTime<Utc>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConceptRef {
+    pub term: String,
+    pub source: String,
+    pub source_path: Option<String>,
+    pub obsidian_uri: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NoteRef {
+    pub path: String,
+    pub title: String,
+    pub obsidian_uri: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

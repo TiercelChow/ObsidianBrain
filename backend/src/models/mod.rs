@@ -7,7 +7,7 @@ pub mod radar;
 pub mod repo;
 pub mod timeline;
 
-pub use inspiration::{InspirationRecord, InspirationType};
+pub use inspiration::{ConceptRef, InspirationRecord, InspirationResult, InspirationType, NoteRef, QuestionItem, CounterpointItem};
 pub use memory::MemoryStats;
 pub use note::{CodeBlock, NoteSummary, ParsedDocument, Section};
 pub use radar::{RadarItem, RadarItemView, RadarStatus};
