@@ -190,3 +190,25 @@ pub fn get_timeline_schema() -> Value {
         "additionalProperties": false
     })
 }
+
+// ── Inspiration Tools ──
+
+/// Schema for `get_inspiration` — generate creative inspiration.
+pub fn get_inspiration_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "type": {
+                "type": "string",
+                "description": "灵感模式",
+                "enum": ["concept_combo", "reverse_question", "counterpoint"],
+                "default": "concept_combo"
+            },
+            "note_path": {
+                "type": "string",
+                "description": "目标笔记路径（vault 内相对路径）"
+            }
+        },
+        "additionalProperties": false
+    })
+}

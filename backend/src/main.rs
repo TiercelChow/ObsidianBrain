@@ -15,6 +15,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use crate::config::AppConfig;
 use crate::core::code_repo::manager::{RepoManager, RepoManagerConfig};
 use crate::core::code_repo::note_linker::NoteLinker;
+use crate::core::inspiration::InspirationService;
 use crate::core::memory_service::MemoryService;
 use crate::core::timeline::store::TimelineStore;
 use crate::core::timeline::{TimelineConfig, TimelineService};
@@ -32,6 +33,7 @@ pub struct AppContext {
     pub repo_manager: Arc<RepoManager>,
     pub note_linker: Arc<NoteLinker>,
     pub timeline_service: Arc<TimelineService>,
+    pub inspiration_service: Arc<InspirationService>,
     /// Server start time — used to compute uptime in health endpoint.
     pub start_time: chrono::DateTime<chrono::Utc>,
 }
@@ -126,7 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 5. Create core services
     let memory_service = Arc::new(MemoryService::new(
-        obsidian,
+        obsidian.clone(),
         config.vault.path.clone(),
         config.vault.name.clone(),
     ));
@@ -141,6 +143,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     tracing::info!("CodeRepo & Timeline 服务初始化完成");
 
+    // 初始化 LLM 客户端（用于灵感服务）
+    let llm: Arc<dyn crate::infra::llm_client::LlmProvider> =
+        crate::infra::llm_client::LlmClientFactory::create(&config.llm)
+            .map(|boxed| Arc::from(boxed))
+            .unwrap_or_else(|e| {
+                tracing::warn!("LLM 客户端创建失败: {e}，灵感功能将受限");
+                let fallback_config = crate::config::LlmConfig {
+                    provider: "ollama".to_string(),
+                    ..Default::default()
+                };
+                Arc::from(crate::infra::llm_client::LlmClientFactory::create(&fallback_config)
+                    .expect("Fallback LLM client creation failed"))
+            });
+
+    let inspiration_service = Arc::new(InspirationService::new(
+        db.clone(),
+        obsidian.clone(),
+        llm,
+        crate::models::inspiration::InspirationConfig::default(),
+    ));
+    tracing::info!("InspirationService 初始化完成");
+
     // 6. Build AppContext and register tools
     let tool_registry = Arc::new(ToolRegistry::new());
 
@@ -152,6 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         repo_manager,
         note_linker,
         timeline_service,
+        inspiration_service,
         start_time,
     });
 
@@ -255,6 +280,18 @@ mod test_helpers {
                 TimelineConfig::default(),
             ));
 
+            // 创建测试用 LLM 和灵感服务
+            let llm_config = crate::config::LlmConfig::default();
+            let llm: Arc<dyn crate::infra::llm_client::LlmProvider> =
+                Arc::from(crate::infra::llm_client::LlmClientFactory::create(&llm_config)
+                    .expect("Test LLM client creation failed"));
+            let inspiration_service = Arc::new(InspirationService::new(
+                db.clone(),
+                None, // 测试时不使用 Obsidian
+                llm,
+                crate::models::inspiration::InspirationConfig::default(),
+            ));
+
             let ctx = Arc::new(AppContext {
                 config: Arc::new(config),
                 components: Arc::new(std::sync::Mutex::new(ComponentStatus::default())),
@@ -263,6 +300,7 @@ mod test_helpers {
                 repo_manager,
                 note_linker,
                 timeline_service,
+                inspiration_service,
                 start_time: chrono::Utc::now(),
             });
 
