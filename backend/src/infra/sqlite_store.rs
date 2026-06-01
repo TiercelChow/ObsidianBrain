@@ -186,6 +186,178 @@ impl SqliteStore {
         conn.query_row("SELECT 1", [], |_| Ok(true))
             .unwrap_or(false)
     }
+
+    // ── Code Repos ──
+
+    pub fn insert_code_repo(&self, name: &str, path: &str, metadata: &str) -> Result<(), BrainError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO code_repos (name, path, metadata) VALUES (?1, ?2, ?3)",
+            params![name, path, metadata],
+        )
+        .map_err(|e| BrainError::Internal(format!("插入代码仓失败: {e}")))?;
+        Ok(())
+    }
+
+    pub fn get_code_repo_by_name(&self, name: &str) -> Result<Option<(String, String, String)>, BrainError> {
+        let conn = self.conn.lock().unwrap();
+        let result = conn.query_row(
+            "SELECT name, path, metadata FROM code_repos WHERE name = ?1",
+            params![name],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
+        );
+        match result {
+            Ok(val) => Ok(Some(val)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(BrainError::Internal(format!("查询代码仓失败: {e}"))),
+        }
+    }
+
+    pub fn list_code_repos(&self) -> Result<Vec<(String, String, String)>, BrainError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT name, path, metadata FROM code_repos")
+            .map_err(|e| BrainError::Internal(format!("准备查询失败: {e}")))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| BrainError::Internal(format!("查询代码仓失败: {e}")))?;
+        let mut repos = Vec::new();
+        for row in rows {
+            repos.push(row.map_err(|e| BrainError::Internal(format!("读取行失败: {e}")))?);
+        }
+        Ok(repos)
+    }
+
+    pub fn delete_code_repo(&self, name: &str) -> Result<bool, BrainError> {
+        let conn = self.conn.lock().unwrap();
+        let rows_changed = conn
+            .execute("DELETE FROM code_repos WHERE name = ?1", params![name])
+            .map_err(|e| BrainError::Internal(format!("删除代码仓失败: {e}")))?;
+        Ok(rows_changed > 0)
+    }
+
+    pub fn update_repo_metadata(&self, name: &str, metadata: &str) -> Result<(), BrainError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE code_repos SET metadata = ?1 WHERE name = ?2",
+            params![metadata, name],
+        )
+        .map_err(|e| BrainError::Internal(format!("更新代码仓元数据失败: {e}")))?;
+        Ok(())
+    }
+
+    // ── Note-Repo Links ──
+
+    pub fn insert_note_repo_link(&self, note_path: &str, repo_name: &str) -> Result<(), BrainError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO note_repo_links (note_path, repo_name) VALUES (?1, ?2)",
+            params![note_path, repo_name],
+        )
+        .map_err(|e| BrainError::Internal(format!("插入笔记-仓库关联失败: {e}")))?;
+        Ok(())
+    }
+
+    pub fn get_linked_notes(&self, repo_name: &str) -> Result<Vec<String>, BrainError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT note_path FROM note_repo_links WHERE repo_name = ?1")
+            .map_err(|e| BrainError::Internal(format!("准备查询失败: {e}")))?;
+        let rows = stmt
+            .query_map(params![repo_name], |row| row.get::<_, String>(0))
+            .map_err(|e| BrainError::Internal(format!("查询关联笔记失败: {e}")))?;
+        let mut notes = Vec::new();
+        for row in rows {
+            notes.push(row.map_err(|e| BrainError::Internal(format!("读取行失败: {e}")))?);
+        }
+        Ok(notes)
+    }
+
+    pub fn count_note_links(&self, repo_name: &str) -> Result<usize, BrainError> {
+        let conn = self.conn.lock().unwrap();
+        let count: usize = conn
+            .query_row(
+                "SELECT COUNT(*) FROM note_repo_links WHERE repo_name = ?1",
+                params![repo_name],
+                |row| row.get(0),
+            )
+            .map_err(|e| BrainError::Internal(format!("统计关联笔记失败: {e}")))?;
+        Ok(count)
+    }
+
+    // ── Timeline Events ──
+
+    pub fn insert_timeline_event(
+        &self,
+        id: &str,
+        date: &str,
+        event_type: &str,
+        title: &str,
+        summary: &str,
+        tags: &str,
+        related_paths: &str,
+        source: &str,
+    ) -> Result<(), BrainError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO timeline_events (id, date, event_type, title, summary, tags, related_paths, source_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![id, date, event_type, title, summary, tags, related_paths, source],
+        )
+        .map_err(|e| BrainError::Internal(format!("插入时间线事件失败: {e}")))?;
+        Ok(())
+    }
+
+    pub fn get_timeline_events(
+        &self,
+        start_date: &str,
+        end_date: &str,
+    ) -> Result<Vec<(String, String, String, String, String, String, String, String)>, BrainError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, date, event_type, title, summary, tags, related_paths, source_path
+                 FROM timeline_events
+                 WHERE date >= ?1 AND date <= ?2
+                 ORDER BY date",
+            )
+            .map_err(|e| BrainError::Internal(format!("准备查询失败: {e}")))?;
+        let rows = stmt
+            .query_map(params![start_date, end_date], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                ))
+            })
+            .map_err(|e| BrainError::Internal(format!("查询时间线事件失败: {e}")))?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row.map_err(|e| BrainError::Internal(format!("读取行失败: {e}")))?);
+        }
+        Ok(events)
+    }
+
+    pub fn delete_timeline_events_before(&self, before_date: &str) -> Result<usize, BrainError> {
+        let conn = self.conn.lock().unwrap();
+        let rows_deleted = conn
+            .execute(
+                "DELETE FROM timeline_events WHERE date < ?1",
+                params![before_date],
+            )
+            .map_err(|e| BrainError::Internal(format!("删除时间线事件失败: {e}")))?;
+        Ok(rows_deleted)
+    }
 }
 
 #[cfg(test)]
