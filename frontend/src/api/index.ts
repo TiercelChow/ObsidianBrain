@@ -62,3 +62,33 @@ export function forgetMemory(memoryId: string) {
 export function getMemoryStats() {
   return callTool('get_memory_stats')
 }
+
+// ── Code Repo ──
+export function addCodeRepo(path: string, name: string) {
+  return callTool('add_code_repo', { path, name })
+}
+
+export function listCodeRepos() {
+  return callTool('list_code_repos')
+}
+
+export function getRepoDetail(name: string) {
+  return callTool('get_repo_detail', { name })
+}
+
+export function linkNoteToRepo(notePath: string, repoName: string) {
+  return callTool('link_note_to_repo', { note_path: notePath, repo_name: repoName })
+}
+
+export function getLinkedNotes(repoName: string) {
+  return callTool('get_linked_notes', { repo_name: repoName })
+}
+
+export function openInVscode(name: string) {
+  return callTool('open_in_vscode', { name })
+}
+
+// ── Timeline ──
+export function getTimeline(startDate: string, endDate: string) {
+  return callTool('get_timeline', { start_date: startDate, end_date: endDate })
+}

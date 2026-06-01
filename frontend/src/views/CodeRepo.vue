@@ -1,75 +1,197 @@
 <template>
-  <div class="page">
+  <div class="code-repo-page">
     <header class="page-header">
-      <h1 class="page-title">代码仓管理</h1>
-      <p class="page-subtitle">注册本地 Git 仓库，元信息展示，笔记关联与自动文档化</p>
+      <div>
+        <h1 class="page-title">代码仓管理</h1>
+        <p class="page-subtitle">注册本地 Git 仓库，自动提取元信息，关联笔记</p>
+      </div>
+      <div class="header-actions">
+        <el-button @click="loadRepos" :loading="loading" size="small">
+          <el-icon><Refresh /></el-icon> 刷新
+        </el-button>
+        <el-button type="primary" size="small" @click="showAddDialog = true">
+          <el-icon><Plus /></el-icon> 注册仓库
+        </el-button>
+      </div>
     </header>
 
-    <div class="features-grid">
-      <div
-        v-for="(feat, i) in features"
-        :key="feat.title"
-        class="feature-card"
-        :style="{ '--delay': `${i * 0.06}s` }"
-      >
-        <div class="feature-icon">
-          <el-icon :size="18"><component :is="feat.icon" /></el-icon>
+    <!-- 仓库列表 -->
+    <div class="repo-grid" v-if="repos.length > 0">
+      <div v-for="repo in repos" :key="repo.name" class="repo-card">
+        <div class="repo-header">
+          <div class="repo-name">{{ repo.name }}</div>
+          <el-tag :type="repo.is_dirty ? 'warning' : 'success'" size="small">
+            {{ repo.is_dirty ? '有未提交' : '干净' }}
+          </el-tag>
         </div>
-        <div class="feature-content">
-          <h3>{{ feat.title }}</h3>
-          <p>{{ feat.desc }}</p>
+        <div class="repo-branch">
+          <el-icon><Connection /></el-icon>
+          {{ repo.current_branch }}
+        </div>
+        <div class="repo-path">{{ repo.path }}</div>
+        <div class="repo-meta" v-if="repo.languages && Object.keys(repo.languages).length > 0">
+          <span v-for="(ratio, lang) in repo.languages" :key="lang" class="lang-tag">
+            {{ lang }} {{ (ratio * 100).toFixed(0) }}%
+          </span>
+        </div>
+        <div class="repo-actions">
+          <el-button size="small" @click="viewDetail(repo.name)">详情</el-button>
+          <el-button size="small" @click="openVscode(repo.name)">VSCode</el-button>
         </div>
       </div>
     </div>
 
-    <div class="empty-state">
-      <el-empty description="功能开发中..." :image-size="80" />
-    </div>
+    <el-empty v-else-if="!loading" description="暂无注册的代码仓库">
+      <el-button type="primary" @click="showAddDialog = true">注册第一个仓库</el-button>
+    </el-empty>
+
+    <!-- 仓库详情对话框 -->
+    <el-dialog v-model="showDetailDialog" title="仓库详情" width="600px" v-if="selectedRepo">
+      <el-descriptions :column="2" border>
+        <el-descriptions-item label="名称">{{ selectedRepo.name }}</el-descriptions-item>
+        <el-descriptions-item label="分支">{{ selectedRepo.current_branch }}</el-descriptions-item>
+        <el-descriptions-item label="HEAD">{{ selectedRepo.head_hash?.substring(0, 7) }}</el-descriptions-item>
+        <el-descriptions-item label="总提交数">{{ selectedRepo.total_commits }}</el-descriptions-item>
+        <el-descriptions-item label="贡献者" :span="2">
+          {{ selectedRepo.contributors?.join(', ') || '无' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="路径" :span="2">{{ selectedRepo.path }}</el-descriptions-item>
+      </el-descriptions>
+
+      <h4 style="margin-top: 16px;">最近提交</h4>
+      <div v-if="selectedRepo.recent_commits?.length" class="commit-list">
+        <div v-for="commit in selectedRepo.recent_commits.slice(0, 5)" :key="commit.hash" class="commit-item">
+          <span class="commit-hash">{{ commit.hash }}</span>
+          <span class="commit-msg">{{ commit.message }}</span>
+          <span class="commit-author">{{ commit.author }}</span>
+        </div>
+      </div>
+    </el-dialog>
+
+    <!-- 注册仓库对话框 -->
+    <el-dialog v-model="showAddDialog" title="注册代码仓库" width="400px">
+      <el-form :model="addForm" label-position="top">
+        <el-form-item label="仓库路径" required>
+          <el-input v-model="addForm.path" placeholder="/path/to/repo" />
+        </el-form-item>
+        <el-form-item label="仓库名称" required>
+          <el-input v-model="addForm.name" placeholder="my-project" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showAddDialog = false">取消</el-button>
+        <el-button type="primary" @click="registerRepo" :loading="adding">注册</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { FolderAdd, DataBoard, Connection, Document } from '@element-plus/icons-vue'
+import { ref, onMounted } from 'vue'
+import { addCodeRepo, listCodeRepos, getRepoDetail, openInVscode } from '@/api'
+import { Refresh, Plus, Connection } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 
-const features = [
-  { icon: FolderAdd, title: '仓库注册', desc: '验证 Git 仓库路径，提取元数据并持久化配置' },
-  { icon: DataBoard, title: '信息卡片', desc: '分支、最近提交、语言占比、工作区状态一览' },
-  { icon: Connection, title: '笔记关联', desc: '在笔记中插入仓库引用块，建立双向链接' },
-  { icon: Document, title: '自动文档化', desc: '调用 LLM 生成结构化项目文档笔记写入 Vault' },
-]
+interface RepoInfo {
+  name: string
+  path: string
+  current_branch: string
+  is_dirty: boolean
+  languages: Record<string, number>
+  linked_notes_count: number
+}
+
+interface RepoDetail extends RepoInfo {
+  head_hash: string
+  total_commits: number
+  contributors: string[]
+  branches: string[]
+  recent_commits: Array<{ hash: string; author: string; message: string; timestamp: string }>
+}
+
+const repos = ref<RepoInfo[]>([])
+const loading = ref(false)
+const showAddDialog = ref(false)
+const showDetailDialog = ref(false)
+const adding = ref(false)
+const selectedRepo = ref<RepoDetail | null>(null)
+const addForm = ref({ path: '', name: '' })
+
+async function loadRepos() {
+  loading.value = true
+  try {
+    const res = await listCodeRepos() as unknown as { result: { repos: RepoInfo[] } }
+    repos.value = res.result?.repos || []
+  } catch (e) {
+    console.error('加载仓库列表失败:', e)
+    repos.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+async function registerRepo() {
+  if (!addForm.value.path || !addForm.value.name) {
+    ElMessage.warning('请填写完整信息')
+    return
+  }
+  adding.value = true
+  try {
+    await addCodeRepo(addForm.value.path, addForm.value.name)
+    ElMessage.success('仓库注册成功')
+    showAddDialog.value = false
+    addForm.value = { path: '', name: '' }
+    await loadRepos()
+  } catch (e) {
+    ElMessage.error('注册失败: ' + (e as Error).message)
+  } finally {
+    adding.value = false
+  }
+}
+
+async function viewDetail(name: string) {
+  try {
+    const res = await getRepoDetail(name) as unknown as { result: RepoDetail }
+    selectedRepo.value = res.result
+    showDetailDialog.value = true
+  } catch {
+    ElMessage.error('获取详情失败')
+  }
+}
+
+async function openVscode(name: string) {
+  try {
+    await openInVscode(name)
+    ElMessage.success('VSCode 已打开')
+  } catch {
+    ElMessage.error('打开失败')
+  }
+}
+
+onMounted(() => { loadRepos() })
 </script>
 
 <style scoped>
-.page-header { margin-bottom: 32px; }
+.code-repo-page { max-width: 100%; }
+.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
 .page-title { font-size: 22px; font-weight: 600; color: #18181b; letter-spacing: -0.3px; }
 .page-subtitle { margin-top: 4px; color: #a1a1aa; font-size: 14px; }
+.header-actions { display: flex; gap: 8px; }
 
-.features-grid {
-  display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 40px;
-}
-.feature-card {
-  display: flex; gap: 14px; padding: 18px 20px;
-  background: #fff; border: 1px solid #f0f0f0; border-radius: 16px;
-  animation: fade-in 0.4s ease both; animation-delay: var(--delay, 0s);
-  transition: box-shadow 0.2s ease;
-}
-.feature-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+.repo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.repo-card { padding: 20px; background: #fff; border: 1px solid #f0f0f0; border-radius: 16px; transition: box-shadow 0.2s ease; }
+.repo-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
+.repo-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.repo-name { font-size: 16px; font-weight: 600; color: #18181b; }
+.repo-branch { display: flex; align-items: center; gap: 4px; font-size: 13px; color: #6366f1; margin-bottom: 4px; }
+.repo-path { font-size: 12px; color: #a1a1aa; font-family: monospace; margin-bottom: 12px; }
+.repo-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.lang-tag { font-size: 11px; padding: 2px 8px; border-radius: 8px; background: #f4f4f5; color: #52525b; }
+.repo-actions { display: flex; gap: 8px; }
 
-.feature-icon {
-  width: 38px; height: 38px; border-radius: 12px; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  background: #ecfdf5; color: #10b981;
-}
-.feature-content h3 { font-size: 14px; font-weight: 600; color: #18181b; margin-bottom: 4px; }
-.feature-content p { font-size: 13px; color: #71717a; line-height: 1.5; }
-
-.empty-state {
-  padding: 48px; background: #fff; border: 1px solid #f0f0f0; border-radius: 16px;
-  animation: fade-in 0.4s ease both; animation-delay: 0.3s;
-}
-
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+.commit-list { display: flex; flex-direction: column; gap: 8px; }
+.commit-item { display: flex; gap: 12px; align-items: center; padding: 8px; background: #fafafa; border-radius: 8px; font-size: 13px; }
+.commit-hash { font-family: monospace; color: #6366f1; min-width: 60px; }
+.commit-msg { flex: 1; color: #18181b; }
+.commit-author { color: #a1a1aa; font-size: 12px; }
 </style>
