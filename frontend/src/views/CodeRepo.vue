@@ -28,7 +28,7 @@
           <el-icon><Connection /></el-icon>
           {{ repo.current_branch }}
         </div>
-        <div class="repo-path">{{ repo.path }}</div>
+        <div class="repo-path" :title="repo.path">{{ repo.path }}</div>
         <div class="repo-meta" v-if="repo.languages && Object.keys(repo.languages).length > 0">
           <span v-for="(ratio, lang) in repo.languages" :key="lang" class="lang-tag">
             {{ lang }} {{ (ratio * 100).toFixed(0) }}%
@@ -58,12 +58,17 @@
         <el-descriptions-item label="路径" :span="2">{{ selectedRepo.path }}</el-descriptions-item>
       </el-descriptions>
 
-      <h4 style="margin-top: 16px;">最近提交</h4>
-      <div v-if="selectedRepo.recent_commits?.length" class="commit-list">
-        <div v-for="commit in selectedRepo.recent_commits.slice(0, 5)" :key="commit.hash" class="commit-item">
-          <span class="commit-hash">{{ commit.hash }}</span>
-          <span class="commit-msg">{{ commit.message }}</span>
-          <span class="commit-author">{{ commit.author }}</span>
+      <div class="commits-section">
+        <h4>最近提交</h4>
+        <div v-if="selectedRepo.recent_commits && selectedRepo.recent_commits.length > 0" class="commit-list">
+          <div v-for="commit in selectedRepo.recent_commits.slice(0, 5)" :key="commit.hash" class="commit-item">
+            <span class="commit-hash">{{ commit.hash?.substring(0, 7) || '-' }}</span>
+            <span class="commit-msg">{{ commit.message || '无提交消息' }}</span>
+            <span class="commit-author">{{ commit.author || '未知' }}</span>
+          </div>
+        </div>
+        <div v-else class="no-commits">
+          <el-empty description="暂无提交记录" :image-size="60" />
         </div>
       </div>
     </el-dialog>
@@ -184,14 +189,31 @@ onMounted(() => { loadRepos() })
 .repo-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .repo-name { font-size: 16px; font-weight: 600; color: #18181b; }
 .repo-branch { display: flex; align-items: center; gap: 4px; font-size: 13px; color: #6366f1; margin-bottom: 4px; }
-.repo-path { font-size: 12px; color: #a1a1aa; font-family: monospace; margin-bottom: 12px; }
+.repo-path {
+  font-size: 12px; color: #a1a1aa; font-family: monospace; margin-bottom: 12px;
+  word-break: break-all; overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; max-height: 2.4em;
+}
 .repo-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .lang-tag { font-size: 11px; padding: 2px 8px; border-radius: 8px; background: #f4f4f5; color: #52525b; }
 .repo-actions { display: flex; gap: 8px; }
 
+.commits-section { margin-top: 20px; }
+.commits-section h4 { font-size: 15px; font-weight: 600; color: #18181b; margin-bottom: 12px; }
 .commit-list { display: flex; flex-direction: column; gap: 8px; }
-.commit-item { display: flex; gap: 12px; align-items: center; padding: 8px; background: #fafafa; border-radius: 8px; font-size: 13px; }
-.commit-hash { font-family: monospace; color: #6366f1; min-width: 60px; }
+.commit-item { display: flex; gap: 12px; align-items: center; padding: 10px 12px; background: #fafafa; border-radius: 10px; font-size: 13px; }
+.commit-hash { font-family: monospace; color: #6366f1; min-width: 60px; font-weight: 500; }
 .commit-msg { flex: 1; color: #18181b; }
 .commit-author { color: #a1a1aa; font-size: 12px; }
+.no-commits { padding: 20px; text-align: center; }
+.detail-path { font-family: monospace; font-size: 12px; color: #6366f1; word-break: break-all; }
+</style>
+
+<style>
+/* 全局样式 - 圆角弹窗和表格 */
+.el-dialog { border-radius: 16px !important; overflow: hidden; }
+.el-dialog__header { border-radius: 16px 16px 0 0 !important; padding: 20px 24px 16px !important; }
+.el-dialog__body { padding: 16px 24px 24px !important; }
+.el-descriptions { border-radius: 12px !important; overflow: hidden; }
+.el-descriptions__table { border-radius: 12px !important; }
 </style>

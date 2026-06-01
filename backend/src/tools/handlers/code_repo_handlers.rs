@@ -100,6 +100,7 @@ impl ToolHandler for GetRepoDetailHandler {
             "linked_notes": detail.base.linked_notes,
             "vscode_uri": detail.vscode_uri,
             "working_dir_status": detail.working_dir_status,
+            "recent_commits": detail.base.recent_commits,
         }))
     }
 }
