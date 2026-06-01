@@ -13,8 +13,13 @@ use tokio::signal;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::AppConfig;
+use crate::core::code_repo::manager::{RepoManager, RepoManagerConfig};
+use crate::core::code_repo::note_linker::NoteLinker;
 use crate::core::memory_service::MemoryService;
+use crate::core::timeline::store::TimelineStore;
+use crate::core::timeline::{TimelineConfig, TimelineService};
 use crate::infra::obsidian_client::ObsidianClient;
+use crate::infra::sqlite_store::SqliteStore;
 use crate::tools::handlers::register_all_tools;
 use crate::tools::registry::ToolRegistry;
 
@@ -24,6 +29,9 @@ pub struct AppContext {
     pub components: Arc<std::sync::Mutex<ComponentStatus>>,
     pub tool_registry: Arc<ToolRegistry>,
     pub memory_service: Arc<MemoryService>,
+    pub repo_manager: Arc<RepoManager>,
+    pub note_linker: Arc<NoteLinker>,
+    pub timeline_service: Arc<TimelineService>,
     /// Server start time — used to compute uptime in health endpoint.
     pub start_time: chrono::DateTime<chrono::Utc>,
 }
@@ -33,6 +41,9 @@ pub struct AppContext {
 pub struct ComponentStatus {
     pub server: String,
     pub obsidian: String,
+    pub sqlite: String,
+    pub timeline: String,
+    pub code_repo: String,
 }
 
 #[tokio::main]
@@ -63,6 +74,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut components = ComponentStatus {
         server: "ok".to_string(),
         obsidian: "disabled".to_string(),
+        sqlite: "pending".to_string(),
+        timeline: "pending".to_string(),
+        code_repo: "pending".to_string(),
     };
 
     // Obsidian Local REST API (required)
@@ -95,7 +109,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    // 4. Create core services
+    // 4. Initialize SQLite
+    let db = match SqliteStore::new(&config.storage.db_path) {
+        Ok(store) => {
+            components.sqlite = "ok".to_string();
+            tracing::info!("SQLite 初始化成功: {:?}", config.storage.db_path);
+            Arc::new(store)
+        }
+        Err(e) => {
+            tracing::error!("SQLite 初始化失败: {e}");
+            components.sqlite = format!("error: {e}");
+            // SQLite is required, so fail fast
+            std::process::exit(1);
+        }
+    };
+
+    // 5. Create core services
     let memory_service = Arc::new(MemoryService::new(
         obsidian,
         config.vault.path.clone(),
@@ -103,7 +132,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     tracing::info!("MemoryService 初始化完成");
 
-    // 5. Build AppContext and register tools
+    let repo_manager = Arc::new(RepoManager::new(db.clone(), RepoManagerConfig::default()));
+    let note_linker = Arc::new(NoteLinker::new(db.clone()));
+    let timeline_store = Arc::new(TimelineStore::new(db.clone()));
+    let timeline_service = Arc::new(TimelineService::new(
+        timeline_store,
+        TimelineConfig::default(),
+    ));
+    tracing::info!("CodeRepo & Timeline 服务初始化完成");
+
+    // 6. Build AppContext and register tools
     let tool_registry = Arc::new(ToolRegistry::new());
 
     let ctx = Arc::new(AppContext {
@@ -111,6 +149,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         components: Arc::new(std::sync::Mutex::new(components)),
         tool_registry: tool_registry.clone(),
         memory_service,
+        repo_manager,
+        note_linker,
+        timeline_service,
         start_time,
     });
 
@@ -120,12 +161,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 6. Build router and serve
     let app = api::router::create_router(ctx);
 
-    let listener = TcpListener::bind(addr).await?;
+    let listener = match TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("绑定地址失败: {e}");
+            std::process::exit(1);
+        }
+    };
     tracing::info!("服务已启动: http://{}", addr);
 
-    axum::serve(listener, app)
+    if let Err(e) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
-        .await?;
+        .await
+    {
+        tracing::error!("服务运行失败: {e}");
+        std::process::exit(1);
+    }
 
     tracing::info!("ObsidianBrain 已关闭");
     Ok(())
@@ -193,11 +244,25 @@ mod test_helpers {
                 "TestVault".to_string(),
             ));
 
+            let db = Arc::new(
+                SqliteStore::new(&dir.path().join("test.db")).expect("SQLite creation"),
+            );
+            let repo_manager = Arc::new(RepoManager::new(db.clone(), RepoManagerConfig::default()));
+            let note_linker = Arc::new(NoteLinker::new(db.clone()));
+            let timeline_store = Arc::new(TimelineStore::new(db.clone()));
+            let timeline_service = Arc::new(TimelineService::new(
+                timeline_store,
+                TimelineConfig::default(),
+            ));
+
             let ctx = Arc::new(AppContext {
                 config: Arc::new(config),
                 components: Arc::new(std::sync::Mutex::new(ComponentStatus::default())),
                 tool_registry: Arc::new(ToolRegistry::new()),
                 memory_service,
+                repo_manager,
+                note_linker,
+                timeline_service,
                 start_time: chrono::Utc::now(),
             });
 

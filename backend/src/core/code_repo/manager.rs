@@ -2,8 +2,7 @@
 
 use chrono::Utc;
 use git2::Repository;
-use serde_json::json;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::core::code_repo::git_extractor::GitExtractor;
@@ -262,6 +261,7 @@ impl RepoManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn create_manager() -> (TempDir, RepoManager) {
