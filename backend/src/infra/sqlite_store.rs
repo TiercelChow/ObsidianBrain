@@ -42,6 +42,16 @@ const MIGRATIONS: &[Migration] = &[
         description: "app_state",
         sql: include_str!("../../migrations/005_app_state.sql"),
     },
+    Migration {
+        version: 6,
+        description: "inspiration_history (Phase 3)",
+        sql: include_str!("../../migrations/006_inspiration_history.sql"),
+    },
+    Migration {
+        version: 7,
+        description: "radar_items (Phase 3)",
+        sql: include_str!("../../migrations/007_radar_items.sql"),
+    },
 ];
 
 impl SqliteStore {
@@ -358,6 +368,105 @@ impl SqliteStore {
             .map_err(|e| BrainError::Internal(format!("删除时间线事件失败: {e}")))?;
         Ok(rows_deleted)
     }
+
+    // ── Inspiration History ──
+
+    pub fn insert_inspiration(&self, id: &str, insp_type: &str, input_refs: &str, output: &str) -> Result<(), BrainError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO inspiration_history (id, type, input_refs, output) VALUES (?1, ?2, ?3, ?4)",
+            params![id, insp_type, input_refs, output],
+        )
+        .map_err(|e| BrainError::Internal(format!("插入灵感记录失败: {e}")))?;
+        Ok(())
+    }
+
+    pub fn get_recent_inspirations(&self, insp_type: &str, limit: i64) -> Result<Vec<(String, String, String, String)>, BrainError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, type, input_refs, output FROM inspiration_history
+                 WHERE type = ?1 ORDER BY created_at DESC LIMIT ?2",
+            )
+            .map_err(|e| BrainError::Internal(format!("准备查询失败: {e}")))?;
+        let rows = stmt
+            .query_map(params![insp_type, limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .map_err(|e| BrainError::Internal(format!("查询灵感记录失败: {e}")))?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row.map_err(|e| BrainError::Internal(format!("读取行失败: {e}")))?);
+        }
+        Ok(results)
+    }
+
+    // ── Radar Items ──
+
+    pub fn insert_radar_item(&self, id: &str, title: &str, summary: &str, source_name: &str, url: &str) -> Result<(), BrainError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO radar_items (id, title, summary, source_name, url) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, title, summary, source_name, url],
+        )
+        .map_err(|e| BrainError::Internal(format!("插入雷达条目失败: {e}")))?;
+        Ok(())
+    }
+
+    pub fn get_radar_items(&self, status: &str, limit: i64) -> Result<Vec<(String, String, String, String, String, String)>, BrainError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, title, summary, source_name, url, status FROM radar_items
+                 WHERE status = ?1 ORDER BY fetched_at DESC LIMIT ?2",
+            )
+            .map_err(|e| BrainError::Internal(format!("准备查询失败: {e}")))?;
+        let rows = stmt
+            .query_map(params![status, limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })
+            .map_err(|e| BrainError::Internal(format!("查询雷达条目失败: {e}")))?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row.map_err(|e| BrainError::Internal(format!("读取行失败: {e}")))?);
+        }
+        Ok(results)
+    }
+
+    pub fn update_radar_status(&self, id: &str, status: &str) -> Result<bool, BrainError> {
+        let conn = self.conn.lock().unwrap();
+        let rows_changed = conn
+            .execute(
+                "UPDATE radar_items SET status = ?1 WHERE id = ?2",
+                params![status, id],
+            )
+            .map_err(|e| BrainError::Internal(format!("更新雷达状态失败: {e}")))?;
+        Ok(rows_changed > 0)
+    }
+
+    pub fn radar_url_exists(&self, url: &str) -> Result<bool, BrainError> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM radar_items WHERE url = ?1",
+                params![url],
+                |row| row.get(0),
+            )
+            .map_err(|e| BrainError::Internal(format!("查询雷达URL失败: {e}")))?;
+        Ok(count > 0)
+    }
 }
 
 #[cfg(test)]
@@ -375,7 +484,7 @@ mod tests {
         let count: u32 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(count, 5);
+        assert_eq!(count, 7);
     }
 
     #[test]
