@@ -26,15 +26,15 @@
 │  ▶ 基础设施层（本文档范围）◀                                  │
 │  ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌────────────────┐  │
 │  │ Config  │ │ SQLite   │ │ File     │ │ Obsidian       │  │
-│  │ Manager │ │ Store    │ │ Watcher  │ │ Client         │  │
-│  │         │ │          │ │ (可选)    │ │ (REST API)     │  │
+│  │ Manager │ │ Store    │ │ Watcher  │ │ Client (新增)  │  │
+│  │         │ │          │ │ (可选)   │ │                │  │
 │  └─────────┘ └──────────┘ └──────────┘ └────────────────┘  │
 │  ┌─────────┐                                                │
 │  │ LLM     │                                                │
 │  │ Client  │                                                │
 │  └─────────┘                                                │
 ├─────────────────────────────────────────────────────────────┤
-│  外部系统: 文件系统 │ SQLite │ Obsidian REST API │ OpenAI   │
+│  外部系统: 文件系统 │ SQLite │ Obsidian REST API │ OpenAI │ Ollama │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -55,8 +55,7 @@ AppConfig ←──── 所有模块（配置注入）
     │
     ├──→ ObsidianClient（Obsidian REST API 客户端）
     │       ↑
-    │       ├── Memory Service（搜索、笔记读写）
-    │       └── Radar Service（标签查询、关联笔记）
+    │       └── Memory Service（搜索、笔记读写）
     │
     └──→ LlmClient（LLM 调用）
             ↑
@@ -75,7 +74,7 @@ AppConfig ←──── 所有模块（配置注入）
   - FileWatcher 事件循环（独立线程 + channel 通知，可选）
   - Radar 定时拉取（tokio-cron-scheduler）
 - **Channel 通信**：
-  - `tokio::sync::mpsc`：FileWatcher → Memory Service 变更事件（可选）
+  - `tokio::sync::mpsc`：FileWatcher → Memory Service 变更事件
   - `tokio::sync::broadcast`：全局事件总线
 
 ---
@@ -85,28 +84,28 @@ AppConfig ←──── 所有模块（配置注入）
 ### 2.1 文件结构
 
 ```
-src/
+backend/src/
 ├── main.rs                  # 入口：启动、优雅关闭        (~80 行)
-├── config.rs                # 配置管理                    (~200 行)
-├── error.rs                 # 统一错误类型                (~150 行)
+├── config.rs                # 配置管理                    (~250 行)
+├── error.rs                 # 统一错误类型                (~200 行)
 ├── infra/
-│   ├── mod.rs               # 模块导出                    (~20 行)
-│   ├── obsidian_client.rs   # Obsidian REST API 客户端   (~350 行)
+│   ├── mod.rs               # 模块导出                    (~30 行)
 │   ├── sqlite_store.rs      # SQLite 元数据存储           (~400 行)
-│   ├── llm_client.rs        # LLM 调用封装               (~400 行)
-│   └── file_watcher.rs      # 文件监控（可选）            (~300 行)
+│   ├── file_watcher.rs      # 文件监控（可选）            (~300 行)
+│   ├── obsidian_client.rs   # Obsidian REST API 封装     (~350 行)
+│   └── llm_client.rs        # LLM 调用封装               (~400 行)
 ```
 
 ### 2.2 各文件职责
 
 | 文件 | 职责 | 核心类型 |
 |------|------|----------|
-| `config.rs` | 配置加载、校验、环境覆盖 | `AppConfig`, `ServerConfig`, `VaultConfig`, `ObsidianConfig` |
+| `config.rs` | 配置加载、校验、环境覆盖 | `AppConfig`, `ServerConfig`, `VaultConfig` |
 | `error.rs` | 统一错误枚举、转换、降级 | `BrainError` |
-| `obsidian_client.rs` | Obsidian REST API 封装（搜索、文件读写） | `ObsidianClient` |
 | `sqlite_store.rs` | 连接管理、迁移、CRUD | `SqliteStore` |
+| `file_watcher.rs` | Vault 文件监控、防抖、事件分发 | `FileWatcher`, `FileChangeEvent` |
+| `obsidian_client.rs` | Obsidian Local REST API 封装 | `ObsidianClient` |
 | `llm_client.rs` | 多 Provider LLM 调用 | `LlmProvider`, `OpenAiProvider` |
-| `file_watcher.rs` | Vault 文件监控、防抖、事件分发（可选） | `FileWatcher`, `FileChangeEvent` |
 
 ---
 
@@ -178,14 +177,10 @@ fn default_exclude_patterns() -> Vec<String> {
 /// Obsidian REST API 配置
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ObsidianConfig {
-    #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default = "default_obsidian_url")]
     pub url: String,
     pub api_key: String,
 }
-
-fn default_obsidian_url() -> String { "https://127.0.0.1:27124".to_string() }
 
 /// LLM 配置
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -346,10 +341,10 @@ impl Validate for AppConfig {
             ));
         }
 
-        // 校验 Obsidian API Key
-        if self.obsidian.enabled && self.obsidian.api_key.is_empty() {
+        // 校验 Obsidian API 配置
+        if self.obsidian.enabled && self.obsidian.url.is_empty() {
             return Err(BrainError::ConfigError(
-                "Obsidian API Key 未配置".to_string()
+                "Obsidian API URL 不能为空".to_string()
             ));
         }
 
@@ -645,6 +640,8 @@ impl SqliteStore {
 
 ## 5. 文件监控 (file_watcher.rs)
 
+> **注意**：FileWatcher 当前标记为 `#[allow(dead_code)]`，在运行时未启用。搜索和笔记读写通过 Obsidian REST API 完成，无需本地文件监控。此模块保留以备未来需要实时文件变更感知的场景。
+
 ### 5.1 核心类型
 
 ```rust
@@ -855,66 +852,77 @@ use std::time::Duration;
 
 /// Obsidian Local REST API 客户端
 pub struct ObsidianClient {
-    client: Client,
+    client: reqwest::Client,
     base_url: String,
     api_key: String,
 }
 
 /// 搜索结果项
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct SearchResultItem {
-    pub path: String,
-    pub title: String,
-    pub snippet: String,
-    pub score: f32,
-    pub tags: Vec<String>,
+    pub filename: String,
+    pub score: f64,
+    #[serde(default)]
+    pub matches: Vec<SearchMatch>,
+}
+
+/// 搜索匹配片段
+#[derive(Debug, Clone, Deserialize)]
+pub struct SearchMatch {
+    pub context: String,
+    #[serde(rename = "match")]
+    pub matched_text: SearchMatchText,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SearchMatchText {
+    pub start: usize,
+    pub end: usize,
 }
 
 /// 文件信息
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct FileInfo {
     pub path: String,
     pub stat: FileStat,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct FileStat {
-    pub mtime: u64,
     pub ctime: u64,
+    pub mtime: u64,
     pub size: u64,
 }
 ```
 
-### 6.2 初始化与连接
+### 6.2 初始化
 
 ```rust
 impl ObsidianClient {
     pub fn new(config: &ObsidianConfig) -> Result<Self, BrainError> {
-        let client = Client::builder()
-            .danger_accept_invalid_certs(true) // Obsidian 使用自签名证书
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true) // 自签名证书
             .timeout(Duration::from_secs(30))
             .build()
             .map_err(|e| BrainError::Internal(format!("HTTP 客户端创建失败: {e}")))?;
 
-        Ok(ObsidianClient {
+        Ok(Self {
             client,
             base_url: config.url.clone(),
             api_key: config.api_key.clone(),
         })
     }
 
-    /// 健康检查：验证 Obsidian API 可达
+    /// 健康检查
     pub async fn health_check(&self) -> Result<bool, BrainError> {
         let resp = self.client
             .get(format!("{}/", self.base_url))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .send()
-            .await;
+            .await
+            .map_err(|e| BrainError::ObsidianApiError(format!("连接失败: {e}")))?;
 
-        match resp {
-            Ok(r) => Ok(r.status().is_success()),
-            Err(_) => Ok(false),
-        }
+        Ok(resp.status().is_success())
     }
 }
 ```
@@ -923,13 +931,9 @@ impl ObsidianClient {
 
 ```rust
 impl ObsidianClient {
-    /// 搜索笔记（使用 JsonLogic 查询）
-    pub async fn search(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<SearchResultItem>, BrainError> {
-        // Obsidian Search API 使用 JsonLogic 格式
+    /// 搜索笔记（JsonLogic 查询）
+    pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResultItem>, BrainError> {
+        // POST /search/ with JsonLogic
         let body = serde_json::json!({
             "in": [query, {"var": "content"}]
         });
@@ -945,99 +949,96 @@ impl ObsidianClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let err_body = response.text().await.unwrap_or_default();
             return Err(BrainError::ObsidianApiError(
-                format!("搜索 API 返回 {status}: {body}")
+                format!("搜索 API 错误 {status}: {err_body}")
             ));
         }
 
-        let mut results: Vec<SearchResultItem> = response.json().await
-            .map_err(|e| BrainError::ObsidianApiError(format!("响应解析失败: {e}")))?;
-
-        // 客户端截断到 limit
-        results.truncate(limit);
+        let results: Vec<SearchResultItem> = response.json().await
+            .map_err(|e| BrainError::ObsidianApiError(format!("搜索响应解析失败: {e}")))?;
 
         tracing::debug!(
-            query = query,
+            query = %query,
             result_count = results.len(),
             "Obsidian 搜索完成"
         );
 
-        Ok(results)
+        // 截取 top-K
+        let limited = if results.len() > limit {
+            results[..limit].to_vec()
+        } else {
+            results
+        };
+
+        Ok(limited)
     }
 }
 ```
 
-### 6.4 文件读写操作
+### 6.4 文件 CRUD
 
 ```rust
 impl ObsidianClient {
     /// 读取文件内容
     pub async fn read_file(&self, path: &str) -> Result<String, BrainError> {
         let response = self.client
-            .get(format!("{}/vault/{}", self.base_url, urlencoding::encode(path)))
+            .get(format!("{}/vault/{}", self.base_url, path))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .send()
             .await
             .map_err(|e| BrainError::ObsidianApiError(format!("读取文件失败: {e}")))?;
 
         if response.status().as_u16() == 404 {
-            return Err(BrainError::NoteNotFound(PathBuf::from(path)));
+            return Err(BrainError::NoteNotFound(
+                std::path::PathBuf::from(path)
+            ));
         }
 
         if !response.status().is_success() {
             let status = response.status();
-            return Err(BrainError::ObsidianApiError(format!("读取文件 API 返回 {status}")));
+            let err_body = response.text().await.unwrap_or_default();
+            return Err(BrainError::ObsidianApiError(
+                format!("读取文件错误 {status}: {err_body}")
+            ));
         }
 
         response.text().await
-            .map_err(|e| BrainError::ObsidianApiError(format!("读取响应失败: {e}")))
+            .map_err(|e| BrainError::ObsidianApiError(format!("响应读取失败: {e}")))
     }
 
-    /// 写入文件内容
+    /// 写入文件
     pub async fn write_file(&self, path: &str, content: &str) -> Result<(), BrainError> {
         let response = self.client
-            .put(format!("{}/vault/{}", self.base_url, urlencoding::encode(path)))
+            .put(format!("{}/vault/{}", self.base_url, path))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "text/markdown")
-            .header("Operation", "overwrite")
             .body(content.to_string())
             .send()
             .await
             .map_err(|e| BrainError::ObsidianApiError(format!("写入文件失败: {e}")))?;
 
-        if !response.status().is_success() {
+        if !response.status().is_success() && response.status().as_u16() != 204 {
             let status = response.status();
-            return Err(BrainError::ObsidianApiError(format!("写入文件 API 返回 {status}")));
+            let err_body = response.text().await.unwrap_or_default();
+            return Err(BrainError::ObsidianApiError(
+                format!("写入文件错误 {status}: {err_body}")
+            ));
         }
 
         Ok(())
     }
 
-    /// 追加内容到文件
-    pub async fn append_file(&self, path: &str, content: &str) -> Result<(), BrainError> {
+    /// 列出目录文件
+    pub async fn list_files(&self, dir: &str) -> Result<Vec<String>, BrainError> {
+        let url = if dir.is_empty() {
+            format!("{}/vault/", self.base_url)
+        } else {
+            format!("{}/vault/{}/", self.base_url, dir)
+        };
+
         let response = self.client
-            .put(format!("{}/vault/{}", self.base_url, urlencoding::encode(path)))
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "text/markdown")
-            .header("Operation", "append")
-            .body(content.to_string())
-            .send()
-            .await
-            .map_err(|e| BrainError::ObsidianApiError(format!("追加文件失败: {e}")))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            return Err(BrainError::ObsidianApiError(format!("追加文件 API 返回 {status}")));
-        }
-
-        Ok(())
-    }
-
-    /// 列出目录下的文件
-    pub async fn list_files(&self, dir: &str) -> Result<Vec<FileInfo>, BrainError> {
-        let response = self.client
-            .get(format!("{}/vault/{}", self.base_url, urlencoding::encode(dir)))
+            .get(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .send()
             .await
@@ -1045,96 +1046,76 @@ impl ObsidianClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            return Err(BrainError::ObsidianApiError(format!("列出文件 API 返回 {status}")));
+            let err_body = response.text().await.unwrap_or_default();
+            return Err(BrainError::ObsidianApiError(
+                format!("列出文件错误 {status}: {err_body}")
+            ));
         }
 
-        response.json().await
-            .map_err(|e| BrainError::ObsidianApiError(format!("响应解析失败: {e}")))
-    }
-
-    /// 删除文件
-    pub async fn delete_file(&self, path: &str) -> Result<(), BrainError> {
-        let response = self.client
-            .delete(format!("{}/vault/{}", self.base_url, urlencoding::encode(path)))
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .send()
-            .await
-            .map_err(|e| BrainError::ObsidianApiError(format!("删除文件失败: {e}")))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            return Err(BrainError::ObsidianApiError(format!("删除文件 API 返回 {status}")));
+        #[derive(Deserialize)]
+        struct FileListResponse {
+            files: Vec<String>,
+            folders: Vec<String>,
         }
 
-        Ok(())
+        let resp: FileListResponse = response.json().await
+            .map_err(|e| BrainError::ObsidianApiError(format!("响应解析失败: {e}")))?;
+
+        Ok(resp.files)
     }
 }
 ```
 
-### 6.5 周期性笔记与命令
+### 6.5 周期笔记与命令
 
 ```rust
 impl ObsidianClient {
-    /// 获取周期性笔记（daily/weekly/monthly）
-    pub async fn get_periodic_note(
-        &self,
-        period: &str, // "daily", "weekly", "monthly", "quarterly", "yearly"
-    ) -> Result<String, BrainError> {
+    /// 获取今日周期笔记
+    pub async fn get_periodic_note(&self) -> Result<Option<String>, BrainError> {
         let response = self.client
-            .get(format!("{}/periodic/{}/", self.base_url, period))
+            .get(format!("{}/periodic/daily/", self.base_url))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .send()
             .await
             .map_err(|e| BrainError::ObsidianApiError(format!("获取周期笔记失败: {e}")))?;
 
+        if response.status().as_u16() == 404 {
+            return Ok(None);
+        }
+
         if !response.status().is_success() {
+            let status = response.status();
+            let err_body = response.text().await.unwrap_or_default();
             return Err(BrainError::ObsidianApiError(
-                format!("周期笔记 API 返回 {}", response.status())
+                format!("获取周期笔记错误 {status}: {err_body}")
             ));
         }
 
-        response.text().await
-            .map_err(|e| BrainError::ObsidianApiError(format!("读取响应失败: {e}")))
-    }
-
-    /// 列出可用命令
-    pub async fn list_commands(&self) -> Result<Vec<String>, BrainError> {
-        let response = self.client
-            .get(format!("{}/commands/", self.base_url))
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .send()
-            .await
-            .map_err(|e| BrainError::ObsidianApiError(format!("列出命令失败: {e}")))?;
-
-        if !response.status().is_success() {
-            return Err(BrainError::ObsidianApiError(
-                format!("命令 API 返回 {}", response.status())
-            ));
+        #[derive(Deserialize)]
+        struct PeriodicNote {
+            content: String,
         }
 
-        let commands: serde_json::Value = response.json().await
+        let note: PeriodicNote = response.json().await
             .map_err(|e| BrainError::ObsidianApiError(format!("响应解析失败: {e}")))?;
 
-        Ok(commands["commands"]
-            .as_array()
-            .unwrap_or(&vec![])
-            .iter()
-            .filter_map(|c| c["id"].as_str().map(String::from))
-            .collect())
+        Ok(Some(note.content))
     }
 
     /// 执行 Obsidian 命令
     pub async fn execute_command(&self, command_id: &str) -> Result<(), BrainError> {
         let response = self.client
-            .post(format!("{}/commands/{}", self.base_url, urlencoding::encode(command_id)))
+            .post(format!("{}/commands/{}/", self.base_url, command_id))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .send()
             .await
             .map_err(|e| BrainError::ObsidianApiError(format!("执行命令失败: {e}")))?;
 
-        if !response.status().is_success() {
+        if !response.status().is_success() && response.status().as_u16() != 204 {
+            let status = response.status();
+            let err_body = response.text().await.unwrap_or_default();
             return Err(BrainError::ObsidianApiError(
-                format!("命令执行 API 返回 {}", response.status())
+                format!("执行命令错误 {status}: {err_body}")
             ));
         }
 
@@ -1219,7 +1200,6 @@ pub trait LlmProvider: Send + Sync {
 
     /// Token 估算
     fn estimate_tokens(&self, text: &str) -> u32 {
-        // 粗略估算：英文 ~4 chars/token，中文 ~2 chars/token
         let char_count = text.chars().count();
         let cjk_count = text.chars()
             .filter(|c| *c as u32 > 0x4E00 && *c as u32 < 0x9FFF)
@@ -1240,47 +1220,6 @@ pub struct OpenAiProvider {
     max_tokens: u32,
     temperature: f64,
     base_url: String,
-}
-
-#[derive(Serialize)]
-struct OpenAiChatRequest {
-    model: String,
-    messages: Vec<OpenAiMessage>,
-    max_tokens: u32,
-    temperature: f64,
-    stream: bool,
-}
-
-#[derive(Serialize)]
-struct OpenAiMessage {
-    role: String,
-    content: String,
-}
-
-#[derive(Deserialize)]
-struct OpenAiChatResponse {
-    choices: Vec<OpenAiChoice>,
-    usage: OpenAiUsage,
-    model: String,
-}
-
-#[derive(Deserialize)]
-struct OpenAiChoice {
-    message: OpenAiMessageResp,
-    finish_reason: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct OpenAiMessageResp {
-    role: String,
-    content: String,
-}
-
-#[derive(Deserialize)]
-struct OpenAiUsage {
-    prompt_tokens: u32,
-    completion_tokens: u32,
-    total_tokens: u32,
 }
 
 impl OpenAiProvider {
@@ -1312,138 +1251,16 @@ impl OpenAiProvider {
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
     async fn chat(&self, messages: &[ChatMessage]) -> Result<ChatResponse, BrainError> {
-        let request = OpenAiChatRequest {
-            model: self.model.clone(),
-            messages: messages.iter().map(|m| OpenAiMessage {
-                role: format!("{:?}", m.role).to_lowercase(),
-                content: m.content.clone(),
-            }).collect(),
-            max_tokens: self.max_tokens,
-            temperature: self.temperature,
-            stream: false,
-        };
-
-        let response = self.client
-            .post(format!("{}/chat/completions", self.base_url))
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| BrainError::LlmApiError {
-                provider: "openai".to_string(),
-                detail: format!("请求失败: {e}"),
-            })?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(BrainError::LlmApiError {
-                provider: "openai".to_string(),
-                detail: format!("API 错误 {status}: {body}"),
-            });
-        }
-
-        let resp: OpenAiChatResponse = response.json().await
-            .map_err(|e| BrainError::LlmApiError {
-                provider: "openai".to_string(),
-                detail: format!("响应解析失败: {e}"),
-            })?;
-
-        let choice = resp.choices.into_iter().next()
-            .ok_or_else(|| BrainError::LlmApiError {
-                provider: "openai".to_string(),
-                detail: "空响应".to_string(),
-            })?;
-
-        Ok(ChatResponse {
-            content: choice.message.content,
-            model: resp.model,
-            usage: TokenUsage {
-                prompt_tokens: resp.usage.prompt_tokens,
-                completion_tokens: resp.usage.completion_tokens,
-                total_tokens: resp.usage.total_tokens,
-            },
-        })
+        // 构造请求、发送、解析响应（省略完整代码，与原文一致）
+        todo!()
     }
 
     async fn chat_stream(
         &self,
         messages: &[ChatMessage],
     ) -> Result<mpsc::Receiver<StreamChunk>, BrainError> {
-        let (tx, rx) = mpsc::channel(64);
-
-        let request = OpenAiChatRequest {
-            model: self.model.clone(),
-            messages: messages.iter().map(|m| OpenAiMessage {
-                role: format!("{:?}", m.role).to_lowercase(),
-                content: m.content.clone(),
-            }).collect(),
-            max_tokens: self.max_tokens,
-            temperature: self.temperature,
-            stream: true,
-        };
-
-        let client = self.client.clone();
-        let api_key = self.api_key.clone();
-        let base_url = self.base_url.clone();
-
-        tokio::spawn(async move {
-            let resp = client
-                .post(format!("{}/chat/completions", base_url))
-                .header("Authorization", format!("Bearer {}", api_key))
-                .json(&request)
-                .send()
-                .await;
-
-            let resp = match resp {
-                Ok(r) => r,
-                Err(e) => {
-                    let _ = tx.send(StreamChunk {
-                        content: format!("错误: {e}"),
-                        is_final: true,
-                    }).await;
-                    return;
-                }
-            };
-
-            // SSE 流解析
-            let mut stream = resp.bytes_stream();
-            use futures::StreamExt;
-            let mut buffer = String::new();
-
-            while let Some(chunk) = stream.next().await {
-                if let Ok(bytes) = chunk {
-                    buffer.push_str(&String::from_utf8_lossy(&bytes));
-
-                    // 按行解析 SSE data
-                    while let Some(line_end) = buffer.find('\n') {
-                        let line = buffer[..line_end].trim().to_string();
-                        buffer = buffer[line_end + 1..].to_string();
-
-                        if let Some(data) = line.strip_prefix("data: ") {
-                            if data == "[DONE]" {
-                                let _ = tx.send(StreamChunk {
-                                    content: String::new(),
-                                    is_final: true,
-                                }).await;
-                                return;
-                            }
-
-                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                                if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
-                                    let _ = tx.send(StreamChunk {
-                                        content: content.to_string(),
-                                        is_final: false,
-                                    }).await;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        Ok(rx)
+        // SSE 流式解析（省略完整代码，与原文一致）
+        todo!()
     }
 }
 ```
@@ -1476,67 +1293,15 @@ impl OllamaProvider {
 #[async_trait]
 impl LlmProvider for OllamaProvider {
     async fn chat(&self, messages: &[ChatMessage]) -> Result<ChatResponse, BrainError> {
-        #[derive(Serialize)]
-        struct Req {
-            model: String,
-            messages: Vec<OpenAiMessage>,
-            stream: bool,
-        }
-
-        let request = Req {
-            model: self.model.clone(),
-            messages: messages.iter().map(|m| OpenAiMessage {
-                role: format!("{:?}", m.role).to_lowercase(),
-                content: m.content.clone(),
-            }).collect(),
-            stream: false,
-        };
-
-        let response = self.client
-            .post(format!("{}/api/chat", self.base_url))
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| BrainError::LlmApiError {
-                provider: "ollama".to_string(),
-                detail: format!("请求失败: {e}"),
-            })?;
-
-        #[derive(Deserialize)]
-        struct Resp {
-            message: OpenAiMessageResp,
-            model: String,
-        }
-
-        let resp: Resp = response.json().await
-            .map_err(|e| BrainError::LlmApiError {
-                provider: "ollama".to_string(),
-                detail: format!("响应解析失败: {e}"),
-            })?;
-
-        Ok(ChatResponse {
-            content: resp.message.content,
-            model: resp.model,
-            usage: TokenUsage {
-                prompt_tokens: 0,
-                completion_tokens: 0,
-                total_tokens: 0,
-            },
-        })
+        // Ollama /api/chat 端点（省略完整代码，与原文一致）
+        todo!()
     }
 
     async fn chat_stream(
         &self,
         messages: &[ChatMessage],
     ) -> Result<mpsc::Receiver<StreamChunk>, BrainError> {
-        let (tx, rx) = mpsc::channel(64);
-        // 简化实现：先获取完整响应再发送
-        let response = self.chat(messages).await?;
-        let _ = tx.send(StreamChunk {
-            content: response.content,
-            is_final: true,
-        }).await;
-        Ok(rx)
+        todo!()
     }
 }
 ```
@@ -1553,8 +1318,6 @@ impl LlmClientFactory {
                 Ok(Box::new(OpenAiProvider::new(config)?))
             }
             LlmProviderType::Anthropic => {
-                // Anthropic 实现类似 OpenAI，使用 /v1/messages 端点
-                // 此处省略，结构与 OpenAiProvider 相同
                 unimplemented!("Anthropic Provider 待实现")
             }
             LlmProviderType::Ollama => {
@@ -1578,49 +1341,38 @@ use std::fmt;
 #[derive(Debug)]
 pub enum BrainError {
     // ── 配置与启动 ──
-    /// 配置错误（路径无效、参数越界等）
     ConfigError(String),
 
     // ── Vault / 笔记 ──
-    /// Vault 路径不存在
     VaultNotFound(std::path::PathBuf),
-    /// 指定笔记不存在
     NoteNotFound(std::path::PathBuf),
-    /// Markdown / Frontmatter 解析错误
     ParseError {
         path: std::path::PathBuf,
         detail: String,
     },
 
     // ── Obsidian API ──
-    /// Obsidian REST API 调用错误
     ObsidianApiError(String),
 
     // ── 代码仓 ──
-    /// 代码仓库不存在
     RepoNotFound(std::path::PathBuf),
-    /// Git 操作错误
     GitError {
         path: std::path::PathBuf,
         detail: String,
     },
 
     // ── 外部服务 ──
-    /// LLM API 调用错误
     LlmApiError {
         provider: String,
         detail: String,
     },
-    /// 外部数据抓取错误
     FetchError {
         url: String,
         detail: String,
     },
 
     // ── 通用 ──
-    /// IO 错误
     IoError(std::io::Error),
-    /// 内部错误
     Internal(String),
 }
 
@@ -1653,9 +1405,7 @@ impl std::error::Error for BrainError {}
 
 ```rust
 impl From<std::io::Error> for BrainError {
-    fn from(e: std::io::Error) -> Self {
-        BrainError::IoError(e)
-    }
+    fn from(e: std::io::Error) -> Self { BrainError::IoError(e) }
 }
 
 impl From<rusqlite::Error> for BrainError {
@@ -1696,7 +1446,6 @@ impl From<git2::Error> for BrainError {
 
 ```rust
 impl BrainError {
-    /// 映射到工具协议错误码
     pub fn error_code(&self) -> &'static str {
         match self {
             BrainError::ConfigError(_) => "CONFIG_ERROR",
@@ -1713,7 +1462,6 @@ impl BrainError {
         }
     }
 
-    /// 是否可降级处理
     pub fn is_degradable(&self) -> bool {
         matches!(self,
             BrainError::ObsidianApiError(_)
@@ -1775,7 +1523,7 @@ Debouncer（300ms 防抖合并）
     ▼
 FileChangeEvent (via mpsc::channel)
     │
-    ├──→ Memory Service：更新索引
+    ├──→ Memory Service：通知变更
     ├──→ Timeline Service：记录事件
     └──→ CodeRepo Service：检查关联
 ```
@@ -1804,8 +1552,6 @@ Top-K 结果（含 Obsidian URI）
 | 连接池 | SQLite | WAL 模式 + busy_timeout 5s |
 | HTTP 连接复用 | reqwest | `pool_max_idle_per_host(5)` |
 | 防抖合并 | file_watcher | 300ms 窗口合并多次变更 |
-| API 超时控制 | ObsidianClient | 30 秒请求超时 |
-| 自签名证书 | ObsidianClient | `danger_accept_invalid_certs(true)` |
 
 ---
 
@@ -1821,7 +1567,6 @@ mod tests {
 
     #[test]
     fn test_config_load_defaults() {
-        // 创建临时配置文件
         let dir = TempDir::new().unwrap();
         let config_path = dir.path().join("test.toml");
         std::fs::write(&config_path, r#"
@@ -1837,7 +1582,7 @@ mod tests {
             [obsidian]
             enabled = true
             url = "https://127.0.0.1:27124"
-            api_key = "test_key"
+            api_key = "test-key"
 
             [llm]
             provider = "openai"
@@ -1854,12 +1599,13 @@ mod tests {
         let config = AppConfig::load(Some(config_path.to_str().unwrap())).unwrap();
         assert_eq!(config.server.port, 9999);
         assert_eq!(config.vault.name, "test");
+        assert!(config.obsidian.enabled);
     }
 
     #[test]
     fn test_config_validation_invalid_port() {
         let mut config = create_test_config();
-        config.server.port = 80; // 低于 1024
+        config.server.port = 80;
         assert!(config.validate().is_err());
     }
 
@@ -1869,57 +1615,71 @@ mod tests {
         let db_path = dir.path().join("test.db");
         let store = SqliteStore::new(&db_path).unwrap();
 
-        // 验证所有表已创建
         store.set_state("test_key", "test_value").unwrap();
         let val = store.get_state("test_key").unwrap();
         assert_eq!(val, Some("test_value".to_string()));
     }
 
     #[tokio::test]
-    async fn test_obsidian_client_health_check() {
-        use wiremock::{MockServer, Mock, ResponseTemplate, matchers};
+    async fn test_obsidian_client_search() {
+        use wiremock::{MockServer, Mock, matchers, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
-        Mock::given(matchers::method("GET"))
-            .and(matchers::path("/"))
-            .respond_with(ResponseTemplate::new(200))
+
+        Mock::given(matchers::method("POST"))
+            .and(matchers::path("/search/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                vec![serde_json::json!({
+                    "filename": "test-note.md",
+                    "score": 1.0,
+                    "matches": []
+                })]
+            ))
             .mount(&mock_server)
             .await;
 
         let config = ObsidianConfig {
             enabled: true,
             url: mock_server.uri(),
-            api_key: "test_key".to_string(),
+            api_key: "test-key".to_string(),
         };
+
         let client = ObsidianClient::new(&config).unwrap();
-        assert!(client.health_check().await.unwrap());
+        let results = client.search("测试查询", 5).await.unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].filename, "test-note.md");
     }
 }
 ```
 
 ### 11.2 Mock 方案
 
-使用 `mockall` 进行 trait mock：
+使用 `wiremock` 对 Obsidian REST API 和 LLM API 做 HTTP mock：
 
 ```rust
-use mockall::automock;
-
-#[automock]
-impl ObsidianClient {
-    pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResultItem>, BrainError> { ... }
-    pub async fn read_file(&self, path: &str) -> Result<String, BrainError> { ... }
-    pub async fn health_check(&self) -> Result<bool, BrainError> { ... }
-}
+use wiremock::{MockServer, Mock, matchers, ResponseTemplate};
 
 #[tokio::test]
-async fn test_memory_service_with_mock_obsidian() {
-    let mut mock = MockObsidianClient::new();
-    mock.expect_search()
-        .returning(|_, limit| Ok(vec![SearchResultItem { /* test data */ }]));
-    mock.expect_health_check()
-        .returning(|| Ok(true));
+async fn test_obsidian_client_read_file() {
+    let mock_server = MockServer::start().await;
 
-    // 使用 mock 测试 MemoryService
+    Mock::given(matchers::method("GET"))
+        .and(matchers::path("/vault/test-note.md"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("# 测试笔记\n\n内容"))
+        .mount(&mock_server)
+        .await;
+
+    let config = ObsidianConfig {
+        enabled: true,
+        url: mock_server.uri(),
+        api_key: "test-key".to_string(),
+    };
+
+    let client = ObsidianClient::new(&config).unwrap();
+    let content = client.read_file("test-note.md").await.unwrap();
+
+    assert!(content.contains("测试笔记"));
 }
 ```
 
@@ -1930,7 +1690,7 @@ async fn test_memory_service_with_mock_obsidian() {
 | config.rs | 90% | 加载、校验、默认值、环境变量覆盖 |
 | sqlite_store.rs | 85% | 迁移、CRUD、事务、并发 |
 | file_watcher.rs | 75% | 防抖、过滤、事件类型判断 |
-| obsidian_client.rs | 85% | Mock HTTP、搜索、文件读写、健康检查 |
+| obsidian_client.rs | 80% | Mock HTTP、搜索、文件读写、健康检查 |
 | llm_client.rs | 80% | Mock API 调用、流式解析 |
 
 ---
@@ -1947,14 +1707,15 @@ edition = "2021"
 
 [dependencies]
 # Web 框架
-axum = "0.8"
+axum = "0.7"
 tokio = { version = "1", features = ["full"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
 
 # 序列化
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
 
 # 配置
 config = "0.14"
@@ -1965,8 +1726,8 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 # HTTP 客户端（Obsidian REST API + LLM API）
 reqwest = { version = "0.12", features = ["json", "stream"] }
 
-# Markdown 解析（预留）
-pulldown-cmark = "0.12"
+# Markdown 解析
+pulldown-cmark = "0.10"
 gray_matter = "0.2"
 
 # Git 操作
@@ -1993,7 +1754,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # 工具
 uuid = { version = "1", features = ["v4", "serde"] }
 thiserror = "1"
-urlencoding = "2"
 
 [dev-dependencies]
 tempfile = "3"
@@ -2007,13 +1767,12 @@ tokio-test = "0.4"
 ```
 config ──────────────→ serde, serde_json
 rusqlite ────────────→ 无（bundled 编译）
-reqwest ─────────────→ serde_json, tokio（用于 ObsidianClient + LlmClient）
+reqwest ─────────────→ serde_json, tokio（用于 ObsidianClient + LlmProvider）
 notify ──────────────→ tokio::sync::mpsc
-pulldown-cmark ──────→ 无（预留）
-gray_matter ─────────→ serde_yaml（预留）
+pulldown-cmark ──────→ 无
+gray_matter ─────────→ serde_yaml
 git2 ────────────────→ 无（系统 libgit2）
 tracing ─────────────→ tracing-subscriber
 chrono ──────────────→ serde
 uuid ────────────────→ 无
-urlencoding ─────────→ 无（Obsidian URI 编码）
 ```
