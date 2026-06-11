@@ -1,7 +1,9 @@
 # 基础设施层（Infrastructure）开发设计文档
 
-> **版本**: v0.1 | **最后更新**: 2026-05-29 | **状态**: 设计中
+> **版本**: v0.2 | **最后更新**: 2026-06-12 | **状态**: 设计中
 > **关联文档**: [顶层设计文档](../top_design.md) | [需求设计文档](../requirement/01-infrastructure.md)
+>
+> **架构说明**：项目已从混合搜索架构（Tantivy + Qdrant + Embedding）简化为直接使用 Obsidian Local REST API。不再需要本地索引、向量存储或 Embedding 服务。
 
 ---
 
@@ -23,15 +25,16 @@
 ├─────────────────────────────────────────────────────────────┤
 │  ▶ 基础设施层（本文档范围）◀                                  │
 │  ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌────────────────┐  │
-│  │ Config  │ │ SQLite   │ │ File     │ │ Embedding      │  │
-│  │ Manager │ │ Store    │ │ Watcher  │ │ Provider       │  │
+│  │ Config  │ │ SQLite   │ │ File     │ │ Obsidian       │  │
+│  │ Manager │ │ Store    │ │ Watcher  │ │ Client         │  │
+│  │         │ │          │ │ (可选)    │ │ (REST API)     │  │
 │  └─────────┘ └──────────┘ └──────────┘ └────────────────┘  │
-│  ┌─────────┐ ┌──────────┐ ┌──────────┐                     │
-│  │ LLM     │ │ Qdrant   │ │ Tantivy  │                     │
-│  │ Client  │ │ Store    │ │ Index    │                     │
-│  └─────────┘ └──────────┘ └──────────┘                     │
+│  ┌─────────┐                                                │
+│  │ LLM     │                                                │
+│  │ Client  │                                                │
+│  └─────────┘                                                │
 ├─────────────────────────────────────────────────────────────┤
-│  外部系统: 文件系统 │ SQLite │ Qdrant │ OpenAI │ Ollama     │
+│  外部系统: 文件系统 │ SQLite │ Obsidian REST API │ OpenAI   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -46,29 +49,20 @@ AppConfig ←──── 所有模块（配置注入）
     │       ├── Radar Service
     │       └── Inspiration Service
     │
-    ├──→ FileWatcher（文件变更感知）
+    ├──→ FileWatcher（文件变更感知，可选）
     │       ↑
     │       └── Memory Service（触发索引更新）
     │
-    ├──→ EmbeddingProvider（向量化）
+    ├──→ ObsidianClient（Obsidian REST API 客户端）
     │       ↑
-    │       ├── Memory Service
-    │       └── Radar Service
+    │       ├── Memory Service（搜索、笔记读写）
+    │       └── Radar Service（标签查询、关联笔记）
     │
-    ├──→ LlmClient（LLM 调用）
-    │       ↑
-    │       ├── Inspiration Service
-    │       ├── Radar Service
-    │       └── CodeRepo Service（文档生成）
-    │
-    ├──→ QdrantStore（向量存储）
-    │       ↑
-    │       ├── Memory Service
-    │       └── Radar Service
-    │
-    └──→ TantivyIndex（全文索引）
+    └──→ LlmClient（LLM 调用）
             ↑
-            └── Memory Service
+            ├── Inspiration Service
+            ├── Radar Service
+            └── CodeRepo Service（文档生成）
 ```
 
 ### 1.3 并发模型
@@ -78,11 +72,10 @@ AppConfig ←──── 所有模块（配置注入）
 - **主线程**：Axum HTTP/MCP 服务
 - **Worker Pool**：Tokio 多线程调度器处理工具调用
 - **后台任务**：
-  - FileWatcher 事件循环（独立线程 + channel 通知）
+  - FileWatcher 事件循环（独立线程 + channel 通知，可选）
   - Radar 定时拉取（tokio-cron-scheduler）
-  - Embedding 批处理队列（tokio::spawn）
 - **Channel 通信**：
-  - `tokio::sync::mpsc`：FileWatcher → Memory Service 变更事件
+  - `tokio::sync::mpsc`：FileWatcher → Memory Service 变更事件（可选）
   - `tokio::sync::broadcast`：全局事件总线
 
 ---
@@ -94,30 +87,26 @@ AppConfig ←──── 所有模块（配置注入）
 ```
 src/
 ├── main.rs                  # 入口：启动、优雅关闭        (~80 行)
-├── config.rs                # 配置管理                    (~250 行)
-├── error.rs                 # 统一错误类型                (~200 行)
+├── config.rs                # 配置管理                    (~200 行)
+├── error.rs                 # 统一错误类型                (~150 行)
 ├── infra/
-│   ├── mod.rs               # 模块导出                    (~30 行)
+│   ├── mod.rs               # 模块导出                    (~20 行)
+│   ├── obsidian_client.rs   # Obsidian REST API 客户端   (~350 行)
 │   ├── sqlite_store.rs      # SQLite 元数据存储           (~400 行)
-│   ├── file_watcher.rs      # 文件监控                    (~300 行)
-│   ├── embedding.rs         # Embedding 生成              (~350 行)
 │   ├── llm_client.rs        # LLM 调用封装               (~400 行)
-│   ├── qdrant_client.rs     # Qdrant 向量操作            (~350 行)
-│   └── tantivy_index.rs     # Tantivy 全文索引           (~400 行)
+│   └── file_watcher.rs      # 文件监控（可选）            (~300 行)
 ```
 
 ### 2.2 各文件职责
 
 | 文件 | 职责 | 核心类型 |
 |------|------|----------|
-| `config.rs` | 配置加载、校验、环境覆盖 | `AppConfig`, `ServerConfig`, `VaultConfig` |
+| `config.rs` | 配置加载、校验、环境覆盖 | `AppConfig`, `ServerConfig`, `VaultConfig`, `ObsidianConfig` |
 | `error.rs` | 统一错误枚举、转换、降级 | `BrainError` |
+| `obsidian_client.rs` | Obsidian REST API 封装（搜索、文件读写） | `ObsidianClient` |
 | `sqlite_store.rs` | 连接管理、迁移、CRUD | `SqliteStore` |
-| `file_watcher.rs` | Vault 文件监控、防抖、事件分发 | `FileWatcher`, `FileChangeEvent` |
-| `embedding.rs` | 多 Provider Embedding 生成 | `EmbeddingProvider`, `OpenAiEmbedder` |
 | `llm_client.rs` | 多 Provider LLM 调用 | `LlmProvider`, `OpenAiProvider` |
-| `qdrant_client.rs` | 向量存储操作 | `QdrantStore` |
-| `tantivy_index.rs` | 全文索引管理 | `TantivyIndex` |
+| `file_watcher.rs` | Vault 文件监控、防抖、事件分发（可选） | `FileWatcher`, `FileChangeEvent` |
 
 ---
 
@@ -134,8 +123,7 @@ use std::path::PathBuf;
 pub struct AppConfig {
     pub server: ServerConfig,
     pub vault: VaultConfig,
-    pub qdrant: QdrantConfig,
-    pub embedding: EmbeddingConfig,
+    pub obsidian: ObsidianConfig,
     pub llm: LlmConfig,
     pub memory: MemoryConfig,
     pub timeline: TimelineConfig,
@@ -187,43 +175,17 @@ fn default_exclude_patterns() -> Vec<String> {
     ]
 }
 
-/// Qdrant 配置
+/// Obsidian REST API 配置
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct QdrantConfig {
-    #[serde(default = "default_qdrant_url")]
+pub struct ObsidianConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_obsidian_url")]
     pub url: String,
-    #[serde(default = "default_collection_name")]
-    pub collection_name: String,
-    #[serde(default = "default_vector_size")]
-    pub vector_size: usize,
+    pub api_key: String,
 }
 
-fn default_qdrant_url() -> String { "http://127.0.0.1:6333".to_string() }
-fn default_collection_name() -> String { "obsidian_brain".to_string() }
-fn default_vector_size() -> usize { 1536 }
-
-/// Embedding 配置
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct EmbeddingConfig {
-    pub provider: EmbeddingProviderType,
-    pub model: String,
-    #[serde(default)]
-    pub api_key_env: Option<String>,
-    #[serde(default)]
-    pub base_url: Option<String>,
-    #[serde(default = "default_batch_size")]
-    pub batch_size: usize,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum EmbeddingProviderType {
-    Openai,
-    Ollama,
-    Onnx,
-}
-
-fn default_batch_size() -> usize { 100 }
+fn default_obsidian_url() -> String { "https://127.0.0.1:27124".to_string() }
 
 /// LLM 配置
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -260,16 +222,11 @@ pub struct MemoryConfig {
     pub chunk_max_tokens: usize,
     #[serde(default = "default_top_k")]
     pub search_top_k: usize,
-    #[serde(default = "default_true")]
-    pub hybrid_search: bool,
-    #[serde(default = "default_rrf_k")]
-    pub rrf_k: u32,
 }
 
 fn default_chunk_min() -> usize { 300 }
 fn default_chunk_max() -> usize { 800 }
 fn default_top_k() -> usize { 5 }
-fn default_rrf_k() -> u32 { 60 }
 
 /// 时间线配置
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -308,12 +265,9 @@ fn default_max_items() -> usize { 20 }
 pub struct StorageConfig {
     #[serde(default = "default_db_path")]
     pub db_path: PathBuf,
-    #[serde(default = "default_index_path")]
-    pub index_path: PathBuf,
 }
 
 fn default_db_path() -> PathBuf { PathBuf::from("./data/brain.db") }
-fn default_index_path() -> PathBuf { PathBuf::from("./data/tantivy_index") }
 
 /// 日志配置
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -392,21 +346,10 @@ impl Validate for AppConfig {
             ));
         }
 
-        // 校验 Embedding API Key
-        if matches!(self.embedding.provider, EmbeddingProviderType::Openai) {
-            if let Some(ref env_key) = self.embedding.api_key_env {
-                if std::env::var(env_key).is_err() {
-                    return Err(BrainError::ConfigError(
-                        format!("环境变量 {} 未设置", env_key)
-                    ));
-                }
-            }
-        }
-
-        // 校验向量维度
-        if self.qdrant.vector_size == 0 {
+        // 校验 Obsidian API Key
+        if self.obsidian.enabled && self.obsidian.api_key.is_empty() {
             return Err(BrainError::ConfigError(
-                "向量维度不能为 0".to_string()
+                "Obsidian API Key 未配置".to_string()
             ));
         }
 
@@ -612,7 +555,6 @@ CREATE TABLE IF NOT EXISTS radar_items (
     summary     TEXT,
     source      TEXT NOT NULL,
     url         TEXT NOT NULL UNIQUE,
-    embedding_id TEXT,
     status      TEXT DEFAULT 'new' CHECK(status IN ('new','read','saved','dismissed')),
     relevance_score REAL,
     related_notes TEXT,  -- JSON 数组
@@ -902,306 +844,302 @@ impl Drop for FileWatcher {
 
 ---
 
-## 6. Embedding 生成 (embedding.rs)
+## 6. Obsidian REST API 客户端 (obsidian_client.rs)
 
-### 6.1 Trait 定义
-
-```rust
-use async_trait::async_trait;
-
-/// Embedding Provider 统一接口
-#[async_trait]
-pub trait EmbeddingProvider: Send + Sync {
-    /// 单文本向量化
-    async fn embed_text(&self, text: &str) -> Result<Vec<f32>, BrainError>;
-
-    /// 批量向量化（默认分批 100 条）
-    async fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, BrainError> {
-        let mut results = Vec::with_capacity(texts.len());
-        for chunk in texts.chunks(self.batch_size()) {
-            let batch = self.embed_batch_inner(chunk).await?;
-            results.extend(batch);
-        }
-        Ok(results)
-    }
-
-    /// 内部批量实现（由具体 Provider 实现）
-    async fn embed_batch_inner(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, BrainError>;
-
-    /// 向量维度
-    fn dimensions(&self) -> usize;
-
-    /// 批量大小
-    fn batch_size(&self) -> usize { 100 }
-}
-```
-
-### 6.2 OpenAI 实现
+### 6.1 核心结构
 
 ```rust
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
-pub struct OpenAiEmbedder {
+/// Obsidian Local REST API 客户端
+pub struct ObsidianClient {
     client: Client,
-    api_key: String,
-    model: String,
-    dimensions: usize,
     base_url: String,
+    api_key: String,
 }
 
-#[derive(Serialize)]
-struct EmbeddingRequest {
-    model: String,
-    input: Vec<String>,
+/// 搜索结果项
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResultItem {
+    pub path: String,
+    pub title: String,
+    pub snippet: String,
+    pub score: f32,
+    pub tags: Vec<String>,
 }
 
-#[derive(Deserialize)]
-struct EmbeddingResponse {
-    data: Vec<EmbeddingData>,
-    usage: EmbeddingUsage,
+/// 文件信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileInfo {
+    pub path: String,
+    pub stat: FileStat,
 }
 
-#[derive(Deserialize)]
-struct EmbeddingData {
-    embedding: Vec<f32>,
-    index: usize,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileStat {
+    pub mtime: u64,
+    pub ctime: u64,
+    pub size: u64,
 }
+```
 
-#[derive(Deserialize)]
-struct EmbeddingUsage {
-    prompt_tokens: u32,
-    total_tokens: u32,
-}
+### 6.2 初始化与连接
 
-impl OpenAiEmbedder {
-    pub fn new(config: &EmbeddingConfig) -> Result<Self, BrainError> {
-        let api_key = config.api_key_env
-            .as_ref()
-            .and_then(|env| std::env::var(env).ok())
-            .ok_or_else(|| BrainError::ConfigError(
-                "OpenAI API Key 未配置".to_string()
-            ))?;
-
+```rust
+impl ObsidianClient {
+    pub fn new(config: &ObsidianConfig) -> Result<Self, BrainError> {
         let client = Client::builder()
+            .danger_accept_invalid_certs(true) // Obsidian 使用自签名证书
             .timeout(Duration::from_secs(30))
-            .pool_max_idle_per_host(5)
             .build()
             .map_err(|e| BrainError::Internal(format!("HTTP 客户端创建失败: {e}")))?;
 
-        Ok(OpenAiEmbedder {
+        Ok(ObsidianClient {
             client,
-            api_key,
-            model: config.model.clone(),
-            dimensions: 1536,  // text-embedding-3-small
-            base_url: config.base_url.clone()
-                .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
+            base_url: config.url.clone(),
+            api_key: config.api_key.clone(),
         })
     }
-}
 
-#[async_trait]
-impl EmbeddingProvider for OpenAiEmbedder {
-    async fn embed_text(&self, text: &str) -> Result<Vec<f32>, BrainError> {
-        let results = self.embed_batch_inner(&[text.to_string()]).await?;
-        results.into_iter().next()
-            .ok_or_else(|| BrainError::EmbeddingError("空响应".to_string()))
+    /// 健康检查：验证 Obsidian API 可达
+    pub async fn health_check(&self) -> Result<bool, BrainError> {
+        let resp = self.client
+            .get(format!("{}/", self.base_url))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .send()
+            .await;
+
+        match resp {
+            Ok(r) => Ok(r.status().is_success()),
+            Err(_) => Ok(false),
+        }
     }
+}
+```
 
-    async fn embed_batch_inner(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, BrainError> {
-        let request = EmbeddingRequest {
-            model: self.model.clone(),
-            input: texts.to_vec(),
-        };
+### 6.3 搜索操作
 
-        let response = retry_with_backoff(3, || async {
-            self.client
-                .post(format!("{}/embeddings", self.base_url))
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .json(&request)
-                .send()
-                .await
-        }).await?;
+```rust
+impl ObsidianClient {
+    /// 搜索笔记（使用 JsonLogic 查询）
+    pub async fn search(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<SearchResultItem>, BrainError> {
+        // Obsidian Search API 使用 JsonLogic 格式
+        let body = serde_json::json!({
+            "in": [query, {"var": "content"}]
+        });
+
+        let response = self.client
+            .post(format!("{}/search/", self.base_url))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/vnd.olrapi.jsonlogic+json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| BrainError::ObsidianApiError(format!("搜索请求失败: {e}")))?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(BrainError::EmbeddingError(
-                format!("OpenAI API 错误 {status}: {body}")
+            return Err(BrainError::ObsidianApiError(
+                format!("搜索 API 返回 {status}: {body}")
             ));
         }
 
-        let embedding_resp: EmbeddingResponse = response.json().await
-            .map_err(|e| BrainError::EmbeddingError(format!("响应解析失败: {e}")))?;
+        let mut results: Vec<SearchResultItem> = response.json().await
+            .map_err(|e| BrainError::ObsidianApiError(format!("响应解析失败: {e}")))?;
+
+        // 客户端截断到 limit
+        results.truncate(limit);
 
         tracing::debug!(
-            "Embedding 完成: {} 条文本, {} tokens",
-            texts.len(),
-            embedding_resp.usage.total_tokens
+            query = query,
+            result_count = results.len(),
+            "Obsidian 搜索完成"
         );
 
-        // 按 index 排序（API 可能乱序返回）
-        let mut data = embedding_resp.data;
-        data.sort_by_key(|d| d.index);
-        Ok(data.into_iter().map(|d| d.embedding).collect())
-    }
-
-    fn dimensions(&self) -> usize { self.dimensions }
-}
-```
-
-### 6.3 Ollama 实现
-
-```rust
-pub struct OllamaEmbedder {
-    client: Client,
-    model: String,
-    base_url: String,
-}
-
-#[derive(Serialize)]
-struct OllamaEmbedRequest {
-    model: String,
-    input: String,
-}
-
-#[derive(Deserialize)]
-struct OllamaEmbedResponse {
-    embeddings: Vec<Vec<f32>>,
-}
-
-impl OllamaEmbedder {
-    pub fn new(config: &EmbeddingConfig) -> Result<Self, BrainError> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .map_err(|e| BrainError::Internal(format!("HTTP 客户端创建失败: {e}")))?;
-
-        Ok(OllamaEmbedder {
-            client,
-            model: config.model.clone(),
-            base_url: config.base_url.clone()
-                .unwrap_or_else(|| "http://127.0.0.1:11434".to_string()),
-        })
-    }
-}
-
-#[async_trait]
-impl EmbeddingProvider for OllamaEmbedder {
-    async fn embed_text(&self, text: &str) -> Result<Vec<f32>, BrainError> {
-        let request = OllamaEmbedRequest {
-            model: self.model.clone(),
-            input: text.to_string(),
-        };
-
-        let response = self.client
-            .post(format!("{}/api/embed", self.base_url))
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| BrainError::EmbeddingError(format!("Ollama 请求失败: {e}")))?;
-
-        let resp: OllamaEmbedResponse = response.json().await
-            .map_err(|e| BrainError::EmbeddingError(format!("Ollama 响应解析失败: {e}")))?;
-
-        resp.embeddings.into_iter().next()
-            .ok_or_else(|| BrainError::EmbeddingError("Ollama 空响应".to_string()))
-    }
-
-    async fn embed_batch_inner(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, BrainError> {
-        // Ollama 不支持批量 API，逐条调用
-        let mut results = Vec::with_capacity(texts.len());
-        for text in texts {
-            results.push(self.embed_text(text).await?);
-        }
         Ok(results)
     }
-
-    fn dimensions(&self) -> usize { 768 }  // nomic-embed-text 维度
 }
 ```
 
-### 6.4 ONNX 预留 + 工厂
+### 6.4 文件读写操作
 
 ```rust
-/// ONNX 本地模型（预留）
-pub struct OnnxEmbedder {
-    _model_path: PathBuf,
-}
+impl ObsidianClient {
+    /// 读取文件内容
+    pub async fn read_file(&self, path: &str) -> Result<String, BrainError> {
+        let response = self.client
+            .get(format!("{}/vault/{}", self.base_url, urlencoding::encode(path)))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .send()
+            .await
+            .map_err(|e| BrainError::ObsidianApiError(format!("读取文件失败: {e}")))?;
 
-#[async_trait]
-impl EmbeddingProvider for OnnxEmbedder {
-    async fn embed_text(&self, _text: &str) -> Result<Vec<f32>, BrainError> {
-        unimplemented!("ONNX Embedding 尚未实现")
-    }
-
-    async fn embed_batch_inner(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, BrainError> {
-        unimplemented!("ONNX Embedding 尚未实现")
-    }
-
-    fn dimensions(&self) -> usize { 384 }
-}
-
-/// Embedding Provider 工厂
-pub struct EmbeddingFactory;
-
-impl EmbeddingFactory {
-    pub fn create(config: &EmbeddingConfig) -> Result<Box<dyn EmbeddingProvider>, BrainError> {
-        match config.provider {
-            EmbeddingProviderType::Openai => {
-                Ok(Box::new(OpenAiEmbedder::new(config)?))
-            }
-            EmbeddingProviderType::Ollama => {
-                Ok(Box::new(OllamaEmbedder::new(config)?))
-            }
-            EmbeddingProviderType::Onnx => {
-                Err(BrainError::ConfigError(
-                    "ONNX Embedding 尚未实现，请使用 openai 或 ollama".to_string()
-                ))
-            }
+        if response.status().as_u16() == 404 {
+            return Err(BrainError::NoteNotFound(PathBuf::from(path)));
         }
+
+        if !response.status().is_success() {
+            let status = response.status();
+            return Err(BrainError::ObsidianApiError(format!("读取文件 API 返回 {status}")));
+        }
+
+        response.text().await
+            .map_err(|e| BrainError::ObsidianApiError(format!("读取响应失败: {e}")))
+    }
+
+    /// 写入文件内容
+    pub async fn write_file(&self, path: &str, content: &str) -> Result<(), BrainError> {
+        let response = self.client
+            .put(format!("{}/vault/{}", self.base_url, urlencoding::encode(path)))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "text/markdown")
+            .header("Operation", "overwrite")
+            .body(content.to_string())
+            .send()
+            .await
+            .map_err(|e| BrainError::ObsidianApiError(format!("写入文件失败: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            return Err(BrainError::ObsidianApiError(format!("写入文件 API 返回 {status}")));
+        }
+
+        Ok(())
+    }
+
+    /// 追加内容到文件
+    pub async fn append_file(&self, path: &str, content: &str) -> Result<(), BrainError> {
+        let response = self.client
+            .put(format!("{}/vault/{}", self.base_url, urlencoding::encode(path)))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "text/markdown")
+            .header("Operation", "append")
+            .body(content.to_string())
+            .send()
+            .await
+            .map_err(|e| BrainError::ObsidianApiError(format!("追加文件失败: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            return Err(BrainError::ObsidianApiError(format!("追加文件 API 返回 {status}")));
+        }
+
+        Ok(())
+    }
+
+    /// 列出目录下的文件
+    pub async fn list_files(&self, dir: &str) -> Result<Vec<FileInfo>, BrainError> {
+        let response = self.client
+            .get(format!("{}/vault/{}", self.base_url, urlencoding::encode(dir)))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .send()
+            .await
+            .map_err(|e| BrainError::ObsidianApiError(format!("列出文件失败: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            return Err(BrainError::ObsidianApiError(format!("列出文件 API 返回 {status}")));
+        }
+
+        response.json().await
+            .map_err(|e| BrainError::ObsidianApiError(format!("响应解析失败: {e}")))
+    }
+
+    /// 删除文件
+    pub async fn delete_file(&self, path: &str) -> Result<(), BrainError> {
+        let response = self.client
+            .delete(format!("{}/vault/{}", self.base_url, urlencoding::encode(path)))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .send()
+            .await
+            .map_err(|e| BrainError::ObsidianApiError(format!("删除文件失败: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            return Err(BrainError::ObsidianApiError(format!("删除文件 API 返回 {status}")));
+        }
+
+        Ok(())
     }
 }
 ```
 
-### 6.5 重试策略
+### 6.5 周期性笔记与命令
 
 ```rust
-use std::future::Future;
+impl ObsidianClient {
+    /// 获取周期性笔记（daily/weekly/monthly）
+    pub async fn get_periodic_note(
+        &self,
+        period: &str, // "daily", "weekly", "monthly", "quarterly", "yearly"
+    ) -> Result<String, BrainError> {
+        let response = self.client
+            .get(format!("{}/periodic/{}/", self.base_url, period))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .send()
+            .await
+            .map_err(|e| BrainError::ObsidianApiError(format!("获取周期笔记失败: {e}")))?;
 
-/// 指数退避重试
-async fn retry_with_backoff<F, Fut, T>(max_retries: u32, f: F) -> Result<T, BrainError>
-where
-    F: Fn() -> Fut,
-    Fut: Future<Output = Result<reqwest::Response, reqwest::Error>>,
-{
-    let mut last_error = None;
-
-    for attempt in 0..=max_retries {
-        if attempt > 0 {
-            let delay = Duration::from_millis(100 * 2u64.pow(attempt - 1));
-            tracing::warn!("重试第 {} 次，等待 {:?}...", attempt, delay);
-            tokio::time::sleep(delay).await;
+        if !response.status().is_success() {
+            return Err(BrainError::ObsidianApiError(
+                format!("周期笔记 API 返回 {}", response.status())
+            ));
         }
 
-        match f().await {
-            Ok(resp) => return Ok(resp),
-            Err(e) => {
-                let is_retryable = e.is_timeout()
-                    || e.is_connect()
-                    || e.status().map(|s| s.as_u16() >= 500).unwrap_or(false);
-
-                if !is_retryable {
-                    return Err(BrainError::EmbeddingError(format!("不可重试的错误: {e}")));
-                }
-                last_error = Some(e);
-            }
-        }
+        response.text().await
+            .map_err(|e| BrainError::ObsidianApiError(format!("读取响应失败: {e}")))
     }
 
-    Err(BrainError::EmbeddingError(
-        format!("重试 {} 次后仍然失败: {:?}", max_retries, last_error)
-    ))
+    /// 列出可用命令
+    pub async fn list_commands(&self) -> Result<Vec<String>, BrainError> {
+        let response = self.client
+            .get(format!("{}/commands/", self.base_url))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .send()
+            .await
+            .map_err(|e| BrainError::ObsidianApiError(format!("列出命令失败: {e}")))?;
+
+        if !response.status().is_success() {
+            return Err(BrainError::ObsidianApiError(
+                format!("命令 API 返回 {}", response.status())
+            ));
+        }
+
+        let commands: serde_json::Value = response.json().await
+            .map_err(|e| BrainError::ObsidianApiError(format!("响应解析失败: {e}")))?;
+
+        Ok(commands["commands"]
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .filter_map(|c| c["id"].as_str().map(String::from))
+            .collect())
+    }
+
+    /// 执行 Obsidian 命令
+    pub async fn execute_command(&self, command_id: &str) -> Result<(), BrainError> {
+        let response = self.client
+            .post(format!("{}/commands/{}", self.base_url, urlencoding::encode(command_id)))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .send()
+            .await
+            .map_err(|e| BrainError::ObsidianApiError(format!("执行命令失败: {e}")))?;
+
+        if !response.status().is_success() {
+            return Err(BrainError::ObsidianApiError(
+                format!("命令执行 API 返回 {}", response.status())
+            ));
+        }
+
+        Ok(())
+    }
 }
 ```
 
@@ -1629,580 +1567,9 @@ impl LlmClientFactory {
 
 ---
 
-## 8. Qdrant 向量客户端 (qdrant_client.rs)
+## 8. 统一错误处理 (error.rs)
 
-### 8.1 核心结构
-
-```rust
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-
-/// Qdrant 向量存储
-pub struct QdrantStore {
-    client: Client,
-    base_url: String,
-    collection_name: String,
-    vector_size: usize,
-}
-
-/// 向量点
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VectorPoint {
-    pub id: String,
-    pub vector: Vec<f32>,
-    pub payload: Value,
-}
-
-/// 搜索结果
-#[derive(Debug, Clone, Deserialize)]
-pub struct SearchResult {
-    pub id: String,
-    pub score: f32,
-    pub payload: Value,
-}
-
-/// Chunk Payload（存储在 Qdrant 中的元数据）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChunkPayload {
-    pub note_path: String,
-    pub chunk_index: usize,
-    pub content: String,
-    pub title: String,
-    pub tags: Vec<String>,
-    pub heading_path: Vec<String>,
-    pub word_count: usize,
-    pub created_at: String,
-    pub updated_at: String,
-}
-```
-
-### 8.2 连接与 Collection 管理
-
-```rust
-impl QdrantStore {
-    pub fn new(config: &QdrantConfig) -> Result<Self, BrainError> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .map_err(|e| BrainError::Internal(format!("HTTP 客户端创建失败: {e}")))?;
-
-        Ok(QdrantStore {
-            client,
-            base_url: config.url.clone(),
-            collection_name: config.collection_name.clone(),
-            vector_size: config.vector_size,
-        })
-    }
-
-    /// 健康检查
-    pub async fn health_check(&self) -> Result<bool, BrainError> {
-        let resp = self.client
-            .get(format!("{}/healthz", self.base_url))
-            .send()
-            .await
-            .map_err(|e| BrainError::QdrantError(format!("连接失败: {e}")))?;
-        Ok(resp.status().is_success())
-    }
-
-    /// 确保 Collection 存在
-    pub async fn ensure_collection(&self) -> Result<(), BrainError> {
-        // 检查是否存在
-        let resp = self.client
-            .get(format!("{}/collections/{}", self.base_url, self.collection_name))
-            .send()
-            .await
-            .map_err(|e| BrainError::QdrantError(format!("查询失败: {e}")))?;
-
-        if resp.status().is_success() {
-            return Ok(());
-        }
-
-        // 创建 Collection
-        #[derive(Serialize)]
-        struct CreateReq {
-            vectors: VectorParams,
-            hnsw_config: HnswConfig,
-        }
-        #[derive(Serialize)]
-        struct VectorParams {
-            size: usize,
-            distance: String,
-        }
-        #[derive(Serialize)]
-        struct HnswConfig {
-            m: usize,
-            ef_construct: usize,
-        }
-
-        let body = CreateReq {
-            vectors: VectorParams {
-                size: self.vector_size,
-                distance: "Cosine".to_string(),
-            },
-            hnsw_config: HnswConfig {
-                m: 16,
-                ef_construct: 200,
-            },
-        };
-
-        self.client
-            .put(format!("{}/collections/{}", self.base_url, self.collection_name))
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| BrainError::QdrantError(format!("创建失败: {e}")))?;
-
-        tracing::info!("Qdrant collection 创建: {}", self.collection_name);
-        Ok(())
-    }
-}
-```
-
-### 8.3 向量操作
-
-```rust
-impl QdrantStore {
-    /// 批量写入/更新向量
-    pub async fn upsert_points(&self, points: Vec<VectorPoint>) -> Result<(), BrainError> {
-        if points.is_empty() {
-            return Ok(());
-        }
-
-        #[derive(Serialize)]
-        struct UpsertReq {
-            points: Vec<PointData>,
-        }
-        #[derive(Serialize)]
-        struct PointData {
-            id: String,
-            vector: Vec<f32>,
-            payload: Value,
-        }
-
-        let body = UpsertReq {
-            points: points.into_iter().map(|p| PointData {
-                id: p.id,
-                vector: p.vector,
-                payload: p.payload,
-            }).collect(),
-        };
-
-        self.client
-            .put(format!(
-                "{}/collections/{}/points",
-                self.base_url, self.collection_name
-            ))
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| BrainError::QdrantError(format!("Upsert 失败: {e}")))?;
-
-        Ok(())
-    }
-
-    /// 向量搜索
-    pub async fn search(
-        &self,
-        query_vector: &[f32],
-        top_k: usize,
-        filter: Option<Value>,
-    ) -> Result<Vec<SearchResult>, BrainError> {
-        #[derive(Serialize)]
-        struct SearchReq {
-            vector: Vec<f32>,
-            limit: usize,
-            with_payload: bool,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            filter: Option<Value>,
-        }
-
-        let body = SearchReq {
-            vector: query_vector.to_vec(),
-            limit: top_k,
-            with_payload: true,
-            filter,
-        };
-
-        let resp = self.client
-            .post(format!(
-                "{}/collections/{}/points/search",
-                self.base_url, self.collection_name
-            ))
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| BrainError::QdrantError(format!("搜索失败: {e}")))?;
-
-        #[derive(Deserialize)]
-        struct SearchResp {
-            result: Vec<SearchResultItem>,
-        }
-        #[derive(Deserialize)]
-        struct SearchResultItem {
-            id: String,
-            score: f32,
-            payload: Value,
-        }
-
-        let search_resp: SearchResp = resp.json().await
-            .map_err(|e| BrainError::QdrantError(format!("响应解析失败: {e}")))?;
-
-        Ok(search_resp.result.into_iter().map(|r| SearchResult {
-            id: r.id,
-            score: r.score,
-            payload: r.payload,
-        }).collect())
-    }
-
-    /// 删除向量点
-    pub async fn delete_points(&self, ids: &[String]) -> Result<(), BrainError> {
-        if ids.is_empty() {
-            return Ok(());
-        }
-
-        #[derive(Serialize)]
-        struct DeleteReq {
-            points: Vec<String>,
-        }
-
-        self.client
-            .post(format!(
-                "{}/collections/{}/points/delete",
-                self.base_url, self.collection_name
-            ))
-            .json(&DeleteReq { points: ids.to_vec() })
-            .send()
-            .await
-            .map_err(|e| BrainError::QdrantError(format!("删除失败: {e}")))?;
-
-        Ok(())
-    }
-}
-```
-
----
-
-## 9. Tantivy 全文索引 (tantivy_index.rs)
-
-### 9.1 Schema 定义
-
-```rust
-use tantivy::{
-    schema::*,
-    Index, IndexWriter, IndexReader, Document,
-    query::{QueryParser, BooleanQuery, TermQuery, Occur},
-    collector::TopDocs,
-    tokenizer::TextAnalyzer,
-};
-
-/// Tantivy 全文索引管理器
-pub struct TantivyIndex {
-    index: Index,
-    schema: Schema,
-    fields: FieldMap,
-    writer: std::sync::Mutex<IndexWriter>,
-    reader: IndexReader,
-}
-
-/// 字段映射
-struct FieldMap {
-    title: Field,
-    content: Field,
-    path: Field,
-    tags: Field,
-    created_at: Field,
-    updated_at: Field,
-}
-
-impl TantivyIndex {
-    /// 构建 Schema
-    fn build_schema() -> (Schema, FieldMap) {
-        let mut schema_builder = Schema::builder();
-
-        // 标题：索引+存储，使用中文分词
-        let text_options = TextOptions::default()
-            .set_indexing_options(
-                TextFieldIndexing::default()
-                    .set_tokenizer("jieba")
-                    .set_index_option(IndexRecordOption::WithFreqsAndPositions)
-            )
-            .set_stored();
-
-        let title = schema_builder.add_text_field("title", text_options.clone());
-        let content = schema_builder.add_text_field("content", text_options);
-
-        // 路径：索引+存储，不分词
-        let path = schema_builder.add_text_field("path", STRING | STORED);
-
-        // 标签：索引+存储，使用简单分词（空格分隔）
-        let tag_options = TextOptions::default()
-            .set_indexing_options(
-                TextFieldIndexing::default()
-                    .set_tokenizer("simple")
-                    .set_index_option(IndexRecordOption::WithFreqs)
-            )
-            .set_stored();
-        let tags = schema_builder.add_text_field("tags", tag_options);
-
-        // 时间戳
-        let created_at = schema_builder.add_date_field("created_at", STORED);
-        let updated_at = schema_builder.add_date_field("updated_at", STORED);
-
-        let schema = schema_builder.build();
-        let fields = FieldMap {
-            title, content, path, tags, created_at, updated_at,
-        };
-
-        (schema, fields)
-    }
-}
-```
-
-### 9.2 初始化与分词器注册
-
-```rust
-use tantivy_jieba::JiebaTokenizer;
-
-impl TantivyIndex {
-    pub fn new(index_path: &std::path::Path) -> Result<Self, BrainError> {
-        let (schema, fields) = Self::build_schema();
-
-        // 创建或打开索引
-        let index = if index_path.exists() {
-            Index::open_in_dir(index_path)
-                .map_err(|e| BrainError::SearchError(format!("索引打开失败: {e}")))?
-        } else {
-            std::fs::create_dir_all(index_path)
-                .map_err(|e| BrainError::IoError(e))?;
-            Index::create_in_dir(index_path, schema.clone())
-                .map_err(|e| BrainError::SearchError(format!("索引创建失败: {e}")))?
-        };
-
-        // 注册 Jieba 中文分词器
-        let jieba = JiebaTokenizer {};
-        let tokenizer = TextAnalyzer::from(jieba);
-        index.tokenizers().register("jieba", tokenizer);
-
-        // 创建 IndexWriter（50MB heap）
-        let writer = index.writer(50_000_000)
-            .map_err(|e| BrainError::SearchError(format!("Writer 创建失败: {e}")))?;
-
-        // 创建 IndexReader
-        let reader = index.reader()
-            .map_err(|e| BrainError::SearchError(format!("Reader 创建失败: {e}")))?;
-
-        Ok(TantivyIndex {
-            index,
-            schema,
-            fields,
-            writer: std::sync::Mutex::new(writer),
-            reader,
-        })
-    }
-}
-```
-
-### 9.3 索引操作
-
-```rust
-impl TantivyIndex {
-    /// 添加文档到索引
-    pub fn add_document(&self, doc: &NoteDocument) -> Result<(), BrainError> {
-        let mut tantivy_doc = Document::default();
-        tantivy_doc.add_text(self.fields.title, &doc.title);
-        tantivy_doc.add_text(self.fields.content, &doc.content);
-        tantivy_doc.add_text(self.fields.path, &doc.path);
-        tantivy_doc.add_text(self.fields.tags, &doc.tags.join(" "));
-        tantivy_doc.add_date(self.fields.created_at, doc.created_at);
-        tantivy_doc.add_date(self.fields.updated_at, doc.updated_at);
-
-        let writer = self.writer.lock().unwrap();
-        writer.add_document(tantivy_doc)
-            .map_err(|e| BrainError::SearchError(format!("文档添加失败: {e}")))?;
-
-        Ok(())
-    }
-
-    /// 更新文档（先删后加）
-    pub fn update_document(&self, doc: &NoteDocument) -> Result<(), BrainError> {
-        self.delete_document(&doc.path)?;
-        self.add_document(doc)?;
-        Ok(())
-    }
-
-    /// 删除文档（按路径）
-    pub fn delete_document(&self, path: &str) -> Result<(), BrainError> {
-        let term = Term::from_field_text(self.fields.path, path);
-        let writer = self.writer.lock().unwrap();
-        writer.delete_term(term);
-        Ok(())
-    }
-
-    /// 提交变更
-    pub fn commit(&self) -> Result<(), BrainError> {
-        let mut writer = self.writer.lock().unwrap();
-        writer.commit()
-            .map_err(|e| BrainError::SearchError(format!("提交失败: {e}")))?;
-        self.reader.reload()
-            .map_err(|e| BrainError::SearchError(format!("Reader 刷新失败: {e}")))?;
-        Ok(())
-    }
-}
-```
-
-### 9.4 搜索查询
-
-```rust
-/// 搜索参数
-pub struct SearchParams {
-    pub query: String,
-    pub top_k: usize,
-    pub tag_filter: Option<Vec<String>>,
-}
-
-/// 搜索结果
-pub struct TantivySearchResult {
-    pub path: String,
-    pub title: String,
-    pub snippet: String,
-    pub score: f32,
-    pub tags: Vec<String>,
-}
-
-impl TantivyIndex {
-    /// 全文搜索
-    pub fn search(&self, params: &SearchParams) -> Result<Vec<TantivySearchResult>, BrainError> {
-        let searcher = self.reader.searcher();
-
-        let query_parser = QueryParser::for_index(
-            &self.index,
-            vec![self.fields.title, self.fields.content],
-        );
-
-        let text_query = query_parser.parse_query(&params.query)
-            .map_err(|e| BrainError::SearchError(format!("查询解析失败: {e}")))?;
-
-        // 构建组合查询（文本查询 + 标签过滤）
-        let final_query: Box<dyn tantivy::query::Query> = if let Some(ref tags) = params.tag_filter {
-            let mut sub_queries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = vec![
-                (Occur::Must, text_query),
-            ];
-
-            for tag in tags {
-                let tag_term = Term::from_field_text(self.fields.tags, tag);
-                let tag_query = Box::new(TermQuery::new(tag_term, IndexRecordOption::Basic));
-                sub_queries.push((Occur::Must, tag_query));
-            }
-
-            Box::new(BooleanQuery::from(sub_queries))
-        } else {
-            text_query
-        };
-
-        let top_docs = searcher.search(&*final_query, &TopDocs::with_limit(params.top_k))
-            .map_err(|e| BrainError::SearchError(format!("搜索执行失败: {e}")))?;
-
-        let mut results = Vec::new();
-        for (score, doc_address) in top_docs {
-            let doc: Document = searcher.doc(doc_address)
-                .map_err(|e| BrainError::SearchError(format!("文档获取失败: {e}")))?;
-
-            let path = doc.get_first(self.fields.path)
-                .and_then(|v| v.as_text())
-                .unwrap_or("")
-                .to_string();
-
-            let title = doc.get_first(self.fields.title)
-                .and_then(|v| v.as_text())
-                .unwrap_or("")
-                .to_string();
-
-            let content = doc.get_first(self.fields.content)
-                .and_then(|v| v.as_text())
-                .unwrap_or("");
-
-            let tags_text = doc.get_first(self.fields.tags)
-                .and_then(|v| v.as_text())
-                .unwrap_or("");
-
-            // 生成摘要片段
-            let snippet = generate_snippet(content, &params.query, 200);
-
-            results.push(TantivySearchResult {
-                path,
-                title,
-                snippet,
-                score,
-                tags: tags_text.split_whitespace().map(String::from).collect(),
-            });
-        }
-
-        Ok(results)
-    }
-}
-
-/// 生成搜索摘要片段
-fn generate_snippet(content: &str, query: &str, max_len: usize) -> String {
-    let lower_content = content.to_lowercase();
-    let lower_query = query.to_lowercase();
-
-    if let Some(pos) = lower_content.find(&lower_query) {
-        let start = pos.saturating_sub(max_len / 3);
-        let end = (pos + query.len() + max_len * 2 / 3).min(content.len());
-
-        let snippet = &content[start..end];
-        format!("...{}...", snippet.trim())
-    } else {
-        // 未找到匹配位置，返回开头
-        let end = max_len.min(content.len());
-        format!("{}...", &content[..end].trim())
-    }
-}
-```
-
-### 9.5 NoteDocument 结构
-
-```rust
-use chrono::{DateTime, Utc};
-use tantivy::DateTime as TantivyDateTime;
-
-/// 索引文档
-pub struct NoteDocument {
-    pub title: String,
-    pub content: String,
-    pub path: String,
-    pub tags: Vec<String>,
-    pub created_at: TantivyDateTime,
-    pub updated_at: TantivyDateTime,
-}
-
-impl NoteDocument {
-    pub fn from_chrono(
-        title: String,
-        content: String,
-        path: String,
-        tags: Vec<String>,
-        created_at: DateTime<Utc>,
-        updated_at: DateTime<Utc>,
-    ) -> Self {
-        NoteDocument {
-            title,
-            content,
-            path,
-            tags,
-            created_at: TantivyDateTime::from_timestamp_secs(created_at.timestamp()),
-            updated_at: TantivyDateTime::from_timestamp_secs(updated_at.timestamp()),
-        }
-    }
-}
-```
-
----
-
-## 10. 统一错误处理 (error.rs)
-
-### 10.1 BrainError 枚举
+### 8.1 BrainError 枚举
 
 ```rust
 use std::fmt;
@@ -2225,11 +1592,9 @@ pub enum BrainError {
         detail: String,
     },
 
-    // ── 搜索 ──
-    /// 搜索引擎错误（Tantivy）
-    SearchError(String),
-    /// Embedding 生成错误
-    EmbeddingError(String),
+    // ── Obsidian API ──
+    /// Obsidian REST API 调用错误
+    ObsidianApiError(String),
 
     // ── 代码仓 ──
     /// 代码仓库不存在
@@ -2241,8 +1606,6 @@ pub enum BrainError {
     },
 
     // ── 外部服务 ──
-    /// Qdrant 操作错误
-    QdrantError(String),
     /// LLM API 调用错误
     LlmApiError {
         provider: String,
@@ -2269,12 +1632,10 @@ impl fmt::Display for BrainError {
             BrainError::NoteNotFound(p) => write!(f, "笔记不存在: {:?}", p),
             BrainError::ParseError { path, detail } =>
                 write!(f, "解析错误 {:?}: {detail}", path),
-            BrainError::SearchError(msg) => write!(f, "搜索错误: {msg}"),
-            BrainError::EmbeddingError(msg) => write!(f, "Embedding 错误: {msg}"),
+            BrainError::ObsidianApiError(msg) => write!(f, "Obsidian API 错误: {msg}"),
             BrainError::RepoNotFound(p) => write!(f, "仓库不存在: {:?}", p),
             BrainError::GitError { path, detail } =>
                 write!(f, "Git 错误 {:?}: {detail}", path),
-            BrainError::QdrantError(msg) => write!(f, "Qdrant 错误: {msg}"),
             BrainError::LlmApiError { provider, detail } =>
                 write!(f, "LLM 错误 [{provider}]: {detail}"),
             BrainError::FetchError { url, detail } =>
@@ -2288,7 +1649,7 @@ impl fmt::Display for BrainError {
 impl std::error::Error for BrainError {}
 ```
 
-### 10.2 From 转换
+### 8.2 From 转换
 
 ```rust
 impl From<std::io::Error> for BrainError {
@@ -2331,7 +1692,7 @@ impl From<git2::Error> for BrainError {
 }
 ```
 
-### 10.3 错误码映射
+### 8.3 错误码映射
 
 ```rust
 impl BrainError {
@@ -2342,11 +1703,9 @@ impl BrainError {
             BrainError::VaultNotFound(_) => "VAULT_NOT_FOUND",
             BrainError::NoteNotFound(_) => "NOTE_NOT_FOUND",
             BrainError::ParseError { .. } => "PARSE_ERROR",
-            BrainError::SearchError(_) => "SEARCH_ERROR",
-            BrainError::EmbeddingError(_) => "EMBEDDING_ERROR",
+            BrainError::ObsidianApiError(_) => "OBSIDIAN_API_ERROR",
             BrainError::RepoNotFound(_) => "REPO_NOT_FOUND",
             BrainError::GitError { .. } => "GIT_ERROR",
-            BrainError::QdrantError(_) => "QDRANT_ERROR",
             BrainError::LlmApiError { .. } => "LLM_API_ERROR",
             BrainError::FetchError { .. } => "FETCH_ERROR",
             BrainError::IoError(_) => "IO_ERROR",
@@ -2357,8 +1716,7 @@ impl BrainError {
     /// 是否可降级处理
     pub fn is_degradable(&self) -> bool {
         matches!(self,
-            BrainError::QdrantError(_)
-            | BrainError::EmbeddingError(_)
+            BrainError::ObsidianApiError(_)
             | BrainError::LlmApiError { .. }
             | BrainError::FetchError { .. }
         )
@@ -2368,9 +1726,9 @@ impl BrainError {
 
 ---
 
-## 11. 数据流图
+## 9. 数据流图
 
-### 11.1 配置加载流程
+### 9.1 配置加载流程
 
 ```
 启动
@@ -2397,7 +1755,7 @@ Validate::validate() ─── 业务校验（路径存在、范围合理）
 AppConfig (Arc<>) ────── 全局共享
 ```
 
-### 11.2 文件变更处理流程
+### 9.2 文件变更处理流程
 
 ```
 Vault 文件变更
@@ -2422,28 +1780,16 @@ FileChangeEvent (via mpsc::channel)
     └──→ CodeRepo Service：检查关联
 ```
 
-### 11.3 搜索请求流程
+### 9.3 搜索请求流程
 
 ```
 search_notes(query)
     │
     ▼
-┌───────────────────────────┐
-│ tokio::join! 并行执行      │
-│                           │
-│  ┌─────────┐ ┌─────────┐ │
-│  │Tantivy  │ │Qdrant   │ │
-│  │全文搜索  │ │语义搜索  │ │
-│  │BM25排序 │ │余弦排序  │ │
-│  └────┬────┘ └────┬────┘ │
-│       │           │      │
-│       ▼           ▼      │
-│    top 20      top 20    │
-│       │           │      │
-│       ▼           ▼      │
-│    RRF 融合排序          │
-│    (k=60)                │
-└───────────────────────────┘
+ObsidianClient::search(query, limit)
+    │
+    ▼
+POST /search/ (JsonLogic)
     │
     ▼
 Top-K 结果（含 Obsidian URI）
@@ -2451,24 +1797,21 @@ Top-K 结果（含 Obsidian URI）
 
 ---
 
-## 12. 性能优化策略
+## 10. 性能优化策略
 
 | 策略 | 适用模块 | 实现方式 |
 |------|----------|----------|
 | 连接池 | SQLite | WAL 模式 + busy_timeout 5s |
 | HTTP 连接复用 | reqwest | `pool_max_idle_per_host(5)` |
-| 批量 Embedding | embedding.rs | 100 条/批，减少 API 调用 |
 | 防抖合并 | file_watcher | 300ms 窗口合并多次变更 |
-| 索引增量更新 | tantivy | 仅重新索引变更的 chunk |
-| 搜索并行化 | 混合搜索 | `tokio::join!` 全文+语义并行 |
-| 内存缓存 | Qdrant results | DashMap 缓存热门查询（TTL 5min） |
-| 写入批量提交 | Tantivy | 变更累积后一次 commit |
+| API 超时控制 | ObsidianClient | 30 秒请求超时 |
+| 自签名证书 | ObsidianClient | `danger_accept_invalid_certs(true)` |
 
 ---
 
-## 13. 测试策略
+## 11. 测试策略
 
-### 13.1 单元测试示例
+### 11.1 单元测试示例
 
 ```rust
 #[cfg(test)]
@@ -2491,13 +1834,10 @@ mod tests {
             path = "/tmp/test_vault"
             name = "test"
 
-            [qdrant]
-            url = "http://localhost:6333"
-
-            [embedding]
-            provider = "openai"
-            model = "text-embedding-3-small"
-            api_key_env = "TEST_KEY"
+            [obsidian]
+            enabled = true
+            url = "https://127.0.0.1:27124"
+            api_key = "test_key"
 
             [llm]
             provider = "openai"
@@ -2509,7 +1849,6 @@ mod tests {
 
             [storage]
             db_path = "/tmp/test.db"
-            index_path = "/tmp/test_index"
         "#).unwrap();
 
         let config = AppConfig::load(Some(config_path.to_str().unwrap())).unwrap();
@@ -2536,34 +1875,29 @@ mod tests {
         assert_eq!(val, Some("test_value".to_string()));
     }
 
-    #[test]
-    fn test_tantivy_index_search() {
-        let dir = TempDir::new().unwrap();
-        let index = TantivyIndex::new(dir.path()).unwrap();
+    #[tokio::test]
+    async fn test_obsidian_client_health_check() {
+        use wiremock::{MockServer, Mock, ResponseTemplate, matchers};
 
-        index.add_document(&NoteDocument {
-            title: "Rust 异步编程".to_string(),
-            content: "Tokio 是 Rust 生态中最流行的异步运行时".to_string(),
-            path: "programming/rust-async.md".to_string(),
-            tags: vec!["rust".to_string(), "async".to_string()],
-            created_at: TantivyDateTime::from_timestamp_secs(1700000000),
-            updated_at: TantivyDateTime::from_timestamp_secs(1700000000),
-        }).unwrap();
-        index.commit().unwrap();
+        let mock_server = MockServer::start().await;
+        Mock::given(matchers::method("GET"))
+            .and(matchers::path("/"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
 
-        let results = index.search(&SearchParams {
-            query: "异步运行时".to_string(),
-            top_k: 5,
-            tag_filter: None,
-        }).unwrap();
-
-        assert!(!results.is_empty());
-        assert!(results[0].path.contains("rust-async"));
+        let config = ObsidianConfig {
+            enabled: true,
+            url: mock_server.uri(),
+            api_key: "test_key".to_string(),
+        };
+        let client = ObsidianClient::new(&config).unwrap();
+        assert!(client.health_check().await.unwrap());
     }
 }
 ```
 
-### 13.2 Mock 方案
+### 11.2 Mock 方案
 
 使用 `mockall` 进行 trait mock：
 
@@ -2571,43 +1905,39 @@ mod tests {
 use mockall::automock;
 
 #[automock]
-#[async_trait]
-pub trait EmbeddingProvider: Send + Sync {
-    async fn embed_text(&self, text: &str) -> Result<Vec<f32>, BrainError>;
-    async fn embed_batch_inner(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, BrainError>;
-    fn dimensions(&self) -> usize;
-    fn batch_size(&self) -> usize { 100 }
+impl ObsidianClient {
+    pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResultItem>, BrainError> { ... }
+    pub async fn read_file(&self, path: &str) -> Result<String, BrainError> { ... }
+    pub async fn health_check(&self) -> Result<bool, BrainError> { ... }
 }
 
 #[tokio::test]
-async fn test_memory_service_with_mock_embedding() {
-    let mut mock = MockEmbeddingProvider::new();
-    mock.expect_embed_text()
-        .returning(|_| Ok(vec![0.1; 1536]));
-    mock.expect_dimensions()
-        .returning(|| 1536);
+async fn test_memory_service_with_mock_obsidian() {
+    let mut mock = MockObsidianClient::new();
+    mock.expect_search()
+        .returning(|_, limit| Ok(vec![SearchResultItem { /* test data */ }]));
+    mock.expect_health_check()
+        .returning(|| Ok(true));
 
-    // 使用 mock 测试 Memory Service
+    // 使用 mock 测试 MemoryService
 }
 ```
 
-### 13.3 测试覆盖目标
+### 11.3 测试覆盖目标
 
 | 模块 | 目标覆盖率 | 关键测试场景 |
 |------|-----------|-------------|
 | config.rs | 90% | 加载、校验、默认值、环境变量覆盖 |
 | sqlite_store.rs | 85% | 迁移、CRUD、事务、并发 |
 | file_watcher.rs | 75% | 防抖、过滤、事件类型判断 |
-| embedding.rs | 80% | Mock API 调用、重试、批量 |
+| obsidian_client.rs | 85% | Mock HTTP、搜索、文件读写、健康检查 |
 | llm_client.rs | 80% | Mock API 调用、流式解析 |
-| qdrant_client.rs | 80% | Mock HTTP、upsert/search/delete |
-| tantivy_index.rs | 85% | 索引/搜索/删除、中文分词 |
 
 ---
 
-## 14. 依赖清单
+## 12. 依赖清单
 
-### 14.1 Cargo.toml
+### 12.1 Cargo.toml
 
 ```toml
 [package]
@@ -2617,15 +1947,14 @@ edition = "2021"
 
 [dependencies]
 # Web 框架
-axum = "0.7"
+axum = "0.8"
 tokio = { version = "1", features = ["full"] }
-tower = "0.4"
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
 
 # 序列化
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yaml = "0.9"
 
 # 配置
 config = "0.14"
@@ -2633,21 +1962,17 @@ config = "0.14"
 # 数据库
 rusqlite = { version = "0.31", features = ["bundled"] }
 
-# 全文搜索
-tantivy = "0.22"
-tantivy-jieba = "0.2"
-
-# HTTP 客户端
+# HTTP 客户端（Obsidian REST API + LLM API）
 reqwest = { version = "0.12", features = ["json", "stream"] }
 
-# Markdown 解析
-pulldown-cmark = "0.10"
+# Markdown 解析（预留）
+pulldown-cmark = "0.12"
 gray_matter = "0.2"
 
 # Git 操作
 git2 = "0.19"
 
-# 文件监控
+# 文件监控（可选）
 notify = "6"
 
 # RSS 解析
@@ -2668,6 +1993,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # 工具
 uuid = { version = "1", features = ["v4", "serde"] }
 thiserror = "1"
+urlencoding = "2"
 
 [dev-dependencies]
 tempfile = "3"
@@ -2676,18 +2002,18 @@ wiremock = "0.6"
 tokio-test = "0.4"
 ```
 
-### 14.2 依赖关系图
+### 12.2 依赖关系图
 
 ```
 config ──────────────→ serde, serde_json
 rusqlite ────────────→ 无（bundled 编译）
-tantivy ─────────────→ tantivy-jieba
-reqwest ─────────────→ serde_json, tokio
+reqwest ─────────────→ serde_json, tokio（用于 ObsidianClient + LlmClient）
 notify ──────────────→ tokio::sync::mpsc
-pulldown-cmark ──────→ 无
-gray_matter ─────────→ serde_yaml
+pulldown-cmark ──────→ 无（预留）
+gray_matter ─────────→ serde_yaml（预留）
 git2 ────────────────→ 无（系统 libgit2）
 tracing ─────────────→ tracing-subscriber
 chrono ──────────────→ serde
 uuid ────────────────→ 无
+urlencoding ─────────→ 无（Obsidian URI 编码）
 ```

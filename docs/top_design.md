@@ -1,6 +1,6 @@
 # ObsidianBrain — 顶层设计文档
 
-> **版本**: v0.2-draft | **最后更新**: 2026-05-29 | **状态**: 设计中
+> **版本**: v1.0 | **最后更新**: 2026-06-02 | **状态**: 已实现
 
 ---
 
@@ -20,7 +20,7 @@ ObsidianBrain 是一个运行在本地的 **Rust 知识引擎**，对外提供�
 
 | 痛点 | ObsidianBrain 的解决方式 |
 |---|---|
-| 笔记写了就忘，难以跨笔记关联 | 语义记忆引擎 + 全文检索，自动关联 |
+| 笔记写了就忘，难以跨笔记关联 | 通过 Obsidian API 快速检索笔记，支持全文搜索和标签过滤 |
 | 代码仓库与知识笔记割裂 | 代码仓 Hub 打通笔记 ↔ 仓库双向链接 |
 | 缺乏跨界灵感触发 | 灵感熔炉主动制造知识碰撞 |
 | 外部信息过载，手动筛选成本高 | 智识雷达基于个人知识图谱做个性化推荐 |
@@ -28,11 +28,11 @@ ObsidianBrain 是一个运行在本地的 **Rust 知识引擎**，对外提供�
 
 ### 1.4 非功能性需求
 
-- **隐私优先**：所有数据本地存储，服务仅监听 `127.0.0.1`，不上传任何用户数据（Embedding API 调用除外，后续可切换本地模型）。
-- **低资源占用**：空闲时内存 < 100MB（不含 Qdrant），CPU 接近零。
-- **快速响应**：工具调用 P95 延迟 < 500ms（不含 LLM 调用）。
+- **隐私优先**：所有数据本地存储，服务仅监听 `127.0.0.1`，不上传任何用户数据（LLM API 调用除外）。
+- **低资源占用**：空闲时内存 < 50MB，CPU 接近零。
+- **快速响应**：工具调用 P95 延迟 < 200ms（不含 LLM 调用）。
 - **可靠运行**：单进程，panic 自动重启（通过 systemd/launchd），数据持久化不丢失。
-- **易部署**：单一二进制 + Qdrant Docker 容器，`docker compose up` 一键启动。
+- **易部署**：单一二进制 + Obsidian Local REST API 插件，无需额外服务。
 
 ---
 
@@ -104,51 +104,60 @@ Tool Handler 调用 MemoryService
 LLM 整合结果，生成自然语言回复给用户
 ```
 
-### 2.3 目录结构（规划）
+### 2.3 目录结构（实际实现）
 
 ```
 ObsidianBrain/
 ├── Cargo.toml
-├── docker-compose.yml          # Qdrant + 未来可能的辅助服务
+├── docker-compose.yml          # Qdrant（可选，当前未使用）
 ├── config/
-│   └── default.toml            # 默认配置文件
+│   ├── default.toml            # 默认配置文件
+│   └── radar_sources.toml      # 智识雷达源配置
 ├── docs/
 │   └── top_design.md           # 本文档
 ├── migrations/                 # SQLite schema 迁移
-└── src/
-    ├── main.rs                 # 入口：启动、优雅关闭
-    ├── config.rs               # 配置加载与校验
-    ├── error.rs                # 统一错误类型
-    ├── api/                    # API 层
-    │   ├── mod.rs
-    │   ├── router.rs           # Axum 路由定义
-    │   ├── tool_protocol.rs    # Tool 协议（MCP / function calling）
-    │   └── handlers/           # 各工具的请求处理器
-    ├── core/                   # 核心服务层
-    │   ├── mod.rs
-    │   ├── memory.rs           # 记忆引擎
-    │   ├── timeline.rs         # 时间线
-    │   ├── code_repo.rs        # 代码仓管理
-    │   ├── inspiration.rs      # 灵感熔炉
-    │   └── radar.rs            # 智识雷达
-    ├── infra/                  # 基础设施层
-    │   ├── mod.rs
-    │   ├── tantivy_index.rs    # Tantivy 全文索引封装
-    │   ├── qdrant_client.rs    # Qdrant 向量操作封装
-    │   ├── sqlite_store.rs     # SQLite 元数据存储
-    │   ├── file_watcher.rs     # notify 文件监控
-    │   ├── embedding.rs        # Embedding 生成（OpenAI / 本地 ONNX）
-    │   └── llm_client.rs       # LLM 调用封装（多 provider）
-    ├── tools/                  # 工具定义与注册
-    │   ├── mod.rs
-    │   ├── registry.rs         # 工具注册表
-    │   └── definitions.rs      # 工具 schema 定义（JSON Schema）
-    └── models/                 # 共享数据模型
-        ├── mod.rs
-        ├── note.rs
-        ├── memory.rs
-        ├── repo.rs
-        └── radar.rs
+├── backend/
+│   └── src/
+│       ├── main.rs             # 入口：启动、优雅关闭
+│       ├── config.rs           # 配置加载与校验
+│       ├── error.rs            # 统一错误类型
+│       ├── api/                # API 层
+│       │   ├── mod.rs
+│       │   ├── router.rs       # Axum 路由定义
+│       │   └── handlers/       # 各工具的请求处理器
+│       ├── core/               # 核心服务层
+│       │   ├── mod.rs
+│       │   ├── memory_service.rs    # 记忆引擎（通过 Obsidian API）
+│       │   ├── timeline.rs          # 时间线
+│       │   ├── code_repo/           # 代码仓管理
+│       │   ├── inspiration/         # 灵感熔炉
+│       │   └── radar/               # 智识雷达
+│       ├── infra/              # 基础设施层
+│       │   ├── mod.rs
+│       │   ├── sqlite_store.rs      # SQLite 元数据存储
+│       │   ├── file_watcher.rs      # notify 文件监控（用于 Timeline）
+│       │   ├── obsidian_client.rs   # Obsidian Local REST API 客户端
+│       │   └── llm_client.rs        # LLM 调用封装（多 provider）
+│       ├── tools/              # 工具定义与注册
+│       │   ├── mod.rs
+│       │   ├── registry.rs          # 工具注册表
+│       │   ├── definitions.rs       # 工具 schema 定义（JSON Schema）
+│       │   └── handlers/            # 工具处理器
+│       └── models/             # 共享数据模型
+│           ├── mod.rs
+│           ├── note.rs
+│           ├── memory.rs
+│           ├── repo.rs
+│           ├── radar.rs
+│           ├── inspiration.rs
+│           └── timeline.rs
+└── frontend/                   # Vue3 前端
+    ├── src/
+    │   ├── views/              # 页面组件
+    │   ├── components/         # 通用组件
+    │   ├── api/                # API 客户端
+    │   └── ...
+    └── ...
 ```
 
 ---
@@ -157,12 +166,17 @@ ObsidianBrain/
 
 | 层次 | 组件 | 技术选型 | 选型理由 |
 |---|---|---|---|
-| Web 框架 | HTTP 服务 | **Axum + Tokio** | 高性能异步框架，生态成熟，类型安全的路由 |
+| Web 框架 | HTTP 服务 | **Axum 0.7 + Tokio** | 高性能异步框架，生态成熟，类型安全的路由 |
 | 序列化 | JSON 处理 | **serde + serde_json** | Rust 标准选择 |
 | Obsidian 集成 | 笔记操作 | **Obsidian Local REST API** | 直接通过 HTTP 调用 Obsidian 插件，无需本地索引 |
-| HTTP 客户端 | API 调用 | **reqwest** | 异步 HTTP 客户端，支持连接池 |
-| 配置管理 | 应用配置 | **config** crate | 支持 TOML/YAML/ENV 多来源配置 |
+| HTTP 客户端 | API 调用 | **reqwest 0.12** | 异步 HTTP 客户端，支持连接池 |
+| 数据库 | 元数据存储 | **SQLite** (rusqlite) | 轻量级嵌入式数据库，用于元数据和缓存 |
+| Git 操作 | 代码仓信息 | **git2** | libgit2 绑定，无需系统 Git |
+| 文件监控 | 文件变更检测 | **notify 6** | 跨平台文件监控，用于 Timeline 模块 |
+| LLM 调用 | AI 能力 | **reqwest** (OpenAI/Ollama API) | 多 provider 支持，流式响应 |
+| 配置管理 | 应用配置 | **config** crate | 支持 TOML/ENV 多来源配置 |
 | 日志 | 运行日志 | **tracing** + **tracing-subscriber** | 结构化日志，支持 span 追踪 |
+| 前端 | Web UI | **Vue 3 + Vite + Element Plus** | 现代化前端框架 |
 
 ### 3.1 部署架构
 
@@ -211,21 +225,17 @@ struct Note {
 
 ### 4.2 记忆单元 (Memory)
 
+当前实现中，记忆管理直接通过 Obsidian API 操作笔记，不维护独立的记忆索引。
+
 ```rust
-struct Memory {
-    id: Uuid,
-    note_path: PathBuf,         // 来源笔记路径
-    chunk_index: usize,         // 在笔记中的段落序号
-    content: String,            // 记忆文本内容
-    summary: Option<String>,    // LLM 生成的摘要
-    tags: Vec<String>,          // 继承自笔记 + 自动提取
-    embedding_id: String,       // Qdrant 中的向量 ID
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
-    access_count: u32,          // 访问次数，用于排序
-    importance: f32,            // 重要度评分
-}
+// 通过 Obsidian API 进行笔记操作
+// search_notes: Obsidian API /search/simple
+// get_note: Obsidian API /vault/{path} (GET)
+// write_note: Obsidian API /vault/{path} (PUT)
+// delete_note: Obsidian API /vault/{path} (DELETE)
 ```
+
+**注意**：当前版本不实现独立的记忆索引，所有搜索和检索都通过 Obsidian Local REST API 完成。这简化了架构，但搜索能力受限于 Obsidian 的搜索功能。
 
 ### 4.3 代码仓库 (CodeRepo)
 
@@ -259,9 +269,8 @@ struct RadarItem {
     summary: String,
     source: String,             // "arxiv" | "hackernews" | "reddit" | "rss:xxx"
     url: String,
-    embedding_id: String,       // Qdrant 向量 ID
-    relevance_score: f32,       // 与用户知识的相似度
-    related_notes: Vec<PathBuf>,// 关联的笔记
+    relevance_score: f32,       // 与用户知识的相似度（基于标签匹配）
+    related_notes: Vec<PathBuf>,// 关联的笔记（基于标签匹配）
     status: RadarStatus,        // New | Read | Saved | Dismissed
     fetched_at: DateTime<Utc>,
     published_at: Option<DateTime<Utc>>,
@@ -269,6 +278,8 @@ struct RadarItem {
 
 enum RadarStatus { New, Read, Saved, Dismissed }
 ```
+
+**注意**：当前版本的相关性计算基于标签匹配，不使用向量相似度。这简化了架构，但相关性精度受限于标签系统的覆盖度。
 
 ### 4.5 时间线事件 (TimelineEvent)
 
@@ -311,7 +322,6 @@ CREATE TABLE radar_items (
     summary     TEXT,
     source      TEXT NOT NULL,
     url         TEXT NOT NULL UNIQUE,
-    embedding_id TEXT,
     status      TEXT DEFAULT 'new',
     relevance_score REAL,
     fetched_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -345,42 +355,30 @@ CREATE TABLE app_state (
 
 #### 5.1.1 记忆系统 (Memory)
 
-**记忆单元**：从 Obsidian 笔记中提取的段落或摘要，携带来源路径、标签、时间戳。
+**记忆单元**：当前实现中，记忆管理直接通过 Obsidian API 操作笔记，不维护独立的记忆索引。
 
-**自动提取流程**：
+**笔记操作流程**：
 
 ```
-文件变更 (notify 监听)
+LLM 调用 tool
     │
     ▼
-变更检测（新增 / 修改 / 删除）
+MemoryService 接收请求
     │
-    ▼
-Markdown 解析（frontmatter 提取 + 正文分割）
-    │
-    ▼
-智能分块（按标题层级 + 段落边界，每块 300-800 token）
-    │
-    ├─→ Tantivy 全文索引（更新对应文档）
-    ├─→ Embedding 生成（批量调用 API）
-    └─→ Qdrant 向量写入（upsert，携带 payload）
+    ├─→ 搜索笔记 ──→ Obsidian API /search/simple
+    ├─→ 读取笔记 ──→ Obsidian API /vault/{path} (GET)
+    ├─→ 写入笔记 ──→ Obsidian API /vault/{path} (PUT)
+    └─→ 删除笔记 ──→ Obsidian API /vault/{path} (DELETE)
 ```
-
-**分块策略**：
-- 优先按 H1/H2/H3 标题分割
-- 每块目标 300-800 token，超长段落按段落边界二次分割
-- 保留上下文：每块附带其所在标题路径（如 `## 项目 > ### 架构 > #### 后端`）
-- 代码块保持完整，不在代码块内部分割
 
 **记忆操作工具**：
 
 | 工具 | 参数 | 返回 | 说明 |
 |---|---|---|---|
-| `search_memory` | `query: string, top_k?: int, tags?: string[]` | `Memory[]` | 混合检索：全文 + 语义，RRF 融合排序 |
-| `add_memory` | `note_path: string, content: string, tags?: string[]` | `Memory` | 手动添加记忆（写入笔记 + 索引） |
-| `update_memory` | `memory_id: string, content: string` | `Memory` | 更新记忆内容并重新向量化 |
-| `forget_memory` | `memory_id: string` | `bool` | 从索引中删除记忆 |
-| `get_memory_stats` | 无 | `{total, by_tag, recent}` | 记忆库统计信息 |
+| `search_notes` | `query: string, top_k?: int, tags?: string[]` | `Note[]` | 通过 Obsidian API 搜索笔记 |
+| `get_note` | `path: string` | `Note` | 读取笔记完整内容 |
+| `list_recent_notes` | `days?: int, limit?: int` | `Note[]` | 列出最近修改的笔记 |
+| `get_memory_stats` | 无 | `{total_notes, total_files, tags}` | 记忆库统计信息 |
 
 **引用溯源**：每条搜索结果都附带 Obsidian URI：
 
@@ -388,12 +386,12 @@ Markdown 解析（frontmatter 提取 + 正文分割）
 obsidian://open?vault=<vault_name>&file=<encoded_path>
 ```
 
-**混合检索策略**：
-1. Tantivy 全文检索 → BM25 排序，取 top 20
-2. Qdrant 语义检索 → 余弦相似度，取 top 20
-3. RRF (Reciprocal Rank Fusion) 融合两路结果
-4. 按 `importance` 和 `access_count` 做微调
-5. 返回 top_k 条结果
+**搜索策略**：
+1. 调用 Obsidian API `/search/simple` 进行全文搜索
+2. 支持标签过滤
+3. 返回 top_k 条结果，附带 Obsidian URI
+
+**注意**：当前版本不实现独立的记忆索引，所有搜索和检索都通过 Obsidian Local REST API 完成。这简化了架构，但搜索能力受限于 Obsidian 的搜索功能。
 
 #### 5.1.2 技能系统 (Skill)
 
@@ -495,7 +493,7 @@ GET  /v1/health             → 健康检查
 
 | 分类 | 工具名 | 参数 | 说明 |
 |---|---|---|---|
-| **笔记检索** | `search_notes` | `query, top_k?, tags?` | 全文 + 语义混合搜索 |
+| **笔记检索** | `search_notes` | `query, top_k?, tags?` | 通过 Obsidian API 搜索笔记 |
 | | `get_note` | `path` | 获取笔记完整内容 |
 | | `list_recent_notes` | `days?, limit?` | 列出最近修改的笔记 |
 | **记忆管理** | `search_memory` | `query, top_k?, tags?` | 记忆语义搜索 |
@@ -837,8 +835,6 @@ temperature = 0.7
 chunk_min_tokens = 300
 chunk_max_tokens = 800
 search_top_k = 5
-hybrid_search = true          # 启用全文 + 语义混合检索
-rrf_k = 60                    # RRF 参数
 
 [timeline]
 date_formats = ["%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"]
@@ -876,14 +872,13 @@ enum BrainError {
 
     // 搜索相关
     SearchError(String),
-    EmbeddingError(String),
 
     // 代码仓相关
     RepoNotFound(PathBuf),
     GitError { path: PathBuf, detail: String },
 
     // 外部服务
-    QdrantError(String),
+    ObsidianApiError(String),
     LlmApiError { provider: String, detail: String },
     FetchError { url: String, detail: String },
 
@@ -913,8 +908,7 @@ enum BrainError {
 
 | 场景 | 处理方式 |
 |---|---|
-| Qdrant 不可用 | 降级为纯 Tantivy 全文搜索，日志告警 |
-| Embedding API 超时 | 重试 3 次后跳过向量化，仅全文索引 |
+| Obsidian API 不可用 | 返回错误，提示用户检查 Obsidian 插件是否启用 |
 | LLM API 失败 | 返回错误 + 建议（"请稍后重试或使用更小的模型"） |
 | 文件监控丢失 | 自动重连，全量扫描补偿 |
 | Git 仓库路径失效 | 标记为 inactive，不删除注册信息 |
@@ -927,22 +921,18 @@ enum BrainError {
 
 | 操作 | 目标延迟 | 策略 |
 |---|---|---|
-| 全文搜索 | < 50ms | Tantivy 索引常驻内存 |
-| 语义搜索 | < 200ms | Qdrant HNSW 索引 |
-| 混合搜索 | < 300ms | 全文 + 语义并行执行，tokio::join! |
-| 笔记读取 | < 10ms | 文件系统直接读取 |
+| 笔记搜索 | < 200ms | 通过 Obsidian API 搜索 |
+| 笔记读取 | < 50ms | 通过 Obsidian API 读取 |
 | 仓库元信息 | < 100ms | SQLite 缓存 + 增量更新 |
-| 文件变更处理 | < 500ms | 防抖 (300ms) + 增量索引 |
+| 文件变更处理 | < 500ms | 防抖 (300ms) + 事件过滤 |
 | LLM 调用 | 取决于 API | 流式输出 + 超时控制 (30s) |
 
 ### 8.2 优化策略
 
-- **批量 Embedding**：文件变更防抖后批量处理，减少 API 调用次数
-- **增量索引**：仅重新索引变更的 chunk，未变更的保留原向量
 - **连接池**：reqwest 连接池复用 HTTP 连接
 - **缓存层**：仓库元信息、雷达结果等缓存在 SQLite，TTL 可控
-- **并行执行**：混合搜索中全文和语义检索并行执行
 - **懒加载**：雷达源仅在定时任务时拉取，不阻塞主流程
+- **防抖**：文件变更事件防抖，避免频繁触发
 
 ---
 
@@ -981,54 +971,46 @@ enum BrainError {
 
 ## 10. 实施路线图
 
-### Phase 0: 基础设施搭建（详细计划见 `docs/superpowers/plans/2026-05-30-phase0-infrastructure.md`）
+### Phase 0: 基础设施搭建 ✅ 已完成
 
-- [ ] Task 1: 配置系统（config crate + TOML 解析 + 环境变量覆盖 + 校验）
-- [ ] Task 2: SQLite 元数据存储（rusqlite WAL + 迁移框架 + 5 张表）
-- [ ] Task 3: 文件监控（notify + 300ms 防抖 + .md 过滤）
-- [ ] Task 4: Qdrant 客户端（REST API + collection 管理 + 向量操作）
-- [ ] Task 5: Embedding Provider（trait + OpenAI + Ollama + 批量 + 重试）
-- [ ] Task 6: LLM Client（trait + OpenAI + Ollama + 流式 SSE）
-- [ ] Task 7: Tantivy 全文索引（jieba 中文分词 + schema + 搜索）
-- [ ] Task 8: 集成到 AppContext + 健康检查
+- [x] Task 1: 配置系统（config crate + TOML 解析 + 环境变量覆盖 + 校验）
+- [x] Task 2: SQLite 元数据存储（rusqlite WAL + 迁移框架 + 7 张表）
+- [x] Task 3: 文件监控（notify + 300ms 防抖 + .md 过滤）
+- [x] Task 4: Obsidian Local REST API 客户端
+- [x] Task 5: LLM Client（trait + OpenAI + Ollama + 流式 SSE）
+- [x] Task 6: 集成到 AppContext + 健康检查
 
-### Phase 1: 核心引擎 MVP（2-3 周）
+**注意**：当前架构使用 Obsidian Local REST API 进行笔记操作，不实现 Tantivy/Qdrant/Embedding 混合搜索架构。
 
-- [ ] Vault 文件监控 (notify)
-- [ ] Markdown 解析 (pulldown-cmark + gray_matter)
-- [ ] 智能分块器
-- [ ] Tantivy 全文索引 + 中文分词
-- [ ] Qdrant 向量存储
-- [ ] Embedding 生成 (OpenAI API)
-- [ ] 混合搜索 (RRF 融合)
-- [ ] MCP / HTTP Tool API 基础协议
-- [ ] 核心工具：`search_notes`, `get_note`, `search_memory`, `add_memory`
+### Phase 1: 核心引擎 MVP ✅ 已完成
 
-**里程碑**：在 Claude 中通过 Tool API 搜索 Obsidian 笔记并获得结果
+- [x] 通过 Obsidian API 实现笔记操作
+- [x] HTTP Tool API 基础协议
+- [x] 核心工具：`search_notes`, `get_note`, `list_recent_notes`, `get_memory_stats`
+- [x] Vue3 前端基础框架
 
-### Phase 2: 代码仓 + 时间线（1-2 周）
+**里程碑**：在 Claude 中通过 Tool API 搜索 Obsidian 笔记并获得结果 ✅
 
-- [ ] 代码仓注册与元信息提取 (git2)
-- [ ] 仓库卡片信息展示
-- [ ] 笔记 ↔ 仓库关联
-- [ ] VSCode 跳转
-- [ ] 自动文档化 (LLM 生成)
-- [ ] 时间线数据收集与查询
-- [ ] 工具：`add_code_repo`, `list_code_repos`, `get_repo_detail`, `generate_docs`, `get_timeline`
+### Phase 2: 代码仓 + 时间线 ✅ 已完成
 
-### Phase 3: 灵感 + 雷达（1-2 周）
+- [x] 代码仓注册与元信息提取 (git2)
+- [x] 仓库卡片信息展示
+- [x] 笔记 ↔ 仓库关联
+- [x] VSCode 跳转
+- [x] 时间线数据收集与查询
+- [x] 工具：`add_code_repo`, `list_code_repos`, `get_repo_detail`, `link_note_to_repo`, `get_linked_notes`, `open_in_vscode`, `get_timeline`
 
-- [ ] 灵感熔炉三种模式实现
-- [ ] 概念距离计算算法
-- [ ] 雷达外部源拉取（RSS、HN、arXiv）
-- [ ] 个性化相关性排序
-- [ ] 文章纳藏到 vault
-- [ ] 工具：`get_inspiration`, `get_radar`, `add_to_vault`
+### Phase 3: 灵感 + 雷达 ✅ 已完成
+
+- [x] 灵感熔炉三种模式实现（LLM 生成）
+- [x] 雷达外部源拉取（RSS、HN、arXiv、Reddit）
+- [x] 基于标签的相关性排序
+- [x] 文章纳藏到 vault
+- [x] 工具：`get_inspiration`, `get_radar`, `add_to_vault`, `dismiss_radar_item`
 
 ### Phase 4: 打磨与增强（持续）
 
 - [ ] 技能 YAML 扩展系统
-- [ ] 本地 ONNX Embedding 支持（隐私模式）
 - [ ] 用户兴趣漂移追踪
 - [ ] 性能优化与内存调优
 - [ ] 完善的文档与使用指南

@@ -158,7 +158,7 @@ Tool Protocol & API 层（以下简称"协议层"）是 ObsidianBrain 引擎的*
 
 | 工具名 | 参数 | 返回值 | 描述 | 所属模块 |
 |---|---|---|---|---|
-| `search_notes` | `query: string`（必填）, `top_k: int?`（默认5）, `tags: string[]?` | `{ notes: NoteResult[], total: int }` | 全文 + 语义混合搜索 Obsidian vault 中的笔记，返回匹配片段及来源链接 | `search` |
+| `search_notes` | `query: string`（必填）, `top_k: int?`（默认5）, `tags: string[]?` | `{ notes: NoteResult[], total: int }` | 通过 Obsidian API 搜索 vault 中的笔记，返回匹配片段及来源链接 | `search` |
 | `get_note` | `path: string`（必填） | `{ note: Note }` | 获取指定路径笔记的完整内容（含 frontmatter、标签、正文） | `search` |
 | `list_recent_notes` | `days: int?`（默认7）, `limit: int?`（默认20） | `{ notes: NoteSummary[] }` | 列出最近修改/创建的笔记列表 | `search` |
 
@@ -166,10 +166,10 @@ Tool Protocol & API 层（以下简称"协议层"）是 ObsidianBrain 引擎的*
 
 | 工具名 | 参数 | 返回值 | 描述 | 所属模块 |
 |---|---|---|---|---|
-| `search_memory` | `query: string`（必填）, `top_k: int?`（默认5）, `tags: string[]?` | `{ memories: Memory[], total: int }` | 记忆语义搜索，混合检索 + RRF 融合排序 | `memory` |
-| `add_memory` | `note_path: string`（必填）, `content: string`（必填）, `tags: string[]?` | `{ memory: Memory }` | 手动添加记忆单元（写入笔记 + 索引 + 向量化） | `memory` |
-| `update_memory` | `memory_id: string`（必填）, `content: string`（必填） | `{ memory: Memory }` | 更新记忆内容并重新向量化 | `memory` |
-| `forget_memory` | `memory_id: string`（必填） | `{ deleted: bool }` | 从索引和向量库中删除指定记忆 | `memory` |
+| `search_memory` | `query: string`（必填）, `top_k: int?`（默认5）, `tags: string[]?` | `{ memories: Memory[], total: int }` | 记忆搜索，通过 Obsidian API 搜索笔记内容 | `memory` |
+| `add_memory` | `note_path: string`（必填）, `content: string`（必填）, `tags: string[]?` | `{ memory: Memory }` | 手动添加记忆单元（写入笔记内容） | `memory` |
+| `update_memory` | `memory_id: string`（必填）, `content: string`（必填） | `{ memory: Memory }` | 更新记忆内容 | `memory` |
+| `forget_memory` | `memory_id: string`（必填） | `{ deleted: bool }` | 删除指定记忆（从笔记中移除） | `memory` |
 | `get_memory_stats` | 无 | `{ total: int, by_tag: object, recent_count: int }` | 获取记忆库统计信息 | `memory` |
 
 ### 3.3 代码仓管理模块
@@ -477,8 +477,7 @@ Claude Desktop                    ObsidianBrain (MCP Server)
   │       "uptime_seconds": 86400,           │
   │       "components": {                    │
   │         "vault": "ok",                   │
-  │         "qdrant": "ok",                  │
-  │         "tantivy": "ok",                 │
+  │         "obsidian": "ok",                │
   │         "sqlite": "ok"                   │
   │       },                                 │
   │       "tools_count": 20                  │
@@ -503,9 +502,8 @@ Claude Desktop                    ObsidianBrain (MCP Server)
 | `REPO_PATH_INVALID` | 200 | 代码仓库路径不存在或不是 Git 仓库 | 检查路径是否正确，确保路径下已初始化 Git 仓库 |
 | `RADAR_ITEM_NOT_FOUND` | 200 | 指定 ID 的雷达条目不存在 | 使用 get_radar 获取最新推荐列表 |
 | `SEARCH_ERROR` | 200 | 搜索执行失败 | 请稍后重试，或尝试简化搜索关键词 |
-| `EMBEDDING_ERROR` | 200 | Embedding 生成失败 | 语义搜索暂不可用，全文搜索仍然可用 |
+| `OBSIDIAN_API_ERROR` | 200 | Obsidian REST API 调用失败 | 请确保 Obsidian 正在运行且 Local REST API 插件已启用 |
 | `LLM_API_ERROR` | 200 | LLM API 调用失败 | 请稍后重试，或检查 LLM 配置 |
-| `QDRANT_UNAVAILABLE` | 200 | Qdrant 向量库不可用 | 语义搜索暂不可用，已自动降级为全文搜索 |
 | `GIT_ERROR` | 200 | Git 操作失败 | 检查仓库状态是否正常 |
 | `FILE_WRITE_ERROR` | 200 | 文件写入失败 | 检查 vault 路径权限和磁盘空间 |
 | `TOOL_TIMEOUT` | 200 | 工具执行超时 | 请稍后重试，或减小请求参数范围 |
@@ -632,8 +630,7 @@ Claude Desktop                    ObsidianBrain (MCP Server)
 | `RepoNotFound` | `REPO_NOT_FOUND` |
 | `GitError` | `GIT_ERROR` |
 | `SearchError` | `SEARCH_ERROR` |
-| `EmbeddingError` | `EMBEDDING_ERROR` |
-| `QdrantError` | `QDRANT_UNAVAILABLE` |
+| `FetchError` | `OBSIDIAN_API_ERROR` |
 | `LlmApiError` | `LLM_API_ERROR` |
 | `IoError` | `FILE_WRITE_ERROR` |
 | `Internal` | `INTERNAL_ERROR` |

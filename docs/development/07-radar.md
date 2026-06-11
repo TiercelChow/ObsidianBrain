@@ -28,15 +28,15 @@
 │         │                  │                       │             │
 │         ▼                  ▼                       ▼             │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │                   SQLite + Qdrant                         │   │
-│  │          (radar_items 表 + embedding 向量)                 │   │
+│  │                   SQLite                                  │   │
+│  │          (radar_items 表)                                  │   │
 │  └──────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
          │                                        │
          ▼                                        ▼
   ┌──────────────┐                      ┌──────────────────┐
-  │  记忆引擎     │                      │  Embedding 基础设施│
-  │ (Memory)     │                      │  (infra/embedding)│
+  │  记忆引擎     │                      │  ObsidianClient   │
+  │ (Memory)     │                      │  (笔记标签查询)    │
   └──────────────┘                      └──────────────────┘
 ```
 
@@ -44,7 +44,7 @@
 
 1. **异步优先**：所有网络 IO 操作使用 `tokio` 异步执行，不阻塞主事件循环
 2. **容错隔离**：每个源的抓取独立执行，单个源失败不影响其他源
-3. **增量处理**：已抓取的 URL 不重复处理，embedding 缓存复用
+3. **增量处理**：已抓取的 URL 不重复处理，标签缓存复用
 4. **可配置性**：所有关键参数（拉取间隔、阈值、排序权重等）可通过配置文件调整
 5. **可观测性**：关键操作通过 `tracing` 输出结构化日志
 
@@ -57,10 +57,9 @@ src/
 ├── core/
 │   └── radar.rs                    # 雷达主服务，RadarService struct + 对外工具接口
 ├── infra/
-│   ├── embedding.rs                # (已有) Embedding 生成基础设施
-│   ├── qdrant_client.rs            # (已有) Qdrant 向量操作
 │   ├── sqlite_store.rs             # (已有) SQLite 操作，扩展 radar_items 表
-│   └── llm_client.rs               # (已有) LLM 调用封装
+│   ├── llm_client.rs               # (已有) LLM 调用封装
+│   └── obsidian_client.rs          # (已有) Obsidian REST API 封装
 ├── models/
 │   └── radar.rs                    # 雷达相关数据模型定义
 └── tools/
@@ -99,10 +98,9 @@ pub struct RadarService {
     state_manager: StateManager,
     scheduler: RadarScheduler,
     // 基础设施依赖
-    embedding_client: Arc<EmbeddingClient>,
-    qdrant_client: Arc<QdrantClient>,
     sqlite_store: Arc<SqliteStore>,
     llm_client: Arc<LlmClient>,
+    obsidian_client: Arc<ObsidianClient>,
     vault_path: PathBuf,
     config: RadarConfig,
 }
@@ -1107,12 +1105,11 @@ impl RadarScheduler {
 ```rust
 pub struct Processor {
     sqlite_store: Arc<SqliteStore>,
-    embedding_client: Arc<EmbeddingClient>,
 }
 
 impl Processor {
-    pub fn new(sqlite_store: Arc<SqliteStore>, embedding_client: Arc<EmbeddingClient>) -> Self {
-        Self { sqlite_store, embedding_client }
+    pub fn new(sqlite_store: Arc<SqliteStore>) -> Self {
+        Self { sqlite_store }
     }
 
     /// 处理一批原始文章：清洗 → 去重 → 标准化
@@ -1232,27 +1229,24 @@ pub struct ProcessedArticle {
 
 ### 3.4 相关性引擎 (RelevanceEngine)
 
-核心的个性化推荐引擎，负责构建用户兴趣向量、计算文章相关性并执行多因子排序。
+核心的个性化推荐引擎，负责构建用户兴趣标签画像、计算文章相关性并执行多因子排序。
 
-#### 3.4.1 用户兴趣向量构建算法
+#### 3.4.1 用户兴趣标签构建算法
 
 ```rust
 pub struct RelevanceEngine {
-    embedding_client: Arc<EmbeddingClient>,
-    qdrant_client: Arc<QdrantClient>,
+    obsidian_client: Arc<ObsidianClient>,
     sqlite_store: Arc<SqliteStore>,
     config: RelevanceConfig,
 }
 
 #[derive(Debug, Clone)]
 pub struct RelevanceConfig {
-    pub relevance_threshold: f32,     // 默认 0.7
+    pub relevance_threshold: f32,     // 默认 0.3
     pub interest_window_days: u32,    // 默认 30
-    pub content_dedup_threshold: f32, // 默认 0.92
-    // 多因子排序权重
-    pub alpha: f32,  // 语义相似度权重，默认 0.6
-    pub beta: f32,   // 来源可信度权重，默认 0.15
-    pub gamma: f32,  // 时效性权重，默认 0.15
+    pub alpha: f32,  // 标签匹配权重，默认 0.5
+    pub beta: f32,   // 来源可信度权重，默认 0.2
+    pub gamma: f32,  // 时效性权重，默认 0.2
     pub delta: f32,  // 内容重复度降权，默认 0.1
     // 时间衰减参数
     pub time_decay_halflife_days: f32, // 时间衰减半衰期（天），默认 7
@@ -1261,12 +1255,11 @@ pub struct RelevanceConfig {
 impl Default for RelevanceConfig {
     fn default() -> Self {
         Self {
-            relevance_threshold: 0.7,
+            relevance_threshold: 0.3,
             interest_window_days: 30,
-            content_dedup_threshold: 0.92,
-            alpha: 0.6,
-            beta: 0.15,
-            gamma: 0.15,
+            alpha: 0.5,
+            beta: 0.2,
+            gamma: 0.2,
             delta: 0.1,
             time_decay_halflife_days: 7.0,
         }
@@ -1274,11 +1267,11 @@ impl Default for RelevanceConfig {
 }
 ```
 
-**用户兴趣向量构建算法**：
+**用户兴趣标签频率构建算法**：
 
 ```
 输入：最近 N 天活跃笔记集合 Notes = {n₁, n₂, ..., nₖ}
-输出：用户兴趣向量 V_user (维度 = embedding 维度，如 1536)
+输出：用户兴趣标签频率 Map<String, f32>
 
 算法步骤：
 
@@ -1287,7 +1280,7 @@ impl Default for RelevanceConfig {
 
 2. 对每篇笔记 nᵢ 计算权重 wᵢ：
 
-   wᵢ = w_time(i) × w_access(i) × w_importance(i)
+   wᵢ = w_time(i) × w_access(i)
 
    其中：
    - 时间衰减权重：
@@ -1298,131 +1291,117 @@ impl Default for RelevanceConfig {
    - 访问频次权重：
      w_access(i) = 1.0 + log₂(1 + nᵢ.access_count)
 
-   - 重要度权重：
-     w_importance(i) = 0.5 + nᵢ.importance   // importance ∈ [0, 1]，故权重 ∈ [0.5, 1.5]
+3. 对每篇笔记的所有标签，累加该笔记的权重到标签频率中
 
-3. 归一化权重：
-   w̃ᵢ = wᵢ / Σⱼ wⱼ
-
-4. 计算加权平均向量：
-   V_user = Σᵢ (w̃ᵢ × embedding(nᵢ))
-
-5. 归一化 V_user 为单位向量：
-   V_user = V_user / ‖V_user‖₂
+4. 归一化标签频率分布：
+   tag_weight(tag) = tag_weight(tag) / Σⱼ wⱼ
 ```
 
 ```rust
 impl RelevanceEngine {
-    /// 构建用户兴趣向量
-    pub async fn build_user_interest_vector(&self) -> Result<Vec<f32>, BrainError> {
+    /// 构建用户兴趣标签频率
+    pub async fn build_user_interest_tags(&self) -> Result<HashMap<String, f32>, BrainError> {
         let now = Utc::now();
         let window_start = now - Duration::days(self.config.interest_window_days as i64);
-
-        // 从记忆引擎获取最近 30 天活跃笔记的 embedding 和元数据
-        let active_memories = self.qdrant_client
-            .scroll_with_filter(
-                "obsidian_brain",
-                QdrantFilter::gte("updated_at", window_start.to_rfc3339()),
-                None, // 不设 limit，获取所有活跃笔记
-            )
+        
+        // 从 Obsidian API 获取最近活跃笔记的标签
+        let active_notes = self.obsidian_client
+            .search_recent_notes(window_start)
             .await?;
-
-        if active_memories.is_empty() {
-            tracing::warn!("无活跃笔记，返回零向量作为默认兴趣向量");
-            return Ok(vec![0.0; 1536]); // 降级：返回零向量
+        
+        if active_notes.is_empty() {
+            tracing::warn!("无活跃笔记，返回空兴趣标签");
+            return Ok(HashMap::new());
         }
-
+        
         let lambda = (2.0_f32).ln() / self.config.time_decay_halflife_days;
-
-        let mut weighted_sum = vec![0.0f32; 1536];
-        let mut total_weight = 0.0f32;
-
-        for memory in &active_memories {
-            // 时间衰减
-            let updated_at = DateTime::parse_from_rfc3339(
-                memory.payload.get("updated_at")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-            ).unwrap_or_else(|_| now.into());
-
-            let delta_days = (now - updated_at).num_days().max(0) as f32;
+        let mut tag_weights: HashMap<String, f32> = HashMap::new();
+        let mut total_weight = 0.0_f32;
+        
+        for note in &active_notes {
+            let delta_days = (now - note.updated_at).num_days().max(0) as f32;
             let w_time = (-lambda * delta_days).exp();
-
-            // 访问频次
-            let access_count = memory.payload.get("access_count")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as f32;
-            let w_access = 1.0 + (1.0 + access_count).log2();
-
-            // 重要度
-            let importance = memory.payload.get("importance")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.5) as f32;
-            let w_importance = 0.5 + importance;
-
-            // 综合权重
-            let weight = w_time * w_access * w_importance;
-
-            // 加权累加
-            for (i, &val) in memory.vector.iter().enumerate() {
-                weighted_sum[i] += weight * val;
+            let w_access = 1.0 + (1.0 + note.access_count as f32).log2();
+            let weight = w_time * w_access;
+            
+            for tag in &note.tags {
+                *tag_weights.entry(tag.clone()).or_insert(0.0) += weight;
             }
             total_weight += weight;
         }
-
+        
         // 归一化
         if total_weight > 0.0 {
-            for val in &mut weighted_sum {
+            for val in tag_weights.values_mut() {
                 *val /= total_weight;
             }
         }
-
-        // L2 归一化为单位向量
-        let norm: f32 = weighted_sum.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm > 0.0 {
-            for val in &mut weighted_sum {
-                *val /= norm;
-            }
-        }
-
-        Ok(weighted_sum)
+        
+        Ok(tag_weights)
     }
 
-    /// 计算两个向量的余弦相似度
-    pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-        let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-        let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm_a == 0.0 || norm_b == 0.0 {
-            0.0
-        } else {
-            dot / (norm_a * norm_b)
+    /// 计算文章与用户兴趣的标签匹配度
+    pub fn tag_similarity(
+        article_tags: &[String],
+        user_interest_tags: &HashMap<String, f32>,
+    ) -> f32 {
+        if article_tags.is_empty() || user_interest_tags.is_empty() {
+            return 0.0;
         }
+        
+        let mut score = 0.0;
+        for tag in article_tags {
+            if let Some(&weight) = user_interest_tags.get(tag) {
+                score += weight;
+            }
+        }
+        
+        // 归一化到 [0, 1]
+        (score / article_tags.len() as f32).min(1.0)
+    }
+
+    /// 从文章标题和摘要中提取关键词标签
+    fn extract_article_tags(&self, article: &ProcessedArticle) -> Vec<String> {
+        // 使用 LLM 或关键词提取从标题和摘要中提取标签
+        // 简化实现：从标题中分词并过滤停用词
+        let text = format!("{} {}", article.title, article.summary);
+        let tags: Vec<String> = text
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() > 2)
+            .map(|w| w.to_lowercase())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .take(10)
+            .collect();
+        tags
     }
 
     /// 对一批文章计算相关性得分并排序
     pub async fn rank_articles(
         &self,
-        articles: &[ScoredArticle],
-        user_interest: &[f32],
+        articles: &[ProcessedArticle],
+        user_interest_tags: &HashMap<String, f32>,
         source_manager: &SourceManager,
     ) -> Result<Vec<RankedArticle>, BrainError> {
         let now = Utc::now();
         let mut ranked = Vec::new();
-
-        // 获取已有笔记的 embedding（用于内容去重）
-        let existing_embeddings = self.get_recent_note_embeddings().await?;
-
+        
+        // 获取已有笔记的标签（用于内容去重）
+        let existing_tag_sets = self.get_recent_note_tags().await?;
+        
         for article in articles {
-            // 1. 计算语义相似度
-            let similarity = Self::cosine_similarity(&article.embedding, user_interest);
-
-            // 2. 阈值过滤
+            // 1. 提取文章标签
+            let article_tags = self.extract_article_tags(article);
+            
+            // 2. 计算标签匹配度
+            let similarity = Self::tag_similarity(&article_tags, user_interest_tags);
+            
+            // 3. 阈值过滤
             if similarity < self.config.relevance_threshold {
                 continue;
             }
-
-            // 3. 检查已读/已忽略状态
+            
+            // 4. 检查已读/已忽略状态
             let status = self.sqlite_store.get_radar_item_status_by_url(&article.url).await?;
             match status {
                 Some(RadarStatus::Read) | Some(RadarStatus::Saved) | Some(RadarStatus::Dismissed) => {
@@ -1430,22 +1409,22 @@ impl RelevanceEngine {
                 }
                 _ => {}
             }
-
-            // 4. 计算来源可信度
+            
+            // 5. 计算来源可信度
             let trust = source_manager.trust_weight(&article.source_name);
-
-            // 5. 计算时效性得分
+            
+            // 6. 计算时效性得分
             let recency = self.calculate_recency_score(article.published_at, now);
-
-            // 6. 计算内容重复度
-            let duplication = self.calculate_duplication_score(&article.embedding, &existing_embeddings);
-
-            // 7. 多因子排序得分
+            
+            // 7. 计算内容重复度（标签重叠）
+            let duplication = self.calculate_tag_duplication(&article_tags, &existing_tag_sets);
+            
+            // 8. 多因子排序
             let final_score = self.config.alpha * similarity
                 + self.config.beta * trust
                 + self.config.gamma * recency
                 - self.config.delta * duplication;
-
+            
             ranked.push(RankedArticle {
                 article: article.clone(),
                 relevance_score: final_score,
@@ -1453,12 +1432,12 @@ impl RelevanceEngine {
                 trust_score: trust,
                 recency_score: recency,
                 duplication_score: duplication,
+                url: article.url.clone(),
+                source_name: article.source_name.clone(),
             });
         }
-
-        // 按最终得分降序排序
+        
         ranked.sort_by(|a, b| b.relevance_score.partial_cmp(&a.relevance_score).unwrap());
-
         Ok(ranked)
     }
 
@@ -1474,41 +1453,40 @@ impl RelevanceEngine {
         }
     }
 
-    /// 内容重复度：与已有笔记 embedding 的最大相似度
-    fn calculate_duplication_score(
+    /// 内容重复度：与已有笔记标签的最大 Jaccard 相似度
+    fn calculate_tag_duplication(
         &self,
-        article_embedding: &[f32],
-        existing_embeddings: &[Vec<f32>],
+        article_tags: &[String],
+        existing_tag_sets: &[Vec<String>],
     ) -> f32 {
-        if existing_embeddings.is_empty() {
+        if existing_tag_sets.is_empty() || article_tags.is_empty() {
             return 0.0;
         }
 
-        let max_similarity = existing_embeddings.iter()
-            .map(|emb| Self::cosine_similarity(article_embedding, emb))
+        let article_set: std::collections::HashSet<&str> =
+            article_tags.iter().map(|s| s.as_str()).collect();
+
+        let max_jaccard = existing_tag_sets.iter()
+            .map(|existing| {
+                let existing_set: std::collections::HashSet<&str> =
+                    existing.iter().map(|s| s.as_str()).collect();
+                let intersection = article_set.intersection(&existing_set).count() as f32;
+                let union = article_set.union(&existing_set).count() as f32;
+                if union == 0.0 { 0.0 } else { intersection / union }
+            })
             .fold(0.0f32, f32::max);
 
-        // 超过去重阈值才返回实际相似度，否则返回 0（不降权）
-        if max_similarity > self.config.content_dedup_threshold {
-            max_similarity
-        } else {
-            0.0
-        }
+        max_jaccard
     }
 
-    /// 获取最近笔记的 embedding 向量（用于去重计算）
-    async fn get_recent_note_embeddings(&self) -> Result<Vec<Vec<f32>>, BrainError> {
-        // 从 Qdrant 获取最近 30 天笔记的 embedding，限制 100 条避免开销过大
-        let results = self.qdrant_client
-            .scroll_with_filter(
-                "obsidian_brain",
-                QdrantFilter::gte("updated_at",
-                    (Utc::now() - Duration::days(30)).to_rfc3339()),
-                Some(100),
-            )
+    /// 获取最近笔记的标签集合（用于去重计算）
+    async fn get_recent_note_tags(&self) -> Result<Vec<Vec<String>>, BrainError> {
+        let window_start = Utc::now() - Duration::days(self.config.interest_window_days as i64);
+        let notes = self.obsidian_client
+            .search_recent_notes(window_start)
             .await?;
-
-        Ok(results.into_iter().map(|r| r.vector).collect())
+        
+        Ok(notes.into_iter().map(|n| n.tags).collect())
     }
 }
 ```
@@ -1516,11 +1494,10 @@ impl RelevanceEngine {
 #### 3.4.2 多因子排序公式
 
 ```
-最终得分 S = α × sim(V_article, V_user) + β × trust(source) + γ × recency(t) - δ × dup(V_article, E_existing)
+最终得分 S = α × tag_sim(article_tags, user_interest) + β × trust(source) + γ × recency(t) - δ × dup(article_tags, existing)
 
 其中：
-  sim(V_article, V_user) = cosine_similarity(article_embedding, user_interest_vector)
-                          ∈ [0, 1]
+  tag_sim = Σ weight(tag) / len(article_tags)  ∈ [0, 1]
 
   trust(source)           = source_manager.trust_weight(source_name)
                           ∈ [0, 1], 默认 0.8
@@ -1528,14 +1505,14 @@ impl RelevanceEngine {
   recency(t)              = max(0, 1 - days_since_published / 30)
                           ∈ [0, 1]
 
-  dup(V_article, E)       = max_{e ∈ E} cosine_similarity(V_article, e)  (仅当 > 0.92 时非零)
-                          ∈ {0} ∪ (0.92, 1.0]
+  dup(article_tags, existing) = max jaccard_similarity(article_tags, existing_tags)
+                          ∈ [0, 1]
 
-默认权重：α=0.6, β=0.15, γ=0.15, δ=0.1
+默认权重：α=0.5, β=0.2, γ=0.2, δ=0.1
 
 得分范围：约 [-0.1, 1.0]
-  - 最高：1.0 × 0.6 + 1.0 × 0.15 + 1.0 × 0.15 - 0 = 0.9
-  - 最低：0 × 0.6 + 0 × 0.15 + 0 × 0.15 - 1.0 × 0.1 = -0.1
+  - 最高：1.0 × 0.5 + 1.0 × 0.2 + 1.0 × 0.2 - 0 = 0.9
+  - 最低：0 × 0.5 + 0 × 0.2 + 0 × 0.2 - 1.0 × 0.1 = -0.1
 ```
 
 #### 3.4.3 过滤链完整流程
@@ -1547,16 +1524,16 @@ impl RelevanceEngine {
 [1] URL 去重（SQLite 中已存在的 URL 跳过）
     │
     ▼
-[2] Embedding 生成（复用 infra/embedding.rs，批量调用）
+[2] 标签提取（从标题和摘要中提取关键词标签）
     │
     ▼
-[3] 阈值过滤（cosine_similarity < 0.7 → 丢弃）
+[3] 阈值过滤（tag_similarity < threshold → 丢弃）
     │
     ▼
 [4] 状态过滤（status ∈ {Read, Saved, Dismissed} → 丢弃）
     │
     ▼
-[5] 内容去重（与已有笔记 cosine > 0.92 → 降权 50%）
+[5] 内容去重（与已有笔记标签高度重叠 → 降权）
     │
     ▼
 [6] 多因子排序
@@ -1576,7 +1553,7 @@ pub struct VaultSaver {
     vault_path: PathBuf,
     sqlite_store: Arc<SqliteStore>,
     llm_client: Arc<LlmClient>,
-    embedding_client: Arc<EmbeddingClient>,
+    obsidian_client: Arc<ObsidianClient>,
     http_client: reqwest::Client,
 }
 
@@ -1775,21 +1752,22 @@ status: saved
             })
     }
 
-    /// 搜索与新文章语义相近的已有笔记
+    /// 搜索与新文章标签相近的已有笔记
     async fn find_related_notes(&self, article: &RadarItem) -> Result<Vec<String>, BrainError> {
-        let results = self.qdrant_client
-            .search(
-                "obsidian_brain",
-                &article.embedding,
-                3, // top 3
-            )
-            .await?;
-
-        Ok(results.into_iter()
-            .filter_map(|r| r.payload.get("note_path")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()))
-            .collect())
+        // 通过 Obsidian API 搜索具有相同标签的笔记
+        let mut related = Vec::new();
+        for tag in &article.tags {
+            let results = self.obsidian_client
+                .search(&format!("tag:{}", tag), 5)
+                .await?;
+            for r in results {
+                if !related.contains(&r.path) {
+                    related.push(r.path);
+                }
+            }
+        }
+        related.truncate(3);
+        Ok(related)
     }
 }
 ```
@@ -1972,10 +1950,9 @@ CREATE TABLE IF NOT EXISTS radar_items (
     source          TEXT NOT NULL,             -- 源名称（如 "arxiv-cs"）
     source_type     TEXT NOT NULL,             -- 源类型（rss/arxiv/hackernews/reddit）
     url             TEXT NOT NULL UNIQUE,
-    embedding_id    TEXT,                      -- Qdrant 中的向量 ID
+    tags            JSON,                      -- 文章标签列表
     status          TEXT NOT NULL DEFAULT 'new', -- new/read/saved/dismissed
     relevance_score REAL,                      -- 最终排序得分
-    similarity_score REAL,                     -- 语义相似度原始分
     author          TEXT,
     content_html    TEXT,                      -- 原始 HTML（可选，用于纳藏时正文提取）
     extra_data      JSON,                      -- 源特定的额外数据
@@ -2083,31 +2060,22 @@ impl StateManager {
         self.sqlite_store.execute(sql, &[&max_items.to_string()]).await
     }
 
-    /// 按 query 过滤（语义搜索）
+    /// 按 query 过滤（标签关键词搜索）
     pub async fn search_in_radar(
         &self,
-        query_embedding: &[f32],
+        query: &str,
         limit: usize,
     ) -> Result<Vec<RadarItem>, BrainError> {
-        // 通过 Qdrant 在雷达条目的 embedding 中搜索
-        // 然后与 SQLite 中的 status 过滤结合
-        let qdrant_results = self.qdrant_client
-            .search_with_filter(
-                "obsidian_brain",
-                query_embedding,
-                limit,
-                QdrantFilter::eq("item_type", "radar"),
-            )
-            .await?;
-
-        // 从 SQLite 获取完整信息
-        let ids: Vec<String> = qdrant_results.iter()
-            .filter_map(|r| r.payload.get("radar_id")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()))
-            .collect();
-
-        self.sqlite_store.get_radar_items_by_ids(&ids).await
+        // 在 SQLite 中通过标题、摘要和标签进行关键词搜索
+        let pattern = format!("%{}%", query);
+        self.sqlite_store.query_radar_items(
+            "SELECT * FROM radar_items 
+             WHERE status != 'dismissed'
+             AND (title LIKE ?1 OR summary LIKE ?1 OR tags LIKE ?1)
+             ORDER BY relevance_score DESC
+             LIMIT ?2",
+            &[&pattern, &limit.to_string()],
+        ).await
     }
 }
 ```
@@ -2124,9 +2092,9 @@ tokio-cron-scheduler (每 6 小时触发)
     ▼
 RadarService::fetch_now()
     │
-    ├─→ [1] RelevanceEngine::build_user_interest_vector()
-    │       └─→ Qdrant: 获取最近 30 天活跃笔记 embedding
-    │       └─→ 计算加权平均 → V_user
+    ├─→ [1] RelevanceEngine::build_user_interest_tags()
+    │       └─→ Obsidian API: 获取最近 30 天活跃笔记标签
+    │       └─→ 计算标签频率加权 → HashMap<String, f32>
     │
     ├─→ [2] 对每个已启用的源并行抓取：
     │       │
@@ -2145,16 +2113,15 @@ RadarService::fetch_now()
     ├─→ [3] Processor::process(all_raw_articles)
     │       └─→ URL 去重 → 标题清洗 → 摘要提取 → 标题去重 → Vec<ProcessedArticle>
     │
-    ├─→ [4] 批量生成 embedding
-    │       └─→ EmbeddingClient::batch_embed(titles + summaries) → Vec<Vec<f32>>
+    ├─→ [4] 标签提取
+    │       └─→ 从标题和摘要中提取关键词标签 → Vec<String>
     │
-    ├─→ [5] RelevanceEngine::rank_articles(articles, V_user)
-    │       └─→ 余弦相似度 → 阈值过滤 → 状态过滤 → 内容去重 → 多因子排序
+    ├─→ [5] RelevanceEngine::rank_articles(articles, user_interest_tags)
+    │       └─→ 标签匹配度 → 阈值过滤 → 状态过滤 → 内容去重 → 多因子排序
     │       → Vec<RankedArticle>
     │
     ├─→ [6] StateManager::insert_articles(ranked_articles)
     │       └─→ 写入 SQLite radar_items 表
-    │       └─→ 写入 Qdrant 向量（用于后续 query 搜索）
     │
     └─→ [7] StateManager::cleanup_old_items(1000)
             └─→ 清理超限的旧条目
@@ -2165,22 +2132,23 @@ RadarService::fetch_now()
 ### 4.2 相关性排序流程
 
 ```
-输入：Vec<ProcessedArticle> + V_user (用户兴趣向量)
+输入：Vec<ProcessedArticle> + user_interest_tags (用户兴趣标签频率)
     │
     ▼
 ┌─────────────────────────────────┐
-│ Step 1: 批量生成文章 embedding   │
-│   调用 EmbeddingClient::batch()  │
-│   输入：[title + " " + summary]  │
-│   输出：Vec<Vec<f32>>           │
+│ Step 1: 逐篇提取文章标签          │
+│   从 title + summary 中提取      │
+│   关键词标签                      │
+│   输出：Vec<String>              │
 └──────────────┬──────────────────┘
                │
                ▼
 ┌─────────────────────────────────┐
 │ Step 2: 逐篇计算                │
 │   for each article:             │
-│     similarity = cosine(V, V_u) │
-│     if similarity < 0.7:        │
+│     tags = extract_tags(article)│
+│     sim = tag_sim(tags, user)   │
+│     if sim < threshold:         │
 │       → 丢弃                    │
 │     if url in existing:         │
 │       → 丢弃                    │
@@ -2188,7 +2156,7 @@ RadarService::fetch_now()
 │       → 丢弃                    │
 │     trust = source.trust_weight │
 │     recency = f(published_at)   │
-│     dup = max_sim(existing)     │
+│     dup = max_jaccard(existing) │
 │     score = α·sim + β·trust    │
 │           + γ·recency - δ·dup  │
 └──────────────┬──────────────────┘
@@ -2224,7 +2192,7 @@ RadarService::add_to_vault(article_id, target_dir?)
 [4] VaultSaver::generate_note_content()
     ├── LLM: 生成中文摘要 (150-250字)
     ├── LLM: 提取标签 (3-5个)
-    └── Qdrant: 搜索相关笔记 (top 3)
+    └── Obsidian API: 按标签搜索相关笔记 (top 3)
     │
     ▼
 [5] 组装 Obsidian 笔记 Markdown
@@ -2241,7 +2209,6 @@ RadarService::add_to_vault(article_id, target_dir?)
     ▼
 [7] 后续操作（异步并行）
     ├── StateManager: 状态 → Saved
-    ├── MemoryService: 触发新笔记索引（分块 → embedding → Qdrant）
     ├── TimelineService: 记录 RadarSaved 事件
     └── 返回 VaultSaveResult
 ```
@@ -2267,10 +2234,9 @@ pub struct RadarItem {
     pub source_name: String,          // "arxiv-cs" | "hackernews" | "tech-rss" | "reddit-programming"
     pub source_type: SourceType,      // rss / arxiv / hackernews / reddit
     pub url: String,
-    pub embedding_id: Option<String>, // Qdrant 向量 ID
+    pub tags: Vec<String>,            // 文章标签列表
     pub status: RadarStatus,
     pub relevance_score: Option<f32>,
-    pub similarity_score: Option<f32>,
     pub author: Option<String>,
     pub content_html: Option<String>, // 原始 HTML（用于延迟正文提取）
     pub extra_data: Option<serde_json::Value>, // 源特定额外数据
@@ -2358,7 +2324,7 @@ impl From<RadarItem> for RadarItemView {
 ### 5.4 ScoredArticle / RankedArticle（内部中间结构）
 
 ```rust
-/// 已生成 embedding 的文章（相关性计算前）
+/// 已提取标签的文章（相关性计算前）
 #[derive(Debug, Clone)]
 pub struct ScoredArticle {
     pub title: String,
@@ -2370,7 +2336,7 @@ pub struct ScoredArticle {
     pub published_at: Option<DateTime<Utc>>,
     pub content_html: Option<String>,
     pub extra: HashMap<String, serde_json::Value>,
-    pub embedding: Vec<f32>,          // 文章 embedding 向量
+    pub tags: Vec<String>,            // 从标题和摘要提取的关键词标签
 }
 
 /// 排序后的文章（相关性计算后）
@@ -2689,11 +2655,11 @@ pub struct RadarSourceStatus {
 | **源不可达** | DNS 解析失败、连接超时、HTTP 5xx | 记录错误，跳过该源，下次拉取重试。连续失败 3 次标记为 Unhealthy |
 | **API 限流** | HTTP 429、arXiv 3 秒间隔 | 指数退避重试（1s → 2s → 4s），最多重试 3 次 |
 | **解析失败** | Feed 格式不标准、XML/JSON 结构异常 | 记录错误日志，跳过该条目，不中断整体流程 |
-| **Embedding 失败** | API 超时、额度不足 | 重试 3 次后降级为按可信度+时效性排序（无语义排序） |
+| **标签提取失败** | 标题/摘要过短或无有效关键词 | 降级为使用来源类型作为默认标签 |
 | **Readability 失败** | SPA 页面、JS 渲染内容 | 降级为仅保存摘要和链接，不保存正文 |
 | **文件写入失败** | 磁盘满、权限不足 | 返回错误给用户，建议检查 vault 路径和磁盘空间 |
 | **SQLite 错误** | 数据库锁定、磁盘 IO 错误 | 重试 3 次，若仍失败返回 Internal 错误 |
-| **Qdrant 不可用** | 容器未启动、网络不通 | 降级为纯 SQLite 存储，不做向量搜索，日志告警 |
+| **Obsidian API 不可用** | Obsidian 未运行、HTTP 连接失败 | 降级为无相关性排序（按可信度+时效性），日志告警 |
 | **LLM 调用失败** | API 超时、模型不可用 | 摘要生成降级为截取正文前 200 字，标签降级为 "radar" |
 
 ### 7.2 错误类型扩展
@@ -2737,34 +2703,31 @@ impl Processor {
 }
 ```
 
-### 8.2 Embedding 缓存
+### 8.2 标签缓存
 
 ```rust
-/// Embedding 缓存策略
-pub struct EmbeddingCache {
-    cache: DashMap<String, Vec<f32>>,  // URL/文本 hash → embedding
-    max_size: usize,
+/// 用户兴趣标签缓存策略
+pub struct InterestTagCache {
+    cache: DashMap<String, (HashMap<String, f32>, DateTime<Utc>)>,
+    ttl_minutes: i64,
 }
 
-impl EmbeddingCache {
-    /// 查找缓存
-    pub fn get(&self, key: &str) -> Option<Vec<f32>> {
-        self.cache.get(key).map(|v| v.clone())
+impl InterestTagCache {
+    /// 获取缓存的兴趣标签（未过期）
+    pub fn get(&self, key: &str) -> Option<HashMap<String, f32>> {
+        self.cache.get(key).and_then(|entry| {
+            let (ref tags, cached_at) = *entry;
+            if (Utc::now() - cached_at).num_minutes() < self.ttl_minutes {
+                Some(tags.clone())
+            } else {
+                None // 已过期
+            }
+        })
     }
 
     /// 写入缓存
-    pub fn insert(&self, key: String, embedding: Vec<f32>) {
-        if self.cache.len() >= self.max_size {
-            // LRU 淘汰（简化实现：随机淘汰 10%）
-            let keys_to_remove: Vec<String> = self.cache.iter()
-                .take(self.max_size / 10)
-                .map(|e| e.key().clone())
-                .collect();
-            for key in keys_to_remove {
-                self.cache.remove(&key);
-            }
-        }
-        self.cache.insert(key, embedding);
+    pub fn insert(&self, key: String, tags: HashMap<String, f32>) {
+        self.cache.insert(key, (tags, Utc::now()));
     }
 }
 ```
@@ -2772,46 +2735,55 @@ impl EmbeddingCache {
 ### 8.3 批量处理
 
 ```rust
-/// 批量生成 embedding，减少 API 调用次数
+/// 批量提取文章标签，减少 LLM 调用次数
 impl RelevanceEngine {
-    pub async fn batch_generate_embeddings(
+    pub async fn batch_extract_tags(
         &self,
         articles: &[ProcessedArticle],
-    ) -> Result<Vec<Vec<f32>>, BrainError> {
-        // 将标题 + 摘要拼接为文本列表
-        let texts: Vec<String> = articles.iter()
-            .map(|a| format!("{} {}", a.title, a.summary))
+    ) -> Result<Vec<Vec<String>>, BrainError> {
+        // 将所有标题 + 摘要合并为一次 LLM 调用
+        let prompts: Vec<String> = articles.iter()
+            .map(|a| format!("[{}] {}", a.source_name, a.title))
             .collect();
 
-        // 检查缓存
-        let mut results = vec![vec![]; texts.len()];
-        let mut uncached_indices = Vec::new();
-        let mut uncached_texts = Vec::new();
+        let batch_prompt = format!(
+            "请为以下每篇文章提取 3-5 个关键词标签，每行格式为 \"序号: 标签1, 标签2, ...\"：\n\n{}",
+            prompts.iter().enumerate()
+                .map(|(i, p)| format!("{}. {}", i + 1, p))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
 
-        for (i, text) in texts.iter().enumerate() {
-            let cache_key = format!("radar:{}", md5::compute(text));
-            if let Some(cached) = self.embedding_cache.get(&cache_key) {
-                results[i] = cached;
-            } else {
-                uncached_indices.push(i);
-                uncached_texts.push(text.clone());
+        // 调用 LLM 批量提取
+        let response = self.llm_client.complete(&batch_prompt, LlmParams {
+            max_tokens: 1000,
+            temperature: 0.1,
+            ..Default::default()
+        }).await?;
+
+        // 解析返回结果
+        let tag_lists = self.parse_batch_tags(&response, articles.len());
+        Ok(tag_lists)
+    }
+
+    /// 解析 LLM 返回的批量标签结果
+    fn parse_batch_tags(&self, response: &str, expected_count: usize) -> Vec<Vec<String>> {
+        let mut result = Vec::new();
+        for line in response.lines() {
+            let line = line.trim();
+            if let Some(tags_str) = line.split(':').nth(1) {
+                let tags: Vec<String> = tags_str.split(',')
+                    .map(|t| t.trim().to_lowercase())
+                    .filter(|t| !t.is_empty())
+                    .collect();
+                result.push(tags);
             }
         }
-
-        if !uncached_texts.is_empty() {
-            // 批量调用 Embedding API（OpenAI 支持单次最多 2048 条）
-            let batch_embeddings = self.embedding_client
-                .batch_embed(&uncached_texts)
-                .await?;
-
-            for (idx, embedding) in uncached_indices.into_iter().zip(batch_embeddings) {
-                let cache_key = format!("radar:{}", md5::compute(&texts[idx]));
-                self.embedding_cache.insert(cache_key, embedding.clone());
-                results[idx] = embedding;
-            }
+        // 补齐不足的部分
+        while result.len() < expected_count {
+            result.push(vec![]);
         }
-
-        Ok(results)
+        result
     }
 }
 ```
@@ -2821,11 +2793,11 @@ impl RelevanceEngine {
 | 操作 | 目标耗时 | 优化手段 |
 |---|---|---|
 | 全量拉取（4 个源） | < 5 min | 源并行抓取，单源超时 30s |
-| 100 篇文章 embedding 生成 | < 30s | 批量 API 调用（一次请求 100 条） |
-| 100 篇文章相关性排序 | < 5s | 内存中向量计算，无 IO |
+| 100 篇文章标签提取 | < 10s | 批量 LLM 调用或关键词算法 |
+| 100 篇文章相关性排序 | < 2s | 内存中标签匹配计算，无 IO |
 | 单篇文章纳藏 | < 15s | 正文提取 + LLM 摘要 + 文件写入 |
 | get_radar 查询 | < 500ms | SQLite 查询 + 内存排序 |
-| 用户兴趣向量构建 | < 10s | Qdrant scroll + 内存计算 |
+| 用户兴趣标签构建 | < 3s | Obsidian API 查询 + 内存计算 |
 
 ---
 
@@ -2903,13 +2875,25 @@ mod tests {
     // ── RelevanceEngine 测试 ──
 
     #[test]
-    fn test_cosine_similarity() {
-        let a = vec![1.0, 0.0, 0.0];
-        let b = vec![1.0, 0.0, 0.0];
-        assert!((RelevanceEngine::cosine_similarity(&a, &b) - 1.0).abs() < 1e-6);
+    fn test_tag_similarity() {
+        let mut user_tags = HashMap::new();
+        user_tags.insert("rust".to_string(), 0.4);
+        user_tags.insert("async".to_string(), 0.3);
+        user_tags.insert("ai".to_string(), 0.3);
 
-        let c = vec![0.0, 1.0, 0.0];
-        assert!(RelevanceEngine::cosine_similarity(&a, &c).abs() < 1e-6);
+        // 完全匹配
+        let article_tags = vec!["rust".to_string(), "async".to_string()];
+        let score = RelevanceEngine::tag_similarity(&article_tags, &user_tags);
+        assert!((score - 0.35).abs() < 1e-6); // (0.4 + 0.3) / 2
+
+        // 无匹配
+        let no_match = vec!["python".to_string(), "django".to_string()];
+        let score = RelevanceEngine::tag_similarity(&no_match, &user_tags);
+        assert!(score.abs() < 1e-6);
+
+        // 空输入
+        let score = RelevanceEngine::tag_similarity(&[], &user_tags);
+        assert!(score.abs() < 1e-6);
     }
 
     #[test]
@@ -2932,9 +2916,9 @@ mod tests {
     }
 
     #[test]
-    fn test_user_interest_vector_normalization() {
+    fn test_user_interest_tags_normalization() {
         let engine = RelevanceEngine::new_for_test();
-        // 测试加权平均和归一化逻辑
+        // 测试标签频率加权和归一化逻辑
         // ...
     }
 
@@ -3080,7 +3064,7 @@ const MOCK_RSS_FEED: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 [dependencies]
 # ── 已有（复用） ──
 # tokio, axum, serde, serde_json, reqwest, tracing
-# rusqlite, qdrant-client, uuid, chrono
+# rusqlite, uuid, chrono
 
 # ── 雷达模块新增 ──
 
@@ -3120,13 +3104,10 @@ async-trait = "0.1"
 # futures 工具
 futures = "0.3"
 
-# 哈希（embedding 缓存 key）
-md5 = "0.7"
-
 # TOML 序列化（配置文件回写）
 toml = "0.8"
 
-# 并发 HashMap（embedding 缓存）
+# 并发 HashMap（标签缓存）
 dashmap = "6"
 
 # 临时目录（测试用）
@@ -3156,12 +3137,12 @@ edit-distance ──────────────┤
                     │ (内容处理器)   │
                     └───────┬───────┘
                             │
-infra/embedding.rs ─────────┤
-qdrant-client ──────────────┤
+infra/obsidian_client.rs ───┤
                             ▼
                     ┌───────────────┐
                     │ Relevance     │
                     │ Engine        │
+                    │ (标签匹配排序) │
                     └───────┬───────┘
                             │
 readability ────────────────┤

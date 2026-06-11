@@ -183,7 +183,7 @@ pub struct AppContext {
     pub code_repo_service: Arc<CodeRepoService>,
     pub inspiration_service: Arc<InspirationService>,
     pub radar_service: Arc<RadarService>,
-    pub search_service: Arc<SearchService>,
+    pub obsidian_client: Arc<ObsidianClient>,
     pub config: Arc<AppConfig>,
 }
 
@@ -983,8 +983,7 @@ pub struct HealthResponse {
 #[derive(Debug, Serialize)]
 pub struct ComponentHealth {
     pub vault: String,      // "ok" | "error"
-    pub qdrant: String,
-    pub tantivy: String,
+    pub obsidian: String,   // "ok" | "error"
     pub sqlite: String,
 }
 
@@ -997,12 +996,11 @@ pub async fn health_check(
         .num_seconds() as u64;
 
     // 检查各组件连通性
-    let qdrant_ok = state.context.search_service.check_qdrant().await;
-    let tantivy_ok = state.context.search_service.check_tantivy().await;
+    let obsidian_ok = state.context.obsidian_client.health_check().await;
     let sqlite_ok = state.context.memory_service.check_sqlite().await;
     let vault_ok = state.context.config.vault_path.exists();
 
-    let all_ok = qdrant_ok && tantivy_ok && sqlite_ok && vault_ok;
+    let all_ok = obsidian_ok && sqlite_ok && vault_ok;
 
     Json(HealthResponse {
         status: if all_ok { "healthy".to_string() } else { "degraded".to_string() },
@@ -1010,8 +1008,7 @@ pub async fn health_check(
         uptime_seconds: uptime,
         components: ComponentHealth {
             vault: if vault_ok { "ok" } else { "error" }.to_string(),
-            qdrant: if qdrant_ok { "ok" } else { "error" }.to_string(),
-            tantivy: if tantivy_ok { "ok" } else { "error" }.to_string(),
+            obsidian: if obsidian_ok { "ok" } else { "error" }.to_string(),
             sqlite: if sqlite_ok { "ok" } else { "error" }.to_string(),
         },
         tools_count: state.registry.count().await,
@@ -1064,7 +1061,7 @@ pub fn build_all_definitions() -> Vec<ToolDefinition> {
 fn search_notes_def() -> ToolDefinition {
     ToolDefinition {
         name: "search_notes".to_string(),
-        description: "在 Obsidian vault 中搜索笔记。支持全文搜索和语义搜索（混合检索），返回匹配的笔记片段及其 Obsidian URI 来源链接。适用于查找特定知识点、回顾过去的笔记、按标签过滤内容。".to_string(),
+        description: "在 Obsidian vault 中搜索笔记。通过 Obsidian 搜索 API 进行全文检索，返回匹配的笔记片段及其 Obsidian URI 来源链接。适用于查找特定知识点、回顾过去的笔记、按标签过滤内容。".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -1099,7 +1096,7 @@ fn search_notes_def() -> ToolDefinition {
 ```json
 {
   "name": "search_notes",
-  "description": "在 Obsidian vault 中搜索笔记。支持全文搜索和语义搜索（混合检索），返回匹配的笔记片段及其 Obsidian URI 来源链接。适用于查找特定知识点、回顾过去的笔记、按标签过滤内容。",
+  "description": "在 Obsidian vault 中搜索笔记。通过 Obsidian 搜索 API 进行全文检索，返回匹配的笔记片段及其 Obsidian URI 来源链接。适用于查找特定知识点、回顾过去的笔记、按标签过滤内容。",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -1132,7 +1129,7 @@ fn search_notes_def() -> ToolDefinition {
 fn add_memory_def() -> ToolDefinition {
     ToolDefinition {
         name: "add_memory".to_string(),
-        description: "手动添加一条记忆到知识库。记忆将写入指定笔记、建立全文索引、生成语义向量。适用于 LLM 认为某个重要信息需要被持久化记忆时使用。".to_string(),
+        description: "手动添加一条记忆到知识库。记忆将写入指定笔记。适用于 LLM 认为某个重要信息需要被持久化记忆时使用。".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -1769,9 +1766,9 @@ MCP `tools/call` 的响应格式为 `CallToolResult`：
   "tool": "search_notes",
   "status": "error",
   "error": {
-    "code": "SEARCH_ERROR",
-    "message": "全文索引查询失败：Tantivy 内部错误",
-    "suggestion": "请稍后重试，或尝试简化搜索关键词"
+    "code": "OBSIDIAN_API_ERROR",
+    "message": "Obsidian API 调用失败: 连接被拒绝",
+    "suggestion": "请检查 Obsidian 是否正在运行，以及 REST API 插件是否已启用"
   }
 }
 ```
@@ -1894,9 +1891,9 @@ impl ToolHandler for SearchNotesHandler {
 
         let top_k = params.top_k.unwrap_or(5);
 
-        // 调用 SearchService 执行混合搜索
-        let results = ctx.search_service
-            .hybrid_search(&params.query, top_k, params.tags.as_deref())
+        // 调用 MemoryService 通过 Obsidian API 执行搜索
+        let results = ctx.memory_service
+            .search(&params.query, top_k)
             .await?;
 
         // 组装返回结果
@@ -2043,15 +2040,10 @@ pub fn brain_error_to_tool_error(err: BrainError, tool_name: &str) -> ToolError 
             message: format!("搜索执行失败: {}", detail),
             suggestion: Some("请稍后重试，或尝试简化搜索关键词".to_string()),
         },
-        BrainError::EmbeddingError(detail) => ToolError {
-            code: "EMBEDDING_ERROR".to_string(),
-            message: format!("Embedding 生成失败: {}", detail),
-            suggestion: Some("语义搜索暂不可用，全文搜索仍然可用".to_string()),
-        },
-        BrainError::QdrantError(detail) => ToolError {
-            code: "QDRANT_UNAVAILABLE".to_string(),
-            message: format!("Qdrant 向量库不可用: {}", detail),
-            suggestion: Some("已自动降级为全文搜索模式".to_string()),
+        BrainError::ObsidianApiError(detail) => ToolError {
+            code: "OBSIDIAN_API_ERROR".to_string(),
+            message: format!("Obsidian API 调用失败: {}", detail),
+            suggestion: Some("请检查 Obsidian 是否正在运行，以及 REST API 插件是否已启用".to_string()),
         },
         BrainError::LlmApiError { provider, detail } => ToolError {
             code: "LLM_API_ERROR".to_string(),
@@ -2570,7 +2562,7 @@ mod http_tests {
 /// 端到端测试：完整的 MCP 工具调用流程
 #[tokio::test]
 async fn test_e2e_mcp_tool_call_flow() {
-    // 1. 设置测试环境（含真实的 SQLite、内存 Tantivy 索引）
+    // 1. 设置测试环境（含真实的 SQLite、Obsidian API Mock）
     let (registry, ctx) = setup_test_env_with_real_data();
     let handler = McpProtocolHandler::new(registry, ctx);
 
@@ -2639,10 +2631,8 @@ async fn test_e2e_mcp_tool_call_flow() {
 
 | Crate | 用途 | 被谁使用 |
 |---|---|---|
-| `reqwest` | HTTP 客户端 | infra/llm_client, infra/embedding |
+| `reqwest` | HTTP 客户端 | infra/llm_client, infra/obsidian_client |
 | `rusqlite` | SQLite 操作 | infra/sqlite_store |
-| `tantivy` | 全文索引 | infra/tantivy_index |
-| `qdrant-client` | Qdrant 向量库客户端 | infra/qdrant_client |
 | `git2` | Git 操作 | core/code_repo |
 | `pulldown-cmark` | Markdown 解析 | core/memory |
 | `gray_matter` | YAML frontmatter 解析 | core/memory |
