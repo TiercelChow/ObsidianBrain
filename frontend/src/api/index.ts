@@ -124,7 +124,13 @@ export function searchMemos(query: string, startDate?: string, endDate?: string,
 export function uploadImages(files: File[]): Promise<{ paths: string[] }> {
   const formData = new FormData()
   files.forEach(f => formData.append('images', f))
-  return api.post('/upload/images', formData) as unknown as Promise<{ paths: string[] }>
+  return fetch('/v1/upload/images', {
+    method: 'POST',
+    body: formData,
+  }).then(res => {
+    if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
+    return res.json()
+  })
 }
 
 // ── Inspiration ──
