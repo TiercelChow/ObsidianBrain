@@ -1,11 +1,5 @@
 <template>
   <div class="timeline-page">
-    <!-- Ambient gradient background for glass effect -->
-    <div class="ambient-bg">
-      <div class="orb orb-1"></div>
-      <div class="orb orb-2"></div>
-      <div class="orb orb-3"></div>
-    </div>
 
     <header class="page-header">
       <div>
@@ -594,45 +588,6 @@ onMounted(() => { loadMemos() })
 </script>
 
 <style scoped>
-/* ── Ambient Background ── */
-.ambient-bg {
-  position: fixed;
-  inset: -120px;
-  pointer-events: none;
-  z-index: 0;
-  overflow: hidden;
-}
-.orb {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(100px);
-  opacity: 0.25;
-  animation: orbFloat 20s ease-in-out infinite;
-}
-.orb-1 {
-  width: 520px; height: 520px;
-  background: radial-gradient(circle, #c4b5fd, #818cf8);
-  top: 0; right: 0;
-}
-.orb-2 {
-  width: 440px; height: 440px;
-  background: radial-gradient(circle, #a5f3fc, #67e8f9);
-  bottom: 0; left: 0;
-  animation-delay: -7s;
-}
-.orb-3 {
-  width: 340px; height: 340px;
-  background: radial-gradient(circle, #fde68a, #fbbf24);
-  top: 38%; left: 32%;
-  animation-delay: -14s;
-}
-@keyframes orbFloat {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  25% { transform: translate(30px, -20px) scale(1.05); }
-  50% { transform: translate(-20px, 15px) scale(0.95); }
-  75% { transform: translate(15px, 25px) scale(1.02); }
-}
-
 /* ── Page Root ── */
 .timeline-page {
   position: relative;

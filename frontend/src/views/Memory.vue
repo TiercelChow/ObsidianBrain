@@ -202,7 +202,28 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.memory-page { max-width: 100%; }
+.memory-page {
+  max-width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.06) transparent;
+}
+.memory-page .stat-chip {
+  animation: pageFadeIn 0.5s ease both;
+}
+.memory-page .stat-chip:nth-child(2) { animation-delay: 0.06s; }
+.memory-page .stat-chip:nth-child(3) { animation-delay: 0.12s; }
+.memory-page .result-card { animation: pageFadeIn 0.5s ease both; }
+.memory-page .result-card:nth-child(2) { animation-delay: 0.06s; }
+.memory-page .result-card:nth-child(3) { animation-delay: 0.12s; }
+.memory-page .recent-card { animation: pageFadeIn 0.5s ease both; }
+.memory-page .recent-card:nth-child(2) { animation-delay: 0.06s; }
+.memory-page .recent-card:nth-child(3) { animation-delay: 0.12s; }
+@keyframes pageFadeIn {
+  from { opacity: 0; transform: translateY(20px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 .page-header {
   display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;
 }

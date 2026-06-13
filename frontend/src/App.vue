@@ -1,5 +1,11 @@
 <template>
   <div class="app-shell">
+    <!-- Ambient gradient orbs for liquid glass effect -->
+    <div class="ambient-bg">
+      <div class="orb orb-1"></div>
+      <div class="orb orb-2"></div>
+      <div class="orb orb-3"></div>
+    </div>
     <!-- Subtle grain texture background -->
     <div class="bg-grain"></div>
 
@@ -107,6 +113,70 @@ html, body, #app {
   font-weight: 500 !important;
 }
 
+/* ── Glass Input 覆盖 ── */
+.el-input__wrapper {
+  border-radius: 12px !important;
+  background: rgba(255, 255, 255, 0.45) !important;
+  backdrop-filter: blur(12px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.5) inset,
+    0 1px 2px rgba(0, 0, 0, 0.03) !important;
+  transition: all 0.25s ease !important;
+}
+.el-input__wrapper:hover {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.7) inset,
+    0 1px 3px rgba(0, 0, 0, 0.05) !important;
+}
+.el-input__wrapper.is-focus {
+  box-shadow:
+    0 0 0 2px rgba(129, 140, 248, 0.15),
+    0 0 0 1px rgba(255, 255, 255, 0.5) inset !important;
+}
+
+/* ── Glass Select 覆盖 ── */
+.el-select__wrapper {
+  border-radius: 10px !important;
+  background: rgba(255, 255, 255, 0.45) !important;
+  backdrop-filter: blur(12px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5) inset !important;
+}
+
+/* ── Glass Date Picker 覆盖 ── */
+.el-date-editor.el-input__wrapper {
+  border-radius: 12px !important;
+}
+.el-range-editor {
+  border-radius: 12px !important;
+  background: rgba(255, 255, 255, 0.45) !important;
+  backdrop-filter: blur(12px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.5) !important;
+}
+
+/* ── Glass Dialog 覆盖 ── */
+.el-dialog {
+  border-radius: 20px !important;
+  background: rgba(255, 255, 255, 0.8) !important;
+  backdrop-filter: blur(40px) saturate(200%) !important;
+  -webkit-backdrop-filter: blur(40px) saturate(200%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.7) !important;
+  box-shadow:
+    0 12px 48px rgba(0, 0, 0, 0.1),
+    0 4px 16px rgba(0, 0, 0, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
+  overflow: hidden;
+}
+.el-dialog__header {
+  border-radius: 20px 20px 0 0 !important;
+  padding: 20px 24px 16px !important;
+}
+.el-dialog__body {
+  padding: 16px 24px 24px !important;
+}
+
 .el-empty__description p {
   color: #a1a1aa;
 }
@@ -119,6 +189,45 @@ html, body, #app {
   position: relative;
   overflow: hidden;
   background: #fafafa;
+}
+
+/* Ambient gradient orbs */
+.ambient-bg {
+  position: fixed;
+  inset: -120px;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(100px);
+  opacity: 0.22;
+  animation: orbFloat 20s ease-in-out infinite;
+}
+.orb-1 {
+  width: 520px; height: 520px;
+  background: radial-gradient(circle, #c4b5fd, #818cf8);
+  top: 0; right: 0;
+}
+.orb-2 {
+  width: 440px; height: 440px;
+  background: radial-gradient(circle, #a5f3fc, #67e8f9);
+  bottom: 0; left: 0;
+  animation-delay: -7s;
+}
+.orb-3 {
+  width: 340px; height: 340px;
+  background: radial-gradient(circle, #fde68a, #fbbf24);
+  top: 38%; left: 32%;
+  animation-delay: -14s;
+}
+@keyframes orbFloat {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(30px, -20px) scale(1.05); }
+  50% { transform: translate(-20px, 15px) scale(0.95); }
+  75% { transform: translate(15px, 25px) scale(1.02); }
 }
 
 /* Subtle noise texture */

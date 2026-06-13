@@ -230,7 +230,29 @@ function loadHistory() {
 </script>
 
 <style scoped>
-.inspiration-page { max-width: 100%; }
+.inspiration-page {
+  max-width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.06) transparent;
+}
+.inspiration-page .mode-option {
+  animation: pageFadeIn 0.5s ease both;
+}
+.inspiration-page .mode-option:nth-child(2) { animation-delay: 0.06s; }
+.inspiration-page .mode-option:nth-child(3) { animation-delay: 0.12s; }
+.inspiration-page .result-card { animation: pageFadeIn 0.5s ease both; }
+.inspiration-page .question-item { animation: pageFadeIn 0.5s ease both; }
+.inspiration-page .question-item:nth-child(2) { animation-delay: 0.06s; }
+.inspiration-page .question-item:nth-child(3) { animation-delay: 0.12s; }
+.inspiration-page .counterpoint-item { animation: pageFadeIn 0.5s ease both; }
+.inspiration-page .counterpoint-item:nth-child(2) { animation-delay: 0.06s; }
+.inspiration-page .counterpoint-item:nth-child(3) { animation-delay: 0.12s; }
+@keyframes pageFadeIn {
+  from { opacity: 0; transform: translateY(20px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
 .page-title { font-size: 22px; font-weight: 600; color: #18181b; letter-spacing: -0.3px; }
 .page-subtitle { margin-top: 4px; color: #a1a1aa; font-size: 14px; }

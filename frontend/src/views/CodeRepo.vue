@@ -187,7 +187,23 @@ onMounted(() => { loadRepos() })
 </script>
 
 <style scoped>
-.code-repo-page { max-width: 100%; }
+.code-repo-page {
+  max-width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.06) transparent;
+}
+.code-repo-page .repo-card {
+  animation: pageFadeIn 0.5s ease both;
+}
+.code-repo-page .repo-card:nth-child(2) { animation-delay: 0.06s; }
+.code-repo-page .repo-card:nth-child(3) { animation-delay: 0.12s; }
+.code-repo-page .repo-card:nth-child(4) { animation-delay: 0.18s; }
+@keyframes pageFadeIn {
+  from { opacity: 0; transform: translateY(20px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
 .page-title { font-size: 22px; font-weight: 600; color: #18181b; letter-spacing: -0.3px; }
 .page-subtitle { margin-top: 4px; color: #a1a1aa; font-size: 14px; }
@@ -202,7 +218,7 @@ onMounted(() => { loadRepos() })
 .repo-path {
   font-size: 12px; color: #a1a1aa; font-family: monospace; margin-bottom: 12px;
   word-break: break-all; overflow: hidden; text-overflow: ellipsis;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; max-height: 2.4em;
+  display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; max-height: 2.4em;
 }
 .repo-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .lang-tag { font-size: 11px; padding: 2px 8px; border-radius: 8px; color: #52525b; }
