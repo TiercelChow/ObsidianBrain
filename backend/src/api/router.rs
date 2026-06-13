@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use axum::Router;
 use tower_http::cors::{Any, CorsLayer};
@@ -24,6 +25,7 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
         .route("/tools", get(list_tools))
         .route("/tools/call", post(call_tool))
         .route("/upload/images", post(upload_images))
+        .layer(DefaultBodyLimit::max(50 * 1024 * 1024)) // 50MB for image uploads
         .route("/vault/images/*path", get(serve_vault_image))
         .with_state(ctx);
 

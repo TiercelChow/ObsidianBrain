@@ -121,16 +121,17 @@ export function searchMemos(query: string, startDate?: string, endDate?: string,
   })
 }
 
-export function uploadImages(files: File[]): Promise<{ paths: string[] }> {
+export async function uploadImages(files: File[]): Promise<{ paths: string[] }> {
   const formData = new FormData()
   files.forEach(f => formData.append('images', f))
-  return fetch('/v1/upload/images', {
+  // Send directly to backend to bypass Vite proxy multipart size limits
+  const baseUrl = import.meta.env.DEV ? 'http://127.0.0.1:9876' : ''
+  const res = await fetch(`${baseUrl}/v1/upload/images`, {
     method: 'POST',
     body: formData,
-  }).then(res => {
-    if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
-    return res.json()
   })
+  if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
+  return res.json()
 }
 
 // ── Inspiration ──
