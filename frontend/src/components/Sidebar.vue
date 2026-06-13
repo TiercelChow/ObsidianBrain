@@ -82,8 +82,11 @@ function isActive(path: string) {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #fff;
-  border-right: 1px solid #f0f0f0;
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border-right: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.3);
   padding: 0 12px;
   transition: padding 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -101,6 +104,12 @@ function isActive(path: string) {
   padding: 0 8px;
   margin-bottom: 8px;
   flex-shrink: 0;
+  transition: padding 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar.collapsed .logo-section {
+  padding: 0;
+  justify-content: center;
 }
 
 .logo-mark {
@@ -141,18 +150,24 @@ function isActive(path: string) {
   font-size: 14px;
   font-weight: 450;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
+}
+
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 10px 0;
 }
 
 .nav-item:hover {
-  background: #f4f4f5;
+  background: rgba(255, 255, 255, 0.5);
   color: #27272a;
 }
 
 .nav-item.active {
-  background: #f4f4f5;
+  background: rgba(255, 255, 255, 0.6);
   color: #18181b;
   font-weight: 500;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .nav-icon {
@@ -172,7 +187,7 @@ function isActive(path: string) {
 
 /* ── Footer ── */
 .sidebar-footer {
-  border-top: 1px solid #f4f4f5;
+  border-top: 1px solid rgba(255, 255, 255, 0.4);
   padding: 12px 0;
   flex-shrink: 0;
 }
@@ -189,11 +204,16 @@ function isActive(path: string) {
   color: #a1a1aa;
   font-size: 13px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
+}
+
+.sidebar.collapsed .collapse-btn {
+  justify-content: center;
+  padding: 8px 0;
 }
 
 .collapse-btn:hover {
-  background: #f4f4f5;
+  background: rgba(255, 255, 255, 0.5);
   color: #52525b;
 }
 
