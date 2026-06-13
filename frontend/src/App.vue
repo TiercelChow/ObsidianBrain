@@ -128,46 +128,49 @@ html, body, #app {
   background: #fafafa;
 }
 
-/* Ambient gradient orbs */
+/* Ambient gradient mesh */
 .ambient-bg {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background:
-    radial-gradient(ellipse 50% 50% at 80% 20%, rgba(196, 181, 253, 0.3), transparent),
-    radial-gradient(ellipse 40% 40% at 20% 80%, rgba(165, 243, 252, 0.25), transparent),
-    radial-gradient(ellipse 35% 35% at 50% 50%, rgba(253, 230, 138, 0.15), transparent);
-  animation: meshShift 30s ease-in-out infinite alternate;
+  overflow: hidden;
+}
+.ambient-bg::before,
+.ambient-bg::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.ambient-bg::before {
+  width: 80%; height: 80%;
+  top: -20%; right: -20%;
+  background: radial-gradient(ellipse at 70% 30%, rgba(196, 181, 253, 0.35), transparent 70%);
+  animation: mesh1 28s ease-in-out infinite alternate;
+}
+.ambient-bg::after {
+  width: 70%; height: 70%;
+  bottom: -20%; left: -20%;
+  background: radial-gradient(ellipse at 30% 70%, rgba(165, 243, 252, 0.3), transparent 70%);
+  animation: mesh2 32s ease-in-out infinite alternate;
+}
+/* Third gradient via the .orbs container's own background */
+.ambient-bg {
+  background: radial-gradient(ellipse at 50% 50%, rgba(253, 230, 138, 0.2), transparent 60%);
 }
 .orb {
   display: none;
 }
-@keyframes meshShift {
-  0% {
-    background:
-      radial-gradient(ellipse 50% 50% at 80% 20%, rgba(196, 181, 253, 0.3), transparent),
-      radial-gradient(ellipse 40% 40% at 20% 80%, rgba(165, 243, 252, 0.25), transparent),
-      radial-gradient(ellipse 35% 35% at 50% 50%, rgba(253, 230, 138, 0.15), transparent);
-  }
-  33% {
-    background:
-      radial-gradient(ellipse 45% 45% at 70% 30%, rgba(196, 181, 253, 0.25), transparent),
-      radial-gradient(ellipse 45% 45% at 30% 70%, rgba(165, 243, 252, 0.3), transparent),
-      radial-gradient(ellipse 30% 30% at 60% 45%, rgba(253, 230, 138, 0.2), transparent);
-  }
-  66% {
-    background:
-      radial-gradient(ellipse 55% 55% at 75% 25%, rgba(196, 181, 253, 0.35), transparent),
-      radial-gradient(ellipse 35% 35% at 25% 75%, rgba(165, 243, 252, 0.2), transparent),
-      radial-gradient(ellipse 40% 40% at 45% 55%, rgba(253, 230, 138, 0.25), transparent);
-  }
-  100% {
-    background:
-      radial-gradient(ellipse 50% 50% at 85% 15%, rgba(196, 181, 253, 0.28), transparent),
-      radial-gradient(ellipse 42% 42% at 18% 82%, rgba(165, 243, 252, 0.28), transparent),
-      radial-gradient(ellipse 38% 38% at 55% 48%, rgba(253, 230, 138, 0.18), transparent);
-  }
+@keyframes mesh1 {
+  0%   { transform: translate(0, 0) scale(1); }
+  50%  { transform: translate(-40px, 30px) scale(1.05); }
+  100% { transform: translate(20px, -20px) scale(0.97); }
+}
+@keyframes mesh2 {
+  0%   { transform: translate(0, 0) scale(1); }
+  50%  { transform: translate(30px, -25px) scale(0.96); }
+  100% { transform: translate(-20px, 20px) scale(1.04); }
 }
 
 /* Subtle noise texture */
