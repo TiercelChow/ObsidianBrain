@@ -111,6 +111,10 @@ export function browseTimeline(startDate?: string, endDate?: string, limit = 20,
   })
 }
 
+export function syncMemos(months = 3) {
+  return callTool('sync_memos', { months })
+}
+
 export function searchMemos(query: string, startDate?: string, endDate?: string, tags?: string[], limit = 20) {
   return callTool('search_memos', {
     query,

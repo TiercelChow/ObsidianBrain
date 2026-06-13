@@ -471,6 +471,34 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Insert or update a memo (for sync from Obsidian files).
+    pub fn upsert_memo(
+        &self,
+        id: &str,
+        timestamp: &str,
+        date: &str,
+        content: &str,
+        images: &str,
+        tags: &str,
+        file_path: &str,
+    ) -> Result<(), BrainError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO memos (id, timestamp, date, content, images, tags, file_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(id) DO UPDATE SET
+               timestamp = excluded.timestamp,
+               date = excluded.date,
+               content = excluded.content,
+               images = excluded.images,
+               tags = excluded.tags,
+               file_path = excluded.file_path",
+            params![id, timestamp, date, content, images, tags, file_path],
+        )
+        .map_err(|e| BrainError::Internal(format!("同步小记失败: {e}")))?;
+        Ok(())
+    }
+
     pub fn query_memos(&self, sql: &str, params: &[String]) -> Result<Vec<(String, String, String, String, String, String, String, String)>, BrainError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn

@@ -1,6 +1,6 @@
 //! 时光机小记管理器
 
-use chrono::Utc;
+use chrono::{Datelike, Local, Utc};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -215,5 +215,212 @@ impl MemoManager {
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now()),
         }
+    }
+
+    /// 从 Obsidian 文件同步小记到数据库
+    pub async fn sync_from_obsidian(&self, months: u32) -> Result<u32, BrainError> {
+        let obsidian = self
+            .obsidian
+            .as_ref()
+            .ok_or_else(|| BrainError::Internal("Obsidian API 不可用".to_string()))?;
+
+        // 计算需要同步的月份列表
+        let now = Local::now();
+        let mut month_files = Vec::new();
+        for i in 0..months {
+            let target = now - chrono::Duration::days(30 * i as i64);
+            month_files.push(format!("Timeline/{:04}-{:02}.md", target.year(), target.month()));
+        }
+
+        let mut total_synced = 0u32;
+
+        for file_path in &month_files {
+            let content = match obsidian.read_file(file_path).await {
+                Ok(c) => c,
+                Err(_) => {
+                    tracing::debug!(path = %file_path, "月份文件不存在，跳过");
+                    continue;
+                }
+            };
+
+            let memos = self.parse_month_file(&content, file_path);
+            for memo in memos {
+                let images_json =
+                    serde_json::to_string(&memo.images).unwrap_or_else(|_| "[]".to_string());
+                let tags_json =
+                    serde_json::to_string(&memo.tags).unwrap_or_else(|_| "[]".to_string());
+
+                self.db.upsert_memo(
+                    &memo.id,
+                    &memo.timestamp.to_rfc3339(),
+                    &memo.date,
+                    &memo.content,
+                    &images_json,
+                    &tags_json,
+                    &memo.file_path,
+                )?;
+                total_synced += 1;
+            }
+        }
+
+        tracing::info!(
+            months = months,
+            synced = total_synced,
+            "Obsidian 小记同步完成"
+        );
+        Ok(total_synced)
+    }
+
+    /// 解析月份 Markdown 文件，提取小记
+    fn parse_month_file(&self, content: &str, file_path: &str) -> Vec<Memo> {
+        let mut memos = Vec::new();
+        let mut current_date = String::new();
+        let mut current_time = String::new();
+        let mut current_content = String::new();
+        let mut current_images: Vec<String> = Vec::new();
+        let mut current_tags: Vec<String> = Vec::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+
+            // ## YYYY-MM-DD
+            if trimmed.starts_with("## ") && trimmed.len() >= 13 {
+                let date_part = trimmed[3..].trim();
+                if date_part.len() >= 10 && date_part.chars().nth(4) == Some('-') {
+                    self.flush_memo(
+                        &mut memos,
+                        &current_date,
+                        &current_time,
+                        &current_content,
+                        &current_images,
+                        &current_tags,
+                        file_path,
+                    );
+                    current_date = date_part[..10].to_string();
+                    current_time.clear();
+                    current_content.clear();
+                    current_images.clear();
+                    current_tags.clear();
+                    continue;
+                }
+            }
+
+            // ### HH:MM:SS
+            if trimmed.starts_with("### ") && trimmed.len() >= 12 {
+                let time_part = trimmed[4..].trim();
+                if time_part.len() >= 8 && time_part.chars().nth(2) == Some(':') {
+                    self.flush_memo(
+                        &mut memos,
+                        &current_date,
+                        &current_time,
+                        &current_content,
+                        &current_images,
+                        &current_tags,
+                        file_path,
+                    );
+                    current_time = time_part[..8].to_string();
+                    current_content.clear();
+                    current_images.clear();
+                    current_tags.clear();
+                    continue;
+                }
+            }
+
+            // --- separator
+            if trimmed == "---" {
+                self.flush_memo(
+                    &mut memos,
+                    &current_date,
+                    &current_time,
+                    &current_content,
+                    &current_images,
+                    &current_tags,
+                    file_path,
+                );
+                continue;
+            }
+
+            // ![[image.png]]
+            if trimmed.starts_with("![") && trimmed.contains("]]") {
+                if let Some(start) = trimmed.find("[[") {
+                    if let Some(end) = trimmed.find("]]") {
+                        let img_path = &trimmed[start + 2..end];
+                        current_images.push(img_path.to_string());
+                        continue;
+                    }
+                }
+            }
+
+            // #tag
+            if trimmed.starts_with('#') && !trimmed.starts_with("# ") {
+                for word in trimmed.split_whitespace() {
+                    if let Some(tag) = word.strip_prefix('#') {
+                        let tag = tag.trim();
+                        if !tag.is_empty() {
+                            current_tags.push(tag.to_string());
+                        }
+                    }
+                }
+                continue;
+            }
+
+            // Skip # title line
+            if trimmed.starts_with("# ") {
+                continue;
+            }
+
+            // Regular content
+            if !current_time.is_empty() && !trimmed.is_empty() {
+                if !current_content.is_empty() {
+                    current_content.push('\n');
+                }
+                current_content.push_str(trimmed);
+            }
+        }
+
+        // Flush last memo
+        self.flush_memo(
+            &mut memos,
+            &current_date,
+            &current_time,
+            &current_content,
+            &current_images,
+            &current_tags,
+            file_path,
+        );
+
+        memos
+    }
+
+    fn flush_memo(
+        &self,
+        memos: &mut Vec<Memo>,
+        date: &str,
+        time: &str,
+        content: &str,
+        images: &[String],
+        tags: &[String],
+        file_path: &str,
+    ) {
+        if date.is_empty() || time.is_empty() || content.is_empty() {
+            return;
+        }
+
+        let id = format!("sync:{}:{}:{}", file_path, date, time);
+        let timestamp_str = format!("{}T{}+08:00", date, time);
+        let timestamp = chrono::DateTime::parse_from_rfc3339(&timestamp_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+
+        memos.push(Memo {
+            id,
+            timestamp,
+            date: date.to_string(),
+            content: content.to_string(),
+            images: images.to_vec(),
+            tags: tags.to_vec(),
+            file_path: file_path.to_string(),
+            created_at: timestamp,
+        });
     }
 }

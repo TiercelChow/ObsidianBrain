@@ -220,3 +220,25 @@ impl ToolHandler for SearchMemosHandler {
     }
 }
 
+/// 从 Obsidian 同步小记
+pub struct SyncMemosHandler;
+
+#[async_trait]
+impl ToolHandler for SyncMemosHandler {
+    fn name(&self) -> &str { "sync_memos" }
+    fn description(&self) -> &str { "从 Obsidian Timeline 文件夹同步小记到数据库" }
+    fn input_schema(&self) -> Value { definitions::sync_memos_schema() }
+    fn module(&self) -> &str { "timeline" }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let months = args.get("months").and_then(|v| v.as_u64()).unwrap_or(3) as u32;
+
+        tracing::info!(months = months, "sync_memos 调用");
+        let synced = ctx.memo_manager.sync_from_obsidian(months).await?;
+
+        Ok(json!({
+            "synced": synced,
+            "months": months,
+        }))
+    }
+}

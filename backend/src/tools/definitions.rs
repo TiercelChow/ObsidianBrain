@@ -282,6 +282,23 @@ pub fn search_memos_schema() -> Value {
     })
 }
 
+/// Schema for `sync_memos` — sync memos from Obsidian files.
+pub fn sync_memos_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "months": {
+                "type": "integer",
+                "default": 3,
+                "minimum": 1,
+                "maximum": 24,
+                "description": "同步最近几个月的数据"
+            }
+        },
+        "additionalProperties": false
+    })
+}
+
 // ── Inspiration Tools ──
 
 /// Schema for `get_inspiration` — generate creative inspiration.

@@ -12,6 +12,11 @@
         </p>
       </div>
       <div class="header-actions">
+        <button class="glass-btn" @click="doSync" :disabled="syncing">
+          <el-icon v-if="syncing" class="is-loading"><Loading /></el-icon>
+          <el-icon v-else><Refresh /></el-icon>
+          <span>{{ syncing ? '同步中' : '同步' }}</span>
+        </button>
         <button class="glass-btn primary" @click="showCreateDialog = true">
           <el-icon><Plus /></el-icon>
           <span>写小记</span>
@@ -308,8 +313,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, type Directive } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus, Search, PriceTag, Loading, Picture } from '@element-plus/icons-vue'
-import { createMemo, browseTimeline, searchMemos, uploadImages } from '@/api'
+import { Plus, Search, PriceTag, Loading, Picture, Refresh } from '@element-plus/icons-vue'
+import { createMemo, browseTimeline, searchMemos, uploadImages, syncMemos } from '@/api'
 
 // ── Types ──
 interface Memo {
@@ -337,6 +342,7 @@ interface TimePreset {
 const loading = ref(false)
 const loadingMore = ref(false)
 const creating = ref(false)
+const syncing = ref(false)
 const memos = ref<Memo[]>([])
 const searchQuery = ref('')
 const activePreset = ref('')
@@ -547,6 +553,21 @@ async function loadMore() {
   if (loadingMore.value || !hasMore.value) return
   loadingMore.value = true
   await loadMemos(false)
+}
+
+async function doSync() {
+  syncing.value = true
+  try {
+    const res = await syncMemos(3) as unknown as { result: { synced: number } }
+    const count = res.result?.synced ?? 0
+    ElMessage.success(`同步完成：${count} 条小记`)
+    await loadMemos()
+  } catch (e) {
+    console.error('同步失败:', e)
+    ElMessage.error('同步失败')
+  } finally {
+    syncing.value = false
+  }
 }
 
 // ── Search ──
