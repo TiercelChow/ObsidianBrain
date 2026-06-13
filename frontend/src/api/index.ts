@@ -128,9 +128,8 @@ export function searchMemos(query: string, startDate?: string, endDate?: string,
 export async function uploadImages(files: File[]): Promise<{ paths: string[] }> {
   const formData = new FormData()
   files.forEach(f => formData.append('images', f))
-  // Send directly to backend to bypass Vite proxy multipart size limits
-  const baseUrl = import.meta.env.DEV ? 'http://127.0.0.1:9876' : ''
-  const res = await fetch(`${baseUrl}/v1/upload/images`, {
+  // Use relative URL so it works on both localhost and LAN access
+  const res = await fetch('/v1/upload/images', {
     method: 'POST',
     body: formData,
   })

@@ -72,7 +72,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("配置加载失败: {e}，使用默认配置");
         AppConfig::default()
     });
-    let addr = SocketAddr::from(([127, 0, 0, 1], config.server.port));
+    let host: std::net::IpAddr = config.server.host.parse()
+        .unwrap_or_else(|_| std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+    let addr = SocketAddr::new(host, config.server.port);
     tracing::info!("配置加载完成: {}:{}", addr.ip(), addr.port());
 
     // 3. Initialize infrastructure
