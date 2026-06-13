@@ -244,7 +244,13 @@ impl MemoManager {
             };
 
             let memos = self.parse_month_file(&content, file_path);
-            for memo in memos {
+            for mut memo in memos {
+                // Check if a memo with this timestamp already exists (e.g. created via app)
+                let ts = memo.timestamp.to_rfc3339();
+                if let Ok(Some(existing_id)) = self.db.find_memo_id_by_timestamp(&ts) {
+                    memo.id = existing_id; // reuse existing ID to avoid duplicates
+                }
+
                 let images_json =
                     serde_json::to_string(&memo.images).unwrap_or_else(|_| "[]".to_string());
                 let tags_json =
@@ -252,7 +258,7 @@ impl MemoManager {
 
                 self.db.upsert_memo(
                     &memo.id,
-                    &memo.timestamp.to_rfc3339(),
+                    &ts,
                     &memo.date,
                     &memo.content,
                     &images_json,

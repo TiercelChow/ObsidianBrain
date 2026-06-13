@@ -499,6 +499,26 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Find an existing memo ID by timestamp (for dedup during sync).
+    /// Compares only the date+time portion (first 19 chars: YYYY-MM-DDTHH:MM:SS)
+    /// to handle different timezone offsets and microsecond precision.
+    pub fn find_memo_id_by_timestamp(&self, timestamp: &str) -> Result<Option<String>, BrainError> {
+        let conn = self.conn.lock().unwrap();
+        // Normalize: take first 19 chars (YYYY-MM-DDTHH:MM:SS)
+        let normalized = if timestamp.len() >= 19 { &timestamp[..19] } else { timestamp };
+        let pattern = format!("{}%", normalized);
+        let result = conn.query_row(
+            "SELECT id FROM memos WHERE timestamp LIKE ?1 LIMIT 1",
+            params![pattern],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(id) => Ok(Some(id)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(BrainError::Internal(format!("查询小记 ID 失败: {e}"))),
+        }
+    }
+
     pub fn query_memos(&self, sql: &str, params: &[String]) -> Result<Vec<(String, String, String, String, String, String, String, String)>, BrainError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
