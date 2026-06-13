@@ -243,7 +243,6 @@ html, body, #app {
 .app-container {
   height: 100vh;
   position: relative;
-  z-index: 1;
 }
 
 .app-aside {
