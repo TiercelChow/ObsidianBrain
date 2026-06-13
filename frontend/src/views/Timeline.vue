@@ -129,29 +129,33 @@
                   <div class="memo-time-dot"></div>
                   <div class="memo-time-line"></div>
                 </div>
-                <div class="memo-card-body glass-surface">
-                  <div class="memo-time">{{ formatTime(memo.timestamp) }}</div>
-                  <div class="memo-content" v-html="renderContent(memo.content, searchQuery)"></div>
-                  <div v-if="memo.images.length > 0" class="memo-images" :class="'memo-images-' + Math.min(memo.images.length, 3)">
-                    <el-image
-                      v-for="(img, idx) in memo.images"
-                      :key="idx"
-                      :src="vaultImageUrl(img)"
-                      fit="cover"
-                      class="memo-image"
-                      :preview-src-list="memo.images.map(vaultImageUrl)"
-                      :initial-index="idx"
-                    />
+                <div class="memo-card-body glass-surface" :class="{ 'has-images': memo.images.length > 0 }">
+                  <div v-if="memo.images.length > 0" class="memo-card-images">
+                    <div class="memo-images" :class="'memo-images-' + imageGridCols(memo.images.length)">
+                      <el-image
+                        v-for="(img, i) in memo.images"
+                        :key="i"
+                        :src="vaultImageUrl(img)"
+                        fit="cover"
+                        class="memo-image"
+                        :preview-src-list="memo.images.map(vaultImageUrl)"
+                        :initial-index="i"
+                      />
+                    </div>
                   </div>
-                  <div v-if="memo.tags.length > 0" class="memo-tags">
-                    <span
-                      v-for="tag in memo.tags"
-                      :key="tag"
-                      class="memo-tag glass-chip"
-                      @click.stop="searchByTag(tag)"
-                    >
-                      #{{ tag }}
-                    </span>
+                  <div class="memo-card-text">
+                    <div class="memo-time">{{ formatTime(memo.timestamp) }}</div>
+                    <div class="memo-content" v-html="renderContent(memo.content, searchQuery)"></div>
+                    <div v-if="memo.tags.length > 0" class="memo-tags">
+                      <span
+                        v-for="tag in memo.tags"
+                        :key="tag"
+                        class="memo-tag glass-chip"
+                        @click.stop="searchByTag(tag)"
+                      >
+                        #{{ tag }}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -559,6 +563,11 @@ async function submitMemo() {
 // ── Formatting ──
 function vaultImageUrl(path: string): string {
   return `/v1/vault/images/${path}`
+}
+function imageGridCols(count: number): number {
+  if (count <= 1) return 1
+  if (count <= 4) return 2
+  return 3
 }
 function formatTime(ts: string) {
   return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -1214,6 +1223,18 @@ onMounted(() => { loadMemos() })
   backface-visibility: hidden;
   contain: layout style paint;
 }
+.memo-card-body.has-images {
+  display: flex;
+  gap: 16px;
+}
+.memo-card-images {
+  flex-shrink: 0;
+  width: 240px;
+}
+.memo-card-text {
+  flex: 1;
+  min-width: 0;
+}
 .memo-card-body:hover {
   transform: translateY(-1px);
   box-shadow:
@@ -1348,13 +1369,16 @@ onMounted(() => { loadMemos() })
 
 .memo-images {
   display: grid;
-  gap: 6px;
-  margin-top: 12px;
-  max-width: 340px;
+  gap: 4px;
+  width: 100%;
 }
 .memo-images-1 {
   grid-template-columns: 1fr;
-  max-width: 240px;
+}
+.memo-images-1 .memo-image {
+  aspect-ratio: auto;
+  max-height: 240px;
+  width: 100%;
 }
 .memo-images-2 {
   grid-template-columns: repeat(2, 1fr);
@@ -1362,19 +1386,17 @@ onMounted(() => { loadMemos() })
 .memo-images-3 {
   grid-template-columns: repeat(3, 1fr);
 }
-.memo-image {
-  width: 100%;
+.memo-images-2 .memo-image,
+.memo-images-3 .memo-image {
   aspect-ratio: 1;
-  border-radius: 10px;
+  width: 100%;
+}
+.memo-image {
+  border-radius: 8px;
   object-fit: cover;
   cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.4);
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.memo-images-1 .memo-image {
-  aspect-ratio: auto;
-  max-height: 280px;
-  width: 100%;
 }
 .memo-image:hover {
   transform: scale(1.03);
@@ -1702,6 +1724,8 @@ onMounted(() => { loadMemos() })
   .toolbar-row { flex-wrap: wrap; }
   .search-box { max-width: 100%; min-width: 0; }
   .filter-right { flex-wrap: wrap; margin-left: 0; width: 100%; }
+  .memo-card-body.has-images { flex-direction: column; }
+  .memo-card-images { width: 100%; }
 }
 </style>
 
