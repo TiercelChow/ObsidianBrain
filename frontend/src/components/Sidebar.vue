@@ -88,7 +88,7 @@ function isActive(path: string) {
   border-right: 1px solid rgba(255, 255, 255, 0.6);
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.3);
   padding: 0 12px;
-  transition: padding 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: padding 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .sidebar.collapsed {
@@ -104,7 +104,8 @@ function isActive(path: string) {
   padding: 0 8px;
   margin-bottom: 8px;
   flex-shrink: 0;
-  transition: padding 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: padding 0.45s cubic-bezier(0.34, 1.56, 0.64, 1),
+              justify-content 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .sidebar.collapsed .logo-section {
@@ -150,12 +151,13 @@ function isActive(path: string) {
   font-size: 14px;
   font-weight: 450;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .sidebar.collapsed .nav-item {
   justify-content: center;
   padding: 10px 0;
+  gap: 0;
 }
 
 .nav-item:hover {
@@ -173,7 +175,11 @@ function isActive(path: string) {
 .nav-icon {
   flex-shrink: 0;
   opacity: 0.6;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.2s ease, transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.sidebar.collapsed .nav-icon {
+  transform: scale(1.1);
 }
 
 .nav-item:hover .nav-icon,
@@ -204,12 +210,13 @@ function isActive(path: string) {
   color: #a1a1aa;
   font-size: 13px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .sidebar.collapsed .collapse-btn {
   justify-content: center;
   padding: 8px 0;
+  gap: 0;
 }
 
 .collapse-btn:hover {
@@ -218,21 +225,33 @@ function isActive(path: string) {
 }
 
 /* ── Transitions ── */
-.logo-text-enter-active,
-.logo-text-leave-active {
-  transition: opacity 0.2s ease;
+.logo-text-enter-active {
+  transition: opacity 0.25s ease 0.15s, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) 0.15s;
 }
-.logo-text-enter-from,
+.logo-text-leave-active {
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.logo-text-enter-from {
+  opacity: 0;
+  transform: translateX(-8px);
+}
 .logo-text-leave-to {
   opacity: 0;
+  transform: translateX(-4px);
 }
 
-.nav-label-enter-active,
-.nav-label-leave-active {
-  transition: opacity 0.15s ease;
+.nav-label-enter-active {
+  transition: opacity 0.2s ease 0.1s, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s;
 }
-.nav-label-enter-from,
+.nav-label-leave-active {
+  transition: opacity 0.1s ease, transform 0.1s ease;
+}
+.nav-label-enter-from {
+  opacity: 0;
+  transform: translateX(-6px);
+}
 .nav-label-leave-to {
   opacity: 0;
+  transform: translateX(-3px);
 }
 </style>

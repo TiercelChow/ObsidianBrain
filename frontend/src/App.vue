@@ -183,9 +183,10 @@ html, body, #app {
 }
 
 .app-aside {
-  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
   overflow: hidden;
   background: transparent;
+  will-change: width;
 }
 
 .app-main {
