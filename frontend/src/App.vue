@@ -58,19 +58,43 @@ html, body, #app {
   background: rgba(0, 0, 0, 0.15);
 }
 
+/* ── Glass Card 全局覆盖 ── */
+.el-card,
+.stat-card, .module-card, .status-card, .tool-card,
+.stat-chip, .result-card, .recent-card,
+.repo-card, .mode-option, .radar-card,
+.combo-result, .question-result, .counterpoint-result,
+.combo-result .concept-chip,
+.question-result .question-item,
+.counterpoint-result .counterpoint-item,
+.assessment {
+  background: rgba(255, 255, 255, 0.55) !important;
+  backdrop-filter: blur(12px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.03),
+    0 4px 16px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+}
+
+/* ── Glass Tag 全局覆盖 ── */
+.lang-tag, .tag, .stat-chip .stat-label {
+  background: rgba(255, 255, 255, 0.45) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.5) !important;
+}
+
 /* ── Element Plus overrides ── */
 .el-card {
   border-radius: 20px !important;
-  border: 1px solid rgba(0, 0, 0, 0.04) !important;
-  background: #fff !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04),
-              0 1px 2px rgba(0, 0, 0, 0.02) !important;
-  transition: box-shadow 0.25s ease,
-              transform 0.25s ease !important;
+  transition: box-shadow 0.25s ease, transform 0.25s ease !important;
 }
 .el-card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06),
-              0 1px 3px rgba(0, 0, 0, 0.04) !important;
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
 }
 
 .el-tag {

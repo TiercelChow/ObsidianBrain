@@ -212,7 +212,7 @@ onMounted(() => {
 .stats-row { display: flex; gap: 16px; margin-bottom: 24px; }
 .stat-chip {
   display: flex; align-items: baseline; gap: 6px;
-  padding: 8px 16px; background: #fff; border: 1px solid #f0f0f0; border-radius: 12px;
+  padding: 8px 16px; border-radius: 12px;
 }
 .stat-num { font-size: 18px; font-weight: 600; color: #18181b; }
 .stat-label { font-size: 12px; color: #a1a1aa; }
@@ -230,7 +230,7 @@ onMounted(() => {
 }
 .results-list { display: flex; flex-direction: column; gap: 12px; }
 .result-card {
-  padding: 16px 20px; background: #fff; border: 1px solid #f0f0f0; border-radius: 14px;
+  padding: 16px 20px; border-radius: 14px;
   transition: box-shadow 0.2s ease;
 }
 .result-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
@@ -249,7 +249,7 @@ onMounted(() => {
 
 .recent-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .recent-card {
-  padding: 12px 16px; background: #fff; border: 1px solid #f0f0f0; border-radius: 12px;
+  padding: 12px 16px; border-radius: 12px;
 }
 .recent-title { font-size: 14px; font-weight: 500; color: #18181b; margin-bottom: 4px; }
 .recent-path { font-size: 12px; color: #a1a1aa; font-family: monospace; margin-bottom: 6px; }

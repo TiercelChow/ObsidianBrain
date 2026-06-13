@@ -234,7 +234,7 @@ onMounted(() => { loadAll() })
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 40px; }
 .stat-card {
   display: flex; align-items: center; gap: 14px; padding: 20px;
-  background: #fff; border: 1px solid #f0f0f0; border-radius: 18px;
+  border-radius: 18px;
   animation: fade-in 0.4s ease both; animation-delay: var(--delay, 0s);
 }
 .stat-icon {
@@ -250,7 +250,7 @@ onMounted(() => { loadAll() })
 
 .modules-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .module-card {
-  padding: 20px; background: #fff; border: 1px solid #f0f0f0; border-radius: 18px;
+  padding: 20px; border-radius: 18px;
   border-left: 3px solid var(--accent, #e4e4e7);
   animation: fade-in 0.4s ease both; animation-delay: var(--delay, 0s);
   transition: box-shadow 0.2s ease;
@@ -264,9 +264,9 @@ onMounted(() => { loadAll() })
 .module-title { font-size: 15px; font-weight: 600; color: #18181b; margin-bottom: 6px; }
 .module-desc { font-size: 13px; color: #71717a; line-height: 1.6; margin-bottom: 14px; }
 .module-tags { display: flex; gap: 6px; flex-wrap: wrap; }
-.tag { font-size: 11px; padding: 3px 8px; border-radius: 8px; background: #f4f4f5; color: #52525b; font-weight: 500; }
+.tag { font-size: 11px; padding: 3px 8px; border-radius: 8px; color: #52525b; font-weight: 500; }
 
-.status-card { padding: 20px; background: #fff; border: 1px solid #f0f0f0; border-radius: 18px; }
+.status-card { padding: 20px; border-radius: 18px; }
 .system-info { margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #f4f4f5; }
 .system-info-row { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
 .system-label { font-size: 13px; color: #a1a1aa; min-width: 80px; }
@@ -292,7 +292,7 @@ onMounted(() => { loadAll() })
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .tools-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-.tool-card { padding: 16px; background: #fff; border: 1px solid #f0f0f0; border-radius: 14px; }
+.tool-card { padding: 16px; border-radius: 14px; }
 .tool-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .tool-name { font-size: 14px; font-weight: 600; color: #18181b; font-family: monospace; }
 .tool-desc { font-size: 12px; color: #71717a; line-height: 1.5; }

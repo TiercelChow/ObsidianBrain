@@ -133,7 +133,7 @@ onMounted(() => { loadRadar() })
 
 .radar-list { display: flex; flex-direction: column; gap: 12px; }
 .radar-card {
-  padding: 20px; background: #fff; border: 1px solid #f0f0f0; border-radius: 16px;
+  padding: 20px; border-radius: 16px;
   transition: box-shadow 0.2s ease;
 }
 .radar-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.04); }

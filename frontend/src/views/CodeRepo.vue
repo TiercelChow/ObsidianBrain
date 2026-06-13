@@ -194,7 +194,7 @@ onMounted(() => { loadRepos() })
 .header-actions { display: flex; gap: 8px; }
 
 .repo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
-.repo-card { padding: 20px; background: #fff; border: 1px solid #f0f0f0; border-radius: 16px; transition: box-shadow 0.2s ease; }
+.repo-card { padding: 20px; border-radius: 16px; transition: box-shadow 0.2s ease; }
 .repo-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
 .repo-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .repo-name { font-size: 16px; font-weight: 600; color: #18181b; }
@@ -205,13 +205,13 @@ onMounted(() => { loadRepos() })
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; max-height: 2.4em;
 }
 .repo-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
-.lang-tag { font-size: 11px; padding: 2px 8px; border-radius: 8px; background: #f4f4f5; color: #52525b; }
+.lang-tag { font-size: 11px; padding: 2px 8px; border-radius: 8px; color: #52525b; }
 .repo-actions { display: flex; gap: 8px; }
 
 .commits-section { margin-top: 20px; }
 .commits-section h4 { font-size: 15px; font-weight: 600; color: #18181b; margin-bottom: 12px; }
 .commit-list { display: flex; flex-direction: column; gap: 8px; }
-.commit-item { display: flex; gap: 12px; align-items: center; padding: 10px 12px; background: #fafafa; border-radius: 10px; font-size: 13px; }
+.commit-item { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 10px; font-size: 13px; }
 .commit-hash { font-family: monospace; color: #6366f1; min-width: 60px; font-weight: 500; }
 .commit-msg { flex: 1; color: #18181b; }
 .commit-author { color: #a1a1aa; font-size: 12px; }

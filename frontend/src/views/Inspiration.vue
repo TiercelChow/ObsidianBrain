@@ -239,11 +239,11 @@ function loadHistory() {
 /* 模式选择 */
 .mode-selector { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
 .mode-option {
-  padding: 20px; background: #fff; border: 2px solid #f0f0f0; border-radius: 16px;
+  padding: 20px; border: 2px solid rgba(255, 255, 255, 0.6); border-radius: 16px;
   text-align: center; cursor: pointer; transition: all 0.2s ease;
 }
 .mode-option:hover { border-color: #e4e4e7; }
-.mode-option.active { border-color: #6366f1; background: #fafafe; }
+.mode-option.active { border-color: #6366f1; background: rgba(99, 102, 241, 0.06); }
 .mode-icon { font-size: 28px; margin-bottom: 8px; }
 .mode-name { font-size: 15px; font-weight: 600; color: #18181b; margin-bottom: 4px; }
 .mode-desc { font-size: 12px; color: #a1a1aa; }
@@ -258,7 +258,7 @@ function loadHistory() {
 @keyframes slide-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 
 .result-card {
-  background: #fff; border: 1px solid #f0f0f0; border-radius: 16px;
+  border-radius: 16px;
   padding: 24px; margin-bottom: 20px;
 }
 
@@ -266,7 +266,7 @@ function loadHistory() {
 .concepts-row { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 24px; }
 .concept-chip {
   display: flex; align-items: center; gap: 8px; padding: 10px 16px;
-  background: #f8f9fa; border-radius: 12px;
+  border-radius: 12px;
 }
 .concept-icon { font-size: 18px; }
 .concept-term { font-size: 16px; font-weight: 600; color: #18181b; }
@@ -289,7 +289,7 @@ function loadHistory() {
 .note-path { font-size: 12px; color: #a1a1aa; font-family: monospace; }
 
 .questions-list { display: flex; flex-direction: column; gap: 16px; }
-.question-item { display: flex; gap: 16px; padding: 16px; background: #fafafa; border-radius: 12px; }
+.question-item { display: flex; gap: 16px; padding: 16px; border-radius: 12px; }
 .question-number {
   width: 32px; height: 32px; border-radius: 50%; background: #6366f1; color: #fff;
   display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0;
@@ -301,7 +301,7 @@ function loadHistory() {
 
 /* 对立观点 */
 .counterpoints-list { display: flex; flex-direction: column; gap: 16px; }
-.counterpoint-item { padding: 16px; background: #fafafa; border-radius: 12px; }
+.counterpoint-item { padding: 16px; border-radius: 12px; }
 .cp-header { margin-bottom: 12px; }
 .cp-number { font-size: 14px; font-weight: 600; color: #6366f1; }
 .cp-section { margin-bottom: 12px; }
@@ -309,7 +309,7 @@ function loadHistory() {
 .cp-label { font-size: 13px; font-weight: 600; color: #18181b; margin-bottom: 4px; }
 .cp-section p { font-size: 13px; color: #52525b; line-height: 1.6; }
 
-.assessment { margin-top: 20px; padding: 16px; background: #f0fdf4; border-radius: 12px; }
+.assessment { margin-top: 20px; padding: 16px; border-radius: 12px; }
 .assessment h3 { color: #166534; }
 .assessment p { color: #15803d; }
 </style>
