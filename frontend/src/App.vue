@@ -113,69 +113,6 @@ html, body, #app {
   font-weight: 500 !important;
 }
 
-/* ── Glass Input 覆盖 ── */
-.el-input__wrapper {
-  border-radius: 12px !important;
-  background: rgba(255, 255, 255, 0.45) !important;
-  backdrop-filter: blur(12px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.5) inset,
-    0 1px 2px rgba(0, 0, 0, 0.03) !important;
-  transition: all 0.25s ease !important;
-}
-.el-input__wrapper:hover {
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.7) inset,
-    0 1px 3px rgba(0, 0, 0, 0.05) !important;
-}
-.el-input__wrapper.is-focus {
-  box-shadow:
-    0 0 0 2px rgba(129, 140, 248, 0.15),
-    0 0 0 1px rgba(255, 255, 255, 0.5) inset !important;
-}
-
-/* ── Glass Select 覆盖 ── */
-.el-select__wrapper {
-  border-radius: 10px !important;
-  background: rgba(255, 255, 255, 0.45) !important;
-  backdrop-filter: blur(12px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5) inset !important;
-}
-
-/* ── Glass Date Picker 覆盖 ── */
-.el-date-editor.el-input__wrapper {
-  border-radius: 12px !important;
-}
-.el-range-editor {
-  border-radius: 12px !important;
-  background: rgba(255, 255, 255, 0.45) !important;
-  backdrop-filter: blur(12px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
-  border: 1px solid rgba(255, 255, 255, 0.5) !important;
-}
-
-/* ── Glass Dialog 覆盖 ── */
-.el-dialog {
-  border-radius: 20px !important;
-  background: rgba(255, 255, 255, 0.8) !important;
-  backdrop-filter: blur(40px) saturate(200%) !important;
-  -webkit-backdrop-filter: blur(40px) saturate(200%) !important;
-  border: 1px solid rgba(255, 255, 255, 0.7) !important;
-  box-shadow:
-    0 12px 48px rgba(0, 0, 0, 0.1),
-    0 4px 16px rgba(0, 0, 0, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
-  overflow: hidden;
-}
-.el-dialog__header {
-  border-radius: 20px 20px 0 0 !important;
-  padding: 20px 24px 16px !important;
-}
-.el-dialog__body {
-  padding: 16px 24px 24px !important;
-}
 
 .el-empty__description p {
   color: #a1a1aa;

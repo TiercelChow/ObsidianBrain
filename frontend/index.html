@@ -9,5 +9,94 @@
   <body>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
+    <!-- Liquid Glass 全局覆盖（绕过 Vite CSS 压缩） -->
+    <style>
+      /* ── Glass Input ── */
+      .el-input__wrapper {
+        border-radius: 12px !important;
+        background: rgba(255, 255, 255, 0.45) !important;
+        backdrop-filter: blur(12px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+        box-shadow:
+          0 0 0 1px rgba(255, 255, 255, 0.5) inset,
+          0 1px 2px rgba(0, 0, 0, 0.03) !important;
+        transition: all 0.25s ease !important;
+      }
+      .el-input__wrapper:hover {
+        box-shadow:
+          0 0 0 1px rgba(255, 255, 255, 0.7) inset,
+          0 1px 3px rgba(0, 0, 0, 0.05) !important;
+      }
+      .el-input__wrapper.is-focus {
+        box-shadow:
+          0 0 0 2px rgba(129, 140, 248, 0.15),
+          0 0 0 1px rgba(255, 255, 255, 0.5) inset !important;
+      }
+
+      /* ── Glass Select ── */
+      .el-select__wrapper {
+        border-radius: 10px !important;
+        background: rgba(255, 255, 255, 0.45) !important;
+        backdrop-filter: blur(12px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5) inset !important;
+      }
+
+      /* ── Glass Date Picker ── */
+      .el-date-editor.el-input__wrapper,
+      .el-range-editor {
+        border-radius: 12px !important;
+        background: rgba(255, 255, 255, 0.45) !important;
+        backdrop-filter: blur(12px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.5) !important;
+      }
+
+      /* ── Glass Dialog ── */
+      .el-dialog {
+        border-radius: 20px !important;
+        background: rgba(255, 255, 255, 0.8) !important;
+        backdrop-filter: blur(40px) saturate(200%) !important;
+        -webkit-backdrop-filter: blur(40px) saturate(200%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.7) !important;
+        box-shadow:
+          0 12px 48px rgba(0, 0, 0, 0.1),
+          0 4px 16px rgba(0, 0, 0, 0.05),
+          inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
+        overflow: hidden;
+      }
+      .el-dialog__header {
+        border-radius: 20px 20px 0 0 !important;
+        padding: 20px 24px 16px !important;
+      }
+      .el-dialog__body {
+        padding: 16px 24px 24px !important;
+      }
+
+      /* ── Glass Card ── */
+      .stat-card, .module-card, .status-card, .tool-card,
+      .stat-chip, .result-card, .recent-card,
+      .repo-card, .mode-option, .radar-card,
+      .combo-result, .question-result, .counterpoint-result,
+      .concept-chip, .question-item, .counterpoint-item,
+      .assessment {
+        background: rgba(255, 255, 255, 0.55) !important;
+        backdrop-filter: blur(12px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.6) !important;
+        box-shadow:
+          0 1px 2px rgba(0, 0, 0, 0.03),
+          0 4px 16px rgba(0, 0, 0, 0.04),
+          inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+      }
+
+      /* ── Glass Tag ── */
+      .lang-tag, .tag {
+        background: rgba(255, 255, 255, 0.45) !important;
+        backdrop-filter: blur(8px) !important;
+        -webkit-backdrop-filter: blur(8px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.5) !important;
+      }
+    </style>
   </body>
 </html>
