@@ -233,7 +233,11 @@ impl MemoManager {
         }
 
         let mut total_synced = 0u32;
+        let mut all_sync_ids: Vec<String> = Vec::new();
+        let mut synced_dates: std::collections::HashSet<String> = std::collections::HashSet::new();
 
+        // Collect all memos from Obsidian first
+        let mut all_memos: Vec<Memo> = Vec::new();
         for file_path in &month_files {
             let content = match obsidian.read_file(file_path).await {
                 Ok(c) => c,
@@ -242,31 +246,38 @@ impl MemoManager {
                     continue;
                 }
             };
-
             let memos = self.parse_month_file(&content, file_path);
-            for mut memo in memos {
-                // Check if a memo with this timestamp already exists (e.g. created via app)
-                let ts = memo.timestamp.to_rfc3339();
-                if let Ok(Some(existing_id)) = self.db.find_memo_id_by_timestamp(&ts) {
-                    memo.id = existing_id; // reuse existing ID to avoid duplicates
-                }
-
-                let images_json =
-                    serde_json::to_string(&memo.images).unwrap_or_else(|_| "[]".to_string());
-                let tags_json =
-                    serde_json::to_string(&memo.tags).unwrap_or_else(|_| "[]".to_string());
-
-                self.db.upsert_memo(
-                    &memo.id,
-                    &ts,
-                    &memo.date,
-                    &memo.content,
-                    &images_json,
-                    &tags_json,
-                    &memo.file_path,
-                )?;
-                total_synced += 1;
+            for memo in memos {
+                all_sync_ids.push(memo.id.clone());
+                synced_dates.insert(memo.date.clone());
+                all_memos.push(memo);
             }
+        }
+
+        // Delete memos in synced date range that no longer exist in Obsidian
+        let deleted = self.db.delete_memos_not_by_ids(&synced_dates, &all_sync_ids)?;
+        if deleted > 0 {
+            tracing::info!(deleted = deleted, "已删除 Obsidian 中不存在的小记");
+        }
+
+        // Upsert all memos from Obsidian
+        for memo in &all_memos {
+            let ts = memo.timestamp.to_rfc3339();
+            let images_json =
+                serde_json::to_string(&memo.images).unwrap_or_else(|_| "[]".to_string());
+            let tags_json =
+                serde_json::to_string(&memo.tags).unwrap_or_else(|_| "[]".to_string());
+
+            self.db.upsert_memo(
+                &memo.id,
+                &ts,
+                &memo.date,
+                &memo.content,
+                &images_json,
+                &tags_json,
+                &memo.file_path,
+            )?;
+            total_synced += 1;
         }
 
         tracing::info!(
@@ -343,6 +354,9 @@ impl MemoManager {
                     &current_tags,
                     file_path,
                 );
+                current_content.clear();
+                current_images.clear();
+                current_tags.clear();
                 continue;
             }
 

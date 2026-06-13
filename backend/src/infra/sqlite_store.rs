@@ -519,6 +519,56 @@ impl SqliteStore {
         }
     }
 
+    /// Delete memos whose date is in synced_dates but whose ID is NOT in keep_ids.
+    /// Used during sync to remove memos deleted from Obsidian.
+    pub fn delete_memos_not_by_ids(
+        &self,
+        synced_dates: &std::collections::HashSet<String>,
+        keep_ids: &[String],
+    ) -> Result<u32, BrainError> {
+        if synced_dates.is_empty() {
+            return Ok(0);
+        }
+
+        let conn = self.conn.lock().unwrap();
+
+        // Build date IN clause
+        let date_placeholders: Vec<String> = synced_dates.iter().enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect();
+        let date_in = date_placeholders.join(", ");
+
+        // Build ID NOT IN clause
+        let id_placeholders: Vec<String> = keep_ids.iter().enumerate()
+            .map(|(i, _)| format!("?{}", i + synced_dates.len() + 1))
+            .collect();
+        let id_not_in = if id_placeholders.is_empty() {
+            "''".to_string()
+        } else {
+            id_placeholders.join(", ")
+        };
+
+        let sql = format!(
+            "DELETE FROM memos WHERE date IN ({}) AND id NOT IN ({})",
+            date_in, id_not_in
+        );
+
+        // Collect all params: dates first, then IDs
+        let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        for d in synced_dates {
+            all_params.push(Box::new(d.clone()));
+        }
+        for id in keep_ids {
+            all_params.push(Box::new(id.clone()));
+        }
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = all_params.iter().map(|p| p.as_ref()).collect();
+
+        let deleted = conn.execute(&sql, param_refs.as_slice())
+            .map_err(|e| BrainError::Internal(format!("删除过期小记失败: {e}")))?;
+
+        Ok(deleted as u32)
+    }
+
     pub fn query_memos(&self, sql: &str, params: &[String]) -> Result<Vec<(String, String, String, String, String, String, String, String)>, BrainError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
