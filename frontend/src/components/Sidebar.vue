@@ -67,7 +67,7 @@ const navItems = [
   { path: '/', label: '首页', icon: House },
   { path: '/memory', label: '记忆管理', icon: Notebook },
   { path: '/code-repo', label: '代码仓', icon: FolderOpened },
-  { path: '/timeline', label: '时间线', icon: Calendar },
+  { path: '/timeline', label: '时光机', icon: Calendar },
   { path: '/inspiration', label: '灵感熔炉', icon: MagicStick },
   { path: '/radar', label: '智识雷达', icon: DataLine },
 ]

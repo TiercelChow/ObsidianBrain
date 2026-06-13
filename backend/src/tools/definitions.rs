@@ -191,6 +191,97 @@ pub fn get_timeline_schema() -> Value {
     })
 }
 
+/// Schema for `create_memo` — create a memo (Time Machine).
+pub fn create_memo_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "content": {
+                "type": "string",
+                "description": "小记内容（支持 Markdown）"
+            },
+            "images": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "图片路径列表"
+            },
+            "tags": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "标签列表"
+            }
+        },
+        "required": ["content"],
+        "additionalProperties": false
+    })
+}
+
+/// Schema for `browse_timeline` — browse the Time Machine timeline.
+pub fn browse_timeline_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "start_date": {
+                "type": "string",
+                "description": "起始日期（YYYY-MM-DD）"
+            },
+            "end_date": {
+                "type": "string",
+                "description": "结束日期（YYYY-MM-DD）"
+            },
+            "limit": {
+                "type": "integer",
+                "default": 20,
+                "minimum": 1,
+                "maximum": 100,
+                "description": "每页数量"
+            },
+            "offset": {
+                "type": "integer",
+                "default": 0,
+                "minimum": 0,
+                "description": "偏移量"
+            }
+        },
+        "additionalProperties": false
+    })
+}
+
+/// Schema for `search_memos` — search memos in the Time Machine.
+pub fn search_memos_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "搜索关键词"
+            },
+            "start_date": {
+                "type": "string",
+                "description": "起始日期（YYYY-MM-DD）"
+            },
+            "end_date": {
+                "type": "string",
+                "description": "结束日期（YYYY-MM-DD）"
+            },
+            "tags": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "标签筛选"
+            },
+            "limit": {
+                "type": "integer",
+                "default": 20,
+                "minimum": 1,
+                "maximum": 100,
+                "description": "每页数量"
+            }
+        },
+        "required": ["query"],
+        "additionalProperties": false
+    })
+}
+
 // ── Inspiration Tools ──
 
 /// Schema for `get_inspiration` — generate creative inspiration.

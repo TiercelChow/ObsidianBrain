@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 use crate::error::BrainError;
-use crate::models::timeline::GetTimelineRequest;
+use crate::models::timeline::{BrowseTimelineRequest, GetTimelineRequest, MemoCreateRequest, MemoQuery};
 use crate::tools::definitions;
 use crate::tools::traits::ToolHandler;
 use crate::AppContext;
@@ -77,3 +77,146 @@ impl ToolHandler for GetTimelineHandler {
         }))
     }
 }
+
+/// 创建小记
+pub struct CreateMemoHandler;
+
+#[async_trait]
+impl ToolHandler for CreateMemoHandler {
+    fn name(&self) -> &str { "create_memo" }
+    fn description(&self) -> &str { "创建一条小记，支持文本和图片" }
+    fn input_schema(&self) -> Value { definitions::create_memo_schema() }
+    fn module(&self) -> &str { "timeline" }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let content = args.get("content")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| BrainError::Internal("缺少必需参数 'content'".to_string()))?
+            .to_string();
+
+        let images: Vec<String> = args.get("images")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+
+        let tags: Vec<String> = args.get("tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+
+        let request = MemoCreateRequest {
+            content,
+            images,
+            tags,
+        };
+
+        tracing::debug!("create_memo 调用");
+        let memo = ctx.memo_manager.create_memo(request).await?;
+
+        Ok(json!({
+            "id": memo.id,
+            "timestamp": memo.timestamp.to_rfc3339(),
+            "file_path": memo.file_path,
+        }))
+    }
+}
+
+/// 浏览时间线
+pub struct BrowseTimelineHandler;
+
+#[async_trait]
+impl ToolHandler for BrowseTimelineHandler {
+    fn name(&self) -> &str { "browse_timeline" }
+    fn description(&self) -> &str { "浏览时间线，支持按时间范围筛选" }
+    fn input_schema(&self) -> Value { definitions::browse_timeline_schema() }
+    fn module(&self) -> &str { "timeline" }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let start_date = args.get("start_date").and_then(|v| v.as_str()).map(String::from);
+        let end_date = args.get("end_date").and_then(|v| v.as_str()).map(String::from);
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+        let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+
+        let request = BrowseTimelineRequest {
+            start_date,
+            end_date,
+            limit,
+            offset,
+        };
+
+        tracing::debug!("browse_timeline 调用");
+        let memos = ctx.memo_manager.browse_timeline(request).await?;
+
+        let memos_json: Vec<Value> = memos.iter().map(|m| {
+            json!({
+                "id": m.id,
+                "timestamp": m.timestamp.to_rfc3339(),
+                "content": m.content,
+                "images": m.images,
+                "tags": m.tags,
+            })
+        }).collect();
+
+        Ok(json!({
+            "memos": memos_json,
+            "total": memos.len(),
+            "has_more": memos.len() == 20,
+        }))
+    }
+}
+
+/// 搜索小记
+pub struct SearchMemosHandler;
+
+#[async_trait]
+impl ToolHandler for SearchMemosHandler {
+    fn name(&self) -> &str { "search_memos" }
+    fn description(&self) -> &str { "搜索小记内容" }
+    fn input_schema(&self) -> Value { definitions::search_memos_schema() }
+    fn module(&self) -> &str { "timeline" }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let query = args.get("query")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| BrainError::Internal("缺少必需参数 'query'".to_string()))?
+            .to_string();
+
+        let start_date = args.get("start_date").and_then(|v| v.as_str()).map(String::from);
+        let end_date = args.get("end_date").and_then(|v| v.as_str()).map(String::from);
+        let tags: Option<Vec<String>> = args.get("tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+
+        let query_obj = MemoQuery {
+            query: Some(query),
+            start_date,
+            end_date,
+            tags,
+            limit,
+            offset: 0,
+        };
+
+        tracing::debug!("search_memos 调用");
+        let memos = ctx.memo_manager.search_memos(query_obj).await?;
+
+        let memos_json: Vec<Value> = memos.iter().map(|m| {
+            json!({
+                "id": m.id,
+                "timestamp": m.timestamp.to_rfc3339(),
+                "content": m.content,
+                "images": m.images,
+                "tags": m.tags,
+                "score": 1.0, // TODO: implement relevance scoring
+            })
+        }).collect();
+
+        Ok(json!({
+            "memos": memos_json,
+            "total": memos.len(),
+        }))
+    }
+}
+

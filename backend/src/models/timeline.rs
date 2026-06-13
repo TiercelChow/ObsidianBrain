@@ -123,6 +123,53 @@ pub struct TimelineResponse {
     pub summary: Option<String>,
 }
 
+// ─── 时光机（Time Machine）模型 ───
+
+/// 小记（Memo）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Memo {
+    pub id: String,
+    pub timestamp: DateTime<Utc>,
+    pub date: String,
+    pub content: String,
+    pub images: Vec<String>,
+    pub tags: Vec<String>,
+    pub file_path: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// 小记查询参数
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoQuery {
+    pub query: Option<String>,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub limit: usize,
+    pub offset: usize,
+}
+
+/// 创建小记请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoCreateRequest {
+    pub content: String,
+    #[serde(default)]
+    pub images: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+/// 时间线浏览请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowseTimelineRequest {
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    #[serde(default = "default_limit")]
+    pub limit: usize,
+    #[serde(default)]
+    pub offset: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

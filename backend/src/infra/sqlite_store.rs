@@ -52,6 +52,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "radar_items (Phase 3)",
         sql: include_str!("../../migrations/007_radar_items.sql"),
     },
+    Migration {
+        version: 8,
+        description: "memos (Time Machine)",
+        sql: include_str!("../../migrations/008_memos.sql"),
+    },
 ];
 
 impl SqliteStore {
@@ -445,6 +450,54 @@ impl SqliteStore {
         Ok(results)
     }
 
+    // ── Memos (Time Machine) ──
+
+    pub fn insert_memo(
+        &self,
+        id: &str,
+        timestamp: &str,
+        date: &str,
+        content: &str,
+        images: &str,
+        tags: &str,
+        file_path: &str,
+    ) -> Result<(), BrainError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO memos (id, timestamp, date, content, images, tags, file_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, timestamp, date, content, images, tags, file_path],
+        )
+        .map_err(|e| BrainError::Internal(format!("插入小记失败: {e}")))?;
+        Ok(())
+    }
+
+    pub fn query_memos(&self, sql: &str, params: &[String]) -> Result<Vec<(String, String, String, String, String, String, String, String)>, BrainError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(sql)
+            .map_err(|e| BrainError::Internal(format!("准备查询失败: {e}")))?;
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+        let rows = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                ))
+            })
+            .map_err(|e| BrainError::Internal(format!("查询小记失败: {e}")))?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row.map_err(|e| BrainError::Internal(format!("读取行失败: {e}")))?);
+        }
+        Ok(results)
+    }
+
     pub fn update_radar_status(&self, id: &str, status: &str) -> Result<bool, BrainError> {
         let conn = self.conn.lock().unwrap();
         let rows_changed = conn
@@ -484,7 +537,7 @@ mod tests {
         let count: u32 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(count, 7);
+        assert_eq!(count, 8);
     }
 
     #[test]
@@ -532,6 +585,7 @@ mod tests {
             "inspiration_history",
             "timeline_events",
             "app_state",
+            "memos",
         ] {
             let exists: bool = conn
                 .query_row(

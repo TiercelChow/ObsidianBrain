@@ -93,6 +93,34 @@ export function getTimeline(startDate: string, endDate: string) {
   return callTool('get_timeline', { start_date: startDate, end_date: endDate })
 }
 
+// ── Time Machine (时光机) ──
+export function createMemo(content: string, images?: string[], tags?: string[]) {
+  return callTool('create_memo', {
+    content,
+    ...(images?.length ? { images } : {}),
+    ...(tags?.length ? { tags } : {}),
+  })
+}
+
+export function browseTimeline(startDate?: string, endDate?: string, limit = 20, offset = 0) {
+  return callTool('browse_timeline', {
+    ...(startDate ? { start_date: startDate } : {}),
+    ...(endDate ? { end_date: endDate } : {}),
+    limit,
+    offset,
+  })
+}
+
+export function searchMemos(query: string, startDate?: string, endDate?: string, tags?: string[], limit = 20) {
+  return callTool('search_memos', {
+    query,
+    ...(startDate ? { start_date: startDate } : {}),
+    ...(endDate ? { end_date: endDate } : {}),
+    ...(tags?.length ? { tags } : {}),
+    limit,
+  })
+}
+
 // ── Inspiration ──
 export function getInspiration(type?: string, notePath?: string) {
   return callTool('get_inspiration', {

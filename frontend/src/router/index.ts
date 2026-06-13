@@ -25,7 +25,7 @@ const router = createRouter({
       path: '/timeline',
       name: 'Timeline',
       component: () => import('@/views/Timeline.vue'),
-      meta: { title: '时间线' },
+      meta: { title: '时光机' },
     },
     {
       path: '/inspiration',

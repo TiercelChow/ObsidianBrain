@@ -49,6 +49,9 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
 
     // Timeline module
     registry.register(Arc::new(GetTimelineHandler)).await;
+    registry.register(Arc::new(CreateMemoHandler)).await;
+    registry.register(Arc::new(BrowseTimelineHandler)).await;
+    registry.register(Arc::new(SearchMemosHandler)).await;
 
     // Inspiration module
     registry.register(Arc::new(GetInspirationHandler)).await;

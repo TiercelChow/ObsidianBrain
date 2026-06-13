@@ -19,7 +19,7 @@ use crate::core::inspiration::InspirationService;
 use crate::core::memory_service::MemoryService;
 use crate::core::radar::RadarService;
 use crate::core::timeline::store::TimelineStore;
-use crate::core::timeline::{TimelineConfig, TimelineService};
+use crate::core::timeline::{MemoManager, TimelineConfig, TimelineService};
 use crate::infra::obsidian_client::ObsidianClient;
 use crate::infra::sqlite_store::SqliteStore;
 use crate::tools::handlers::register_all_tools;
@@ -34,6 +34,7 @@ pub struct AppContext {
     pub repo_manager: Arc<RepoManager>,
     pub note_linker: Arc<NoteLinker>,
     pub timeline_service: Arc<TimelineService>,
+    pub memo_manager: Arc<MemoManager>,
     pub inspiration_service: Arc<InspirationService>,
     pub radar_service: Arc<RadarService>,
     /// Server start time — used to compute uptime in health endpoint.
@@ -143,6 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         timeline_store,
         TimelineConfig::default(),
     ));
+    let memo_manager = Arc::new(MemoManager::new(db.clone(), obsidian.clone()));
     tracing::info!("CodeRepo & Timeline 服务初始化完成");
 
     // 初始化 LLM 客户端（用于灵感服务）
@@ -197,6 +199,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         repo_manager,
         note_linker,
         timeline_service,
+        memo_manager,
         inspiration_service,
         radar_service,
         start_time,
@@ -301,6 +304,7 @@ mod test_helpers {
                 timeline_store,
                 TimelineConfig::default(),
             ));
+            let memo_manager = Arc::new(MemoManager::new(db.clone(), None));
 
             // 创建测试用 LLM 和灵感服务
             let llm_config = crate::config::LlmConfig::default();
@@ -330,6 +334,7 @@ mod test_helpers {
                 repo_manager,
                 note_linker,
                 timeline_service,
+                memo_manager,
                 inspiration_service,
                 radar_service,
                 start_time: chrono::Utc::now(),
