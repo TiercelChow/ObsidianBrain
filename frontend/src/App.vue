@@ -139,24 +139,36 @@ html, body, #app {
 .orb {
   position: absolute;
   border-radius: 50%;
-  filter: blur(100px);
-  opacity: 0.35;
+  filter: blur(140px);
+  opacity: 0.4;
   animation: orbFloat 20s ease-in-out infinite;
 }
 .orb-1 {
-  width: 520px; height: 520px;
-  background: radial-gradient(circle, #c4b5fd, #818cf8);
-  top: 0; right: 0;
+  width: 600px; height: 600px;
+  background: radial-gradient(circle at 50% 50%,
+    rgba(196, 181, 253, 0.6) 0%,
+    rgba(129, 140, 248, 0.3) 40%,
+    rgba(129, 140, 248, 0) 70%
+  );
+  top: -5%; right: -5%;
 }
 .orb-2 {
-  width: 440px; height: 440px;
-  background: radial-gradient(circle, #a5f3fc, #67e8f9);
-  bottom: 0; left: 0;
+  width: 500px; height: 500px;
+  background: radial-gradient(circle at 50% 50%,
+    rgba(165, 243, 252, 0.5) 0%,
+    rgba(103, 232, 249, 0.25) 40%,
+    rgba(103, 232, 249, 0) 70%
+  );
+  bottom: -5%; left: -5%;
   animation-delay: -7s;
 }
 .orb-3 {
-  width: 340px; height: 340px;
-  background: radial-gradient(circle, #fde68a, #fbbf24);
+  width: 400px; height: 400px;
+  background: radial-gradient(circle at 50% 50%,
+    rgba(253, 230, 138, 0.5) 0%,
+    rgba(251, 191, 36, 0.2) 40%,
+    rgba(251, 191, 36, 0) 70%
+  );
   top: 38%; left: 32%;
   animation-delay: -14s;
 }
