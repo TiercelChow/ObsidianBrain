@@ -203,7 +203,7 @@ html, body, #app {
   position: absolute;
   border-radius: 50%;
   filter: blur(100px);
-  opacity: 0.22;
+  opacity: 0.35;
   animation: orbFloat 20s ease-in-out infinite;
 }
 .orb-1 {
