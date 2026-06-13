@@ -132,14 +132,14 @@
                 <div class="memo-card-body glass-surface">
                   <div class="memo-time">{{ formatTime(memo.timestamp) }}</div>
                   <div class="memo-content" v-html="renderContent(memo.content, searchQuery)"></div>
-                  <div v-if="memo.images.length > 0" class="memo-images">
+                  <div v-if="memo.images.length > 0" class="memo-images" :class="'memo-images-' + Math.min(memo.images.length, 3)">
                     <el-image
                       v-for="(img, idx) in memo.images"
                       :key="idx"
-                      :src="img"
+                      :src="vaultImageUrl(img)"
                       fit="cover"
                       class="memo-image"
-                      :preview-src-list="memo.images"
+                      :preview-src-list="memo.images.map(vaultImageUrl)"
                       :initial-index="idx"
                     />
                   </div>
@@ -204,7 +204,31 @@
               placeholder="写下你此刻的想法...（支持 Markdown：**加粗**、- 列表）"
               class="glass-textarea"
               autofocus
+              @paste="onPaste"
             ></textarea>
+
+            <!-- 图片预览区 -->
+            <div class="image-preview-grid" v-if="pendingImages.length > 0">
+              <div
+                v-for="(img, idx) in pendingImages"
+                :key="idx"
+                class="image-preview-item"
+              >
+                <img :src="img.preview" class="image-preview-img" />
+                <button class="image-remove-btn" @click="removePendingImage(idx)">✕</button>
+                <div v-if="img.uploading" class="image-upload-overlay">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                </div>
+              </div>
+              <button
+                v-if="pendingImages.length < 9"
+                class="image-add-btn"
+                @click="triggerFileInput"
+              >
+                <el-icon :size="24"><Plus /></el-icon>
+              </button>
+            </div>
+
             <div class="form-row">
               <div class="glass-surface tag-input-wrap">
                 <el-icon class="tag-icon"><PriceTag /></el-icon>
@@ -214,7 +238,19 @@
                   class="glass-input inline"
                 />
               </div>
+              <button class="glass-btn image-btn" @click="triggerFileInput" v-if="pendingImages.length === 0">
+                <el-icon><Picture /></el-icon>
+                <span>图片</span>
+              </button>
             </div>
+            <input
+              ref="fileInputRef"
+              type="file"
+              accept="image/*"
+              multiple
+              style="display: none"
+              @change="onFileSelect"
+            />
           </div>
           <div class="dialog-footer">
             <span class="char-count" v-if="newMemo.content.length > 0">
@@ -241,8 +277,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, type Directive } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus, Search, PriceTag, Loading } from '@element-plus/icons-vue'
-import { createMemo, browseTimeline, searchMemos } from '@/api'
+import { Plus, Search, PriceTag, Loading, Picture } from '@element-plus/icons-vue'
+import { createMemo, browseTimeline, searchMemos, uploadImages } from '@/api'
 
 // ── Types ──
 interface Memo {
@@ -285,6 +321,54 @@ const newMemo = ref({
   images: [] as string[],
   tags: [] as string[],
 })
+
+// ── Image Upload State ──
+interface PendingImage {
+  file: File
+  preview: string
+  uploading: boolean
+  path?: string
+}
+const pendingImages = ref<PendingImage[]>([])
+const fileInputRef = ref<HTMLInputElement | null>(null)
+
+function triggerFileInput() {
+  fileInputRef.value?.click()
+}
+
+function onFileSelect(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (input.files) addImageFiles(Array.from(input.files))
+  input.value = '' // reset so same file can be re-selected
+}
+
+function onPaste(e: ClipboardEvent) {
+  const items = e.clipboardData?.items
+  if (!items) return
+  const files: File[] = []
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      const file = item.getAsFile()
+      if (file) files.push(file)
+    }
+  }
+  if (files.length > 0) addImageFiles(files)
+}
+
+function addImageFiles(files: File[]) {
+  const remaining = 9 - pendingImages.value.length
+  const toAdd = files.slice(0, remaining)
+  for (const file of toAdd) {
+    const preview = URL.createObjectURL(file)
+    pendingImages.value.push({ file, preview, uploading: false })
+  }
+}
+
+function removePendingImage(idx: number) {
+  const img = pendingImages.value[idx]
+  if (img) URL.revokeObjectURL(img.preview)
+  pendingImages.value.splice(idx, 1)
+}
 
 const PAGE_SIZE = 20
 
@@ -427,36 +511,55 @@ function clearFilter() {
 
 // ── Create ──
 async function submitMemo() {
-  if (!newMemo.value.content.trim()) return
+  if (!newMemo.value.content.trim() && pendingImages.value.length === 0) return
   creating.value = true
   try {
     const tags = tagsInput.value
       ? tagsInput.value.split(/[,，]/).map(t => t.trim()).filter(Boolean) : []
-    const res = await createMemo(newMemo.value.content, [], tags) as unknown as {
+
+    // Upload images first
+    let imagePaths: string[] = []
+    if (pendingImages.value.length > 0) {
+      pendingImages.value.forEach(img => { img.uploading = true })
+      const files = pendingImages.value.map(img => img.file)
+      const uploadRes = await uploadImages(files)
+      imagePaths = uploadRes.paths || []
+    }
+
+    const res = await createMemo(newMemo.value.content, imagePaths, tags) as unknown as {
       result: { id: string; timestamp: string; file_path: string }
     }
     ElMessage.success('小记创建成功')
 
-    // Prepend new memo to existing list instead of full reload
+    // Prepend new memo to existing list
     const newMemoItem: Memo = {
       id: res.result.id,
       timestamp: res.result.timestamp,
       content: newMemo.value.content,
-      images: [],
+      images: imagePaths,
       tags,
     }
     memos.value = [newMemoItem, ...memos.value]
     totalCount.value++
 
+    // Cleanup
+    pendingImages.value.forEach(img => URL.revokeObjectURL(img.preview))
+    pendingImages.value = []
     newMemo.value = { content: '', images: [], tags: [] }
     tagsInput.value = ''
     showCreateDialog.value = false
   } catch (e) {
     console.error('创建小记失败:', e); ElMessage.error('创建小记失败')
-  } finally { creating.value = false }
+  } finally {
+    pendingImages.value.forEach(img => { img.uploading = false })
+    creating.value = false
+  }
 }
 
 // ── Formatting ──
+function vaultImageUrl(path: string): string {
+  return `/v1/vault/images/${path}`
+}
 function formatTime(ts: string) {
   return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
@@ -1244,21 +1347,37 @@ onMounted(() => { loadMemos() })
 }
 
 .memo-images {
-  display: flex;
-  gap: 8px;
+  display: grid;
+  gap: 6px;
   margin-top: 12px;
-  flex-wrap: wrap;
+  max-width: 340px;
+}
+.memo-images-1 {
+  grid-template-columns: 1fr;
+  max-width: 240px;
+}
+.memo-images-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+.memo-images-3 {
+  grid-template-columns: repeat(3, 1fr);
 }
 .memo-image {
-  width: 120px; height: 120px;
-  border-radius: 14px;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 10px;
   object-fit: cover;
   cursor: pointer;
   border: 1px solid rgba(255, 255, 255, 0.5);
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
+.memo-images-1 .memo-image {
+  aspect-ratio: auto;
+  max-height: 280px;
+  width: 100%;
+}
 .memo-image:hover {
-  transform: scale(1.05);
+  transform: scale(1.03);
 }
 
 .memo-tags {
@@ -1396,6 +1515,75 @@ onMounted(() => { loadMemos() })
 }
 .char-count { font-size: 12px; color: #a1a1aa; }
 .dialog-btns { display: flex; gap: 10px; }
+.image-btn { gap: 4px; }
+
+/* ── Image Upload UI ── */
+.image-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+.image-preview-item {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+.image-preview-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.image-remove-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease;
+}
+.image-remove-btn:hover {
+  background: rgba(0, 0, 0, 0.7);
+}
+.image-upload-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 20px;
+}
+.image-add-btn {
+  aspect-ratio: 1;
+  border-radius: 10px;
+  border: 2px dashed rgba(0, 0, 0, 0.12);
+  background: rgba(255, 255, 255, 0.3);
+  color: #a1a1aa;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+.image-add-btn:hover {
+  border-color: rgba(0, 0, 0, 0.2);
+  background: rgba(255, 255, 255, 0.5);
+  color: #71717a;
+}
 
 /* ── Transitions ── */
 .dialog-enter-active {

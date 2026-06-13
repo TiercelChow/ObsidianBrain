@@ -193,6 +193,52 @@ impl ObsidianClient {
         Ok(())
     }
 
+    /// Write binary data (e.g. images) to a file in the vault.
+    pub async fn write_binary(
+        &self,
+        path: &str,
+        data: &[u8],
+        content_type: &str,
+    ) -> Result<(), BrainError> {
+        let resp = self
+            .request(reqwest::Method::PUT, &format!("/vault/{}", encode_path(path)))
+            .header("Content-Type", content_type)
+            .body(data.to_vec())
+            .send()
+            .await
+            .map_err(|e| self.map_error("写入二进制文件", e))?;
+
+        self.check_response(&resp)?;
+        Ok(())
+    }
+
+    /// Read binary data from a file in the vault.
+    pub async fn read_binary(
+        &self,
+        path: &str,
+    ) -> Result<(Vec<u8>, String), BrainError> {
+        let resp = self
+            .request(reqwest::Method::GET, &format!("/vault/{}", encode_path(path)))
+            .header("Accept", "application/octet-stream")
+            .send()
+            .await
+            .map_err(|e| self.map_error("读取二进制文件", e))?;
+
+        let content_type = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("application/octet-stream")
+            .to_string();
+
+        self.check_response(&resp)?;
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| self.map_error("读取二进制数据", e))?;
+        Ok((bytes.to_vec(), content_type))
+    }
+
     /// Append content to a file in the vault.
     pub async fn append_file(&self, path: &str, content: &str) -> Result<(), BrainError> {
         let resp = self

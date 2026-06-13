@@ -7,6 +7,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::api::handlers::health::health_check;
 use crate::api::handlers::tool_handler::{call_tool, list_tools};
+use crate::api::handlers::upload::{upload_images, serve_vault_image};
 use crate::AppContext;
 
 /// Create the application router with all routes, middleware, and fallbacks.
@@ -22,6 +23,8 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
         .route("/health", get(health_check))
         .route("/tools", get(list_tools))
         .route("/tools/call", post(call_tool))
+        .route("/upload/images", post(upload_images))
+        .route("/vault/images/*path", get(serve_vault_image))
         .with_state(ctx);
 
     // Compose the main router with middleware.

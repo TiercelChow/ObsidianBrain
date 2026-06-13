@@ -5,7 +5,7 @@ edition = "2021"
 description = "Local Rust knowledge engine with LLM Tool API for Obsidian"
 
 [dependencies]
-axum = "0.7"
+axum = { version = "0.7", features = ["multipart"] }
 tokio = { version = "1", features = ["full"] }
 tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["cors", "fs", "trace"] }

@@ -121,6 +121,14 @@ export function searchMemos(query: string, startDate?: string, endDate?: string,
   })
 }
 
+export function uploadImages(files: File[]): Promise<{ paths: string[] }> {
+  const formData = new FormData()
+  files.forEach(f => formData.append('images', f))
+  return api.post('/upload/images', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }) as unknown as Promise<{ paths: string[] }>
+}
+
 // ── Inspiration ──
 export function getInspiration(type?: string, notePath?: string) {
   return callTool('get_inspiration', {
