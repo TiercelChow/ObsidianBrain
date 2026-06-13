@@ -131,46 +131,21 @@ html, body, #app {
 /* Ambient gradient mesh */
 .ambient-bg {
   position: fixed;
-  inset: 0;
+  inset: -10%;
   pointer-events: none;
   z-index: 0;
-  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 75% 15%, rgba(196, 181, 253, 0.25), transparent 55%),
+    radial-gradient(ellipse at 15% 85%, rgba(165, 243, 252, 0.2), transparent 55%),
+    radial-gradient(ellipse at 50% 50%, rgba(253, 230, 138, 0.12), transparent 50%),
+    #fafafa;
+  animation: meshDrift 40s ease-in-out infinite alternate;
 }
-.ambient-bg::before,
-.ambient-bg::after {
-  content: '';
-  position: absolute;
-  border-radius: 50%;
-  pointer-events: none;
-}
-.ambient-bg::before {
-  width: 80%; height: 80%;
-  top: -20%; right: -20%;
-  background: radial-gradient(ellipse at 70% 30%, rgba(196, 181, 253, 0.35), transparent 70%);
-  animation: mesh1 28s ease-in-out infinite alternate;
-}
-.ambient-bg::after {
-  width: 70%; height: 70%;
-  bottom: -20%; left: -20%;
-  background: radial-gradient(ellipse at 30% 70%, rgba(165, 243, 252, 0.3), transparent 70%);
-  animation: mesh2 32s ease-in-out infinite alternate;
-}
-/* Third gradient via the .orbs container's own background */
-.ambient-bg {
-  background: radial-gradient(ellipse at 50% 50%, rgba(253, 230, 138, 0.2), transparent 60%);
-}
-.orb {
-  display: none;
-}
-@keyframes mesh1 {
+.orb { display: none; }
+@keyframes meshDrift {
   0%   { transform: translate(0, 0) scale(1); }
-  50%  { transform: translate(-40px, 30px) scale(1.05); }
-  100% { transform: translate(20px, -20px) scale(0.97); }
-}
-@keyframes mesh2 {
-  0%   { transform: translate(0, 0) scale(1); }
-  50%  { transform: translate(30px, -25px) scale(0.96); }
-  100% { transform: translate(-20px, 20px) scale(1.04); }
+  50%  { transform: translate(-15px, 10px) scale(1.02); }
+  100% { transform: translate(10px, -8px) scale(0.99); }
 }
 
 /* Subtle noise texture */
