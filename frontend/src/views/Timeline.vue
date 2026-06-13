@@ -134,30 +134,28 @@
                   <div class="memo-card-main" :class="{ 'has-images': memo.images.length > 0 }">
                     <div v-if="memo.images.length > 0" class="memo-images-wrap">
                       <div class="memo-images" :class="'memo-images-' + imageGridClass(memo.images.length)">
-                        <el-image
+                        <img
                           v-for="(img, i) in memo.images"
                           :key="i"
                           :src="vaultImageUrl(img)"
-                          fit="cover"
                           class="memo-image"
-                          :preview-src-list="memo.images.map(vaultImageUrl)"
-                          :initial-index="i"
+                          @click="openImageViewer(memo.images, i)"
                         />
                       </div>
                     </div>
                     <div class="memo-card-text">
                       <div class="memo-content" v-html="renderContent(memo.content, searchQuery)"></div>
-                      <div v-if="memo.tags.length > 0" class="memo-tags">
-                        <span
-                          v-for="tag in memo.tags"
-                          :key="tag"
-                          class="memo-tag glass-chip"
-                          @click.stop="searchByTag(tag)"
-                        >
-                          #{{ tag }}
-                        </span>
-                      </div>
                     </div>
+                  </div>
+                  <div v-if="memo.tags.length > 0" class="memo-tags">
+                    <span
+                      v-for="tag in memo.tags"
+                      :key="tag"
+                      class="memo-tag glass-chip"
+                      @click.stop="searchByTag(tag)"
+                    >
+                      #{{ tag }}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -277,6 +275,33 @@
         </div>
       </div>
     </Transition>
+
+    <!-- Image Viewer Modal -->
+    <Transition name="viewer">
+      <div v-if="imageViewer.show" class="image-viewer-overlay" @click.self="closeImageViewer">
+        <button class="viewer-close" @click="closeImageViewer">✕</button>
+        <button
+          v-if="imageViewer.images.length > 1"
+          class="viewer-nav viewer-prev"
+          @click="viewerPrev"
+        >‹</button>
+        <div class="viewer-image-wrap">
+          <img
+            :src="vaultImageUrl(imageViewer.images[imageViewer.index])"
+            class="viewer-image"
+            @click.stop
+          />
+          <div v-if="imageViewer.images.length > 1" class="viewer-counter">
+            {{ imageViewer.index + 1 }} / {{ imageViewer.images.length }}
+          </div>
+        </div>
+        <button
+          v-if="imageViewer.images.length > 1"
+          class="viewer-nav viewer-next"
+          @click="viewerNext"
+        >›</button>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -337,6 +362,39 @@ interface PendingImage {
 }
 const pendingImages = ref<PendingImage[]>([])
 const fileInputRef = ref<HTMLInputElement | null>(null)
+
+// ── Image Viewer State ──
+const imageViewer = ref({
+  show: false,
+  images: [] as string[],
+  index: 0,
+})
+
+function openImageViewer(images: string[], index: number) {
+  imageViewer.value = { show: true, images, index }
+  document.addEventListener('keydown', onViewerKeydown)
+}
+function closeImageViewer() {
+  imageViewer.value.show = false
+  document.removeEventListener('keydown', onViewerKeydown)
+}
+function viewerPrev() {
+  const v = imageViewer.value
+  v.index = (v.index - 1 + v.images.length) % v.images.length
+}
+function viewerNext() {
+  const v = imageViewer.value
+  v.index = (v.index + 1) % v.images.length
+}
+function onViewerKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeImageViewer()
+  if (e.key === 'ArrowLeft') viewerPrev()
+  if (e.key === 'ArrowRight') viewerNext()
+}
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', onViewerKeydown)
+})
 
 function triggerFileInput() {
   fileInputRef.value?.click()
@@ -1744,6 +1802,97 @@ onMounted(() => { loadMemos() })
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-6px); }
 }
+
+/* ── Image Viewer Modal ── */
+.image-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.viewer-close {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+.viewer-close:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+.viewer-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 28px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 10;
+  line-height: 1;
+}
+.viewer-nav:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+.viewer-prev { left: 20px; }
+.viewer-next { right: 20px; }
+.viewer-image-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 80vw;
+  max-height: 80vh;
+}
+.viewer-image {
+  max-width: 80vw;
+  max-height: 75vh;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+.viewer-counter {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 4px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Viewer transitions */
+.viewer-enter-active { transition: opacity 0.3s ease; }
+.viewer-enter-active .viewer-image { transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease; }
+.viewer-leave-active { transition: opacity 0.2s ease; }
+.viewer-enter-from { opacity: 0; }
+.viewer-enter-from .viewer-image { transform: scale(0.9); opacity: 0; }
+.viewer-leave-to { opacity: 0; }
 
 /* ── Responsive ── */
 @media (max-width: 768px) {
