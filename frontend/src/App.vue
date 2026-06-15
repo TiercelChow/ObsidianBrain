@@ -278,6 +278,9 @@ html, body, #app {
 .app-main.mobile-full {
   padding: 16px 12px;
   padding-top: 60px; /* space for hamburger button */
+  overflow-x: hidden;
+  width: 100%;
+  max-width: 100vw;
 }
 
 @media (max-width: 768px) {

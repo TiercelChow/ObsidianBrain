@@ -1,33 +1,35 @@
 <template>
   <div class="timeline-page">
 
-    <header class="page-header" :class="{ 'header-collapsed': isScrolled }">
-      <div>
-        <h1 class="page-title">时光机</h1>
-        <p class="page-subtitle">
-          记录碎片化想法，回顾思考历程
-          <span v-if="totalCount > 0" class="total-badge glass-chip">
-            {{ totalCount }} 条小记
-          </span>
-        </p>
-      </div>
-      <div class="header-actions">
-        <button class="glass-btn" @click="doSync" :disabled="syncing">
-          <el-icon v-if="syncing" class="is-loading"><Loading /></el-icon>
-          <el-icon v-else><Refresh /></el-icon>
-          <span>{{ syncing ? '同步中' : '同步' }}</span>
-        </button>
-        <button class="glass-btn primary" @click="showCreateDialog = true">
-          <el-icon><Plus /></el-icon>
-          <span>写小记</span>
-        </button>
-      </div>
-    </header>
+    <!-- Sticky top area: header + toolbar collapse together -->
+    <div class="sticky-top" :class="{ 'sticky-collapsed': isScrolled }">
+      <header class="page-header">
+        <div>
+          <h1 class="page-title">时光机</h1>
+          <p class="page-subtitle">
+            记录碎片化想法，回顾思考历程
+            <span v-if="totalCount > 0" class="total-badge glass-chip">
+              {{ totalCount }} 条小记
+            </span>
+          </p>
+        </div>
+        <div class="header-actions">
+          <button class="glass-btn" @click="doSync" :disabled="syncing">
+            <el-icon v-if="syncing" class="is-loading"><Loading /></el-icon>
+            <el-icon v-else><Refresh /></el-icon>
+            <span>{{ syncing ? '同步中' : '同步' }}</span>
+          </button>
+          <button class="glass-btn primary" @click="showCreateDialog = true">
+            <el-icon><Plus /></el-icon>
+            <span>写小记</span>
+          </button>
+        </div>
+      </header>
 
-    <!-- Toolbar -->
-    <div class="toolbar" :class="{ 'toolbar-collapsed': isScrolled }">
-      <div class="toolbar-row">
-        <div class="search-box glass-surface">
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <div class="toolbar-row">
+          <div class="search-box glass-surface">
           <el-icon class="search-icon"><Search /></el-icon>
           <input
             v-model="searchQuery"
@@ -77,6 +79,7 @@
         </div>
       </div>
     </div>
+    </div> <!-- end sticky-top -->
 
     <!-- Main Content -->
     <div class="main-content">
@@ -1936,7 +1939,60 @@ onMounted(() => { loadMemos() })
   .memo-images-wrap { width: 100%; max-width: 100%; height: auto; aspect-ratio: auto; }
   .memo-images-1 .memo-image { max-height: 200px; }
   .memo-card-body { padding: 14px 16px; border-radius: 14px; }
-  .page-header { flex-wrap: wrap; gap: 8px; padding: 8px 0; margin-bottom: 8px; }
+  /* Sticky top area: wraps header + toolbar, collapses as one unit */
+  .sticky-top {
+    position: sticky;
+    top: 0;
+    z-index: 15;
+    max-height: 300px;
+    overflow: hidden;
+    transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .sticky-top.sticky-collapsed {
+    max-height: 44px;
+  }
+  .sticky-top.sticky-collapsed .page-header {
+    opacity: 0;
+    transform: translateY(-100%);
+    pointer-events: none;
+    position: absolute;
+  }
+  .sticky-top.sticky-collapsed .filter-right {
+    opacity: 0;
+    max-height: 0;
+    overflow: hidden;
+    margin: 0;
+    pointer-events: none;
+  }
+  .sticky-top .page-header {
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 0;
+    margin-bottom: 8px;
+  }
+  .sticky-top .filter-right {
+    max-height: 200px;
+    opacity: 1;
+    overflow: hidden;
+    transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.25s ease;
+  }
+  .sticky-top .toolbar {
+    padding: 4px 0;
+    margin-bottom: 4px;
+    transition: padding 0.3s ease, margin 0.3s ease;
+  }
+  .sticky-top.sticky-collapsed .toolbar {
+    padding: 2px 0;
+    margin-bottom: 0;
+  }
+  .sticky-top.sticky-collapsed .search-box {
+    height: 36px;
+    border-radius: 10px;
+    transition: height 0.3s ease, border-radius 0.3s ease;
+  }
+
   .page-title { font-size: 18px; }
   .preset-chips { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .chip-track { flex-wrap: nowrap; }
@@ -1952,57 +2008,6 @@ onMounted(() => { loadMemos() })
     margin: 0 8px;
   }
   .image-preview-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; }
-
-  /* Toolbar collapse on scroll — smooth transform-based */
-  .toolbar {
-    position: sticky;
-    top: 0;
-    z-index: 15;
-    padding: 6px 0;
-    margin-bottom: 8px;
-  }
-  .toolbar .filter-right {
-    transform-origin: top center;
-    transform: scaleY(1);
-    opacity: 1;
-    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 0.25s ease;
-  }
-  .toolbar.toolbar-collapsed .filter-right {
-    transform: scaleY(0);
-    opacity: 0;
-    height: 0;
-    overflow: hidden;
-    pointer-events: none;
-  }
-  .toolbar.toolbar-collapsed .search-box {
-    height: 36px;
-    border-radius: 10px;
-    transition: height 0.3s ease, border-radius 0.3s ease;
-  }
-
-  /* Page header collapse on scroll — smooth transform-based */
-  .page-header {
-    position: sticky;
-    top: 0;
-    z-index: 16;
-    transform-origin: top center;
-    transform: scaleY(1);
-    opacity: 1;
-    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 0.25s ease,
-                margin 0.35s ease,
-                padding 0.35s ease;
-  }
-  .page-header.header-collapsed {
-    transform: scaleY(0);
-    opacity: 0;
-    height: 0;
-    overflow: hidden;
-    margin: 0;
-    padding: 0;
-    pointer-events: none;
-  }
 
   /* Date picker responsive */
   .date-range-picker {
