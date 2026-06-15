@@ -45,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import {
@@ -62,6 +62,14 @@ import {
 const route = useRoute()
 const appStore = useAppStore()
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
+const isMobile = computed(() => window.innerWidth <= 768)
+
+// Auto-close sidebar on navigation when on mobile
+watch(() => route.path, () => {
+  if (isMobile.value && !isCollapsed.value) {
+    appStore.toggleSidebar()
+  }
+})
 
 const navItems = [
   { path: '/', label: '首页', icon: House },
@@ -253,5 +261,24 @@ function isActive(path: string) {
 .nav-label-leave-to {
   opacity: 0;
   transform: translateX(-3px);
+}
+
+/* ── Mobile ── */
+@media (max-width: 768px) {
+  .sidebar {
+    padding: 0 12px;
+    border-right: none;
+    box-shadow: none;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(32px) saturate(200%);
+    -webkit-backdrop-filter: blur(32px) saturate(200%);
+  }
+  .sidebar-footer {
+    display: none;
+  }
+  .nav-item {
+    padding: 12px 14px;
+    font-size: 15px;
+  }
 }
 </style>

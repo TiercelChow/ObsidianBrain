@@ -9,11 +9,27 @@
     <!-- Subtle grain texture background -->
     <div class="bg-grain"></div>
 
+    <!-- Mobile hamburger button -->
+    <button class="mobile-menu-btn" @click="appStore.toggleSidebar()" v-if="isMobile">
+      <el-icon :size="20"><component :is="isCollapsed ? Expand : Fold" /></el-icon>
+    </button>
+
+    <!-- Mobile sidebar overlay backdrop -->
+    <div
+      v-if="isMobile && !isCollapsed"
+      class="mobile-overlay"
+      @click="appStore.toggleSidebar()"
+    ></div>
+
     <el-container class="app-container">
-      <el-aside :width="isCollapsed ? '72px' : '230px'" class="app-aside">
+      <el-aside
+        :width="isMobile ? '260px' : (isCollapsed ? '72px' : '230px')"
+        class="app-aside"
+        :class="{ 'mobile-open': isMobile && !isCollapsed }"
+      >
         <Sidebar />
       </el-aside>
-      <el-main class="app-main">
+      <el-main class="app-main" :class="{ 'mobile-full': isMobile }">
         <router-view v-slot="{ Component, route }">
           <transition name="page-slide" mode="out-in">
             <component :is="Component" :key="route.path" />
@@ -25,12 +41,24 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from './stores/app'
+import { Expand, Fold } from '@element-plus/icons-vue'
 import Sidebar from './components/Sidebar.vue'
 
 const appStore = useAppStore()
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
+
+// Mobile detection
+const windowWidth = ref(window.innerWidth)
+const isMobile = computed(() => windowWidth.value <= 768)
+
+function onResize() { windowWidth.value = window.innerWidth }
+onMounted(() => {
+  window.addEventListener('resize', onResize)
+  if (isMobile.value && !isCollapsed.value) appStore.toggleSidebar()
+})
+onUnmounted(() => window.removeEventListener('resize', onResize))
 </script>
 
 <style>
@@ -191,5 +219,72 @@ html, body, #app {
 .page-slide-leave-to {
   opacity: 0;
   transform: translateY(-6px);
+}
+
+/* ── Mobile ── */
+.mobile-menu-btn {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 1001;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  color: #18181b;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: all 0.2s ease;
+}
+.mobile-menu-btn:active {
+  transform: scale(0.92);
+}
+
+.mobile-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Mobile aside: fixed overlay sliding from left */
+.app-aside {
+  transition: width 0.45s cubic-bezier(0.34, 1.56, 0.64, 1),
+              transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.app-aside.mobile-open {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 1000;
+  transform: translateX(0);
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.1);
+}
+
+.app-main.mobile-full {
+  padding: 16px 12px;
+  padding-top: 60px; /* space for hamburger button */
+}
+
+@media (max-width: 768px) {
+  .app-aside:not(.mobile-open) {
+    position: fixed;
+    left: -280px;
+    z-index: 1000;
+  }
 }
 </style>
