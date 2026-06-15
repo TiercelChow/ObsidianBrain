@@ -1928,6 +1928,7 @@ onMounted(() => { loadMemos() })
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .time-nav { display: none; }
+  .timeline-page { overflow-x: hidden; width: 100%; }
   .toolbar-row { flex-wrap: wrap; }
   .search-box { max-width: 100%; min-width: 0; }
   .filter-right { flex-wrap: wrap; margin-left: 0; width: 100%; }
@@ -1952,53 +1953,63 @@ onMounted(() => { loadMemos() })
   }
   .image-preview-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; }
 
-  /* Toolbar collapse on scroll */
+  /* Toolbar collapse on scroll — smooth transform-based */
   .toolbar {
     position: sticky;
     top: 0;
     z-index: 15;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     padding: 6px 0;
     margin-bottom: 8px;
   }
   .toolbar .filter-right {
-    max-height: 200px;
+    transform-origin: top center;
+    transform: scaleY(1);
     opacity: 1;
-    overflow: hidden;
-    transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 0.25s ease,
-                margin 0.3s ease;
+    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.25s ease;
   }
   .toolbar.toolbar-collapsed .filter-right {
-    max-height: 0;
+    transform: scaleY(0);
     opacity: 0;
-    margin: 0;
+    height: 0;
+    overflow: hidden;
     pointer-events: none;
-  }
-  .toolbar.toolbar-collapsed .toolbar-row {
-    gap: 0;
   }
   .toolbar.toolbar-collapsed .search-box {
     height: 36px;
     border-radius: 10px;
-  }
-  .toolbar .page-header {
-    transition: all 0.3s ease;
+    transition: height 0.3s ease, border-radius 0.3s ease;
   }
 
-  /* Page header collapse on scroll */
+  /* Page header collapse on scroll — smooth transform-based */
   .page-header {
     position: sticky;
     top: 0;
     z-index: 16;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transform-origin: top center;
+    transform: scaleY(1);
+    opacity: 1;
+    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.25s ease,
+                margin 0.35s ease,
+                padding 0.35s ease;
   }
   .page-header.header-collapsed {
-    margin-bottom: 0;
-    max-height: 0;
-    overflow: hidden;
+    transform: scaleY(0);
     opacity: 0;
+    height: 0;
+    overflow: hidden;
+    margin: 0;
     padding: 0;
+    pointer-events: none;
+  }
+
+  /* Date picker responsive */
+  .date-range-picker {
+    width: 100%;
+  }
+  .date-range-picker :deep(.el-range-editor) {
+    width: 100% !important;
   }
 }
 </style>
@@ -2021,5 +2032,45 @@ onMounted(() => { loadMemos() })
   font-size: 14px !important;
   font-weight: 500 !important;
   color: #18181b !important;
+}
+
+/* ── Calendar Popup Responsive ── */
+@media (max-width: 768px) {
+  .glass-picker {
+    max-width: calc(100vw - 16px) !important;
+    left: 8px !important;
+    right: 8px !important;
+    width: auto !important;
+    border-radius: 16px !important;
+  }
+  .glass-picker .el-date-range-picker__content {
+    padding: 4px !important;
+  }
+  .glass-picker .el-date-range-picker__header,
+  .glass-picker .el-date-picker__header {
+    margin: 2px 4px !important;
+    font-size: 13px !important;
+  }
+  .glass-picker .el-date-table {
+    font-size: 12px !important;
+  }
+  .glass-picker .el-date-table td .el-date-table-cell {
+    width: 32px !important;
+    height: 32px !important;
+  }
+  .glass-picker .el-date-table th {
+    font-size: 11px !important;
+    padding: 4px 0 !important;
+  }
+  .glass-picker .el-picker-panel__footer {
+    padding: 4px 8px !important;
+  }
+  .glass-picker .el-picker-panel__footer button {
+    font-size: 12px !important;
+    padding: 4px 12px !important;
+  }
+  .glass-picker .el-date-range-picker__time-picker-wrap .el-input {
+    width: 100% !important;
+  }
 }
 </style>
