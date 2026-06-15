@@ -646,11 +646,11 @@ function vaultImageUrl(path: string): string {
   return `/v1/vault/images/${path}`
 }
 function imageGridClass(count: number): string {
-  if (count === 1) return '1'
-  if (count === 2) return '2'
-  if (count === 3) return '3'
+  if (count <= 1) return '1'
+  if (count <= 3) return String(count)
   if (count === 4) return '4'
-  return '5' // 5-9: 3 columns, auto rows
+  if (count <= 6) return '5'
+  return '7' // 7-9: 3×3 grid
 }
 function formatTime(ts: string) {
   return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -1471,37 +1471,45 @@ onMounted(() => { loadMemos() })
   height: 100%;
   gap: 2px;
 }
-/* 1 image: fills entire square */
+/* 1 image: fills entire container */
 .memo-images-1 {
   grid-template-columns: 1fr;
   grid-template-rows: 1fr;
 }
-/* 2 images: 2 columns, 1 row */
+/* 2 images: 2 cols × 1 row */
 .memo-images-2 {
   grid-template-columns: repeat(2, 1fr);
   grid-template-rows: 1fr;
 }
-/* 3 images: 3 columns, 1 row */
+/* 3 images: 3 cols × 1 row */
 .memo-images-3 {
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: 1fr;
 }
-/* 4 images: 2 columns, 2 rows */
+/* 4 images: 2 cols × 2 rows (equal squares) */
 .memo-images-4 {
-  grid-template-columns: repeat(2, 1fr);
-  grid-template-rows: repeat(2, 1fr);
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
 }
-/* 5-9 images: 3 columns, auto rows to fill */
+/* 5-6 images: 3 cols × 2 rows */
 .memo-images-5 {
   grid-template-columns: repeat(3, 1fr);
-  grid-auto-rows: 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+/* 7-9 images: 3 cols × 3 rows */
+.memo-images-7 {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
 }
 
 .memo-image {
   width: 100%;
   height: 100%;
+  min-width: 0;
+  min-height: 0;
   object-fit: cover;
   cursor: pointer;
+  display: block;
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .memo-image:hover {
