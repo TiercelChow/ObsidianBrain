@@ -317,4 +317,28 @@ onMounted(() => { loadAll() })
   from { opacity: 0; transform: translateY(20px) scale(0.97); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+
+/* ── Mobile ── */
+@media (max-width: 768px) {
+  .page-header { margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+  .page-title { font-size: 18px; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 20px; }
+  .stat-card { padding: 14px; gap: 10px; border-radius: 14px; }
+  .stat-icon { width: 32px; height: 32px; border-radius: 10px; }
+  .stat-value { font-size: 16px; }
+  .stat-label { font-size: 11px; }
+  .section { margin-bottom: 20px; }
+  .section-title { font-size: 14px; margin-bottom: 10px; }
+  .modules-grid { grid-template-columns: 1fr; gap: 10px; }
+  .module-card { padding: 16px; border-radius: 14px; }
+  .module-title { font-size: 14px; }
+  .module-desc { font-size: 12px; margin-bottom: 10px; }
+  .status-card { padding: 16px; border-radius: 14px; }
+  .status-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .status-item { padding: 8px 10px; gap: 6px; }
+  .tools-grid { grid-template-columns: 1fr; gap: 8px; }
+  .tool-card { padding: 12px; border-radius: 12px; }
+  .tool-name { font-size: 13px; }
+  .tool-desc { font-size: 11px; }
+}
 </style>

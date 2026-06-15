@@ -1,7 +1,7 @@
 <template>
   <div class="timeline-page">
 
-    <header class="page-header">
+    <header class="page-header" :class="{ 'header-collapsed': isScrolled }">
       <div>
         <h1 class="page-title">时光机</h1>
         <p class="page-subtitle">
@@ -25,7 +25,7 @@
     </header>
 
     <!-- Toolbar -->
-    <div class="toolbar">
+    <div class="toolbar" :class="{ 'toolbar-collapsed': isScrolled }">
       <div class="toolbar-row">
         <div class="search-box glass-surface">
           <el-icon class="search-icon"><Search /></el-icon>
@@ -343,6 +343,7 @@ const loading = ref(false)
 const loadingMore = ref(false)
 const creating = ref(false)
 const syncing = ref(false)
+const isScrolled = ref(false)
 const memos = ref<Memo[]>([])
 const searchQuery = ref('')
 const activePreset = ref('')
@@ -776,6 +777,7 @@ function onMemoScroll(e: Event) {
   const el = e.target as HTMLElement
   scrollDir = el.scrollTop > lastScrollTop ? 'down' : 'up'
   lastScrollTop = el.scrollTop
+  isScrolled.value = el.scrollTop > 30
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) loadMore()
 }
 
@@ -1949,6 +1951,55 @@ onMounted(() => { loadMemos() })
     margin: 0 8px;
   }
   .image-preview-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+
+  /* Toolbar collapse on scroll */
+  .toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 15;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 6px 0;
+    margin-bottom: 8px;
+  }
+  .toolbar .filter-right {
+    max-height: 200px;
+    opacity: 1;
+    overflow: hidden;
+    transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.25s ease,
+                margin 0.3s ease;
+  }
+  .toolbar.toolbar-collapsed .filter-right {
+    max-height: 0;
+    opacity: 0;
+    margin: 0;
+    pointer-events: none;
+  }
+  .toolbar.toolbar-collapsed .toolbar-row {
+    gap: 0;
+  }
+  .toolbar.toolbar-collapsed .search-box {
+    height: 36px;
+    border-radius: 10px;
+  }
+  .toolbar .page-header {
+    transition: all 0.3s ease;
+  }
+
+  /* Page header collapse on scroll */
+  .page-header {
+    position: sticky;
+    top: 0;
+    z-index: 16;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .page-header.header-collapsed {
+    margin-bottom: 0;
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    padding: 0;
+  }
 }
 </style>
 
