@@ -1193,8 +1193,8 @@ onMounted(() => { loadMemos() })
 /* ── Memo Scroll ── */
 .memo-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  max-height: calc(100vh - 280px);
   padding-right: 4px;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.06) transparent;
