@@ -12,15 +12,14 @@
           </p>
         </div>
         <div class="header-actions">
-          <button class="glass-btn" @click="doSync" :disabled="syncing">
-            <el-icon v-if="syncing" class="is-loading"><Loading /></el-icon>
-            <el-icon v-else><Refresh /></el-icon>
-            <span>{{ syncing ? '同步中' : '同步' }}</span>
-          </button>
-          <button class="glass-btn primary" @click="showCreateDialog = true">
+          <el-button size="small" @click="doSync" :loading="syncing">
+            <el-icon v-if="!syncing"><Refresh /></el-icon>
+            同步
+          </el-button>
+          <el-button size="small" type="primary" @click="showCreateDialog = true">
             <el-icon><Plus /></el-icon>
-            <span>写小记</span>
-          </button>
+            写小记
+          </el-button>
         </div>
       </header>
 
@@ -929,7 +928,7 @@ onMounted(() => { loadMemos() })
   justify-content: space-between;
   align-items: center;
   padding: 12px 0;
-  margin-bottom: 12px;
+  margin-bottom: 24px;
   background: transparent;
 }
 .page-title {

@@ -5,10 +5,10 @@
         <h1 class="page-title">控制面板</h1>
         <p class="page-subtitle">系统状态与模块概览</p>
       </div>
-      <button class="refresh-btn" @click="loadAll" :disabled="loading">
-        <el-icon :size="14"><Refresh /></el-icon>
-        <span>刷新</span>
-      </button>
+      <el-button size="small" @click="loadAll" :loading="loading">
+        <el-icon v-if="!loading"><Refresh /></el-icon>
+        刷新
+      </el-button>
     </header>
 
     <!-- Stats -->
@@ -226,7 +226,7 @@ onMounted(() => { loadAll() })
   scrollbar-color: rgba(0, 0, 0, 0.06) transparent;
 }
 .page-header {
-  display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px;
+  display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;
 }
 .page-title { font-size: 22px; font-weight: 600; color: #18181b; letter-spacing: -0.3px; }
 .page-subtitle { margin-top: 4px; color: #a1a1aa; font-size: 14px; }
