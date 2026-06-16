@@ -104,7 +104,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { getHealth, listTools, getMemoryStats } from '@/api'
+import { getHealth, listTools, getMemoryStats, getMemoStats } from '@/api'
 import {
   Refresh, Notebook, FolderOpened, Calendar,
   MagicStick, DataLine, Connection,
@@ -129,13 +129,14 @@ interface ToolInfo {
 const health = ref<HealthData | null>(null)
 const tools = ref<ToolInfo[]>([])
 const memStats = ref<{ total_chunks: number; total_notes: number; tags: string[] } | null>(null)
+const memoStats = ref<{ total_memos: number } | null>(null)
 const loading = ref(false)
 
 const stats = computed(() => [
   { icon: Notebook, label: '笔记总数', value: memStats.value?.total_notes ?? '—', color: '#6366f1' },
   { icon: Connection, label: '记忆单元', value: memStats.value?.total_chunks ?? '—', color: '#8b5cf6' },
   { icon: DataLine, label: '已注册工具', value: health.value?.tools_count ?? '—', color: '#06b6d4' },
-  { icon: FolderOpened, label: '标签数', value: memStats.value?.tags?.length ?? '—', color: '#10b981' },
+  { icon: Calendar, label: '小记数', value: memoStats.value?.total_memos ?? '—', color: '#10b981' },
 ])
 
 const modules = computed(() => [
@@ -208,6 +209,13 @@ async function loadAll() {
       memStats.value = statsRes.result || statsRes as unknown as { total_chunks: number; total_notes: number; tags: string[] }
     } catch {
       memStats.value = null
+    }
+    // Try to get memo stats
+    try {
+      const memoRes = await getMemoStats() as unknown as { result: { total_memos: number } }
+      memoStats.value = memoRes.result || memoRes as unknown as { total_memos: number }
+    } catch {
+      memoStats.value = null
     }
   } finally {
     loading.value = false

@@ -471,6 +471,15 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Count total memos in the database.
+    pub fn count_memos(&self) -> Result<u32, BrainError> {
+        let conn = self.conn.lock().unwrap();
+        let count: u32 = conn
+            .query_row("SELECT COUNT(*) FROM memos", [], |row| row.get(0))
+            .map_err(|e| BrainError::Internal(format!("统计小记数量失败: {e}")))?;
+        Ok(count)
+    }
+
     /// Insert or update a memo (for sync from Obsidian files).
     pub fn upsert_memo(
         &self,

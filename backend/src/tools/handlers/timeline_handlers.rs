@@ -242,3 +242,21 @@ impl ToolHandler for SyncMemosHandler {
         }))
     }
 }
+
+/// 获取小记统计信息
+pub struct GetMemoStatsHandler;
+
+#[async_trait]
+impl ToolHandler for GetMemoStatsHandler {
+    fn name(&self) -> &str { "get_memo_stats" }
+    fn description(&self) -> &str { "获取小记统计信息（总数等）" }
+    fn input_schema(&self) -> Value { definitions::get_memo_stats_schema() }
+    fn module(&self) -> &str { "timeline" }
+
+    async fn handle(&self, _args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let total = ctx.memo_manager.count_memos()?;
+        Ok(json!({
+            "total_memos": total,
+        }))
+    }
+}

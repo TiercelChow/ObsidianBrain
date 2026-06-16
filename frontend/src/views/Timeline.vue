@@ -4,12 +4,7 @@
     <header class="page-header">
         <div>
           <h1 class="page-title">时光机</h1>
-          <p class="page-subtitle">
-            记录碎片化想法，回顾思考历程
-            <span v-if="totalCount > 0" class="total-badge glass-chip">
-              {{ totalCount }} 条小记
-            </span>
-          </p>
+          <p class="page-subtitle">记录碎片化想法，回顾思考历程</p>
         </div>
         <div class="header-actions">
           <el-button size="small" @click="doSync" :loading="syncing">
@@ -926,31 +921,23 @@ onMounted(() => { loadMemos() })
 .page-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  padding: 12px 0;
+  align-items: flex-start;
   margin-bottom: 24px;
-  background: transparent;
 }
 .page-title {
   font-size: 22px;
-  font-weight: 700;
+  font-weight: 600;
   color: #18181b;
-  letter-spacing: -0.5px;
+  letter-spacing: -0.3px;
 }
 .page-subtitle {
-  margin-top: 2px;
-  color: #71717a;
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  margin-top: 4px;
+  color: #a1a1aa;
+  font-size: 14px;
 }
-.total-badge {
-  font-size: 11px;
-  padding: 2px 10px;
-  border-radius: 10px;
-  color: #6366f1;
-  font-weight: 600;
+.header-actions {
+  display: flex;
+  gap: 8px;
 }
 
 /* ── Toolbar ── */

@@ -115,6 +115,10 @@ export function syncMemos(months = 3) {
   return callTool('sync_memos', { months })
 }
 
+export function getMemoStats() {
+  return callTool('get_memo_stats')
+}
+
 export function searchMemos(query: string, startDate?: string, endDate?: string, tags?: string[], limit = 20) {
   return callTool('search_memos', {
     query,

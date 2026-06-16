@@ -123,6 +123,11 @@ impl MemoManager {
         })
     }
 
+    /// 统计小记总数
+    pub fn count_memos(&self) -> Result<u32, BrainError> {
+        self.db.count_memos()
+    }
+
     /// 浏览时间线
     pub async fn browse_timeline(
         &self,
