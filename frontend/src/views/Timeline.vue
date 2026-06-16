@@ -748,7 +748,7 @@ function scrollToDate(date: string) {
 let lastScrollTop = 0
 let scrollDir: 'down' | 'up' = 'down'
 
-const scrollReveal: Directive<HTMLElement> = {
+const vScrollReveal: Directive<HTMLElement> = {
   mounted(el) {
     el.classList.add('scroll-hidden')
     const observer = new IntersectionObserver(
@@ -1952,25 +1952,6 @@ onMounted(() => { loadMemos() })
     margin: 0 8px;
   }
   .image-preview-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; }
-
-  /* Sticky top: keeps toolbar pinned while global CSS hides page-header */
-  .sticky-top {
-    position: sticky;
-    top: 0;
-    z-index: 15;
-  }
-
-  /* Override global hide: keep search bar visible when scrolled */
-  :global(.app-main.mobile-scrolled) .toolbar .search-box {
-    height: 36px !important;
-    border-radius: 10px !important;
-    opacity: 1 !important;
-    max-height: none !important;
-    overflow: visible !important;
-    pointer-events: auto !important;
-    display: flex !important;
-    padding: 0 12px !important;
-  }
 
   /* Date picker responsive */
   .date-range-picker {
