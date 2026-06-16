@@ -175,22 +175,6 @@ html, body, #app {
   pointer-events: none !important;
   transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
-
-/* Timeline: also collapse the sticky-top wrapper */
-.app-main.mobile-scrolled .sticky-top {
-  max-height: 44px !important;
-}
-.app-main.mobile-scrolled .sticky-top .page-header {
-  opacity: 0 !important;
-  position: absolute !important;
-  pointer-events: none !important;
-}
-.app-main.mobile-scrolled .sticky-top .filter-right {
-  max-height: 0 !important;
-  opacity: 0 !important;
-  overflow: hidden !important;
-  pointer-events: none !important;
-}
 </style>
 
 <style scoped>

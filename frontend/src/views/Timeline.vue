@@ -1,9 +1,7 @@
 <template>
   <div class="timeline-page">
 
-    <!-- Sticky top area: header + toolbar collapse together -->
-    <div class="sticky-top">
-      <header class="page-header">
+    <header class="page-header">
         <div>
           <h1 class="page-title">时光机</h1>
           <p class="page-subtitle">
@@ -79,7 +77,6 @@
         </div>
       </div>
     </div>
-    </div> <!-- end sticky-top -->
 
     <!-- Main Content -->
     <div class="main-content">
