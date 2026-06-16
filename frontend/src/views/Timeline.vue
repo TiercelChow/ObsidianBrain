@@ -787,13 +787,10 @@ onMounted(() => { loadMemos() })
 .timeline-page {
   position: relative;
   max-width: 100%;
-  height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.06) transparent;
-  display: flex;
-  flex-direction: column;
 }
 
 /* ── Glass Surfaces ── */
@@ -933,7 +930,6 @@ onMounted(() => { loadMemos() })
   align-items: center;
   padding: 12px 0;
   margin-bottom: 12px;
-  flex-shrink: 0;
   background: transparent;
 }
 .page-title {
@@ -961,7 +957,6 @@ onMounted(() => { loadMemos() })
 /* ── Toolbar ── */
 .toolbar {
   margin-bottom: 16px;
-  flex-shrink: 0;
   padding: 8px 0;
 }
 .toolbar-row {
@@ -1101,8 +1096,6 @@ onMounted(() => { loadMemos() })
 .main-content {
   display: flex;
   gap: 20px;
-  flex: 1;
-  min-height: 0;
 }
 
 /* ── Time Nav ── */
