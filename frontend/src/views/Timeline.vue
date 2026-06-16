@@ -934,9 +934,6 @@ onMounted(() => { loadMemos() })
   padding: 12px 0;
   margin-bottom: 12px;
   flex-shrink: 0;
-  position: sticky;
-  top: -32px;
-  z-index: 20;
   background: transparent;
 }
 .page-title {
@@ -965,9 +962,6 @@ onMounted(() => { loadMemos() })
 .toolbar {
   margin-bottom: 16px;
   flex-shrink: 0;
-  position: sticky;
-  top: 36px;
-  z-index: 19;
   padding: 8px 0;
 }
 .toolbar-row {
