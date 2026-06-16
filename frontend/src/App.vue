@@ -9,10 +9,15 @@
     <!-- Subtle grain texture background -->
     <div class="bg-grain"></div>
 
-    <!-- Mobile hamburger button -->
-    <button class="mobile-menu-btn" @click="appStore.toggleSidebar()" v-if="isMobile">
-      <el-icon :size="20"><component :is="isCollapsed ? Expand : Fold" /></el-icon>
-    </button>
+    <!-- Mobile global header: hamburger + page title -->
+    <div class="mobile-global-header" v-if="isMobile" :class="{ 'header-scrolled': isScrolled }">
+      <button class="mobile-menu-btn" @click="appStore.toggleSidebar()">
+        <el-icon :size="20"><component :is="isCollapsed ? Expand : Fold" /></el-icon>
+      </button>
+      <transition name="title-fade">
+        <span v-if="isScrolled" class="mobile-page-title">{{ currentTitle }}</span>
+      </transition>
+    </div>
 
     <!-- Mobile sidebar overlay backdrop -->
     <div
@@ -29,7 +34,11 @@
       >
         <Sidebar />
       </el-aside>
-      <el-main class="app-main" :class="{ 'mobile-full': isMobile }">
+      <el-main
+        class="app-main"
+        :class="{ 'mobile-full': isMobile, 'mobile-scrolled': isMobile && isScrolled }"
+        @scroll="onMainScroll"
+      >
         <router-view v-slot="{ Component, route }">
           <transition name="page-slide" mode="out-in">
             <component :is="Component" :key="route.path" />
@@ -42,16 +51,26 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAppStore } from './stores/app'
 import { Expand, Fold } from '@element-plus/icons-vue'
 import Sidebar from './components/Sidebar.vue'
 
+const route = useRoute()
 const appStore = useAppStore()
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
+const currentTitle = computed(() => (route.meta?.title as string) || '')
 
 // Mobile detection
 const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => windowWidth.value <= 768)
+
+// Scroll detection for mobile header
+const isScrolled = ref(false)
+function onMainScroll(e: Event) {
+  const el = e.target as HTMLElement
+  isScrolled.value = el.scrollTop > 20
+}
 
 function onResize() { windowWidth.value = window.innerWidth }
 onMounted(() => {
@@ -145,6 +164,33 @@ html, body, #app {
 .el-empty__description p {
   color: #a1a1aa;
 }
+
+/* ── Mobile scroll: hide page headers globally ── */
+.app-main.mobile-scrolled .page-header {
+  max-height: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  pointer-events: none !important;
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Timeline: also collapse the sticky-top wrapper */
+.app-main.mobile-scrolled .sticky-top {
+  max-height: 44px !important;
+}
+.app-main.mobile-scrolled .sticky-top .page-header {
+  opacity: 0 !important;
+  position: absolute !important;
+  pointer-events: none !important;
+}
+.app-main.mobile-scrolled .sticky-top .filter-right {
+  max-height: 0 !important;
+  opacity: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+}
 </style>
 
 <style scoped>
@@ -221,29 +267,75 @@ html, body, #app {
   transform: translateY(-6px);
 }
 
-/* ── Mobile ── */
-.mobile-menu-btn {
+/* ── Mobile Global Header ── */
+.mobile-global-header {
   position: fixed;
-  top: 12px;
-  left: 12px;
+  top: 0;
+  left: 0;
+  right: 0;
   z-index: 1001;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  transition: background 0.3s ease, box-shadow 0.3s ease, backdrop-filter 0.3s ease;
+}
+.mobile-global-header.header-scrolled {
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
+}
+
+.mobile-menu-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.5);
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
   color: #18181b;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
   transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+.mobile-global-header.header-scrolled .mobile-menu-btn {
+  background: rgba(255, 255, 255, 0.4);
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: none;
 }
 .mobile-menu-btn:active {
-  transform: scale(0.92);
+  transform: scale(0.9);
+}
+
+.mobile-page-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #18181b;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+}
+
+/* Title fade animation */
+.title-fade-enter-active {
+  transition: opacity 0.35s ease, transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.title-fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.title-fade-enter-from {
+  opacity: 0;
+  transform: translateX(-12px);
+}
+.title-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-6px);
 }
 
 .mobile-overlay {
@@ -277,7 +369,7 @@ html, body, #app {
 
 .app-main.mobile-full {
   padding: 16px 12px;
-  padding-top: 60px; /* space for hamburger button */
+  padding-top: 56px; /* space for global header (52px + 4px gap) */
   overflow-x: hidden;
   width: 100%;
   max-width: 100vw;

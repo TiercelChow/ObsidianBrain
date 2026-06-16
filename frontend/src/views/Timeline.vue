@@ -2,7 +2,7 @@
   <div class="timeline-page">
 
     <!-- Sticky top area: header + toolbar collapse together -->
-    <div class="sticky-top" :class="{ 'sticky-collapsed': isScrolled }">
+    <div class="sticky-top">
       <header class="page-header">
         <div>
           <h1 class="page-title">时光机</h1>
@@ -346,7 +346,6 @@ const loading = ref(false)
 const loadingMore = ref(false)
 const creating = ref(false)
 const syncing = ref(false)
-const isScrolled = ref(false)
 const memos = ref<Memo[]>([])
 const searchQuery = ref('')
 const activePreset = ref('')
@@ -780,7 +779,6 @@ function onMemoScroll(e: Event) {
   const el = e.target as HTMLElement
   scrollDir = el.scrollTop > lastScrollTop ? 'down' : 'up'
   lastScrollTop = el.scrollTop
-  isScrolled.value = el.scrollTop > 30
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) loadMore()
 }
 
@@ -1939,60 +1937,6 @@ onMounted(() => { loadMemos() })
   .memo-images-wrap { width: 100%; max-width: 100%; height: auto; aspect-ratio: auto; }
   .memo-images-1 .memo-image { max-height: 200px; }
   .memo-card-body { padding: 14px 16px; border-radius: 14px; }
-  /* Sticky top area: wraps header + toolbar, collapses as one unit */
-  .sticky-top {
-    position: sticky;
-    top: 0;
-    z-index: 15;
-    max-height: 300px;
-    overflow: hidden;
-    transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  .sticky-top.sticky-collapsed {
-    max-height: 44px;
-  }
-  .sticky-top.sticky-collapsed .page-header {
-    opacity: 0;
-    transform: translateY(-100%);
-    pointer-events: none;
-    position: absolute;
-  }
-  .sticky-top.sticky-collapsed .filter-right {
-    opacity: 0;
-    max-height: 0;
-    overflow: hidden;
-    margin: 0;
-    pointer-events: none;
-  }
-  .sticky-top .page-header {
-    transition: opacity 0.3s ease, transform 0.3s ease;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 8px 0;
-    margin-bottom: 8px;
-  }
-  .sticky-top .filter-right {
-    max-height: 200px;
-    opacity: 1;
-    overflow: hidden;
-    transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 0.25s ease;
-  }
-  .sticky-top .toolbar {
-    padding: 4px 0;
-    margin-bottom: 4px;
-    transition: padding 0.3s ease, margin 0.3s ease;
-  }
-  .sticky-top.sticky-collapsed .toolbar {
-    padding: 2px 0;
-    margin-bottom: 0;
-  }
-  .sticky-top.sticky-collapsed .search-box {
-    height: 36px;
-    border-radius: 10px;
-    transition: height 0.3s ease, border-radius 0.3s ease;
-  }
-
   .page-title { font-size: 18px; }
   .preset-chips { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .chip-track { flex-wrap: nowrap; }
@@ -2008,6 +1952,25 @@ onMounted(() => { loadMemos() })
     margin: 0 8px;
   }
   .image-preview-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+
+  /* Sticky top: keeps toolbar pinned while global CSS hides page-header */
+  .sticky-top {
+    position: sticky;
+    top: 0;
+    z-index: 15;
+  }
+
+  /* Override global hide: keep search bar visible when scrolled */
+  :global(.app-main.mobile-scrolled) .toolbar .search-box {
+    height: 36px !important;
+    border-radius: 10px !important;
+    opacity: 1 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    pointer-events: auto !important;
+    display: flex !important;
+    padding: 0 12px !important;
+  }
 
   /* Date picker responsive */
   .date-range-picker {
