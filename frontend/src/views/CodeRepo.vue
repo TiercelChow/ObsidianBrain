@@ -35,8 +35,12 @@
           </span>
         </div>
         <div class="repo-actions">
-          <el-button size="small" @click="viewDetail(repo.name)">详情</el-button>
-          <el-button size="small" @click="openVscode(repo.name)">VSCode</el-button>
+          <el-button size="small" @click="viewDetail(repo.name)">
+            <el-icon><View /></el-icon> 详情
+          </el-button>
+          <el-button size="small" type="primary" @click="openVscode(repo.name)">
+            <el-icon><Monitor /></el-icon> VSCode
+          </el-button>
         </div>
       </div>
     </div>
@@ -103,7 +107,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { addCodeRepo, listCodeRepos, getRepoDetail, openInVscode } from '@/api'
-import { Refresh, Plus, Connection } from '@element-plus/icons-vue'
+import { Refresh, Plus, Connection, View, Monitor } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 interface RepoInfo {
@@ -207,7 +211,7 @@ onMounted(() => { loadRepos() })
 .header-actions { display: flex; gap: 8px; }
 
 .repo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
-.repo-card { padding: 20px; border-radius: 16px; transition: box-shadow 0.2s ease; }
+.repo-card { padding: 20px; border-radius: 16px; transition: box-shadow 0.2s ease; display: flex; flex-direction: column; }
 .repo-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
 .repo-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .repo-name { font-size: 16px; font-weight: 600; color: #18181b; }
@@ -219,7 +223,7 @@ onMounted(() => { loadRepos() })
 }
 .repo-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .lang-tag { font-size: 11px; padding: 2px 8px; border-radius: 8px; color: #52525b; }
-.repo-actions { display: flex; gap: 8px; }
+.repo-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.04); justify-content: flex-end; }
 
 .commits-section { margin-top: 20px; }
 .commits-section h4 { font-size: 15px; font-weight: 600; color: #18181b; margin-bottom: 12px; }
