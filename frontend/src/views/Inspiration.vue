@@ -232,10 +232,6 @@ function loadHistory() {
 <style scoped>
 .inspiration-page {
   max-width: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.06) transparent;
 }
 .inspiration-page .mode-option {
   animation: pageFadeIn 0.5s ease both;

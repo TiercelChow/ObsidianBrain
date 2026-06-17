@@ -127,10 +127,6 @@ onMounted(() => { loadRadar() })
 <style scoped>
 .radar-page {
   max-width: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.06) transparent;
 }
 .radar-page .radar-card {
   animation: pageFadeIn 0.5s ease both;

@@ -228,10 +228,6 @@ onMounted(() => { loadAll() })
 <style scoped>
 .home-page {
   max-width: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.06) transparent;
 }
 .page-header {
   display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;

@@ -189,10 +189,6 @@ onMounted(() => { loadRepos() })
 <style scoped>
 .code-repo-page {
   max-width: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.06) transparent;
 }
 .code-repo-page .repo-card {
   animation: pageFadeIn 0.5s ease both;

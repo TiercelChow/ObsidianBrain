@@ -781,10 +781,6 @@ onMounted(() => { loadMemos() })
 .timeline-page {
   position: relative;
   max-width: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.06) transparent;
 }
 
 /* ── Glass Surfaces ── */
