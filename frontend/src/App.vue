@@ -361,6 +361,7 @@ html, body, #app {
 .app-main.mobile-full {
   padding: 16px 12px;
   padding-top: 56px; /* space for global header (52px + 4px gap) */
+  padding-bottom: 40px; /* extra space at bottom so last content is fully visible */
   overflow-x: hidden;
   width: 100%;
   max-width: 100vw;
