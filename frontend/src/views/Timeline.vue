@@ -2,21 +2,21 @@
   <div class="timeline-page">
 
     <header class="page-header">
-        <div>
-          <h1 class="page-title">时光机</h1>
-          <p class="page-subtitle">记录碎片化想法，回顾思考历程</p>
-        </div>
-        <div class="header-actions">
-          <el-button size="small" @click="doSync" :loading="syncing">
-            <el-icon v-if="!syncing"><Refresh /></el-icon>
-            同步
-          </el-button>
-          <el-button size="small" type="primary" @click="showCreateDialog = true">
-            <el-icon><Plus /></el-icon>
-            写小记
-          </el-button>
-        </div>
-      </header>
+      <div>
+        <h1 class="page-title">时光机</h1>
+        <p class="page-subtitle">记录碎片化想法，回顾思考历程</p>
+      </div>
+      <div class="header-actions">
+        <el-button size="small" @click="doSync" :loading="syncing">
+          <el-icon v-if="!syncing"><Refresh /></el-icon>
+          同步
+        </el-button>
+        <el-button size="small" type="primary" @click="showCreateDialog = true">
+          <el-icon><Plus /></el-icon>
+          写小记
+        </el-button>
+      </div>
+    </header>
 
       <!-- Toolbar -->
       <div class="toolbar">
@@ -1907,12 +1907,9 @@ onMounted(() => { loadMemos() })
   .memo-images-wrap { width: 100%; max-width: 100%; height: auto; aspect-ratio: auto; }
   .memo-images-1 .memo-image { max-height: 200px; }
   .memo-card-body { padding: 14px 16px; border-radius: 14px; }
-  .page-title { font-size: 18px; }
   .preset-chips { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .chip-track { flex-wrap: nowrap; }
   .chip { flex-shrink: 0; padding: 6px 12px; font-size: 12px; }
-  .header-actions { width: 100%; display: flex; gap: 8px; }
-  .header-actions .glass-btn { flex: 1; justify-content: center; }
 
   /* Dialog full-screen on mobile */
   .dialog-content {

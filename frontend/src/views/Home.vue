@@ -329,7 +329,6 @@ onMounted(() => { loadAll() })
 /* ── Mobile ── */
 @media (max-width: 768px) {
   .page-header { margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
-  .page-title { font-size: 18px; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 20px; }
   .stat-card { padding: 14px; gap: 10px; border-radius: 14px; }
   .stat-icon { width: 32px; height: 32px; border-radius: 10px; }

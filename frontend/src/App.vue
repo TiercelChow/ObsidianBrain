@@ -175,6 +175,13 @@ html, body, #app {
   pointer-events: none !important;
   transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+/* ── Global mobile title size ── */
+@media (max-width: 768px) {
+  .page-title {
+    font-size: 18px !important;
+  }
+}
 </style>
 
 <style scoped>
