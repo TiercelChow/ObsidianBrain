@@ -189,6 +189,7 @@ onMounted(() => { loadRepos() })
 <style scoped>
 .code-repo-page {
   max-width: 100%;
+  min-height: 100%;
 }
 .code-repo-page .repo-card {
   animation: pageFadeIn 0.5s ease both;

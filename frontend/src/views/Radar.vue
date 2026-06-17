@@ -126,6 +126,7 @@ onMounted(() => { loadRadar() })
 
 <style scoped>
 .radar-page {
+  min-height: 100%;
   max-width: 100%;
 }
 .radar-page .radar-card {

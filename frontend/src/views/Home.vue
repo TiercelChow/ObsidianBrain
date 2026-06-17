@@ -227,6 +227,7 @@ onMounted(() => { loadAll() })
 
 <style scoped>
 .home-page {
+  min-height: 100%;
   max-width: 100%;
 }
 .page-header {

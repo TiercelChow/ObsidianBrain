@@ -779,6 +779,7 @@ onMounted(() => { loadMemos() })
 <style scoped>
 /* ── Page Root ── */
 .timeline-page {
+  min-height: 100%;
   position: relative;
   max-width: 100%;
 }
@@ -1895,7 +1896,8 @@ onMounted(() => { loadMemos() })
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .time-nav { display: none; }
-  .timeline-page { overflow-x: hidden; width: 100%; }
+  .timeline-page {
+  min-height: 100%; overflow-x: hidden; width: 100%; }
   .toolbar-row { flex-wrap: wrap; }
   .search-box { max-width: 100%; min-width: 0; }
   .filter-right { flex-wrap: wrap; margin-left: 0; width: 100%; }

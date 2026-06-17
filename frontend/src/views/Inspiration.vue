@@ -231,6 +231,7 @@ function loadHistory() {
 
 <style scoped>
 .inspiration-page {
+  min-height: 100%;
   max-width: 100%;
 }
 .inspiration-page .mode-option {

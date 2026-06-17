@@ -204,6 +204,7 @@ onMounted(() => {
 <style scoped>
 .memory-page {
   max-width: 100%;
+  min-height: 100%;
 }
 .memory-page .stat-chip {
   animation: pageFadeIn 0.5s ease both;
