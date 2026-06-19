@@ -360,6 +360,18 @@ onMounted(() => { loadInsights() })
 }
 
 @media (max-width: 768px) {
-  .insights-grid { grid-template-columns: 1fr; }
+  .page-header { margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+  .insights-grid { grid-template-columns: 1fr; gap: 12px; }
+  .insight-card { padding: 16px; border-radius: 14px; }
+  .card-header { gap: 8px; margin-bottom: 10px; }
+  .card-icon { font-size: 20px; }
+  .card-title { font-size: 14px; }
+  .card-desc { font-size: 11px; }
+  .card-count { font-size: 18px; }
+  .card-body { max-height: 220px; }
+  .note-item { padding: 6px 8px; }
+  .note-path { font-size: 12px; }
+  .note-meta, .note-badge { font-size: 10px; }
+  .domain-info { font-size: 12px; }
 }
 </style>
