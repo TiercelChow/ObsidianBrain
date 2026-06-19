@@ -368,10 +368,9 @@ onMounted(() => { loadInsights() })
   .card-title { font-size: 14px; }
   .card-desc { font-size: 11px; }
   .card-count { font-size: 18px; }
-  .card-body { max-height: 220px; }
-  .note-item { padding: 6px 8px; }
-  .note-path { font-size: 12px; }
-  .note-meta, .note-badge { font-size: 10px; }
+  .card-body { max-height: none; }
+  .note-path { font-size: 12px; white-space: normal; overflow: visible; text-overflow: clip; word-break: break-all; }
+  .note-meta, .note-badge { font-size: 10px; flex-shrink: 0; }
   .domain-info { font-size: 12px; }
 }
 </style>
