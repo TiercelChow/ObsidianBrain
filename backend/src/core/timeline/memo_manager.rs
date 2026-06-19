@@ -223,23 +223,38 @@ impl MemoManager {
     }
 
     /// 从 Obsidian 文件同步小记到数据库
-    pub async fn sync_from_obsidian(&self, months: u32) -> Result<u32, BrainError> {
+    pub async fn sync_from_obsidian(&self, months: u32) -> Result<(u32, u32), BrainError> {
         let obsidian = self
             .obsidian
             .as_ref()
             .ok_or_else(|| BrainError::Internal("Obsidian API 不可用".to_string()))?;
 
-        // 计算需要同步的月份列表
+        // 计算需要同步的月份列表和完整日期范围
         let now = Local::now();
         let mut month_files = Vec::new();
+        let mut all_dates_in_range: std::collections::HashSet<String> = std::collections::HashSet::new();
         for i in 0..months {
             let target = now - chrono::Duration::days(30 * i as i64);
             month_files.push(format!("Timeline/{:04}-{:02}.md", target.year(), target.month()));
+            // Generate all dates in this month for the deletion scope
+            let year = target.year();
+            let month = target.month();
+            let days_in_month = chrono::NaiveDate::from_ymd_opt(
+                year,
+                if month == 12 { 1 } else { month + 1 },
+                1,
+            )
+            .map(|d| d.signed_duration_since(chrono::NaiveDate::from_ymd_opt(year, month, 1).unwrap()).num_days())
+            .unwrap_or(30);
+            for day in 1..=days_in_month {
+                if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day as u32) {
+                    all_dates_in_range.insert(date.format("%Y-%m-%d").to_string());
+                }
+            }
         }
 
         let mut total_synced = 0u32;
         let mut all_sync_ids: Vec<String> = Vec::new();
-        let mut synced_dates: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         // Collect all memos from Obsidian first
         let mut all_memos: Vec<Memo> = Vec::new();
@@ -254,13 +269,12 @@ impl MemoManager {
             let memos = self.parse_month_file(&content, file_path);
             for memo in memos {
                 all_sync_ids.push(memo.id.clone());
-                synced_dates.insert(memo.date.clone());
                 all_memos.push(memo);
             }
         }
 
         // Delete memos in synced date range that no longer exist in Obsidian
-        let deleted = self.db.delete_memos_not_by_ids(&synced_dates, &all_sync_ids)?;
+        let deleted = self.db.delete_memos_not_by_ids(&all_dates_in_range, &all_sync_ids)?;
         if deleted > 0 {
             tracing::info!(deleted = deleted, "已删除 Obsidian 中不存在的小记");
         }
@@ -288,9 +302,10 @@ impl MemoManager {
         tracing::info!(
             months = months,
             synced = total_synced,
+            deleted = deleted,
             "Obsidian 小记同步完成"
         );
-        Ok(total_synced)
+        Ok((total_synced, deleted))
     }
 
     /// 解析月份 Markdown 文件，提取小记

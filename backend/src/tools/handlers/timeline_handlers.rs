@@ -234,10 +234,11 @@ impl ToolHandler for SyncMemosHandler {
         let months = args.get("months").and_then(|v| v.as_u64()).unwrap_or(3) as u32;
 
         tracing::info!(months = months, "sync_memos 调用");
-        let synced = ctx.memo_manager.sync_from_obsidian(months).await?;
+        let (synced, deleted) = ctx.memo_manager.sync_from_obsidian(months).await?;
 
         Ok(json!({
             "synced": synced,
+            "deleted": deleted,
             "months": months,
         }))
     }

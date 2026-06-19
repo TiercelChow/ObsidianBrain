@@ -552,9 +552,10 @@ async function loadMore() {
 async function doSync() {
   syncing.value = true
   try {
-    const res = await syncMemos(3) as unknown as { result: { synced: number } }
+    const res = await syncMemos(3) as unknown as { result: { synced: number; deleted: number } }
     const count = res.result?.synced ?? 0
-    ElMessage.success(`同步完成：${count} 条小记`)
+    const deleted = res.result?.deleted ?? 0
+    ElMessage.success(`同步完成：${count} 条小记${deleted > 0 ? `，删除 ${deleted} 条` : ''}`)
     await loadMemos()
   } catch (e) {
     console.error('同步失败:', e)
