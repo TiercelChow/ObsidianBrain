@@ -360,7 +360,8 @@ onMounted(() => { loadInsights() })
 }
 
 @media (max-width: 768px) {
-  .page-header { margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+  .page-header { margin-bottom: 16px; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .page-subtitle { width: 100%; order: 1; margin-top: 0; }
   .insights-grid { grid-template-columns: 1fr; gap: 12px; }
   .insight-card { padding: 16px; border-radius: 14px; }
   .card-header { gap: 8px; margin-bottom: 10px; }
