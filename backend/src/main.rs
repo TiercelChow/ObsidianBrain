@@ -70,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start_time = chrono::Utc::now();
 
     // 2. Load config
-    let config = AppConfig::load().unwrap_or_else(|e| {
+    let mut config = AppConfig::load().unwrap_or_else(|e| {
         tracing::warn!("配置加载失败: {e}，使用默认配置");
         AppConfig::default()
     });
@@ -79,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::new(host, config.server.port);
     tracing::info!("配置加载完成: {}:{}", addr.ip(), addr.port());
 
-    // 3. Initialize infrastructure
+    // 3. Initialize SQLite (before Obsidian so we can load saved config)
     let mut components = ComponentStatus {
         server: "ok".to_string(),
         obsidian: "disabled".to_string(),
@@ -87,8 +87,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         timeline: "pending".to_string(),
         code_repo: "pending".to_string(),
     };
+    let db = match SqliteStore::new(&config.storage.db_path) {
+        Ok(store) => {
+            components.sqlite = "ok".to_string();
+            tracing::info!("SQLite 初始化成功: {:?}", config.storage.db_path);
+            Arc::new(store)
+        }
+        Err(e) => {
+            tracing::error!("SQLite 初始化失败: {e}");
+            components.sqlite = format!("error: {e}");
+            std::process::exit(1);
+        }
+    };
 
-    // Obsidian Local REST API (required)
+    // Load saved config from DB (overrides file config)
+    if let Ok(Some(saved_json)) = db.get_state("system_config") {
+        if let Ok(saved) = serde_json::from_str::<serde_json::Value>(&saved_json) {
+            if let Some(vault) = saved.get("vault") {
+                if let Some(path) = vault.get("path").and_then(|v| v.as_str()) {
+                    config.vault.path = std::path::PathBuf::from(path);
+                }
+                if let Some(name) = vault.get("name").and_then(|v| v.as_str()) {
+                    config.vault.name = name.to_string();
+                }
+            }
+            if let Some(obs) = saved.get("obsidian") {
+                if let Some(enabled) = obs.get("enabled").and_then(|v| v.as_bool()) {
+                    config.obsidian.enabled = enabled;
+                }
+                if let Some(url) = obs.get("url").and_then(|v| v.as_str()) {
+                    config.obsidian.url = url.to_string();
+                }
+                if let Some(key) = obs.get("api_key").and_then(|v| v.as_str()) {
+                    config.obsidian.api_key = if key.is_empty() { None } else { Some(key.to_string()) };
+                }
+            }
+            if let Some(llm) = saved.get("llm") {
+                if let Some(p) = llm.get("provider").and_then(|v| v.as_str()) {
+                    config.llm.provider = p.to_string();
+                }
+                if let Some(m) = llm.get("model").and_then(|v| v.as_str()) {
+                    config.llm.model = m.to_string();
+                }
+                if let Some(t) = llm.get("max_tokens").and_then(|v| v.as_u64()) {
+                    config.llm.max_tokens = t as u32;
+                }
+                if let Some(t) = llm.get("temperature").and_then(|v| v.as_f64()) {
+                    config.llm.temperature = t;
+                }
+            }
+            tracing::info!("已从数据库加载保存的配置");
+        }
+    }
+
+    // Obsidian Local REST API
     let obsidian = if config.obsidian.enabled {
         match ObsidianClient::new(&config.obsidian) {
             Ok(client) => {
@@ -116,21 +168,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         tracing::warn!("Obsidian API 客户端未启用，搜索功能将不可用");
         None
-    };
-
-    // 4. Initialize SQLite
-    let db = match SqliteStore::new(&config.storage.db_path) {
-        Ok(store) => {
-            components.sqlite = "ok".to_string();
-            tracing::info!("SQLite 初始化成功: {:?}", config.storage.db_path);
-            Arc::new(store)
-        }
-        Err(e) => {
-            tracing::error!("SQLite 初始化失败: {e}");
-            components.sqlite = format!("error: {e}");
-            // SQLite is required, so fail fast
-            std::process::exit(1);
-        }
     };
 
     // 5. Create core services

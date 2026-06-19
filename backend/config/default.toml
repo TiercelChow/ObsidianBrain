@@ -1,97 +1,12 @@
 # =============================================================================
-# ObsidianBrain 默认配置文件
+# ObsidianBrain 配置文件
 # =============================================================================
-# 本文件定义了 ObsidianBrain 知识引擎的所有配置项。
-# 可通过环境变量覆盖（优先级高于本文件），例如：
-#   OBSIDIAN_BRAIN_SERVER_PORT=8080
+# 仅保留服务启动配置。其他配置（Vault、Obsidian API、LLM 等）
+# 请在首页「控制面板 → 系统配置」中设置，保存后重启服务生效。
 # =============================================================================
 
-# ── HTTP 服务器配置 ─────────────────────────────────────────────────────────
 [server]
 # 监听地址（0.0.0.0 允许局域网访问，127.0.0.1 仅本地）
 host = "0.0.0.0"
 # 监听端口
 port = 9876
-
-# ── Obsidian Vault 配置 ─────────────────────────────────────────────────────
-[vault]
-# Vault 根目录路径（请修改为你的实际 Obsidian Vault 路径）
-path = "/Users/tiercelchow/Documents/Obsidian/TiercelChow's Blog"
-# Vault 名称（用于日志和标识）
-name = "brain"
-# 是否启用文件监控（自动检测笔记变更并更新索引）
-watch_enabled = true
-# 排除的目录/文件模式（不会被索引）
-exclude_patterns = [".obsidian/", "templates/", ".trash/"]
-
-# ── Qdrant 向量数据库配置 ───────────────────────────────────────────────────
-[qdrant]
-# Qdrant REST API 地址（默认使用 Docker Compose 启动的本地实例）
-url = "http://127.0.0.1:6333"
-# 向量集合名称
-collection_name = "obsidian_brain"
-# 向量维度（需与 Embedding 模型输出维度一致）
-# OpenAI text-embedding-3-small = 1536
-# Ollama nomic-embed-text = 768
-vector_size = 1536
-
-# ── Embedding 模型配置 ──────────────────────────────────────────────────────
-[embedding]
-# 提供商：openai | ollama | onnx（渐进切换）
-provider = "openai"
-# 模型名称
-model = "text-embedding-3-small"
-# API Key 环境变量名（从环境变量读取，不硬编码）
-# api_key_env = "OPENAI_API_KEY"
-# API Base URL（可切换为 Ollama 本地地址：http://localhost:11434/v1）
-# base_url = "https://api.openai.com/v1"
-
-# ── LLM 调用配置 ────────────────────────────────────────────────────────────
-[llm]
-# 提供商：openai | claude | ollama
-provider = "openai"
-# 模型名称
-model = "gpt-4o-mini"
-# API Key 环境变量名
-# api_key_env = "OPENAI_API_KEY"
-# API Base URL
-# base_url = "https://api.openai.com/v1"
-# 单次请求最大输出 token 数
-max_tokens = 2048
-# 生成温度（0.0 ~ 2.0，越高越随机）
-temperature = 0.7
-
-# ── 记忆引擎配置 ────────────────────────────────────────────────────────────
-[memory]
-# 分块最小 token 数（低于此值的段落会与相邻段落合并）
-chunk_min_tokens = 300
-# 分块最大 token 数（超过此值的段落会被拆分）
-chunk_max_tokens = 800
-# 搜索返回的 Top-K 结果数
-search_top_k = 5
-
-# ── 存储路径配置 ────────────────────────────────────────────────────────────
-[storage]
-# SQLite 数据库文件路径（元数据存储）
-db_path = "./data/brain.db"
-# Tantivy 全文索引目录路径
-index_path = "./data/tantivy_index"
-
-# ── 日志配置 ────────────────────────────────────────────────────────────────
-[logging]
-# 日志级别：trace | debug | info | warn | error
-level = "info"
-# 日志文件路径（留空则仅输出到 stdout）
-# file = "./data/obsidianbrain.log"
-
-# ── Obsidian Local REST API 配置 ─────────────────────────────────────────────
-# 需要先安装 Obsidian 插件: obsidian-local-rest-api
-# 插件地址: https://github.com/coddingtonbear/obsidian-local-rest-api
-[obsidian]
-# 是否启用 Obsidian API 客户端
-# 启用后可通过 API 操作 vault 文件、搜索、执行命令、管理周期性笔记等
-enabled = true
-# Obsidian Local REST API 地址（HTTP 模式，默认端口 27123）
-url = "https://127.0.0.1:27124"
-# API Key（在 Obsidian 设置 → Local REST API 中查看）
-api_key = "002b934c756527984b93dcf59e61cfa16aef9132a5249b2bc8ab2a4842a3473d"

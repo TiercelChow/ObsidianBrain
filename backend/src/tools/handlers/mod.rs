@@ -9,6 +9,7 @@
 //! - `radar_handlers` — get_radar, add_to_vault, dismiss_radar_item
 
 pub mod code_repo_handlers;
+pub mod config_handlers;
 pub mod inspiration_handlers;
 pub mod knowledge_handlers;
 pub mod memory_handlers;
@@ -19,6 +20,7 @@ pub mod timeline_handlers;
 use std::sync::Arc;
 
 use crate::tools::handlers::code_repo_handlers::*;
+use crate::tools::handlers::config_handlers::{GetConfigHandler, SaveConfigHandler};
 use crate::tools::handlers::inspiration_handlers::*;
 use crate::tools::handlers::knowledge_handlers::GetKnowledgeInsightsHandler;
 use crate::tools::handlers::memory_handlers::GetMemoryStatsHandler;
@@ -65,4 +67,8 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     registry.register(Arc::new(GetRadarHandler)).await;
     registry.register(Arc::new(AddToVaultHandler)).await;
     registry.register(Arc::new(DismissRadarItemHandler)).await;
+
+    // System config
+    registry.register(Arc::new(GetConfigHandler)).await;
+    registry.register(Arc::new(SaveConfigHandler)).await;
 }

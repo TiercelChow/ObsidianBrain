@@ -3,7 +3,7 @@
     <header class="page-header">
       <div>
         <h1 class="page-title">控制面板</h1>
-        <p class="page-subtitle">系统状态与模块概览</p>
+        <p class="page-subtitle">系统状态与配置管理</p>
       </div>
       <el-button size="small" @click="loadAll" :loading="loading">
         <el-icon v-if="!loading"><Refresh /></el-icon>
@@ -25,51 +25,10 @@
       </div>
     </div>
 
-    <!-- Modules -->
-    <section class="section">
-      <h2 class="section-title">功能模块</h2>
-      <div class="modules-grid">
-        <div class="module-card" v-for="(mod, i) in modules" :key="mod.title"
-          :style="{ '--accent': mod.color, '--delay': `${0.1 + i * 0.05}s` }">
-          <div class="module-header">
-            <div class="module-icon">
-              <el-icon :size="18"><component :is="mod.icon" /></el-icon>
-            </div>
-            <el-tag :type="mod.status === '已就绪' ? 'success' : 'warning'" size="small" effect="plain">
-              {{ mod.status }}
-            </el-tag>
-          </div>
-          <h3 class="module-title">{{ mod.title }}</h3>
-          <p class="module-desc">{{ mod.desc }}</p>
-          <div class="module-tags">
-            <span v-for="tag in mod.tags" :key="tag" class="tag">{{ tag }}</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <!-- System Status -->
     <section class="section">
       <h2 class="section-title">系统状态</h2>
       <div class="status-card">
-        <div v-if="health" class="system-info">
-          <div class="system-info-row">
-            <span class="system-label">版本</span>
-            <span class="system-value">{{ health.version }}</span>
-          </div>
-          <div class="system-info-row">
-            <span class="system-label">运行时间</span>
-            <span class="system-value">{{ formatUptime(health.uptime_seconds) }}</span>
-          </div>
-          <div class="system-info-row">
-            <span class="system-label">已注册工具</span>
-            <span class="system-value">{{ health.tools_count }} 个</span>
-          </div>
-          <div v-if="health.vault" class="system-info-row">
-            <span class="system-label">Vault 路径</span>
-            <span class="system-value path-value">{{ health.vault.path || '未配置' }}</span>
-          </div>
-        </div>
         <div class="status-grid" v-if="health">
           <div class="status-item" v-for="(status, name) in health.components" :key="name">
             <span class="status-dot" :class="status === 'ok' ? 'ok' : 'inactive'"></span>
@@ -77,6 +36,11 @@
             <span class="status-value" :class="status === 'ok' ? 'ok' : 'inactive'">
               {{ status === 'ok' ? '运行中' : status }}
             </span>
+          </div>
+          <div class="status-item">
+            <span class="status-dot ok"></span>
+            <span class="status-name">运行时间</span>
+            <span class="status-value ok">{{ formatUptime(health.uptime_seconds) }}</span>
           </div>
         </div>
         <div v-else class="status-empty">
@@ -86,16 +50,86 @@
       </div>
     </section>
 
-    <!-- Tools List -->
-    <section class="section" v-if="tools.length > 0">
-      <h2 class="section-title">已注册工具 ({{ tools.length }})</h2>
-      <div class="tools-grid">
-        <div class="tool-card" v-for="tool in tools" :key="tool.name">
-          <div class="tool-header">
-            <span class="tool-name">{{ tool.name }}</span>
-            <el-tag size="small" effect="plain">{{ tool.module }}</el-tag>
+    <!-- Configuration -->
+    <section class="section">
+      <h2 class="section-title">系统配置</h2>
+      <div class="config-card" v-if="config">
+        <!-- Vault -->
+        <div class="config-group">
+          <h3 class="config-group-title">
+            <el-icon><FolderOpened /></el-icon>
+            Obsidian Vault
+          </h3>
+          <div class="config-fields">
+            <div class="config-field">
+              <label>Vault 路径</label>
+              <el-input v-model="config.vault.path" size="small" placeholder="/path/to/vault" />
+            </div>
+            <div class="config-field small">
+              <label>Vault 名称</label>
+              <el-input v-model="config.vault.name" size="small" placeholder="my-vault" />
+            </div>
           </div>
-          <p class="tool-desc">{{ tool.description }}</p>
+        </div>
+
+        <!-- Obsidian API -->
+        <div class="config-group">
+          <h3 class="config-group-title">
+            <el-icon><Connection /></el-icon>
+            Obsidian REST API
+          </h3>
+          <div class="config-fields">
+            <div class="config-field inline">
+              <label>启用</label>
+              <el-switch v-model="config.obsidian.enabled" />
+            </div>
+            <div class="config-field">
+              <label>API 地址</label>
+              <el-input v-model="config.obsidian.url" size="small" placeholder="https://127.0.0.1:27124" />
+            </div>
+            <div class="config-field">
+              <label>API Key</label>
+              <el-input v-model="config.obsidian.api_key" size="small" placeholder="API Key" show-password />
+            </div>
+          </div>
+        </div>
+
+        <!-- LLM -->
+        <div class="config-group">
+          <h3 class="config-group-title">
+            <el-icon><MagicStick /></el-icon>
+            LLM 配置
+          </h3>
+          <div class="config-fields">
+            <div class="config-field inline">
+              <label>提供商</label>
+              <el-select v-model="config.llm.provider" size="small" style="width: 140px">
+                <el-option label="OpenAI" value="openai" />
+                <el-option label="Claude" value="claude" />
+                <el-option label="Ollama" value="ollama" />
+              </el-select>
+            </div>
+            <div class="config-field">
+              <label>模型</label>
+              <el-input v-model="config.llm.model" size="small" placeholder="gpt-4o-mini" />
+            </div>
+            <div class="config-field inline">
+              <label>最大 Token</label>
+              <el-input-number v-model="config.llm.max_tokens" size="small" :min="256" :max="8192" :step="256" />
+            </div>
+            <div class="config-field inline">
+              <label>温度</label>
+              <el-slider v-model="config.llm.temperature" :min="0" :max="2" :step="0.1" style="width: 160px" />
+              <span class="slider-value">{{ config.llm.temperature }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-actions">
+          <el-button type="primary" size="small" @click="saveSettings" :loading="saving">
+            保存配置
+          </el-button>
+          <span class="config-hint">配置保存后需重启服务生效</span>
         </div>
       </div>
     </section>
@@ -104,11 +138,12 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { getHealth, listTools, getMemoryStats, getMemoStats } from '@/api'
+import { getHealth, getMemoryStats, getMemoStats, getConfig, saveConfig } from '@/api'
 import {
   Refresh, Notebook, FolderOpened, Calendar,
   MagicStick, DataLine, Connection,
 } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 
 interface HealthData {
   status: string
@@ -119,106 +154,71 @@ interface HealthData {
   components: Record<string, string>
 }
 
-interface ToolInfo {
-  name: string
-  description: string
-  module: string
-  input_schema: Record<string, unknown>
+interface ConfigData {
+  vault: { path: string; name: string }
+  obsidian: { enabled: boolean; url: string; api_key: string }
+  llm: { provider: string; model: string; max_tokens: number; temperature: number }
 }
 
 const health = ref<HealthData | null>(null)
-const tools = ref<ToolInfo[]>([])
 const memStats = ref<{ total_chunks: number; total_notes: number; tags: string[] } | null>(null)
 const memoStats = ref<{ total_memos: number } | null>(null)
+const config = ref<ConfigData | null>(null)
 const loading = ref(false)
+const saving = ref(false)
 
 const stats = computed(() => [
   { icon: Notebook, label: '笔记总数', value: memStats.value?.total_notes ?? '—', color: '#6366f1' },
-  { icon: Connection, label: '记忆单元', value: memStats.value?.total_chunks ?? '—', color: '#8b5cf6' },
   { icon: DataLine, label: '已注册工具', value: health.value?.tools_count ?? '—', color: '#06b6d4' },
   { icon: Calendar, label: '小记数', value: memoStats.value?.total_memos ?? '—', color: '#10b981' },
-])
-
-const modules = computed(() => [
-  {
-    icon: Notebook, title: '记忆引擎',
-    desc: '自动索引 Obsidian 笔记，提供全文 + 语义混合检索，支持记忆 CRUD。',
-    tags: ['Tantivy', 'Qdrant', 'RRF'],
-    color: '#6366f1',
-    status: health.value?.components?.tantivy === 'ok' ? '已就绪' : '开发中',
-  },
-  {
-    icon: FolderOpened, title: '代码仓管理',
-    desc: '注册本地 Git 仓库，展示元信息卡片，自动关联笔记并生成项目文档。',
-    tags: ['git2', 'LLM', 'VSCode'],
-    color: '#10b981',
-    status: 'Phase 2',
-  },
-  {
-    icon: Calendar, title: '时间线',
-    desc: '从笔记日期、文件名、Git 提交中聚合事件，按时间维度回顾知识演变。',
-    tags: ['事件收集', '统计', '摘要'],
-    color: '#f59e0b',
-    status: 'Phase 2',
-  },
-  {
-    icon: MagicStick, title: '灵感熔炉',
-    desc: '概念组合、反向提问、对立观点——三种模式故意制造知识碰撞与创意激发。',
-    tags: ['TF-IDF', '概念距离', 'LLM'],
-    color: '#ec4899',
-    status: 'Phase 3',
-  },
-  {
-    icon: DataLine, title: '智识雷达',
-    desc: '聚合 RSS/arXiv/HN 等外部源，基于个人知识图谱做个性化语义推荐。',
-    tags: ['feed-rs', '语义排序', '纳藏'],
-    color: '#06b6d4',
-    status: 'Phase 3',
-  },
-  {
-    icon: Connection, title: '工具协议',
-    desc: 'MCP + HTTP REST 双模式统一 API 层，供 Claude 等 LLM 前端调用。',
-    tags: ['MCP', 'JSON-RPC', 'Axum'],
-    color: '#71717a',
-    status: health.value?.tools_count ? '已就绪' : '开发中',
-  },
 ])
 
 function formatUptime(seconds: number): string {
   if (!seconds) return '—'
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
-  const s = seconds % 60
   if (h > 0) return `${h}h ${m}m`
-  if (m > 0) return `${m}m ${s}s`
-  return `${s}s`
+  if (m > 0) return `${m}m`
+  return `${seconds % 60}s`
 }
 
 async function loadAll() {
   loading.value = true
   try {
-    const [healthRes, toolsRes] = await Promise.allSettled([getHealth(), listTools()])
+    const [healthRes, memRes, memoRes, configRes] = await Promise.allSettled([
+      getHealth(),
+      getMemoryStats(),
+      getMemoStats(),
+      getConfig(),
+    ])
     if (healthRes.status === 'fulfilled') health.value = healthRes.value as unknown as HealthData
-    if (toolsRes.status === 'fulfilled') {
-      const data = toolsRes.value as unknown as { tools: ToolInfo[] }
-      tools.value = data.tools || []
+    if (memRes.status === 'fulfilled') {
+      const r = memRes.value as unknown as { result: { total_chunks: number; total_notes: number; tags: string[] } }
+      memStats.value = r.result ?? null
     }
-    // Try to get memory stats
-    try {
-      const statsRes = await getMemoryStats() as unknown as { result: { total_chunks: number; total_notes: number; tags: string[] } }
-      memStats.value = statsRes.result || statsRes as unknown as { total_chunks: number; total_notes: number; tags: string[] }
-    } catch {
-      memStats.value = null
+    if (memoRes.status === 'fulfilled') {
+      const r = memoRes.value as unknown as { result: { total_memos: number } }
+      memoStats.value = r.result ?? null
     }
-    // Try to get memo stats
-    try {
-      const memoRes = await getMemoStats() as unknown as { result: { total_memos: number } }
-      memoStats.value = memoRes.result || memoRes as unknown as { total_memos: number }
-    } catch {
-      memoStats.value = null
+    if (configRes.status === 'fulfilled') {
+      const r = configRes.value as unknown as { result: ConfigData }
+      config.value = r.result ?? null
     }
   } finally {
     loading.value = false
+  }
+}
+
+async function saveSettings() {
+  if (!config.value) return
+  saving.value = true
+  try {
+    await saveConfig(config.value)
+    ElMessage.success('配置已保存，重启服务后生效')
+  } catch (e) {
+    ElMessage.error('保存失败')
+  } finally {
+    saving.value = false
   }
 }
 
@@ -235,24 +235,8 @@ onMounted(() => { loadAll() })
 }
 .page-title { font-size: 22px; font-weight: 600; color: #18181b; letter-spacing: -0.3px; }
 .page-subtitle { margin-top: 4px; color: #a1a1aa; font-size: 14px; }
-.refresh-btn {
-  display: flex; align-items: center; gap: 6px; padding: 7px 14px;
-  border: 1px solid rgba(255,255,255,0.5); border-radius: 12px;
-  background: rgba(255,255,255,0.45);
-  backdrop-filter: blur(12px) saturate(180%);
-  -webkit-backdrop-filter: blur(12px) saturate(180%);
-  color: #52525b; font-size: 13px; font-weight: 500; cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
-}
-.refresh-btn:hover:not(:disabled) {
-  background: rgba(255,255,255,0.65);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-  transform: translateY(-1px);
-}
-.refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 40px; }
+.stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 28px; }
 .stat-card {
   display: flex; align-items: center; gap: 14px; padding: 20px;
   border-radius: 18px;
@@ -266,37 +250,14 @@ onMounted(() => { loadAll() })
 .stat-value { font-size: 20px; font-weight: 600; color: #18181b; line-height: 1.2; }
 .stat-label { font-size: 13px; color: #a1a1aa; margin-top: 2px; }
 
-.section { margin-bottom: 40px; animation: fade-in 0.5s ease both; animation-delay: var(--delay, 0s); }
-.section-title { font-size: 15px; font-weight: 600; color: #18181b; margin-bottom: 16px; letter-spacing: -0.2px; }
+.section { margin-bottom: 28px; animation: fade-in 0.5s ease both; animation-delay: var(--delay, 0s); }
+.section-title { font-size: 15px; font-weight: 600; color: #18181b; margin-bottom: 12px; letter-spacing: -0.2px; }
 
-.modules-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-.module-card {
-  padding: 20px; border-radius: 18px;
-  border-left: 3px solid var(--accent, #e4e4e7);
-  animation: fade-in 0.4s ease both; animation-delay: var(--delay, 0s);
-  transition: box-shadow 0.2s ease;
-}
-.module-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
-.module-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
-.module-icon {
-  width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
-  background: #f8fafc; border-radius: 12px; color: var(--accent, #71717a);
-}
-.module-title { font-size: 15px; font-weight: 600; color: #18181b; margin-bottom: 6px; }
-.module-desc { font-size: 13px; color: #71717a; line-height: 1.6; margin-bottom: 14px; }
-.module-tags { display: flex; gap: 6px; flex-wrap: wrap; }
-.tag { font-size: 11px; padding: 3px 8px; border-radius: 8px; color: #52525b; font-weight: 500; }
-
-.status-card { padding: 20px; border-radius: 18px; }
-.system-info { margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #f4f4f5; }
-.system-info-row { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
-.system-label { font-size: 13px; color: #a1a1aa; min-width: 80px; }
-.system-value { font-size: 13px; color: #18181b; font-weight: 500; }
-.path-value { font-family: monospace; font-size: 12px; color: #71717a; word-break: break-all; }
-.status-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.status-card { padding: 16px 20px; border-radius: 16px; }
+.status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
 .status-item {
-  display: flex; align-items: center; gap: 10px; padding: 10px 14px;
-  border-radius: 12px; background: #fafafa;
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-radius: 10px; background: rgba(0,0,0,0.02);
 }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .status-dot.ok { background: #10b981; }
@@ -312,11 +273,24 @@ onMounted(() => { loadAll() })
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.tools-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-.tool-card { padding: 16px; border-radius: 14px; }
-.tool-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.tool-name { font-size: 14px; font-weight: 600; color: #18181b; font-family: monospace; }
-.tool-desc { font-size: 12px; color: #71717a; line-height: 1.5; }
+/* Config */
+.config-card { padding: 20px; border-radius: 16px; }
+.config-group { margin-bottom: 20px; }
+.config-group:last-of-type { margin-bottom: 16px; }
+.config-group-title {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 14px; font-weight: 600; color: #18181b;
+  margin-bottom: 10px;
+}
+.config-fields { display: flex; flex-direction: column; gap: 8px; }
+.config-field { display: flex; flex-direction: column; gap: 4px; }
+.config-field label { font-size: 12px; color: #71717a; font-weight: 500; }
+.config-field.inline { flex-direction: row; align-items: center; gap: 10px; }
+.config-field.inline label { min-width: 70px; }
+.config-field.small { max-width: 200px; }
+.slider-value { font-size: 13px; color: #18181b; font-weight: 600; min-width: 28px; }
+.config-actions { display: flex; align-items: center; gap: 12px; padding-top: 8px; border-top: 1px solid rgba(0,0,0,0.04); }
+.config-hint { font-size: 12px; color: #a1a1aa; }
 
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(20px) scale(0.97); }
@@ -326,23 +300,18 @@ onMounted(() => { loadAll() })
 /* ── Mobile ── */
 @media (max-width: 768px) {
   .page-header { margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
-  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 20px; }
+  .page-subtitle { width: 100%; order: 1; margin-top: 0; }
+  .stats-grid { grid-template-columns: 1fr; gap: 10px; margin-bottom: 20px; }
   .stat-card { padding: 14px; gap: 10px; border-radius: 14px; }
   .stat-icon { width: 32px; height: 32px; border-radius: 10px; }
   .stat-value { font-size: 16px; }
   .stat-label { font-size: 11px; }
   .section { margin-bottom: 20px; }
   .section-title { font-size: 14px; margin-bottom: 10px; }
-  .modules-grid { grid-template-columns: 1fr; gap: 10px; }
-  .module-card { padding: 16px; border-radius: 14px; }
-  .module-title { font-size: 14px; }
-  .module-desc { font-size: 12px; margin-bottom: 10px; }
-  .status-card { padding: 16px; border-radius: 14px; }
-  .status-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .status-item { padding: 8px 10px; gap: 6px; }
-  .tools-grid { grid-template-columns: 1fr; gap: 8px; }
-  .tool-card { padding: 12px; border-radius: 12px; }
-  .tool-name { font-size: 13px; }
-  .tool-desc { font-size: 11px; }
+  .status-card { padding: 12px 14px; border-radius: 14px; }
+  .status-grid { grid-template-columns: 1fr; gap: 6px; }
+  .status-item { padding: 6px 10px; }
+  .config-card { padding: 16px; border-radius: 14px; }
+  .config-field.small { max-width: 100%; }
 }
 </style>

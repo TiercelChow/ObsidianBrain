@@ -323,6 +323,51 @@ pub fn get_knowledge_insights_schema() -> Value {
     })
 }
 
+// ── System Config Tools ──
+
+/// Schema for `get_config`.
+pub fn get_config_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+    })
+}
+
+/// Schema for `save_config`.
+pub fn save_config_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "vault": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Vault 根目录路径" },
+                    "name": { "type": "string", "description": "Vault 名称" }
+                }
+            },
+            "obsidian": {
+                "type": "object",
+                "properties": {
+                    "enabled": { "type": "boolean" },
+                    "url": { "type": "string" },
+                    "api_key": { "type": "string" }
+                }
+            },
+            "llm": {
+                "type": "object",
+                "properties": {
+                    "provider": { "type": "string", "enum": ["openai", "claude", "ollama"] },
+                    "model": { "type": "string" },
+                    "max_tokens": { "type": "integer" },
+                    "temperature": { "type": "number" }
+                }
+            }
+        },
+        "additionalProperties": false
+    })
+}
+
 // ── Inspiration Tools ──
 
 /// Schema for `get_inspiration` — generate creative inspiration.

@@ -67,6 +67,15 @@ export function getKnowledgeInsights(force = false) {
   return callTool('get_knowledge_insights', { force })
 }
 
+// ── System Config ──
+export function getConfig() {
+  return callTool('get_config')
+}
+
+export function saveConfig(config: Record<string, unknown>) {
+  return callTool('save_config', config)
+}
+
 // ── Code Repo ──
 export function addCodeRepo(path: string, name: string) {
   return callTool('add_code_repo', { path, name })
