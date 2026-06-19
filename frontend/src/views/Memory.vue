@@ -201,6 +201,11 @@ onMounted(() => { loadInsights() })
   min-height: 100%;
 }
 
+.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
+.page-title { font-size: 22px; font-weight: 600; color: #18181b; letter-spacing: -0.3px; }
+.page-subtitle { margin-top: 4px; color: #a1a1aa; font-size: 14px; }
+.header-actions { display: flex; gap: 8px; }
+
 .insights-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
