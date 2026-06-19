@@ -13,7 +13,7 @@ const router = createRouter({
       path: '/memory',
       name: 'Memory',
       component: () => import('@/views/Memory.vue'),
-      meta: { title: '记忆管理' },
+      meta: { title: '知识库' },
     },
     {
       path: '/code-repo',

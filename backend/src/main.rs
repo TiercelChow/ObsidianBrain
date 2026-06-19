@@ -30,6 +30,7 @@ pub struct AppContext {
     pub config: Arc<AppConfig>,
     pub components: Arc<std::sync::Mutex<ComponentStatus>>,
     pub tool_registry: Arc<ToolRegistry>,
+    pub obsidian: Option<Arc<ObsidianClient>>,
     pub memory_service: Arc<MemoryService>,
     pub repo_manager: Arc<RepoManager>,
     pub note_linker: Arc<NoteLinker>,
@@ -185,7 +186,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tracing::warn!("RadarService 初始化失败: {e}，雷达功能将不可用");
             // 创建一个空的 RadarService 作为 fallback
             let fallback_config = crate::models::radar::RadarConfig::default();
-            Arc::new(RadarService::new(db.clone(), obsidian, fallback_config)
+            Arc::new(RadarService::new(db.clone(), obsidian.clone(), fallback_config)
                 .expect("Fallback RadarService creation failed"))
         }
     };
@@ -197,6 +198,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config: Arc::new(config),
         components: Arc::new(std::sync::Mutex::new(components)),
         tool_registry: tool_registry.clone(),
+        obsidian: obsidian.clone(),
         memory_service,
         repo_manager,
         note_linker,
@@ -332,6 +334,7 @@ mod test_helpers {
                 config: Arc::new(config),
                 components: Arc::new(std::sync::Mutex::new(ComponentStatus::default())),
                 tool_registry: Arc::new(ToolRegistry::new()),
+                obsidian: None,
                 memory_service,
                 repo_manager,
                 note_linker,

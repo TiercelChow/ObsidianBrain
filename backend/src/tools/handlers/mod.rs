@@ -10,6 +10,7 @@
 
 pub mod code_repo_handlers;
 pub mod inspiration_handlers;
+pub mod knowledge_handlers;
 pub mod memory_handlers;
 pub mod radar_handlers;
 pub mod search_handlers;
@@ -19,6 +20,7 @@ use std::sync::Arc;
 
 use crate::tools::handlers::code_repo_handlers::*;
 use crate::tools::handlers::inspiration_handlers::*;
+use crate::tools::handlers::knowledge_handlers::GetKnowledgeInsightsHandler;
 use crate::tools::handlers::memory_handlers::GetMemoryStatsHandler;
 use crate::tools::handlers::radar_handlers::*;
 use crate::tools::handlers::search_handlers::*;
@@ -38,6 +40,7 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
 
     // Memory module
     registry.register(Arc::new(GetMemoryStatsHandler)).await;
+    registry.register(Arc::new(GetKnowledgeInsightsHandler)).await;
 
     // Code Repo module
     registry.register(Arc::new(AddCodeRepoHandler)).await;

@@ -308,6 +308,15 @@ pub fn get_memo_stats_schema() -> Value {
     })
 }
 
+/// Schema for `get_knowledge_insights` — get knowledge base insights.
+pub fn get_knowledge_insights_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+    })
+}
+
 // ── Inspiration Tools ──
 
 /// Schema for `get_inspiration` — generate creative inspiration.

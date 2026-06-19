@@ -63,6 +63,10 @@ export function getMemoryStats() {
   return callTool('get_memory_stats')
 }
 
+export function getKnowledgeInsights() {
+  return callTool('get_knowledge_insights')
+}
+
 // ── Code Repo ──
 export function addCodeRepo(path: string, name: string) {
   return callTool('add_code_repo', { path, name })
