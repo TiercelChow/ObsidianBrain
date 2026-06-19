@@ -116,7 +116,7 @@ html, body, #app {
 .stat-card, .module-card, .status-card, .tool-card,
 .stat-chip, .result-card, .recent-card,
 .repo-card, .mode-option, .radar-card,
-.insight-card,
+.insight-card, .config-card,
 .combo-result, .question-result, .counterpoint-result,
 .combo-result .concept-chip,
 .question-result .question-item,
