@@ -312,7 +312,13 @@ pub fn get_memo_stats_schema() -> Value {
 pub fn get_knowledge_insights_schema() -> Value {
     json!({
         "type": "object",
-        "properties": {},
+        "properties": {
+            "force": {
+                "type": "boolean",
+                "default": false,
+                "description": "强制重新统计（忽略缓存）"
+            }
+        },
         "additionalProperties": false
     })
 }

@@ -63,8 +63,8 @@ export function getMemoryStats() {
   return callTool('get_memory_stats')
 }
 
-export function getKnowledgeInsights() {
-  return callTool('get_knowledge_insights')
+export function getKnowledgeInsights(force = false) {
+  return callTool('get_knowledge_insights', { force })
 }
 
 // ── Code Repo ──

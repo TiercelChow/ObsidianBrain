@@ -6,9 +6,9 @@
         <p class="page-subtitle">洞察你的知识体系：孤岛、枢纽、尘封与新生</p>
       </div>
       <div class="header-actions">
-        <el-button size="small" @click="loadInsights" :loading="loading">
+        <el-button size="small" @click="loadInsights(true)" :loading="loading">
           <el-icon v-if="!loading"><Refresh /></el-icon>
-          刷新
+          重新统计
         </el-button>
       </div>
     </header>
@@ -171,10 +171,10 @@ interface Insights {
 const loading = ref(false)
 const insights = ref<Insights | null>(null)
 
-async function loadInsights() {
+async function loadInsights(force = false) {
   loading.value = true
   try {
-    const res = await getKnowledgeInsights() as unknown as { result: Insights }
+    const res = await getKnowledgeInsights(force) as unknown as { result: Insights }
     insights.value = res.result
   } catch (e) {
     console.error('加载知识库洞察失败:', e)
