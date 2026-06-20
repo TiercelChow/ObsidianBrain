@@ -149,38 +149,38 @@ html, body, #app {
   --orb-opacity: 1;
 }
 
-/* ── Dark Theme ── */
+/* ── Dark Theme — Deep Black ── */
 :root[data-theme="dark"] {
-  --bg-base: #0f0f14;
-  --bg-glass: rgba(30, 30, 40, 0.55);
-  --bg-glass-strong: rgba(30, 30, 40, 0.75);
-  --bg-glass-subtle: rgba(40, 40, 50, 0.45);
-  --bg-hover: rgba(50, 50, 60, 0.5);
-  --border-glass: rgba(80, 80, 100, 0.3);
-  --border-subtle: rgba(80, 80, 100, 0.2);
-  --border-faint: rgba(255, 255, 255, 0.04);
+  --bg-base: #000000;
+  --bg-glass: rgba(15, 15, 15, 0.7);
+  --bg-glass-strong: rgba(20, 20, 20, 0.9);
+  --bg-glass-subtle: rgba(28, 28, 28, 0.5);
+  --bg-hover: rgba(35, 35, 35, 0.6);
+  --border-glass: rgba(55, 55, 55, 0.6);
+  --border-subtle: rgba(45, 45, 45, 0.5);
+  --border-faint: rgba(255, 255, 255, 0.06);
 
-  --text-primary: #f4f4f5;
-  --text-secondary: #e4e4e7;
-  --text-tertiary: #d4d4d8;
-  --text-muted: #a1a1aa;
-  --text-faint: #71717a;
+  --text-primary: #ffffff;
+  --text-secondary: #e5e5e5;
+  --text-tertiary: #b3b3b3;
+  --text-muted: #808080;
+  --text-faint: #555555;
 
-  --accent: #818cf8;
-  --accent-light: rgba(129, 140, 248, 0.15);
-  --accent-border: rgba(129, 140, 248, 0.3);
+  --accent: #7c7cff;
+  --accent-light: rgba(124, 124, 255, 0.12);
+  --accent-border: rgba(124, 124, 255, 0.35);
 
-  --code-bg: rgba(255, 255, 255, 0.08);
-  --code-inline-color: #f0abfc;
-  --code-block-bg: #181825;
-  --code-block-text: #cdd6f4;
+  --code-bg: rgba(255, 255, 255, 0.06);
+  --code-inline-color: #ff79c6;
+  --code-block-bg: #0d0d0d;
+  --code-block-text: #e5e5e5;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.2), 0 4px 16px rgba(0, 0, 0, 0.15);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.2);
-  --inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 
-  --orb-opacity: 0.6;
+  --orb-opacity: 0.3;
 }
 
 /* ── Glass Card 全局覆盖 ── */
@@ -234,31 +234,40 @@ html, body, #app {
   color: var(--text-faint);
 }
 
-/* ── Dark theme Element Plus overrides ── */
+/* ── Dark theme Element Plus overrides — Deep Black ── */
 :root[data-theme="dark"] {
-  --el-bg-color: #1e1e2e;
-  --el-bg-color-overlay: #2a2a3a;
-  --el-bg-color-page: #0f0f14;
-  --el-text-color-primary: #f4f4f5;
-  --el-text-color-regular: #d4d4d8;
-  --el-text-color-secondary: #a1a1aa;
-  --el-text-color-placeholder: #71717a;
-  --el-border-color: rgba(80, 80, 100, 0.3);
-  --el-border-color-light: rgba(80, 80, 100, 0.2);
-  --el-border-color-lighter: rgba(80, 80, 100, 0.15);
-  --el-fill-color: rgba(40, 40, 50, 0.5);
-  --el-fill-color-light: rgba(40, 40, 50, 0.4);
-  --el-fill-color-lighter: rgba(40, 40, 50, 0.3);
+  --el-bg-color: #141414;
+  --el-bg-color-overlay: #1a1a1a;
+  --el-bg-color-page: #000000;
+  --el-text-color-primary: #ffffff;
+  --el-text-color-regular: #e5e5e5;
+  --el-text-color-secondary: #b3b3b3;
+  --el-text-color-placeholder: #555555;
+  --el-border-color: rgba(55, 55, 55, 0.6);
+  --el-border-color-light: rgba(45, 45, 45, 0.5);
+  --el-border-color-lighter: rgba(40, 40, 40, 0.4);
+  --el-fill-color: rgba(28, 28, 28, 0.6);
+  --el-fill-color-light: rgba(28, 28, 28, 0.5);
+  --el-fill-color-lighter: rgba(28, 28, 28, 0.3);
   --el-fill-color-blank: transparent;
-  --el-color-primary: #818cf8;
-  --el-mask-color: rgba(0, 0, 0, 0.5);
-  --el-overlay-color: rgba(0, 0, 0, 0.5);
+  --el-color-primary: #7c7cff;
+  --el-mask-color: rgba(0, 0, 0, 0.7);
+  --el-overlay-color: rgba(0, 0, 0, 0.7);
+  --el-disabled-bg-color: rgba(28, 28, 28, 0.5);
+  --el-disabled-text-color: #555555;
+  --el-disabled-border-color: rgba(45, 45, 45, 0.5);
 }
 
-/* Dark theme: el-input, el-select, el-date-picker wrappers */
+/* Dark: el-input, el-select, el-date-picker */
 :root[data-theme="dark"] .el-input__wrapper {
   background: var(--bg-glass-subtle) !important;
   box-shadow: 0 0 0 1px var(--border-glass) inset !important;
+}
+:root[data-theme="dark"] .el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px rgba(124, 124, 255, 0.3) inset !important;
+}
+:root[data-theme="dark"] .el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 2px rgba(124, 124, 255, 0.2) inset !important;
 }
 :root[data-theme="dark"] .el-input__inner {
   color: var(--text-primary) !important;
@@ -266,25 +275,48 @@ html, body, #app {
 :root[data-theme="dark"] .el-input__inner::placeholder {
   color: var(--text-faint) !important;
 }
+:root[data-theme="dark"] .el-input__icon,
+:root[data-theme="dark"] .el-range__icon,
+:root[data-theme="dark"] .el-range__close-icon {
+  color: var(--text-muted) !important;
+}
 :root[data-theme="dark"] .el-select__wrapper {
   background: var(--bg-glass-subtle) !important;
   box-shadow: 0 0 0 1px var(--border-glass) inset !important;
 }
+:root[data-theme="dark"] .el-select__wrapper.is-hovering {
+  box-shadow: 0 0 0 1px rgba(124, 124, 255, 0.3) inset !important;
+}
+:root[data-theme="dark"] .el-select__placeholder {
+  color: var(--text-faint) !important;
+}
+:root[data-theme="dark"] .el-select__selected-item {
+  color: var(--text-primary) !important;
+}
 :root[data-theme="dark"] .el-range-editor {
   background: var(--bg-glass-subtle) !important;
-  border-color: var(--border-glass) !important;
+  border: 1px solid var(--border-glass) !important;
+}
+:root[data-theme="dark"] .el-range-editor:hover {
+  border-color: rgba(124, 124, 255, 0.3) !important;
 }
 :root[data-theme="dark"] .el-range-input {
   color: var(--text-primary) !important;
 }
-:root[data-theme="dark"] .el-range-separator {
+:root[data-theme="dark"] .el-range-input::placeholder {
   color: var(--text-faint) !important;
 }
+:root[data-theme="dark"] .el-range-separator {
+  color: var(--text-muted) !important;
+}
 
-/* Dark theme: el-dialog */
+/* Dark: el-dialog */
 :root[data-theme="dark"] .el-dialog {
   background: var(--bg-glass-strong) !important;
-  border-color: var(--border-glass) !important;
+  border: 1px solid var(--border-glass) !important;
+}
+:root[data-theme="dark"] .el-dialog__header {
+  border-bottom: 1px solid var(--border-faint) !important;
 }
 :root[data-theme="dark"] .el-dialog__title {
   color: var(--text-primary) !important;
@@ -292,37 +324,72 @@ html, body, #app {
 :root[data-theme="dark"] .el-dialog__headerbtn .el-dialog__close {
   color: var(--text-muted) !important;
 }
-
-/* Dark theme: el-message */
-:root[data-theme="dark"] .el-message {
-  background: var(--bg-glass-strong) !important;
-  border-color: var(--border-glass) !important;
+:root[data-theme="dark"] .el-dialog__headerbtn:hover .el-dialog__close {
   color: var(--text-primary) !important;
 }
-
-/* Dark theme: el-tag */
-:root[data-theme="dark"] .el-tag {
-  background: var(--bg-glass-subtle) !important;
-  border-color: var(--border-glass) !important;
+:root[data-theme="dark"] .el-dialog__body {
   color: var(--text-secondary) !important;
 }
 
-/* Dark theme: el-button */
+/* Dark: el-message */
+:root[data-theme="dark"] .el-message {
+  background: var(--bg-glass-strong) !important;
+  border: 1px solid var(--border-glass) !important;
+  color: var(--text-primary) !important;
+}
+:root[data-theme="dark"] .el-message--success .el-message__content {
+  color: #4ade80 !important;
+}
+:root[data-theme="dark"] .el-message--error .el-message__content {
+  color: #f87171 !important;
+}
+
+/* Dark: el-tag */
+:root[data-theme="dark"] .el-tag {
+  background: var(--bg-glass-subtle) !important;
+  border: 1px solid var(--border-subtle) !important;
+  color: var(--text-secondary) !important;
+}
+:root[data-theme="dark"] .el-tag--success {
+  background: rgba(74, 222, 128, 0.1) !important;
+  border-color: rgba(74, 222, 128, 0.2) !important;
+  color: #4ade80 !important;
+}
+:root[data-theme="dark"] .el-tag--warning {
+  background: rgba(251, 191, 36, 0.1) !important;
+  border-color: rgba(251, 191, 36, 0.2) !important;
+  color: #fbbf24 !important;
+}
+
+/* Dark: el-button */
 :root[data-theme="dark"] .el-button {
   background: var(--bg-glass) !important;
-  border-color: var(--border-glass) !important;
+  border: 1px solid var(--border-glass) !important;
   color: var(--text-secondary) !important;
+}
+:root[data-theme="dark"] .el-button:hover {
+  background: var(--bg-hover) !important;
+  border-color: rgba(124, 124, 255, 0.3) !important;
+  color: var(--text-primary) !important;
 }
 :root[data-theme="dark"] .el-button--primary {
   background: var(--accent) !important;
   border-color: var(--accent) !important;
   color: #fff !important;
 }
-:root[data-theme="dark"] .el-button:hover {
-  background: var(--bg-glass-strong) !important;
+:root[data-theme="dark"] .el-button--primary:hover {
+  background: #6a6aff !important;
+  border-color: #6a6aff !important;
+}
+:root[data-theme="dark"] .el-button.is-disabled,
+:root[data-theme="dark"] .el-button.is-loading {
+  opacity: 0.4;
 }
 
-/* Dark theme: el-descriptions */
+/* Dark: el-descriptions */
+:root[data-theme="dark"] .el-descriptions {
+  background: transparent !important;
+}
 :root[data-theme="dark"] .el-descriptions__label {
   background: var(--bg-glass-subtle) !important;
   color: var(--text-muted) !important;
@@ -335,19 +402,48 @@ html, body, #app {
   border-color: var(--border-faint) !important;
 }
 
-/* Dark theme: el-switch */
+/* Dark: el-switch */
+:root[data-theme="dark"] .el-switch__core {
+  background-color: var(--bg-glass-subtle) !important;
+  border-color: var(--border-glass) !important;
+}
 :root[data-theme="dark"] .el-switch.is-checked .el-switch__core {
   background-color: var(--accent) !important;
   border-color: var(--accent) !important;
 }
 
-/* Dark theme: calendar popper */
+/* Dark: el-empty */
+:root[data-theme="dark"] .el-empty__description p {
+  color: var(--text-muted) !important;
+}
+:root[data-theme="dark"] .el-empty__image svg path {
+  fill: var(--bg-glass-subtle) !important;
+}
+
+/* Dark: el-slider */
+:root[data-theme="dark"] .el-slider__runway {
+  background-color: var(--bg-glass-subtle) !important;
+}
+:root[data-theme="dark"] .el-slider__bar {
+  background-color: var(--accent) !important;
+}
+:root[data-theme="dark"] .el-slider__button {
+  border-color: var(--accent) !important;
+  background-color: var(--bg-base) !important;
+}
+
+/* Dark: el-input-number */
+:root[data-theme="dark"] .el-input-number {
+  background: var(--bg-glass-subtle) !important;
+}
+
+/* Dark: calendar popper */
 :root[data-theme="dark"] .glass-picker {
   background: var(--bg-glass-strong) !important;
-  border-color: var(--border-glass) !important;
+  border: 1px solid var(--border-glass) !important;
 }
 :root[data-theme="dark"] .glass-picker .el-date-table th {
-  color: var(--text-faint) !important;
+  color: var(--text-muted) !important;
   border-bottom-color: var(--border-faint) !important;
 }
 :root[data-theme="dark"] .glass-picker .el-date-table td .el-date-table-cell:hover {
@@ -356,6 +452,9 @@ html, body, #app {
 :root[data-theme="dark"] .glass-picker .el-date-table td.today .el-date-table-cell__number {
   color: var(--accent) !important;
 }
+:root[data-theme="dark"] .glass-picker .el-date-table td .el-date-table-cell__number {
+  color: var(--text-secondary) !important;
+}
 :root[data-theme="dark"] .glass-picker .el-date-range-picker__header button {
   background: var(--bg-glass-subtle) !important;
   color: var(--text-secondary) !important;
@@ -363,6 +462,31 @@ html, body, #app {
 :root[data-theme="dark"] .glass-picker .el-picker-panel__footer {
   background: transparent !important;
   border-top-color: var(--border-faint) !important;
+}
+:root[data-theme="dark"] .glass-picker .el-picker-panel__footer button {
+  background: var(--bg-glass-subtle) !important;
+  color: var(--text-secondary) !important;
+}
+
+/* Dark: el-overlay (dialog backdrop) */
+:root[data-theme="dark"] .el-overlay {
+  background-color: rgba(0, 0, 0, 0.7) !important;
+}
+
+/* Dark: el-popper (dropdown lists) */
+:root[data-theme="dark"] .el-popper {
+  background: var(--bg-glass-strong) !important;
+  border: 1px solid var(--border-glass) !important;
+}
+:root[data-theme="dark"] .el-select-dropdown__item {
+  color: var(--text-secondary) !important;
+}
+:root[data-theme="dark"] .el-select-dropdown__item.hover,
+:root[data-theme="dark"] .el-select-dropdown__item:hover {
+  background: var(--bg-hover) !important;
+}
+:root[data-theme="dark"] .el-select-dropdown__item.selected {
+  color: var(--accent) !important;
 }
 
 /* ── Mobile scroll: hide page headers globally ── */
