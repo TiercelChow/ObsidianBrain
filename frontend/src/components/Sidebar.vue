@@ -94,7 +94,7 @@ function isActive(path: string) {
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
   border-right: 1px solid var(--border-glass);
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.3);
+  box-shadow: inset -1px 0 0 var(--border-faint);
   padding: 0 12px;
   transition: padding 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -177,7 +177,7 @@ function isActive(path: string) {
   background: var(--bg-glass);
   color: var(--text-primary);
   font-weight: 500;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--shadow-sm);
 }
 
 .nav-icon {

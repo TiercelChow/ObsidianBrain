@@ -766,30 +766,30 @@ onMounted(() => { loadMemos() })
 
 /* ── Glass Surfaces ── */
 .glass-surface {
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--bg-glass);
   backdrop-filter: blur(12px) saturate(180%);
   -webkit-backdrop-filter: blur(12px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  border: 1px solid var(--border-glass);
   box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.03),
-    0 4px 16px rgba(0, 0, 0, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    var(--shadow-sm),
+    var(--shadow-md),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 .glass-surface-heavy {
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--bg-glass-strong);
   backdrop-filter: blur(40px) saturate(200%);
   -webkit-backdrop-filter: blur(40px) saturate(200%);
-  border: 1px solid rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--border-glass);
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.08),
-    0 2px 8px rgba(0, 0, 0, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    var(--shadow-lg),
+    var(--shadow-sm),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 .glass-chip {
-  background: rgba(255, 255, 255, 0.45);
+  background: var(--bg-glass-subtle);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-subtle);
 }
 
 /* ── Glass Buttons ── */
@@ -799,8 +799,8 @@ onMounted(() => { loadMemos() })
   gap: 6px;
   padding: 9px 20px;
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-hover);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
   color: var(--text-secondary);
@@ -808,16 +808,16 @@ onMounted(() => { loadMemos() })
   font-weight: 500;
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--shadow-sm);
 }
 .glass-btn:hover {
-  background: rgba(255, 255, 255, 0.7);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  background: var(--bg-glass-strong);
+  box-shadow: var(--shadow-md);
   transform: translateY(-1px);
 }
 .glass-btn:active {
   transform: translateY(0) scale(0.97);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-sm);
 }
 .glass-btn:disabled {
   opacity: 0.5;
@@ -827,7 +827,7 @@ onMounted(() => { loadMemos() })
   background: rgba(24, 24, 27, 0.85);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: var(--border-faint);
   color: #fff;
 }
 .glass-btn.primary:hover {
@@ -838,8 +838,8 @@ onMounted(() => { loadMemos() })
 .glass-icon-btn {
   width: 32px; height: 32px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  background: rgba(255, 255, 255, 0.3);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-glass-subtle);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   color: var(--text-muted);
@@ -851,7 +851,7 @@ onMounted(() => { loadMemos() })
   transition: all 0.2s ease;
 }
 .glass-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--bg-glass);
   color: var(--text-primary);
 }
 
@@ -873,9 +873,9 @@ onMounted(() => { loadMemos() })
 /* ── Glass Textarea ── */
 .glass-textarea {
   width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-subtle);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.35);
+  background: var(--bg-glass-subtle);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   padding: 14px 16px;
@@ -886,12 +886,12 @@ onMounted(() => { loadMemos() })
   resize: vertical;
   outline: none;
   transition: all 0.25s ease;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.03);
+  box-shadow: inset var(--shadow-sm);
 }
 .glass-textarea::placeholder { color: var(--text-faint); }
 .glass-textarea:focus {
   border-color: rgba(129, 140, 248, 0.4);
-  box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.1), inset 0 1px 2px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 0 0 3px rgba(124, 124, 255, 0.15), inset var(--shadow-sm);
 }
 
 /* ── Header ── */
@@ -945,11 +945,11 @@ onMounted(() => { loadMemos() })
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .search-box:focus-within {
-  background: rgba(255, 255, 255, 0.75);
+  background: var(--bg-glass-strong);
   box-shadow:
-    0 0 0 3px rgba(129, 140, 248, 0.12),
+    0 0 0 3px rgba(124, 124, 255, 0.15),
     0 4px 16px rgba(0, 0, 0, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 .search-icon {
   color: var(--text-faint);
@@ -963,7 +963,7 @@ onMounted(() => { loadMemos() })
   width: 22px; height: 22px;
   border-radius: 50%;
   border: none;
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--border-faint);
   color: var(--text-muted);
   font-size: 10px;
   cursor: pointer;
@@ -999,7 +999,7 @@ onMounted(() => { loadMemos() })
 }
 .chip:hover {
   color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--bg-glass-subtle);
 }
 .chip.active {
   color: #fff;
@@ -1017,22 +1017,22 @@ onMounted(() => { loadMemos() })
 }
 .date-range-picker :deep(.el-range-editor) {
   border-radius: 14px !important;
-  border: 1px solid rgba(255, 255, 255, 0.5) !important;
-  background: rgba(255, 255, 255, 0.45) !important;
+  border: 1px solid var(--border-subtle) !important;
+  background: var(--bg-glass-subtle) !important;
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03), inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+  box-shadow: var(--shadow-sm), var(--inset-highlight) !important;
   height: 40px !important;
   padding: 0 12px !important;
   transition: all 0.25s ease !important;
 }
 .date-range-picker :deep(.el-range-editor:hover) {
-  border-color: rgba(255, 255, 255, 0.7) !important;
-  background: rgba(255, 255, 255, 0.6) !important;
+  border-color: var(--border-glass) !important;
+  background: var(--bg-glass) !important;
 }
 .date-range-picker :deep(.el-range-editor.is-active) {
   border-color: rgba(129, 140, 248, 0.4) !important;
-  box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.1), 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+  box-shadow: 0 0 0 3px rgba(124, 124, 255, 0.15), var(--shadow-sm) !important;
 }
 .date-range-picker :deep(.el-range-input) {
   background: transparent !important;
@@ -1070,7 +1070,7 @@ onMounted(() => { loadMemos() })
   border-radius: 20px;
   padding: 16px 8px 16px 4px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.08) transparent;
+  scrollbar-color: var(--border-glass) transparent;
 }
 .month-group { margin-bottom: 18px; }
 .month-label {
@@ -1096,18 +1096,18 @@ onMounted(() => { loadMemos() })
   position: relative;
 }
 .day-link:hover {
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--bg-glass-subtle);
   color: var(--text-secondary);
 }
 .day-link.active {
-  background: rgba(129, 140, 248, 0.12);
+  background: rgba(124, 124, 255, 0.15);
   color: #4f46e5;
 }
 .day-dot {
   width: 8px; height: 8px;
   border-radius: 50%;
   border: 2px solid #d4d4d8;
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--bg-glass);
   flex-shrink: 0;
   z-index: 1;
   transition: all 0.3s ease;
@@ -1124,7 +1124,7 @@ onMounted(() => { loadMemos() })
   top: -3px;
   bottom: -3px;
   width: 2px;
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--border-faint);
   z-index: 0;
 }
 .day-text { flex: 1; }
@@ -1183,7 +1183,7 @@ onMounted(() => { loadMemos() })
   justify-content: space-between;
   margin-bottom: 14px;
   padding-bottom: 10px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  border-bottom: 1px solid var(--border-faint);
 }
 .day-header-left {
   display: flex;
@@ -1261,7 +1261,7 @@ onMounted(() => { loadMemos() })
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.06),
     0 2px 6px rgba(0, 0, 0, 0.03),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 .memo-time {
   font-size: 12px;
@@ -1601,7 +1601,7 @@ onMounted(() => { loadMemos() })
   display: block;
   width: 40px;
   height: 1px;
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--border-faint);
 }
 
 /* ── Empty & Loading ── */
@@ -1710,7 +1710,7 @@ onMounted(() => { loadMemos() })
   aspect-ratio: 1;
   border-radius: 10px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-subtle);
 }
 .image-preview-img {
   width: 100%;
@@ -1752,7 +1752,7 @@ onMounted(() => { loadMemos() })
   aspect-ratio: 1;
   border-radius: 10px;
   border: 2px dashed rgba(0, 0, 0, 0.12);
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--bg-glass-subtle);
   color: var(--text-faint);
   cursor: pointer;
   display: flex;
@@ -1762,7 +1762,7 @@ onMounted(() => { loadMemos() })
 }
 .image-add-btn:hover {
   border-color: rgba(0, 0, 0, 0.2);
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--bg-hover);
   color: var(--text-muted);
 }
 
@@ -1997,14 +1997,14 @@ onMounted(() => { loadMemos() })
 /* ── ElMessage 适配 ── */
 .el-message {
   border-radius: 16px !important;
-  border: 1px solid rgba(255, 255, 255, 0.6) !important;
-  background: rgba(255, 255, 255, 0.75) !important;
+  border: 1px solid var(--border-glass) !important;
+  background: var(--bg-glass-strong) !important;
   backdrop-filter: blur(32px) saturate(200%) !important;
   -webkit-backdrop-filter: blur(32px) saturate(200%) !important;
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.08),
-    0 2px 8px rgba(0, 0, 0, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+    var(--shadow-lg),
+    var(--shadow-sm),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03) !important;
   padding: 14px 22px !important;
 }
 .el-message .el-message__content {

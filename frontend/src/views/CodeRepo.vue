@@ -223,7 +223,7 @@ onMounted(() => { loadRepos() })
 }
 .repo-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .lang-tag { font-size: 11px; padding: 2px 8px; border-radius: 8px; color: var(--text-tertiary); }
-.repo-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.04); justify-content: flex-end; }
+.repo-actions { display: flex; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border-faint); justify-content: flex-end; }
 
 .commits-section { margin-top: 20px; }
 .commits-section h4 { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px; }

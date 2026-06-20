@@ -276,7 +276,7 @@ onMounted(() => { loadInsights() })
   transition: background 0.15s ease;
 }
 .note-item:hover {
-  background: rgba(99, 102, 241, 0.06);
+  background: var(--accent-light);
 }
 .note-path {
   font-size: 13px;

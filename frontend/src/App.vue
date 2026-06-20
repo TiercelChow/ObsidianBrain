@@ -217,7 +217,7 @@ html, body, #app {
 .el-card:hover {
   box-shadow:
     0 4px 16px rgba(0, 0, 0, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+    var(--inset-highlight) !important;
 }
 
 .el-tag {
