@@ -123,7 +123,7 @@
             </div>
 
             <div class="day-group-memos">
-                <div v-scroll-reveal v-for="(memo, idx) in group.memos" :key="memo.id" class="memo-card" :style="{ '--delay': idx * 0.06 + 's' }">
+                <div v-for="(memo, idx) in group.memos" :key="memo.id" class="memo-card" :style="{ '--delay': idx * 0.06 + 's' }">
                 <div class="memo-card-left">
                   <div class="memo-time-dot"></div>
                   <div class="memo-time-line"></div>
@@ -305,7 +305,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, type Directive } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Search, PriceTag, Loading, Picture, Refresh, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import hljs from 'highlight.js/lib/common'
@@ -748,41 +748,8 @@ function scrollToDate(date: string) {
   document.getElementById('date-' + date)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-// ── Scroll Reveal ──
-let lastScrollTop = 0
-let scrollDir: 'down' | 'up' = 'down'
-
-const vScrollReveal: Directive<HTMLElement> = {
-  mounted(el) {
-    el.classList.add('scroll-hidden')
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            el.classList.remove('scroll-hidden')
-            el.classList.add('scroll-visible')
-            el.style.setProperty('--scroll-dir', scrollDir === 'down' ? '1' : '-1')
-          } else {
-            el.classList.remove('scroll-visible')
-            el.classList.add('scroll-hidden')
-          }
-        })
-      },
-      { threshold: 0.08, rootMargin: '-20px 0px -20px 0px' },
-    )
-    observer.observe(el)
-    ;(el as any).__sr_observer = observer
-  },
-  unmounted(el) {
-    const observer = (el as any).__sr_observer as IntersectionObserver
-    observer?.disconnect()
-  },
-}
-
 function onMemoScroll(e: Event) {
   const el = e.target as HTMLElement
-  scrollDir = el.scrollTop > lastScrollTop ? 'down' : 'up'
-  lastScrollTop = el.scrollTop
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) loadMore()
 }
 
@@ -1837,16 +1804,6 @@ onMounted(() => { loadMemos() })
   animation-delay: var(--delay, 0s);
   transition: opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1),
               transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Scroll reveal states */
-.memo-card.scroll-hidden {
-  opacity: 0;
-  transform: translateY(calc(30px * var(--scroll-dir, 1))) scale(0.96);
-}
-.memo-card.scroll-visible {
-  opacity: 1;
-  transform: translateY(0) scale(1);
 }
 
 @keyframes memoFadeIn {
