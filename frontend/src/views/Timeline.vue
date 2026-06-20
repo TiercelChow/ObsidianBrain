@@ -308,6 +308,8 @@
 import { ref, computed, onMounted, onUnmounted, type Directive } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Search, PriceTag, Loading, Picture, Refresh, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import hljs from 'highlight.js/lib/common'
+import 'highlight.js/styles/github-dark.css'
 import { createMemo, browseTimeline, searchMemos, uploadImages, syncMemos } from '@/api'
 
 // ── Types ──
@@ -661,8 +663,15 @@ function renderContent(content: string, query: string): string {
   const codeBlocks: string[] = []
   let html = content.replace(/```(\w*)\n?([\s\S]*?)```/g, (_m, lang, code) => {
     const i = codeBlocks.length
-    const escaped = code.trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    codeBlocks.push(`<pre class="memo-code"><code${lang ? ` data-lang="${lang}"` : ''}>${escaped}</code></pre>`)
+    const trimmed = code.trim()
+    // Syntax highlight if language is specified
+    let highlighted: string
+    if (lang && hljs.getLanguage(lang)) {
+      highlighted = hljs.highlight(trimmed, { language: lang }).value
+    } else {
+      highlighted = trimmed.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    }
+    codeBlocks.push(`<pre class="memo-code"><code class="hljs language-${lang || 'plaintext'}">${highlighted}</code></pre>`)
     return `\x00CB${i}\x00`
   })
 
@@ -687,9 +696,12 @@ function renderContent(content: string, query: string): string {
   html = html.replace(/^(?:---|\*\*\*|___)$/gm, '<hr class="memo-hr" />')
 
   // Phase 4: lists
-  // Unordered: - item or * item
-  html = html.replace(/^[*-]\s+(.+)$/gm, '<li>$1</li>')
-  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>')
+  // Checkboxes: - [ ] or - [x] (must process before regular list items)
+  html = html.replace(/^[*-]\s+\[ \]\s+(.+)$/gm, '<li class="memo-checkbox"><span class="memo-check-box"></span>$1</li>')
+  html = html.replace(/^[*-]\s+\[x\]\s+(.+)$/gim, '<li class="memo-checkbox memo-checkbox-checked"><span class="memo-check-box memo-check-checked"></span>$1</li>')
+  // Unordered: - item or * item (skip already-processed checkboxes)
+  html = html.replace(/^[*-]\s+(?!\[)(.+)$/gm, '<li>$1</li>')
+  html = html.replace(/((?:<li[^>]*>.*<\/li>\n?)+)/g, '<ul>$1</ul>')
   // Ordered: 1. item
   html = html.replace(/^\d+\.\s+(.+)$/gm, '<oli>$1</oli>')
   html = html.replace(/((?:<oli>.*<\/oli>\n?)+)/g, (_m, items) => {
@@ -1316,9 +1328,9 @@ onMounted(() => { loadMemos() })
   color: #a1a1aa;
 }
 
-/* Code blocks */
+/* Code blocks — dark background with syntax highlighting */
 .memo-content :deep(.memo-code) {
-  background: rgba(24, 24, 27, 0.05);
+  background: #1e1e2e;
   padding: 14px 16px;
   border-radius: 10px;
   font-size: 13px;
@@ -1326,13 +1338,17 @@ onMounted(() => { loadMemos() })
   overflow-x: auto;
   margin: 10px 0;
   line-height: 1.6;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.1);
 }
 .memo-content :deep(.memo-code code) {
   background: none;
   padding: 0;
   font-size: inherit;
-  color: #18181b;
+  color: #cdd6f4;
+}
+.memo-content :deep(.memo-code code.hljs) {
+  background: none;
+  padding: 0;
 }
 .memo-content :deep(.memo-inline-code) {
   background: rgba(24, 24, 27, 0.06);
@@ -1343,7 +1359,7 @@ onMounted(() => { loadMemos() })
   color: #c026d3;
 }
 
-/* Lists */
+/* Lists — fix spacing when items contain code/links */
 .memo-content :deep(ul) {
   padding-left: 20px;
   margin: 8px 0;
@@ -1356,9 +1372,60 @@ onMounted(() => { loadMemos() })
 }
 .memo-content :deep(li) {
   margin-bottom: 4px;
+  line-height: 1.75;
+}
+.memo-content :deep(li:last-child) {
+  margin-bottom: 0;
 }
 .memo-content :deep(li::marker) {
   color: #a1a1aa;
+}
+/* Tighten spacing for inline elements inside list items */
+.memo-content :deep(li code) {
+  vertical-align: baseline;
+}
+.memo-content :deep(li a) {
+  vertical-align: baseline;
+}
+
+/* Checkboxes */
+.memo-content :deep(.memo-checkbox) {
+  list-style: none;
+  margin-left: -20px;
+  padding-left: 0;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.memo-content :deep(.memo-checkbox::marker) {
+  content: '';
+}
+.memo-content :deep(.memo-check-box) {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #d4d4d8;
+  border-radius: 4px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  position: relative;
+}
+.memo-content :deep(.memo-check-checked) {
+  background: #6366f1;
+  border-color: #6366f1;
+}
+.memo-content :deep(.memo-check-checked::after) {
+  content: '✓';
+  position: absolute;
+  top: -2px;
+  left: 1px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.memo-content :deep(.memo-checkbox-checked) {
+  color: #a1a1aa;
+  text-decoration: line-through;
 }
 
 /* Headings */
