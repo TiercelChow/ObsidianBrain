@@ -283,7 +283,7 @@
           v-if="imageViewer.images.length > 1"
           class="viewer-nav viewer-prev"
           @click="viewerPrev"
-        >‹</button>
+        ><el-icon :size="22"><ArrowLeft /></el-icon></button>
         <div class="viewer-image-wrap">
           <img
             :src="vaultImageUrl(imageViewer.images[imageViewer.index])"
@@ -298,7 +298,7 @@
           v-if="imageViewer.images.length > 1"
           class="viewer-nav viewer-next"
           @click="viewerNext"
-        >›</button>
+        ><el-icon :size="22"><ArrowRight /></el-icon></button>
       </div>
     </Transition>
   </div>
@@ -307,7 +307,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, type Directive } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus, Search, PriceTag, Loading, Picture, Refresh } from '@element-plus/icons-vue'
+import { Plus, Search, PriceTag, Loading, Picture, Refresh, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { createMemo, browseTimeline, searchMemos, uploadImages, syncMemos } from '@/api'
 
 // ── Types ──
