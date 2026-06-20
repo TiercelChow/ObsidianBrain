@@ -24,11 +24,12 @@ impl MemoManager {
     pub async fn create_memo(&self, request: MemoCreateRequest) -> Result<Memo, BrainError> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
-        let date = now.format("%Y-%m-%d").to_string();
-        let time = now.format("%H:%M:%S").to_string();
+        let local = Local::now();
+        let date = local.format("%Y-%m-%d").to_string();
+        let time = local.format("%H:%M:%S").to_string();
 
-        // 生成文件路径
-        let file_path = format!("Timeline/{}.md", now.format("%Y-%m"));
+        // 生成文件路径（用本地时间的月份）
+        let file_path = format!("Timeline/{}.md", local.format("%Y-%m"));
 
         // 格式化 Markdown 内容
         let mut md_content = format!("### {}\n{}\n\n", time, request.content);
@@ -52,18 +53,18 @@ impl MemoManager {
         if let Ok(obsidian) = crate::infra::obsidian_client::get_client(&self.obsidian) {
             let month_title = format!(
                 "# {}年{}月 时光机\n\n## {}\n\n",
-                now.format("%Y"),
-                now.format("%m"),
-                now.format("%Y-%m-%d")
+                local.format("%Y"),
+                local.format("%m"),
+                local.format("%Y-%m-%d")
             );
 
             // 尝试读取文件判断是否存在
             match obsidian.read_file(&file_path).await {
                 Ok(existing) => {
                     // 文件存在，检查是否包含今天的日期标题
-                    let today_header = format!("## {}", now.format("%Y-%m-%d"));
+                    let today_header = format!("## {}", local.format("%Y-%m-%d"));
                     if !existing.contains(&today_header) {
-                        let date_header = format!("\n## {}\n\n", now.format("%Y-%m-%d"));
+                        let date_header = format!("\n## {}\n\n", local.format("%Y-%m-%d"));
                         obsidian
                             .append_file(&file_path, &date_header)
                             .await
