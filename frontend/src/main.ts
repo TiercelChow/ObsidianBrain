@@ -7,6 +7,10 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
 
+// Apply saved theme BEFORE app mount to prevent flash of wrong theme
+const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null
+document.documentElement.setAttribute('data-theme', savedTheme || 'light')
+
 const app = createApp(App)
 
 // 注册所有 Element Plus 图标
