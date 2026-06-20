@@ -1301,58 +1301,12 @@ onMounted(() => { loadMemos() })
   background: rgba(253, 224, 71, 0.4);
   padding: 1px 4px;
   border-radius: 4px;
+  color: inherit;
 }
 .memo-content :deep(strong) {
   font-weight: 700;
   color: #18181b;
 }
-.memo-content :deep(.memo-code) {
-  background: rgba(24, 24, 27, 0.06);
-  backdrop-filter: blur(4px);
-  padding: 12px 16px;
-  border-radius: 12px;
-  font-size: 13px;
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  overflow-x: auto;
-  margin: 10px 0;
-  line-height: 1.5;
-  border: 1px solid rgba(0, 0, 0, 0.04);
-}
-.memo-content :deep(.memo-inline-code) {
-  background: rgba(24, 24, 27, 0.06);
-  padding: 2px 7px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-}
-.memo-content :deep(ul) {
-  padding-left: 20px;
-  margin: 6px 0;
-}
-.memo-content :deep(ol) {
-  padding-left: 20px;
-  margin: 6px 0;
-}
-.memo-content :deep(li) {
-  margin-bottom: 3px;
-}
-.memo-content :deep(h1),
-.memo-content :deep(h2),
-.memo-content :deep(h3),
-.memo-content :deep(h4),
-.memo-content :deep(h5),
-.memo-content :deep(h6) {
-  color: #18181b;
-  font-weight: 700;
-  margin: 12px 0 6px;
-  line-height: 1.3;
-}
-.memo-content :deep(h1) { font-size: 1.4em; }
-.memo-content :deep(h2) { font-size: 1.25em; }
-.memo-content :deep(h3) { font-size: 1.12em; }
-.memo-content :deep(h4) { font-size: 1.05em; }
-.memo-content :deep(h5) { font-size: 1em; }
-.memo-content :deep(h6) { font-size: 0.95em; color: #52525b; }
 .memo-content :deep(em) {
   font-style: italic;
   color: #3f3f46;
@@ -1361,15 +1315,83 @@ onMounted(() => { loadMemos() })
   text-decoration: line-through;
   color: #a1a1aa;
 }
-.memo-content :deep(blockquote) {
-  border-left: 3px solid rgba(129, 140, 248, 0.4);
-  padding: 6px 14px;
+
+/* Code blocks */
+.memo-content :deep(.memo-code) {
+  background: rgba(24, 24, 27, 0.05);
+  padding: 14px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  overflow-x: auto;
+  margin: 10px 0;
+  line-height: 1.6;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+.memo-content :deep(.memo-code code) {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+  color: #18181b;
+}
+.memo-content :deep(.memo-inline-code) {
+  background: rgba(24, 24, 27, 0.06);
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 0.9em;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  color: #c026d3;
+}
+
+/* Lists */
+.memo-content :deep(ul) {
+  padding-left: 20px;
   margin: 8px 0;
+  list-style: disc;
+}
+.memo-content :deep(ol) {
+  padding-left: 20px;
+  margin: 8px 0;
+  list-style: decimal;
+}
+.memo-content :deep(li) {
+  margin-bottom: 4px;
+}
+.memo-content :deep(li::marker) {
+  color: #a1a1aa;
+}
+
+/* Headings */
+.memo-content :deep(h1),
+.memo-content :deep(h2),
+.memo-content :deep(h3),
+.memo-content :deep(h4),
+.memo-content :deep(h5),
+.memo-content :deep(h6) {
+  color: #18181b;
+  font-weight: 700;
+  margin: 14px 0 6px;
+  line-height: 1.35;
+}
+.memo-content :deep(h1) { font-size: 1.35em; }
+.memo-content :deep(h2) { font-size: 1.2em; }
+.memo-content :deep(h3) { font-size: 1.1em; }
+.memo-content :deep(h4) { font-size: 1.05em; }
+.memo-content :deep(h5) { font-size: 1em; }
+.memo-content :deep(h6) { font-size: 0.95em; color: #71717a; }
+
+/* Blockquote */
+.memo-content :deep(blockquote) {
+  border-left: 3px solid rgba(129, 140, 248, 0.5);
+  padding: 8px 14px;
+  margin: 10px 0;
   color: #52525b;
-  background: rgba(129, 140, 248, 0.04);
+  background: rgba(129, 140, 248, 0.05);
   border-radius: 0 8px 8px 0;
   font-style: italic;
 }
+
+/* Links */
 .memo-content :deep(.memo-link) {
   color: #6366f1;
   text-decoration: none;
@@ -1379,6 +1401,8 @@ onMounted(() => { loadMemos() })
 .memo-content :deep(.memo-link:hover) {
   border-bottom-color: #6366f1;
 }
+
+/* Images */
 .memo-content :deep(.memo-inline-img) {
   max-width: 100%;
   max-height: 200px;
@@ -1396,17 +1420,33 @@ onMounted(() => { loadMemos() })
   font-size: 13px;
   color: #52525b;
 }
+
+/* Horizontal rule */
 .memo-content :deep(.memo-hr) {
   border: none;
   height: 1px;
-  background: rgba(0, 0, 0, 0.08);
+  background: linear-gradient(to right, transparent, rgba(0,0,0,0.1), transparent);
   margin: 14px 0;
 }
+
+/* Paragraphs */
 .memo-content :deep(p) {
   margin: 0;
 }
 .memo-content :deep(p + p) {
   margin-top: 8px;
+}
+.memo-content :deep(p + h1),
+.memo-content :deep(p + h2),
+.memo-content :deep(p + h3) {
+  margin-top: 12px;
+}
+
+/* Mobile markdown adjustments */
+@media (max-width: 768px) {
+  .memo-content { font-size: 13px; line-height: 1.7; }
+  .memo-content :deep(.memo-code) { padding: 10px 12px; font-size: 12px; }
+  .memo-content :deep(ul), .memo-content :deep(ol) { padding-left: 16px; }
 }
 
 .memo-time {
