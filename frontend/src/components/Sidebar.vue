@@ -90,10 +90,10 @@ function isActive(path: string) {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--bg-glass);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border-right: 1px solid rgba(255, 255, 255, 0.6);
+  border-right: 1px solid var(--border-glass);
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.3);
   padding: 0 12px;
   transition: padding 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -127,14 +127,14 @@ function isActive(path: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #18181b;
+  color: var(--text-primary);
   flex-shrink: 0;
 }
 
 .logo-name {
   font-size: 15px;
   font-weight: 600;
-  color: #18181b;
+  color: var(--text-primary);
   letter-spacing: -0.3px;
   white-space: nowrap;
 }
@@ -155,7 +155,7 @@ function isActive(path: string) {
   padding: 9px 12px;
   border-radius: 12px;
   text-decoration: none;
-  color: #71717a;
+  color: var(--text-muted);
   font-size: 14px;
   font-weight: 450;
   cursor: pointer;
@@ -169,13 +169,13 @@ function isActive(path: string) {
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.5);
-  color: #27272a;
+  background: var(--bg-glass);
+  color: var(--text-secondary);
 }
 
 .nav-item.active {
-  background: rgba(255, 255, 255, 0.6);
-  color: #18181b;
+  background: var(--bg-glass);
+  color: var(--text-primary);
   font-weight: 500;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
@@ -201,7 +201,7 @@ function isActive(path: string) {
 
 /* ── Footer ── */
 .sidebar-footer {
-  border-top: 1px solid rgba(255, 255, 255, 0.4);
+  border-top: 1px solid var(--border-faint);
   padding: 12px 0;
   flex-shrink: 0;
 }
@@ -215,7 +215,7 @@ function isActive(path: string) {
   border: none;
   border-radius: 12px;
   background: transparent;
-  color: #a1a1aa;
+  color: var(--text-faint);
   font-size: 13px;
   cursor: pointer;
   transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -228,8 +228,8 @@ function isActive(path: string) {
 }
 
 .collapse-btn:hover {
-  background: rgba(255, 255, 255, 0.5);
-  color: #52525b;
+  background: var(--bg-glass);
+  color: var(--text-tertiary);
 }
 
 /* ── Transitions ── */
@@ -269,7 +269,7 @@ function isActive(path: string) {
     padding: 0 12px;
     border-right: none;
     box-shadow: none;
-    background: rgba(255, 255, 255, 0.85);
+    background: var(--bg-glass-strong);
     backdrop-filter: blur(32px) saturate(200%);
     -webkit-backdrop-filter: blur(32px) saturate(200%);
   }

@@ -803,7 +803,7 @@ onMounted(() => { loadMemos() })
   background: rgba(255, 255, 255, 0.5);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
-  color: #27272a;
+  color: var(--text-secondary);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -842,7 +842,7 @@ onMounted(() => { loadMemos() })
   background: rgba(255, 255, 255, 0.3);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  color: #71717a;
+  color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
   display: flex;
@@ -852,7 +852,7 @@ onMounted(() => { loadMemos() })
 }
 .glass-icon-btn:hover {
   background: rgba(255, 255, 255, 0.6);
-  color: #18181b;
+  color: var(--text-primary);
 }
 
 /* ── Glass Input ── */
@@ -862,12 +862,12 @@ onMounted(() => { loadMemos() })
   outline: none;
   background: transparent;
   font-size: 14px;
-  color: #18181b;
+  color: var(--text-primary);
   font-family: inherit;
   padding: 0;
 }
 .glass-input::placeholder {
-  color: #a1a1aa;
+  color: var(--text-faint);
 }
 
 /* ── Glass Textarea ── */
@@ -881,14 +881,14 @@ onMounted(() => { loadMemos() })
   padding: 14px 16px;
   font-size: 14px;
   font-family: inherit;
-  color: #18181b;
+  color: var(--text-primary);
   line-height: 1.6;
   resize: vertical;
   outline: none;
   transition: all 0.25s ease;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.03);
 }
-.glass-textarea::placeholder { color: #a1a1aa; }
+.glass-textarea::placeholder { color: var(--text-faint); }
 .glass-textarea:focus {
   border-color: rgba(129, 140, 248, 0.4);
   box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.1), inset 0 1px 2px rgba(0, 0, 0, 0.03);
@@ -904,12 +904,12 @@ onMounted(() => { loadMemos() })
 .page-title {
   font-size: 22px;
   font-weight: 600;
-  color: #18181b;
+  color: var(--text-primary);
   letter-spacing: -0.3px;
 }
 .page-subtitle {
   margin-top: 4px;
-  color: #a1a1aa;
+  color: var(--text-faint);
   font-size: 14px;
 }
 .header-actions {
@@ -952,7 +952,7 @@ onMounted(() => { loadMemos() })
     inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 .search-icon {
-  color: #a1a1aa;
+  color: var(--text-faint);
   flex-shrink: 0;
   transition: color 0.2s ease;
 }
@@ -964,7 +964,7 @@ onMounted(() => { loadMemos() })
   border-radius: 50%;
   border: none;
   background: rgba(0, 0, 0, 0.06);
-  color: #71717a;
+  color: var(--text-muted);
   font-size: 10px;
   cursor: pointer;
   display: flex;
@@ -975,7 +975,7 @@ onMounted(() => { loadMemos() })
 }
 .clear-btn:hover {
   background: rgba(0, 0, 0, 0.1);
-  color: #18181b;
+  color: var(--text-primary);
 }
 
 .preset-chips {
@@ -991,14 +991,14 @@ onMounted(() => { loadMemos() })
   border-radius: 10px;
   font-size: 12px;
   font-weight: 500;
-  color: #71717a;
+  color: var(--text-muted);
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   user-select: none;
 }
 .chip:hover {
-  color: #27272a;
+  color: var(--text-secondary);
   background: rgba(255, 255, 255, 0.4);
 }
 .chip.active {
@@ -1036,19 +1036,19 @@ onMounted(() => { loadMemos() })
 }
 .date-range-picker :deep(.el-range-input) {
   background: transparent !important;
-  color: #18181b !important;
+  color: var(--text-primary) !important;
   font-size: 13px !important;
 }
 .date-range-picker :deep(.el-range-input::placeholder) {
-  color: #a1a1aa !important;
+  color: var(--text-faint) !important;
 }
 .date-range-picker :deep(.el-range-separator) {
-  color: #a1a1aa !important;
+  color: var(--text-faint) !important;
   font-size: 13px !important;
 }
 .date-range-picker :deep(.el-range__icon),
 .date-range-picker :deep(.el-range__close-icon) {
-  color: #a1a1aa !important;
+  color: var(--text-faint) !important;
 }
 .clear-filter {
   width: 28px; height: 28px;
@@ -1076,7 +1076,7 @@ onMounted(() => { loadMemos() })
 .month-label {
   font-size: 11px;
   font-weight: 700;
-  color: #a1a1aa;
+  color: var(--text-faint);
   text-transform: uppercase;
   letter-spacing: 0.8px;
   margin-bottom: 6px;
@@ -1091,13 +1091,13 @@ onMounted(() => { loadMemos() })
   border-radius: 10px;
   cursor: pointer;
   font-size: 13px;
-  color: #71717a;
+  color: var(--text-muted);
   transition: all 0.2s ease;
   position: relative;
 }
 .day-link:hover {
   background: rgba(255, 255, 255, 0.4);
-  color: #27272a;
+  color: var(--text-secondary);
 }
 .day-link.active {
   background: rgba(129, 140, 248, 0.12);
@@ -1130,7 +1130,7 @@ onMounted(() => { loadMemos() })
 .day-text { flex: 1; }
 .day-count {
   font-size: 11px;
-  color: #a1a1aa;
+  color: var(--text-faint);
   min-width: 16px;
   text-align: center;
 }
@@ -1193,12 +1193,12 @@ onMounted(() => { loadMemos() })
 .day-header-date {
   font-size: 16px;
   font-weight: 700;
-  color: #18181b;
+  color: var(--text-primary);
   letter-spacing: -0.3px;
 }
 .day-header-weekday {
   font-size: 12px;
-  color: #a1a1aa;
+  color: var(--text-faint);
 }
 .day-header-count {
   font-size: 11px;
@@ -1265,14 +1265,14 @@ onMounted(() => { loadMemos() })
 }
 .memo-time {
   font-size: 12px;
-  color: #a1a1aa;
+  color: var(--text-faint);
   margin-bottom: 8px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.3px;
 }
 .memo-content {
   font-size: 14px;
-  color: #27272a;
+  color: var(--text-secondary);
   line-height: 1.75;
   word-break: break-word;
 }
@@ -1284,7 +1284,7 @@ onMounted(() => { loadMemos() })
 }
 .memo-content :deep(strong) {
   font-weight: 700;
-  color: #18181b;
+  color: var(--text-primary);
 }
 .memo-content :deep(em) {
   font-style: italic;
@@ -1292,7 +1292,7 @@ onMounted(() => { loadMemos() })
 }
 .memo-content :deep(del) {
   text-decoration: line-through;
-  color: #a1a1aa;
+  color: var(--text-faint);
 }
 
 /* Code blocks — dark background with syntax highlighting */
@@ -1345,7 +1345,7 @@ onMounted(() => { loadMemos() })
   margin-bottom: 0;
 }
 .memo-content :deep(li::marker) {
-  color: #a1a1aa;
+  color: var(--text-faint);
 }
 /* Tighten spacing for inline elements inside list items */
 .memo-content :deep(li code) {
@@ -1391,7 +1391,7 @@ onMounted(() => { loadMemos() })
   font-weight: 700;
 }
 .memo-content :deep(.memo-checkbox-checked) {
-  color: #a1a1aa;
+  color: var(--text-faint);
   text-decoration: line-through;
 }
 
@@ -1402,7 +1402,7 @@ onMounted(() => { loadMemos() })
 .memo-content :deep(h4),
 .memo-content :deep(h5),
 .memo-content :deep(h6) {
-  color: #18181b;
+  color: var(--text-primary);
   font-weight: 700;
   margin: 14px 0 6px;
   line-height: 1.35;
@@ -1412,14 +1412,14 @@ onMounted(() => { loadMemos() })
 .memo-content :deep(h3) { font-size: 1.1em; }
 .memo-content :deep(h4) { font-size: 1.05em; }
 .memo-content :deep(h5) { font-size: 1em; }
-.memo-content :deep(h6) { font-size: 0.95em; color: #71717a; }
+.memo-content :deep(h6) { font-size: 0.95em; color: var(--text-muted); }
 
 /* Blockquote */
 .memo-content :deep(blockquote) {
   border-left: 3px solid rgba(129, 140, 248, 0.5);
   padding: 8px 14px;
   margin: 10px 0;
-  color: #52525b;
+  color: var(--text-tertiary);
   background: rgba(129, 140, 248, 0.05);
   border-radius: 0 8px 8px 0;
   font-style: italic;
@@ -1452,7 +1452,7 @@ onMounted(() => { loadMemos() })
   background: rgba(24, 24, 27, 0.05);
   border-radius: 8px;
   font-size: 13px;
-  color: #52525b;
+  color: var(--text-tertiary);
 }
 
 /* Horizontal rule */
@@ -1485,7 +1485,7 @@ onMounted(() => { loadMemos() })
 
 .memo-time {
   font-size: 12px;
-  color: #a1a1aa;
+  color: var(--text-faint);
   margin-bottom: 8px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.3px;
@@ -1593,7 +1593,7 @@ onMounted(() => { loadMemos() })
   align-items: center;
   gap: 14px;
   justify-content: center;
-  color: #a1a1aa;
+  color: var(--text-faint);
   font-size: 12px;
   padding: 24px 0;
 }
@@ -1617,8 +1617,8 @@ onMounted(() => { loadMemos() })
   margin-bottom: 20px;
   animation: gentleBounce 3s ease-in-out infinite;
 }
-.empty-title { font-size: 16px; color: #52525b; font-weight: 600; }
-.empty-hint { font-size: 13px; color: #a1a1aa; margin-top: 8px; }
+.empty-title { font-size: 16px; color: var(--text-tertiary); font-weight: 600; }
+.empty-hint { font-size: 13px; color: var(--text-faint); margin-top: 8px; }
 
 .loading-state {
   display: flex;
@@ -1666,7 +1666,7 @@ onMounted(() => { loadMemos() })
 .dialog-header h3 {
   font-size: 18px;
   font-weight: 700;
-  color: #18181b;
+  color: var(--text-primary);
 }
 .create-form {
   display: flex;
@@ -1683,7 +1683,7 @@ onMounted(() => { loadMemos() })
   border-radius: 14px;
   flex: 1;
 }
-.tag-icon { color: #a1a1aa; flex-shrink: 0; }
+.tag-icon { color: var(--text-faint); flex-shrink: 0; }
 .glass-input.inline {
   height: 100%;
 }
@@ -1694,7 +1694,7 @@ onMounted(() => { loadMemos() })
   justify-content: space-between;
   margin-top: 20px;
 }
-.char-count { font-size: 12px; color: #a1a1aa; }
+.char-count { font-size: 12px; color: var(--text-faint); }
 .dialog-btns { display: flex; gap: 10px; }
 .image-btn { gap: 4px; }
 
@@ -1753,7 +1753,7 @@ onMounted(() => { loadMemos() })
   border-radius: 10px;
   border: 2px dashed rgba(0, 0, 0, 0.12);
   background: rgba(255, 255, 255, 0.3);
-  color: #a1a1aa;
+  color: var(--text-faint);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1763,7 +1763,7 @@ onMounted(() => { loadMemos() })
 .image-add-btn:hover {
   border-color: rgba(0, 0, 0, 0.2);
   background: rgba(255, 255, 255, 0.5);
-  color: #71717a;
+  color: var(--text-muted);
 }
 
 /* ── Transitions ── */
@@ -2010,7 +2010,7 @@ onMounted(() => { loadMemos() })
 .el-message .el-message__content {
   font-size: 14px !important;
   font-weight: 500 !important;
-  color: #18181b !important;
+  color: var(--text-primary) !important;
 }
 
 /* ── Calendar Popup Responsive ── */

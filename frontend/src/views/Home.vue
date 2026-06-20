@@ -5,10 +5,16 @@
         <h1 class="page-title">控制面板</h1>
         <p class="page-subtitle">系统状态与配置管理</p>
       </div>
-      <el-button size="small" @click="loadAll" :loading="loading">
-        <el-icon v-if="!loading"><Refresh /></el-icon>
-        刷新
-      </el-button>
+      <div class="header-actions">
+        <el-button size="small" @click="appStore.toggleTheme()">
+          <el-icon><component :is="appStore.theme === 'dark' ? Sunny : Moon" /></el-icon>
+          {{ appStore.theme === 'dark' ? '浅色' : '深色' }}
+        </el-button>
+        <el-button size="small" @click="loadAll" :loading="loading">
+          <el-icon v-if="!loading"><Refresh /></el-icon>
+          刷新
+        </el-button>
+      </div>
     </header>
 
     <!-- Stats -->
@@ -139,11 +145,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { getHealth, getMemoryStats, getMemoStats, getConfig, saveConfig, listCodeRepos } from '@/api'
+import { useAppStore } from '@/stores/app'
 import {
   Refresh, Notebook, FolderOpened, Calendar,
-  MagicStick, DataLine, Connection,
+  MagicStick, DataLine, Connection, Sunny, Moon,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+
+const appStore = useAppStore()
 
 interface HealthData {
   status: string
@@ -241,8 +250,8 @@ onMounted(() => { loadAll() })
 .page-header {
   display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;
 }
-.page-title { font-size: 22px; font-weight: 600; color: #18181b; letter-spacing: -0.3px; }
-.page-subtitle { margin-top: 4px; color: #a1a1aa; font-size: 14px; }
+.page-title { font-size: 22px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.3px; }
+.page-subtitle { margin-top: 4px; color: var(--text-faint); font-size: 14px; }
 .header-actions { display: flex; gap: 8px; }
 
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
@@ -258,11 +267,11 @@ onMounted(() => { loadAll() })
   border-radius: 14px; flex-shrink: 0;
 }
 .stat-content { display: flex; flex-direction: column; }
-.stat-value { font-size: 22px; font-weight: 700; color: #18181b; line-height: 1.2; }
-.stat-label { font-size: 12px; color: #a1a1aa; margin-top: 3px; font-weight: 500; }
+.stat-value { font-size: 22px; font-weight: 700; color: var(--text-primary); line-height: 1.2; }
+.stat-label { font-size: 12px; color: var(--text-faint); margin-top: 3px; font-weight: 500; }
 
 .section { margin-bottom: 28px; animation: fade-in 0.5s ease both; animation-delay: var(--delay, 0s); }
-.section-title { font-size: 15px; font-weight: 600; color: #18181b; margin-bottom: 12px; letter-spacing: -0.2px; }
+.section-title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px; letter-spacing: -0.2px; }
 
 .status-card { padding: 16px 20px; border-radius: 16px; }
 .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
@@ -274,11 +283,11 @@ onMounted(() => { loadAll() })
 .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .status-dot.ok { background: #10b981; box-shadow: 0 0 6px rgba(16,185,129,0.3); }
 .status-dot.inactive { background: #d4d4d8; }
-.status-name { flex: 1; font-size: 13px; color: #52525b; font-weight: 500; text-transform: capitalize; }
+.status-name { flex: 1; font-size: 13px; color: var(--text-tertiary); font-weight: 500; text-transform: capitalize; }
 .status-value { font-size: 12px; font-weight: 600; }
 .status-value.ok { color: #10b981; }
-.status-value.inactive { color: #a1a1aa; }
-.status-empty { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 20px; color: #a1a1aa; font-size: 13px; }
+.status-value.inactive { color: var(--text-faint); }
+.status-empty { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 20px; color: var(--text-faint); font-size: 13px; }
 .loading-spinner {
   width: 14px; height: 14px; border: 2px solid #e4e4e7; border-top-color: #6366f1;
   border-radius: 50%; animation: spin 0.8s linear infinite;
@@ -295,22 +304,22 @@ onMounted(() => { loadAll() })
 .config-group:last-of-type { margin-bottom: 16px; border-bottom: none; padding-bottom: 0; }
 .config-group-title {
   display: flex; align-items: center; gap: 8px;
-  font-size: 14px; font-weight: 600; color: #18181b;
+  font-size: 14px; font-weight: 600; color: var(--text-primary);
   margin-bottom: 14px;
 }
 .config-group-title .el-icon { color: #6366f1; }
 .config-fields { display: flex; flex-direction: column; gap: 10px; }
 .config-field { display: flex; flex-direction: column; gap: 4px; }
-.config-field label { font-size: 12px; color: #71717a; font-weight: 500; }
+.config-field label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
 .config-field.inline { flex-direction: row; align-items: center; gap: 12px; }
 .config-field.inline label { min-width: 72px; flex-shrink: 0; }
 .config-field.small { max-width: 200px; }
-.slider-value { font-size: 13px; color: #18181b; font-weight: 600; min-width: 28px; text-align: center; }
+.slider-value { font-size: 13px; color: var(--text-primary); font-weight: 600; min-width: 28px; text-align: center; }
 .config-actions {
   display: flex; align-items: center; gap: 12px;
   padding-top: 12px; margin-top: 4px;
 }
-.config-hint { font-size: 12px; color: #a1a1aa; }
+.config-hint { font-size: 12px; color: var(--text-faint); }
 
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(20px) scale(0.97); }

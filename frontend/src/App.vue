@@ -111,6 +111,78 @@ html, body, #app {
   background: rgba(0, 0, 0, 0.15);
 }
 
+/* ═══════════════════════════════════════════════════
+   Theme System — CSS Custom Properties
+   ═══════════════════════════════════════════════════ */
+
+/* ── Light Theme (default) ── */
+:root, :root[data-theme="light"] {
+  --bg-base: #fafafa;
+  --bg-glass: rgba(255, 255, 255, 0.55);
+  --bg-glass-strong: rgba(255, 255, 255, 0.7);
+  --bg-glass-subtle: rgba(255, 255, 255, 0.45);
+  --bg-hover: rgba(255, 255, 255, 0.5);
+  --border-glass: rgba(255, 255, 255, 0.6);
+  --border-subtle: rgba(255, 255, 255, 0.5);
+  --border-faint: rgba(0, 0, 0, 0.04);
+
+  --text-primary: #18181b;
+  --text-secondary: #27272a;
+  --text-tertiary: #52525b;
+  --text-muted: #71717a;
+  --text-faint: #a1a1aa;
+
+  --accent: #6366f1;
+  --accent-light: rgba(129, 140, 248, 0.12);
+  --accent-border: rgba(129, 140, 248, 0.4);
+
+  --code-bg: rgba(24, 24, 27, 0.06);
+  --code-inline-color: #c026d3;
+  --code-block-bg: #1e1e2e;
+  --code-block-text: #cdd6f4;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.03), 0 4px 16px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.06);
+  --inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+
+  --orb-opacity: 1;
+}
+
+/* ── Dark Theme ── */
+:root[data-theme="dark"] {
+  --bg-base: #0f0f14;
+  --bg-glass: rgba(30, 30, 40, 0.55);
+  --bg-glass-strong: rgba(30, 30, 40, 0.75);
+  --bg-glass-subtle: rgba(40, 40, 50, 0.45);
+  --bg-hover: rgba(50, 50, 60, 0.5);
+  --border-glass: rgba(80, 80, 100, 0.3);
+  --border-subtle: rgba(80, 80, 100, 0.2);
+  --border-faint: rgba(255, 255, 255, 0.04);
+
+  --text-primary: #f4f4f5;
+  --text-secondary: #e4e4e7;
+  --text-tertiary: #d4d4d8;
+  --text-muted: #a1a1aa;
+  --text-faint: #71717a;
+
+  --accent: #818cf8;
+  --accent-light: rgba(129, 140, 248, 0.15);
+  --accent-border: rgba(129, 140, 248, 0.3);
+
+  --code-bg: rgba(255, 255, 255, 0.08);
+  --code-inline-color: #f0abfc;
+  --code-block-bg: #181825;
+  --code-block-text: #cdd6f4;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.2), 0 4px 16px rgba(0, 0, 0, 0.15);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.2);
+  --inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+  --orb-opacity: 0.6;
+}
+
 /* ── Glass Card 全局覆盖 ── */
 .el-card,
 .stat-card, .module-card, .status-card, .tool-card,
@@ -122,22 +194,19 @@ html, body, #app {
 .question-result .question-item,
 .counterpoint-result .counterpoint-item,
 .assessment {
-  background: rgba(255, 255, 255, 0.55) !important;
+  background: var(--bg-glass) !important;
   backdrop-filter: blur(12px) saturate(180%) !important;
   -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
-  border: 1px solid rgba(255, 255, 255, 0.6) !important;
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.03),
-    0 4px 16px rgba(0, 0, 0, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+  border: 1px solid var(--border-glass) !important;
+  box-shadow: var(--shadow-md), var(--inset-highlight) !important;
 }
 
 /* ── Glass Tag 全局覆盖 ── */
 .lang-tag, .tag, .stat-chip .stat-label {
-  background: rgba(255, 255, 255, 0.45) !important;
+  background: var(--bg-glass-subtle) !important;
   backdrop-filter: blur(8px) !important;
   -webkit-backdrop-filter: blur(8px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.5) !important;
+  border: 1px solid var(--border-subtle) !important;
 }
 
 /* ── Element Plus overrides ── */
@@ -161,9 +230,139 @@ html, body, #app {
   font-weight: 500 !important;
 }
 
-
 .el-empty__description p {
-  color: #a1a1aa;
+  color: var(--text-faint);
+}
+
+/* ── Dark theme Element Plus overrides ── */
+:root[data-theme="dark"] {
+  --el-bg-color: #1e1e2e;
+  --el-bg-color-overlay: #2a2a3a;
+  --el-bg-color-page: #0f0f14;
+  --el-text-color-primary: #f4f4f5;
+  --el-text-color-regular: #d4d4d8;
+  --el-text-color-secondary: #a1a1aa;
+  --el-text-color-placeholder: #71717a;
+  --el-border-color: rgba(80, 80, 100, 0.3);
+  --el-border-color-light: rgba(80, 80, 100, 0.2);
+  --el-border-color-lighter: rgba(80, 80, 100, 0.15);
+  --el-fill-color: rgba(40, 40, 50, 0.5);
+  --el-fill-color-light: rgba(40, 40, 50, 0.4);
+  --el-fill-color-lighter: rgba(40, 40, 50, 0.3);
+  --el-fill-color-blank: transparent;
+  --el-color-primary: #818cf8;
+  --el-mask-color: rgba(0, 0, 0, 0.5);
+  --el-overlay-color: rgba(0, 0, 0, 0.5);
+}
+
+/* Dark theme: el-input, el-select, el-date-picker wrappers */
+:root[data-theme="dark"] .el-input__wrapper {
+  background: var(--bg-glass-subtle) !important;
+  box-shadow: 0 0 0 1px var(--border-glass) inset !important;
+}
+:root[data-theme="dark"] .el-input__inner {
+  color: var(--text-primary) !important;
+}
+:root[data-theme="dark"] .el-input__inner::placeholder {
+  color: var(--text-faint) !important;
+}
+:root[data-theme="dark"] .el-select__wrapper {
+  background: var(--bg-glass-subtle) !important;
+  box-shadow: 0 0 0 1px var(--border-glass) inset !important;
+}
+:root[data-theme="dark"] .el-range-editor {
+  background: var(--bg-glass-subtle) !important;
+  border-color: var(--border-glass) !important;
+}
+:root[data-theme="dark"] .el-range-input {
+  color: var(--text-primary) !important;
+}
+:root[data-theme="dark"] .el-range-separator {
+  color: var(--text-faint) !important;
+}
+
+/* Dark theme: el-dialog */
+:root[data-theme="dark"] .el-dialog {
+  background: var(--bg-glass-strong) !important;
+  border-color: var(--border-glass) !important;
+}
+:root[data-theme="dark"] .el-dialog__title {
+  color: var(--text-primary) !important;
+}
+:root[data-theme="dark"] .el-dialog__headerbtn .el-dialog__close {
+  color: var(--text-muted) !important;
+}
+
+/* Dark theme: el-message */
+:root[data-theme="dark"] .el-message {
+  background: var(--bg-glass-strong) !important;
+  border-color: var(--border-glass) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Dark theme: el-tag */
+:root[data-theme="dark"] .el-tag {
+  background: var(--bg-glass-subtle) !important;
+  border-color: var(--border-glass) !important;
+  color: var(--text-secondary) !important;
+}
+
+/* Dark theme: el-button */
+:root[data-theme="dark"] .el-button {
+  background: var(--bg-glass) !important;
+  border-color: var(--border-glass) !important;
+  color: var(--text-secondary) !important;
+}
+:root[data-theme="dark"] .el-button--primary {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #fff !important;
+}
+:root[data-theme="dark"] .el-button:hover {
+  background: var(--bg-glass-strong) !important;
+}
+
+/* Dark theme: el-descriptions */
+:root[data-theme="dark"] .el-descriptions__label {
+  background: var(--bg-glass-subtle) !important;
+  color: var(--text-muted) !important;
+}
+:root[data-theme="dark"] .el-descriptions__content {
+  background: transparent !important;
+  color: var(--text-secondary) !important;
+}
+:root[data-theme="dark"] .el-descriptions__cell {
+  border-color: var(--border-faint) !important;
+}
+
+/* Dark theme: el-switch */
+:root[data-theme="dark"] .el-switch.is-checked .el-switch__core {
+  background-color: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+
+/* Dark theme: calendar popper */
+:root[data-theme="dark"] .glass-picker {
+  background: var(--bg-glass-strong) !important;
+  border-color: var(--border-glass) !important;
+}
+:root[data-theme="dark"] .glass-picker .el-date-table th {
+  color: var(--text-faint) !important;
+  border-bottom-color: var(--border-faint) !important;
+}
+:root[data-theme="dark"] .glass-picker .el-date-table td .el-date-table-cell:hover {
+  background: var(--accent-light) !important;
+}
+:root[data-theme="dark"] .glass-picker .el-date-table td.today .el-date-table-cell__number {
+  color: var(--accent) !important;
+}
+:root[data-theme="dark"] .glass-picker .el-date-range-picker__header button {
+  background: var(--bg-glass-subtle) !important;
+  color: var(--text-secondary) !important;
+}
+:root[data-theme="dark"] .glass-picker .el-picker-panel__footer {
+  background: transparent !important;
+  border-top-color: var(--border-faint) !important;
 }
 
 /* ── Mobile scroll: hide page headers globally ── */
@@ -191,7 +390,7 @@ html, body, #app {
   width: 100vw;
   position: relative;
   overflow: hidden;
-  background: #fafafa;
+  background: var(--bg-base);
 }
 
 /* Ambient gradient mesh */
@@ -274,7 +473,7 @@ html, body, #app {
   transition: background 0.3s ease, box-shadow 0.3s ease, backdrop-filter 0.3s ease;
 }
 .mobile-global-header.header-scrolled {
-  background: rgba(255, 255, 255, 0.65);
+  background: var(--bg-glass-strong);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
   box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
@@ -284,11 +483,11 @@ html, body, #app {
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border-glass);
+  background: var(--bg-glass);
   backdrop-filter: blur(12px) saturate(180%);
   -webkit-backdrop-filter: blur(12px) saturate(180%);
-  color: #18181b;
+  color: var(--text-primary);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -298,8 +497,8 @@ html, body, #app {
   flex-shrink: 0;
 }
 .mobile-global-header.header-scrolled .mobile-menu-btn {
-  background: rgba(255, 255, 255, 0.4);
-  border-color: rgba(255, 255, 255, 0.3);
+  background: var(--bg-glass-subtle);
+  border-color: var(--border-subtle);
   box-shadow: none;
 }
 .mobile-menu-btn:active {
@@ -309,7 +508,7 @@ html, body, #app {
 .mobile-page-title {
   font-size: 16px;
   font-weight: 600;
-  color: #18181b;
+  color: var(--text-primary);
   letter-spacing: -0.2px;
   white-space: nowrap;
 }

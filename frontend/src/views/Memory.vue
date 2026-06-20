@@ -202,8 +202,8 @@ onMounted(() => { loadInsights() })
 }
 
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-.page-title { font-size: 22px; font-weight: 600; color: #18181b; letter-spacing: -0.3px; }
-.page-subtitle { margin-top: 4px; color: #a1a1aa; font-size: 14px; }
+.page-title { font-size: 22px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.3px; }
+.page-subtitle { margin-top: 4px; color: var(--text-faint); font-size: 14px; }
 .header-actions { display: flex; gap: 8px; }
 
 .insights-grid {
@@ -239,12 +239,12 @@ onMounted(() => { loadInsights() })
 .card-title {
   font-size: 15px;
   font-weight: 600;
-  color: #18181b;
+  color: var(--text-primary);
   margin: 0;
 }
 .card-desc {
   font-size: 12px;
-  color: #a1a1aa;
+  color: var(--text-faint);
   margin: 2px 0 0;
 }
 .card-count {
@@ -280,7 +280,7 @@ onMounted(() => { loadInsights() })
 }
 .note-path {
   font-size: 13px;
-  color: #27272a;
+  color: var(--text-secondary);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -288,7 +288,7 @@ onMounted(() => { loadInsights() })
 }
 .note-meta {
   font-size: 11px;
-  color: #a1a1aa;
+  color: var(--text-faint);
   flex-shrink: 0;
   margin-left: 8px;
 }
@@ -318,11 +318,11 @@ onMounted(() => { loadInsights() })
 .domain-name {
   font-size: 13px;
   font-weight: 500;
-  color: #27272a;
+  color: var(--text-secondary);
 }
 .domain-count {
   font-size: 11px;
-  color: #a1a1aa;
+  color: var(--text-faint);
 }
 .domain-bar {
   height: 6px;
@@ -339,7 +339,7 @@ onMounted(() => { loadInsights() })
 
 .empty-hint {
   text-align: center;
-  color: #a1a1aa;
+  color: var(--text-faint);
   font-size: 13px;
   padding: 20px 0;
 }
@@ -350,7 +350,7 @@ onMounted(() => { loadInsights() })
   justify-content: center;
   gap: 10px;
   padding: 60px 0;
-  color: #71717a;
+  color: var(--text-muted);
   font-size: 14px;
 }
 

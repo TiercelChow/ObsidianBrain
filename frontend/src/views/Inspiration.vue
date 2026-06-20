@@ -251,8 +251,8 @@ function loadHistory() {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-.page-title { font-size: 22px; font-weight: 600; color: #18181b; letter-spacing: -0.3px; }
-.page-subtitle { margin-top: 4px; color: #a1a1aa; font-size: 14px; }
+.page-title { font-size: 22px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.3px; }
+.page-subtitle { margin-top: 4px; color: var(--text-faint); font-size: 14px; }
 .header-actions { display: flex; gap: 8px; }
 
 /* 模式选择 */
@@ -264,8 +264,8 @@ function loadHistory() {
 .mode-option:hover { border-color: #e4e4e7; }
 .mode-option.active { border-color: #6366f1; background: rgba(99, 102, 241, 0.06); }
 .mode-icon { font-size: 28px; margin-bottom: 8px; }
-.mode-name { font-size: 15px; font-weight: 600; color: #18181b; margin-bottom: 4px; }
-.mode-desc { font-size: 12px; color: #a1a1aa; }
+.mode-name { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+.mode-desc { font-size: 12px; color: var(--text-faint); }
 
 /* 笔记选择 */
 .note-selector { display: flex; gap: 12px; margin-bottom: 24px; }
@@ -288,24 +288,24 @@ function loadHistory() {
   border-radius: 12px;
 }
 .concept-icon { font-size: 18px; }
-.concept-term { font-size: 16px; font-weight: 600; color: #18181b; }
-.concept-connector { font-size: 20px; color: #a1a1aa; font-weight: 300; }
+.concept-term { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+.concept-connector { font-size: 20px; color: var(--text-faint); font-weight: 300; }
 
 .inspiration-text h3, .suggestions h3, .experiment h3, .assessment h3 {
-  font-size: 16px; font-weight: 600; color: #18181b; margin-bottom: 8px;
+  font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;
 }
 .inspiration-text p, .experiment p, .assessment p {
-  font-size: 14px; color: #52525b; line-height: 1.7;
+  font-size: 14px; color: var(--text-tertiary); line-height: 1.7;
 }
 .suggestions ul { padding-left: 20px; }
-.suggestions li { font-size: 14px; color: #52525b; line-height: 1.7; margin-bottom: 4px; }
+.suggestions li { font-size: 14px; color: var(--text-tertiary); line-height: 1.7; margin-bottom: 4px; }
 
 /* 反向提问 */
 .note-info {
   display: flex; align-items: center; gap: 8px;
-  font-size: 14px; color: #52525b; margin-bottom: 16px;
+  font-size: 14px; color: var(--text-tertiary); margin-bottom: 16px;
 }
-.note-path { font-size: 12px; color: #a1a1aa; font-family: monospace; }
+.note-path { font-size: 12px; color: var(--text-faint); font-family: monospace; }
 
 .questions-list { display: flex; flex-direction: column; gap: 16px; }
 .question-item { display: flex; gap: 16px; padding: 16px; border-radius: 12px; }
@@ -313,9 +313,9 @@ function loadHistory() {
   width: 32px; height: 32px; border-radius: 50%; background: #6366f1; color: #fff;
   display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0;
 }
-.question-text { font-size: 15px; font-weight: 500; color: #18181b; margin-bottom: 6px; }
-.question-why { font-size: 13px; color: #52525b; margin-bottom: 8px; }
-.question-why strong { color: #18181b; }
+.question-text { font-size: 15px; font-weight: 500; color: var(--text-primary); margin-bottom: 6px; }
+.question-why { font-size: 13px; color: var(--text-tertiary); margin-bottom: 8px; }
+.question-why strong { color: var(--text-primary); }
 .question-type { font-size: 11px; }
 
 /* 对立观点 */
@@ -325,8 +325,8 @@ function loadHistory() {
 .cp-number { font-size: 14px; font-weight: 600; color: #6366f1; }
 .cp-section { margin-bottom: 12px; }
 .cp-section:last-child { margin-bottom: 0; }
-.cp-label { font-size: 13px; font-weight: 600; color: #18181b; margin-bottom: 4px; }
-.cp-section p { font-size: 13px; color: #52525b; line-height: 1.6; }
+.cp-label { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+.cp-section p { font-size: 13px; color: var(--text-tertiary); line-height: 1.6; }
 
 .assessment { margin-top: 20px; padding: 16px; border-radius: 12px; }
 .assessment h3 { color: #166534; }

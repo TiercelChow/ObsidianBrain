@@ -140,8 +140,8 @@ onMounted(() => { loadRadar() })
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-.page-title { font-size: 22px; font-weight: 600; color: #18181b; letter-spacing: -0.3px; }
-.page-subtitle { margin-top: 4px; color: #a1a1aa; font-size: 14px; }
+.page-title { font-size: 22px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.3px; }
+.page-subtitle { margin-top: 4px; color: var(--text-faint); font-size: 14px; }
 .header-actions { display: flex; gap: 8px; }
 
 .radar-list { display: flex; flex-direction: column; gap: 12px; }
@@ -153,14 +153,14 @@ onMounted(() => { loadRadar() })
 
 .radar-header { display: flex; gap: 8px; margin-bottom: 8px; }
 .radar-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
-.radar-title a { color: #18181b; text-decoration: none; }
+.radar-title a { color: var(--text-primary); text-decoration: none; }
 .radar-title a:hover { color: #6366f1; }
 
-.radar-summary { font-size: 13px; color: #52525b; line-height: 1.6; margin-bottom: 10px; }
+.radar-summary { font-size: 13px; color: var(--text-tertiary); line-height: 1.6; margin-bottom: 10px; }
 
 .radar-meta {
   display: flex; gap: 16px; align-items: center;
-  font-size: 12px; color: #a1a1aa; margin-bottom: 12px;
+  font-size: 12px; color: var(--text-faint); margin-bottom: 12px;
 }
 
 .radar-actions { display: flex; gap: 8px; }
