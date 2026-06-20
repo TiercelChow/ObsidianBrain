@@ -1903,7 +1903,7 @@ onMounted(() => { loadMemos() })
   .search-box { max-width: 100%; min-width: 0; }
   .filter-right { flex-wrap: wrap; margin-left: 0; width: 100%; }
   .memo-card-main.has-images { flex-direction: column; }
-  .memo-images-wrap { width: 100%; max-width: 100%; height: auto; aspect-ratio: auto; }
+  .memo-images-wrap { width: 100%; max-width: 280px; height: auto; aspect-ratio: 1; }
   .memo-images-1 .memo-image { max-height: 200px; }
   .memo-card-body { padding: 14px 16px; border-radius: 14px; }
   .preset-chips { overflow-x: auto; -webkit-overflow-scrolling: touch; }
