@@ -11,13 +11,13 @@ use std::sync::Arc;
 
 use crate::error::BrainError;
 use crate::infra::file_watcher::FileWatcher;
-use crate::infra::obsidian_client::ObsidianClient;
+use crate::infra::obsidian_client::{ObsidianClient, ObsidianProvider};
 use crate::models::{MemoryStats, NoteSummary};
 
 /// Core service for vault operations via Obsidian API.
 #[allow(dead_code)]
 pub struct MemoryService {
-    obsidian: Option<Arc<ObsidianClient>>,
+    obsidian: ObsidianProvider,
     vault_path: PathBuf,
     vault_name: String,
 }
@@ -25,7 +25,7 @@ pub struct MemoryService {
 #[allow(dead_code)]
 impl MemoryService {
     /// Create a new `MemoryService`.
-    pub fn new(obsidian: Option<Arc<ObsidianClient>>, vault_path: PathBuf, vault_name: String) -> Self {
+    pub fn new(obsidian: ObsidianProvider, vault_path: PathBuf, vault_name: String) -> Self {
         Self {
             obsidian,
             vault_path,
@@ -34,10 +34,8 @@ impl MemoryService {
     }
 
     /// Helper to get the Obsidian client or return an error if not available.
-    fn client(&self) -> Result<&Arc<ObsidianClient>, BrainError> {
-        self.obsidian.as_ref().ok_or_else(|| {
-            BrainError::ConfigError("Obsidian API 客户端未启用，请在配置中设置 obsidian.enabled = true".to_string())
-        })
+    fn client(&self) -> Result<Arc<ObsidianClient>, BrainError> {
+        crate::infra::obsidian_client::get_client(&self.obsidian)
     }
 
     // ── Search ──

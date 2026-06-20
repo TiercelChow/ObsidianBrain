@@ -68,11 +68,36 @@ impl ToolHandler for SaveConfigHandler {
 
         ctx.db.set_state(CONFIG_KEY, &config_json)?;
 
-        tracing::info!("系统配置已保存，重启后生效");
+        // Hot-reload ObsidianClient if obsidian config was provided
+        if let Some(obs_cfg) = args.get("obsidian") {
+            let enabled = obs_cfg.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+            if enabled {
+                let url = obs_cfg.get("url").and_then(|v| v.as_str()).unwrap_or("http://127.0.0.1:27123").to_string();
+                let api_key = obs_cfg.get("api_key").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let new_config = crate::config::ObsidianApiConfig { enabled, url, api_key };
+                match crate::infra::obsidian_client::ObsidianClient::new(&new_config) {
+                    Ok(client) => {
+                        crate::infra::obsidian_client::set_client(&ctx.obsidian, Some(Arc::new(client)));
+                        tracing::info!("ObsidianClient hot-reloaded");
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to hot-reload ObsidianClient: {e}");
+                    }
+                }
+            } else {
+                crate::infra::obsidian_client::set_client(&ctx.obsidian, None);
+            }
+        }
+        // Also update config in memory
+        if let Ok(config_str) = serde_json::to_string(&args) {
+            let _ = ctx.db.set_state("system_config", &config_str);
+        }
+
+        tracing::info!("系统配置已保存并生效");
 
         Ok(json!({
             "saved": true,
-            "message": "配置已保存，重启服务后生效",
+            "message": "配置已保存并生效",
         }))
     }
 }

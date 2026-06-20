@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::core::radar::source_manager::SourceManager;
 use crate::error::BrainError;
-use crate::infra::obsidian_client::ObsidianClient;
+use crate::infra::obsidian_client::ObsidianProvider;
 use crate::infra::sqlite_store::SqliteStore;
 use crate::models::radar::*;
 
@@ -14,14 +14,14 @@ use crate::models::radar::*;
 pub struct RadarService {
     source_manager: SourceManager,
     db: Arc<SqliteStore>,
-    obsidian: Option<Arc<ObsidianClient>>,
+    obsidian: ObsidianProvider,
     config: RadarConfig,
 }
 
 impl RadarService {
     pub fn new(
         db: Arc<SqliteStore>,
-        obsidian: Option<Arc<ObsidianClient>>,
+        obsidian: ObsidianProvider,
         config: RadarConfig,
     ) -> Result<Self, BrainError> {
         let source_manager = if config.sources_path.exists() {
@@ -72,8 +72,12 @@ impl RadarService {
 
     /// 保存到 Vault
     pub async fn add_to_vault(&self, article_id: &str, target_dir: Option<&str>) -> Result<VaultSaveResult, BrainError> {
-        let obsidian = self.obsidian.as_ref()
-            .ok_or_else(|| BrainError::ConfigError("Obsidian API 未启用".to_string()))?;
+        let obsidian = match crate::infra::obsidian_client::get_client(&self.obsidian) {
+            Ok(c) => c,
+            Err(_) => {
+                return Err(BrainError::ConfigError("Obsidian API 未启用".to_string()));
+            }
+        };
 
         // 获取雷达条目信息
         let rows = self.db.get_radar_items("new", 1000)?;

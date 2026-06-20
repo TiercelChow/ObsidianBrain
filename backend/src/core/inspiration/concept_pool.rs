@@ -7,18 +7,18 @@ use std::sync::Arc;
 use crate::error::BrainError;
 use crate::models::inspiration::{Concept, ConceptPool, ConceptSource, InspirationConfig};
 use crate::infra::sqlite_store::SqliteStore;
-use crate::infra::obsidian_client::ObsidianClient;
+use crate::infra::obsidian_client::ObsidianProvider;
 use crate::infra::llm_client::LlmProvider;
 
 /// 概念池构建器
 pub struct ConceptPoolBuilder {
     db: Arc<SqliteStore>,
-    obsidian: Option<Arc<ObsidianClient>>,
+    obsidian: ObsidianProvider,
     config: InspirationConfig,
 }
 
 impl ConceptPoolBuilder {
-    pub fn new(db: Arc<SqliteStore>, obsidian: Option<Arc<ObsidianClient>>, config: InspirationConfig) -> Self {
+    pub fn new(db: Arc<SqliteStore>, obsidian: ObsidianProvider, config: InspirationConfig) -> Self {
         Self { db, obsidian, config }
     }
 
@@ -27,7 +27,7 @@ impl ConceptPoolBuilder {
         let mut concepts: Vec<Concept> = Vec::new();
 
         // 1. 从 vault 标签提取概念
-        if let Some(obsidian) = &self.obsidian {
+        if let Ok(obsidian) = crate::infra::obsidian_client::get_client(&self.obsidian) {
             if let Ok(notes) = obsidian.list_all_files().await {
                 let mut tag_counts: HashMap<String, Vec<String>> = HashMap::new();
 
@@ -62,7 +62,7 @@ impl ConceptPoolBuilder {
         }
 
         // 2. 从笔记标题提取关键词（简化版）
-        if let Some(obsidian) = &self.obsidian {
+        if let Ok(obsidian) = crate::infra::obsidian_client::get_client(&self.obsidian) {
             if let Ok(notes) = obsidian.list_all_files().await {
                 for note_path in &notes {
                     if let Some(name) = std::path::Path::new(note_path)
@@ -174,7 +174,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let db = Arc::new(SqliteStore::new(&dir.path().join("test.db")).unwrap());
         let config = InspirationConfig::default();
-        let builder = ConceptPoolBuilder::new(db, None, config);
+        let builder = ConceptPoolBuilder::new(db, crate::infra::obsidian_client::new_provider(None), config);
         (dir, builder)
     }
 

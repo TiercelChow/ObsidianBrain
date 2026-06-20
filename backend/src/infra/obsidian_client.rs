@@ -5,10 +5,37 @@
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use crate::config::ObsidianApiConfig;
 use crate::error::BrainError;
+
+/// Shared, hot-swappable ObsidianClient provider.
+/// All services hold a reference to this. When the client is recreated
+/// (e.g. after a config change), all services automatically see the new one.
+pub type ObsidianProvider = Arc<RwLock<Option<Arc<ObsidianClient>>>>;
+
+/// Create a new provider wrapping the given client (or None).
+pub fn new_provider(client: Option<Arc<ObsidianClient>>) -> ObsidianProvider {
+    Arc::new(RwLock::new(client))
+}
+
+/// Get a clone of the current ObsidianClient from the provider.
+pub fn get_client(provider: &ObsidianProvider) -> Result<Arc<ObsidianClient>, BrainError> {
+    provider
+        .read()
+        .map_err(|e| BrainError::Internal(format!("ObsidianProvider lock: {e}")))?
+        .clone()
+        .ok_or_else(|| BrainError::Internal("Obsidian API 不可用".to_string()))
+}
+
+/// Atomically swap the client inside a provider.
+pub fn set_client(provider: &ObsidianProvider, client: Option<Arc<ObsidianClient>>) {
+    if let Ok(mut guard) = provider.write() {
+        *guard = client;
+    }
+}
 
 /// Client for the Obsidian Local REST API plugin.
 #[derive(Clone)]

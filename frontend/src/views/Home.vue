@@ -138,7 +138,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { getHealth, getMemoryStats, getMemoStats, getConfig, saveConfig } from '@/api'
+import { getHealth, getMemoryStats, getMemoStats, getConfig, saveConfig, listCodeRepos } from '@/api'
 import {
   Refresh, Notebook, FolderOpened, Calendar,
   MagicStick, DataLine, Connection,
@@ -164,6 +164,7 @@ const health = ref<HealthData | null>(null)
 const memStats = ref<{ total_chunks: number; total_notes: number; tags: string[] } | null>(null)
 const memoStats = ref<{ total_memos: number } | null>(null)
 const config = ref<ConfigData | null>(null)
+const repoCount = ref<number | null>(null)
 const loading = ref(false)
 const saving = ref(false)
 
@@ -171,6 +172,7 @@ const stats = computed(() => [
   { icon: Notebook, label: '笔记总数', value: memStats.value?.total_notes ?? '—', color: '#6366f1' },
   { icon: DataLine, label: '已注册工具', value: health.value?.tools_count ?? '—', color: '#06b6d4' },
   { icon: Calendar, label: '小记数', value: memoStats.value?.total_memos ?? '—', color: '#10b981' },
+  { icon: FolderOpened, label: '代码仓', value: repoCount.value ?? '—', color: '#f59e0b' },
 ])
 
 function formatUptime(seconds: number): string {
@@ -185,11 +187,12 @@ function formatUptime(seconds: number): string {
 async function loadAll() {
   loading.value = true
   try {
-    const [healthRes, memRes, memoRes, configRes] = await Promise.allSettled([
+    const [healthRes, memRes, memoRes, configRes, reposRes] = await Promise.allSettled([
       getHealth(),
       getMemoryStats(),
       getMemoStats(),
       getConfig(),
+      listCodeRepos(),
     ])
     if (healthRes.status === 'fulfilled') health.value = healthRes.value as unknown as HealthData
     if (memRes.status === 'fulfilled') {
@@ -203,6 +206,11 @@ async function loadAll() {
     if (configRes.status === 'fulfilled') {
       const r = configRes.value as unknown as { result: ConfigData }
       config.value = r.result ?? null
+    }
+    if (reposRes.status === 'fulfilled') {
+      const r = reposRes.value as unknown as { result: unknown }
+      const repos = r.result
+      repoCount.value = Array.isArray(repos) ? repos.length : 0
     }
   } finally {
     loading.value = false
@@ -237,7 +245,7 @@ onMounted(() => { loadAll() })
 .page-subtitle { margin-top: 4px; color: #a1a1aa; font-size: 14px; }
 .header-actions { display: flex; gap: 8px; }
 
-.stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 28px; }
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
 .stat-card {
   display: flex; align-items: center; gap: 14px; padding: 20px;
   border-radius: 18px;

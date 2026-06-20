@@ -10,7 +10,7 @@ use crate::core::inspiration::generator::LlmCreativeGenerator;
 use crate::core::inspiration::selector::ConceptSelector;
 use crate::error::BrainError;
 use crate::infra::llm_client::LlmProvider;
-use crate::infra::obsidian_client::ObsidianClient;
+use crate::infra::obsidian_client::{get_client, ObsidianProvider};
 use crate::infra::sqlite_store::SqliteStore;
 use crate::models::inspiration::*;
 
@@ -20,7 +20,7 @@ pub struct InspirationService {
     selector: ConceptSelector,
     generator: LlmCreativeGenerator,
     db: Arc<SqliteStore>,
-    obsidian: Option<Arc<ObsidianClient>>,
+    obsidian: ObsidianProvider,
     config: InspirationConfig,
     cached_pool: RwLock<Option<(ConceptPool, chrono::DateTime<Utc>)>>,
 }
@@ -28,7 +28,7 @@ pub struct InspirationService {
 impl InspirationService {
     pub fn new(
         db: Arc<SqliteStore>,
-        obsidian: Option<Arc<ObsidianClient>>,
+        obsidian: ObsidianProvider,
         llm: Arc<dyn LlmProvider>,
         config: InspirationConfig,
     ) -> Self {
@@ -121,8 +121,10 @@ impl InspirationService {
 
     /// 处理反向提问
     async fn handle_reverse_question(&self, note_path: Option<&str>) -> Result<InspirationResult, BrainError> {
-        let obsidian = self.obsidian.as_ref()
-            .ok_or_else(|| BrainError::ConfigError("Obsidian API 未启用".to_string()))?;
+        let obsidian = match get_client(&self.obsidian) {
+            Ok(c) => c,
+            Err(e) => { return Err(e); }
+        };
 
         // 1. 确定笔记路径
         let path = match note_path {
@@ -166,8 +168,10 @@ impl InspirationService {
 
     /// 处理对立观点
     async fn handle_counterpoint(&self, note_path: Option<&str>) -> Result<InspirationResult, BrainError> {
-        let obsidian = self.obsidian.as_ref()
-            .ok_or_else(|| BrainError::ConfigError("Obsidian API 未启用".to_string()))?;
+        let obsidian = match get_client(&self.obsidian) {
+            Ok(c) => c,
+            Err(e) => { return Err(e); }
+        };
 
         let path = note_path
             .ok_or_else(|| BrainError::Internal("counterpoint 模式需要指定 note_path".to_string()))?
@@ -257,16 +261,18 @@ impl InspirationService {
 
     /// 获取概念的上下文内容
     async fn get_concept_context(&self, concept: &Concept) -> String {
-        if let Some(obsidian) = &self.obsidian {
-            if let Some(path) = concept.note_paths.first() {
-                if let Ok(content) = obsidian.read_file(path).await {
-                    // 截取前 500 字符作为上下文
-                    return if content.len() > 500 {
-                        content[..500].to_string()
-                    } else {
-                        content
-                    };
-                }
+        let obsidian = match get_client(&self.obsidian) {
+            Ok(c) => c,
+            Err(_) => { return String::new(); }
+        };
+        if let Some(path) = concept.note_paths.first() {
+            if let Ok(content) = obsidian.read_file(path).await {
+                // 截取前 500 字符作为上下文
+                return if content.len() > 500 {
+                    content[..500].to_string()
+                } else {
+                    content
+                };
             }
         }
         String::new()
@@ -274,8 +280,10 @@ impl InspirationService {
 
     /// 获取最近修改的笔记路径
     async fn get_recent_note_path(&self) -> Result<String, BrainError> {
-        let obsidian = self.obsidian.as_ref()
-            .ok_or_else(|| BrainError::ConfigError("Obsidian API 未启用".to_string()))?;
+        let obsidian = match get_client(&self.obsidian) {
+            Ok(c) => c,
+            Err(e) => { return Err(e); }
+        };
 
         let files = obsidian.list_all_files().await?;
         let md_files: Vec<&String> = files.iter().filter(|f| f.ends_with(".md")).collect();
@@ -307,6 +315,7 @@ mod tests {
     use tempfile::TempDir;
     use crate::infra::sqlite_store::SqliteStore;
     use crate::infra::llm_client::OllamaProvider;
+    use crate::infra::obsidian_client::new_provider;
     use crate::config::LlmConfig;
 
     fn create_service() -> (TempDir, InspirationService) {
@@ -315,7 +324,7 @@ mod tests {
         let config = InspirationConfig::default();
         let llm_config = LlmConfig::default();
         let llm: Arc<dyn LlmProvider> = Arc::new(OllamaProvider::new(&llm_config).unwrap());
-        let service = InspirationService::new(db, None, llm, config);
+        let service = InspirationService::new(db, new_provider(None), llm, config);
         (dir, service)
     }
 

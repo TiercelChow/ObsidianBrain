@@ -20,7 +20,7 @@ use crate::core::memory_service::MemoryService;
 use crate::core::radar::RadarService;
 use crate::core::timeline::store::TimelineStore;
 use crate::core::timeline::{MemoManager, TimelineConfig, TimelineService};
-use crate::infra::obsidian_client::ObsidianClient;
+use crate::infra::obsidian_client::{new_provider, ObsidianClient};
 use crate::infra::sqlite_store::SqliteStore;
 use crate::tools::handlers::register_all_tools;
 use crate::tools::registry::ToolRegistry;
@@ -31,7 +31,7 @@ pub struct AppContext {
     pub components: Arc<std::sync::Mutex<ComponentStatus>>,
     pub tool_registry: Arc<ToolRegistry>,
     pub db: Arc<SqliteStore>,
-    pub obsidian: Option<Arc<ObsidianClient>>,
+    pub obsidian: crate::infra::obsidian_client::ObsidianProvider,
     pub memory_service: Arc<MemoryService>,
     pub repo_manager: Arc<RepoManager>,
     pub note_linker: Arc<NoteLinker>,
@@ -141,22 +141,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Obsidian Local REST API
-    let obsidian = if config.obsidian.enabled {
+    let obsidian_client = if config.obsidian.enabled {
         match ObsidianClient::new(&config.obsidian) {
             Ok(client) => {
                 let client = Arc::new(client);
-                // Async health check
                 if client.health_check().await {
                     components.obsidian = "ok".to_string();
                     tracing::info!("Obsidian API 连接成功: {}", config.obsidian.url);
                     Some(client)
                 } else {
                     components.obsidian = "degraded: 无法连接".to_string();
-                    tracing::warn!(
-                        "Obsidian API 无法连接: {} (插件是否已启用?)",
-                        config.obsidian.url
-                    );
-                    Some(client) // Still provide client, just degraded
+                    tracing::warn!("Obsidian API 无法连接: {} (插件是否已启用?)", config.obsidian.url);
+                    Some(client)
                 }
             }
             Err(e) => {
@@ -169,6 +165,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("Obsidian API 客户端未启用，搜索功能将不可用");
         None
     };
+    let obsidian = new_provider(obsidian_client);
 
     // 5. Create core services
     let memory_service = Arc::new(MemoryService::new(
@@ -318,7 +315,8 @@ mod test_helpers {
             config.vault.name = "TestVault".to_string();
             config.obsidian.enabled = false;
 
-            // Create a disabled Obsidian client for testing
+            // Create a dummy Obsidian client (will fail on all calls) shared by all
+            // services via a single ObsidianProvider.
             let obsidian = Arc::new(
                 ObsidianClient::new(&config.obsidian).unwrap_or_else(|_| {
                     // Create a dummy client that will fail on all calls
@@ -330,9 +328,10 @@ mod test_helpers {
                     .expect("dummy client creation")
                 }),
             );
+            let obsidian_provider = new_provider(Some(obsidian));
 
             let memory_service = Arc::new(MemoryService::new(
-                Some(obsidian),
+                obsidian_provider.clone(),
                 vault_path.clone(),
                 "TestVault".to_string(),
             ));
@@ -347,7 +346,7 @@ mod test_helpers {
                 timeline_store,
                 TimelineConfig::default(),
             ));
-            let memo_manager = Arc::new(MemoManager::new(db.clone(), None));
+            let memo_manager = Arc::new(MemoManager::new(db.clone(), obsidian_provider.clone()));
 
             // 创建测试用 LLM 和灵感服务
             let llm_config = crate::config::LlmConfig::default();
@@ -356,7 +355,7 @@ mod test_helpers {
                     .expect("Test LLM client creation failed"));
             let inspiration_service = Arc::new(InspirationService::new(
                 db.clone(),
-                None, // 测试时不使用 Obsidian
+                obsidian_provider.clone(),
                 llm,
                 crate::models::inspiration::InspirationConfig::default(),
             ));
@@ -366,7 +365,7 @@ mod test_helpers {
                 ..Default::default()
             };
             let radar_service = Arc::new(
-                RadarService::new(db.clone(), None, radar_config).expect("Test RadarService creation failed")
+                RadarService::new(db.clone(), obsidian_provider.clone(), radar_config).expect("Test RadarService creation failed")
             );
 
             let ctx = Arc::new(AppContext {
@@ -374,7 +373,7 @@ mod test_helpers {
                 components: Arc::new(std::sync::Mutex::new(ComponentStatus::default())),
                 tool_registry: Arc::new(ToolRegistry::new()),
                 db: db.clone(),
-                obsidian: None,
+                obsidian: obsidian_provider.clone(),
                 memory_service,
                 repo_manager,
                 note_linker,

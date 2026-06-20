@@ -5,18 +5,18 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::error::BrainError;
-use crate::infra::obsidian_client::ObsidianClient;
+use crate::infra::obsidian_client::ObsidianProvider;
 use crate::infra::sqlite_store::SqliteStore;
 use crate::models::timeline::{BrowseTimelineRequest, Memo, MemoCreateRequest, MemoQuery};
 
 /// 时光机小记管理器
 pub struct MemoManager {
     db: Arc<SqliteStore>,
-    obsidian: Option<Arc<ObsidianClient>>,
+    obsidian: ObsidianProvider,
 }
 
 impl MemoManager {
-    pub fn new(db: Arc<SqliteStore>, obsidian: Option<Arc<ObsidianClient>>) -> Self {
+    pub fn new(db: Arc<SqliteStore>, obsidian: ObsidianProvider) -> Self {
         Self { db, obsidian }
     }
 
@@ -49,7 +49,7 @@ impl MemoManager {
         md_content.push_str("\n---\n\n");
 
         // 写入 Obsidian 文件（如果 Obsidian 可用）
-        if let Some(ref obsidian) = self.obsidian {
+        if let Ok(obsidian) = crate::infra::obsidian_client::get_client(&self.obsidian) {
             let month_title = format!(
                 "# {}年{}月 时光机\n\n## {}\n\n",
                 now.format("%Y"),
@@ -224,10 +224,7 @@ impl MemoManager {
 
     /// 从 Obsidian 文件同步小记到数据库
     pub async fn sync_from_obsidian(&self, months: u32) -> Result<(u32, u32), BrainError> {
-        let obsidian = self
-            .obsidian
-            .as_ref()
-            .ok_or_else(|| BrainError::Internal("Obsidian API 不可用".to_string()))?;
+        let obsidian = crate::infra::obsidian_client::get_client(&self.obsidian)?;
 
         // 计算需要同步的月份列表和完整日期范围
         let now = Local::now();

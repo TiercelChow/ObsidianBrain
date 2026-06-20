@@ -3,12 +3,11 @@
 //! 分析 Obsidian Vault 的笔记结构和链接关系，提供知识健康度洞察。
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use chrono::{DateTime, Local, Utc};
 
 use crate::error::BrainError;
-use crate::infra::obsidian_client::ObsidianClient;
+use crate::infra::obsidian_client::ObsidianProvider;
 
 /// 排除的目录前缀
 const EXCLUDED_DIRS: &[&str] = &[".obsidian/", "templates/", ".trash/", "Timeline/images/"];
@@ -78,18 +77,19 @@ pub struct NoteInfo {
 
 /// 知识库洞察引擎
 pub struct KnowledgeInsightEngine {
-    obsidian: Arc<ObsidianClient>,
+    obsidian: ObsidianProvider,
 }
 
 impl KnowledgeInsightEngine {
-    pub fn new(obsidian: Arc<ObsidianClient>) -> Self {
+    pub fn new(obsidian: ObsidianProvider) -> Self {
         Self { obsidian }
     }
 
     /// 获取完整的知识库洞察
     pub async fn get_insights(&self) -> Result<KnowledgeInsights, BrainError> {
+        let obsidian = crate::infra::obsidian_client::get_client(&self.obsidian)?;
         // 1. 获取所有 .md 文件
-        let all_files = self.obsidian.list_all_files().await?;
+        let all_files = obsidian.list_all_files().await?;
         let md_files: Vec<String> = all_files
             .into_iter()
             .filter(|f| f.ends_with(".md") && !is_excluded(f))
@@ -101,7 +101,7 @@ impl KnowledgeInsightEngine {
         // 2. 读取每个文件的内容和元数据
         let mut note_data: Vec<(String, String, Option<u64>, Option<u64>)> = Vec::new(); // (path, content, ctime, mtime)
         for path in &md_files {
-            match self.obsidian.read_note(path).await {
+            match obsidian.read_note(path).await {
                 Ok(note) => {
                     let content = note.content.unwrap_or_default();
                     let ctime = note.stat.as_ref().and_then(|s| s.ctime);
