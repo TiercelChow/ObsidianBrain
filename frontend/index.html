@@ -9,86 +9,179 @@
   <body>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
-    <!-- Theme-aware Glass overrides (dark variants use :root[data-theme="dark"]) -->
+    <!-- Glass overrides using CSS variables (works for both light and dark themes) -->
     <style>
-      /* ── Glass Input (light) ── */
+      /* ── Glass Input ── */
       .el-input__wrapper {
         border-radius: 12px !important;
-        background: rgba(255, 255, 255, 0.45) !important;
+        background: var(--bg-glass-subtle) !important;
         backdrop-filter: blur(12px) saturate(180%) !important;
         -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
-        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5) inset, 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+        box-shadow: 0 0 0 1px var(--border-glass) inset, var(--shadow-sm) !important;
         transition: all 0.25s ease !important;
       }
       .el-input__wrapper:hover {
-        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7) inset, 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+        box-shadow: 0 0 0 1px var(--accent-border) inset, var(--shadow-sm) !important;
       }
       .el-input__wrapper.is-focus {
-        box-shadow: 0 0 0 2px rgba(124, 124, 255, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.5) inset !important;
+        box-shadow: 0 0 0 2px var(--accent-light), 0 0 0 1px var(--border-glass) inset !important;
       }
+      .el-input__inner { color: var(--text-primary) !important; }
+      .el-input__inner::placeholder { color: var(--text-faint) !important; }
+      .el-input__icon, .el-range__icon, .el-range__close-icon { color: var(--text-muted) !important; }
 
-      /* ── Glass Select (light) ── */
+      /* ── Glass Select ── */
       .el-select__wrapper {
         border-radius: 10px !important;
-        background: rgba(255, 255, 255, 0.45) !important;
+        background: var(--bg-glass-subtle) !important;
         backdrop-filter: blur(12px) saturate(180%) !important;
         -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
-        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5) inset !important;
+        box-shadow: 0 0 0 1px var(--border-glass) inset !important;
       }
+      .el-select__placeholder { color: var(--text-faint) !important; }
+      .el-select__selected-item { color: var(--text-primary) !important; }
 
-      /* ── Glass Date Picker (light) ── */
+      /* ── Glass Date Picker ── */
       .el-date-editor.el-input__wrapper,
       .el-range-editor {
         border-radius: 12px !important;
-        background: rgba(255, 255, 255, 0.45) !important;
+        background: var(--bg-glass-subtle) !important;
         backdrop-filter: blur(12px) saturate(180%) !important;
         -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
-        border: 1px solid rgba(255, 255, 255, 0.5) !important;
+        border: 1px solid var(--border-glass) !important;
       }
+      .el-range-input { color: var(--text-primary) !important; }
+      .el-range-input::placeholder { color: var(--text-faint) !important; }
+      .el-range-separator { color: var(--text-muted) !important; }
 
-      /* ── Glass Dialog (light) ── */
+      /* ── Glass Dialog ── */
       .el-dialog {
         border-radius: 20px !important;
-        background: rgba(255, 255, 255, 0.8) !important;
+        background: var(--bg-glass-strong) !important;
         backdrop-filter: blur(40px) saturate(200%) !important;
         -webkit-backdrop-filter: blur(40px) saturate(200%) !important;
-        border: 1px solid rgba(255, 255, 255, 0.7) !important;
-        box-shadow: 0 12px 48px rgba(0, 0, 0, 0.1), 0 4px 16px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
+        border: 1px solid var(--border-glass) !important;
+        box-shadow: 0 12px 48px rgba(0,0,0,0.1), 0 4px 16px rgba(0,0,0,0.05), var(--inset-highlight) !important;
         overflow: hidden;
       }
       .el-dialog__header { border-radius: 20px 20px 0 0 !important; padding: 20px 24px 16px !important; }
       .el-dialog__body { padding: 16px 24px 24px !important; }
+      .el-dialog__title { color: var(--text-primary) !important; }
+      .el-dialog__headerbtn .el-dialog__close { color: var(--text-muted) !important; }
+      .el-dialog__headerbtn:hover .el-dialog__close { color: var(--text-primary) !important; }
+      .el-dialog__body { color: var(--text-secondary) !important; }
 
-      /* ── Glass Card (light) ── */
+      /* ── Glass Card ── */
       .stat-card, .module-card, .status-card, .tool-card,
       .stat-chip, .result-card, .recent-card,
       .repo-card, .mode-option, .radar-card,
+      .insight-card, .config-card,
       .combo-result, .question-result, .counterpoint-result,
       .concept-chip, .question-item, .counterpoint-item,
       .assessment {
-        background: rgba(255, 255, 255, 0.55) !important;
+        background: var(--bg-glass) !important;
         backdrop-filter: blur(12px) saturate(180%) !important;
         -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
-        border: 1px solid rgba(255, 255, 255, 0.6) !important;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 4px 16px rgba(0, 0, 0, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+        border: 1px solid var(--border-glass) !important;
+        box-shadow: var(--shadow-md), var(--inset-highlight) !important;
       }
 
-      /* ── Glass Tag (light) ── */
+      /* ── Glass Tag ── */
       .lang-tag, .tag {
-        background: rgba(255, 255, 255, 0.45) !important;
+        background: var(--bg-glass-subtle) !important;
         backdrop-filter: blur(8px) !important;
         -webkit-backdrop-filter: blur(8px) !important;
-        border: 1px solid rgba(255, 255, 255, 0.5) !important;
+        border: 1px solid var(--border-subtle) !important;
+        color: var(--text-tertiary) !important;
       }
 
-      /* ── Glass Calendar Picker (light) ── */
+      /* ── el-button ── */
+      .el-button {
+        background: var(--bg-glass) !important;
+        border: 1px solid var(--border-glass) !important;
+        color: var(--text-secondary) !important;
+      }
+      .el-button:hover {
+        background: var(--bg-hover) !important;
+        border-color: var(--accent-border) !important;
+        color: var(--text-primary) !important;
+      }
+      .el-button--primary {
+        background: var(--accent) !important;
+        border-color: var(--accent) !important;
+        color: #fff !important;
+      }
+
+      /* ── el-tag ── */
+      .el-tag {
+        background: var(--bg-glass-subtle) !important;
+        border: 1px solid var(--border-subtle) !important;
+        color: var(--text-secondary) !important;
+      }
+
+      /* ── el-switch ── */
+      .el-switch__core {
+        background-color: var(--bg-glass-subtle) !important;
+        border-color: var(--border-glass) !important;
+      }
+      .el-switch.is-checked .el-switch__core {
+        background-color: var(--accent) !important;
+        border-color: var(--accent) !important;
+      }
+
+      /* ── el-message ── */
+      .el-message {
+        background: var(--bg-glass-strong) !important;
+        border: 1px solid var(--border-glass) !important;
+        color: var(--text-primary) !important;
+        backdrop-filter: blur(32px) saturate(200%) !important;
+        -webkit-backdrop-filter: blur(32px) saturate(200%) !important;
+      }
+
+      /* ── el-descriptions ── */
+      .el-descriptions__label {
+        background: var(--bg-glass-subtle) !important;
+        color: var(--text-muted) !important;
+      }
+      .el-descriptions__content {
+        background: transparent !important;
+        color: var(--text-secondary) !important;
+      }
+      .el-descriptions__cell {
+        border-color: var(--border-faint) !important;
+      }
+
+      /* ── el-empty ── */
+      .el-empty__description p { color: var(--text-muted) !important; }
+
+      /* ── el-slider ── */
+      .el-slider__runway { background-color: var(--bg-glass-subtle) !important; }
+      .el-slider__bar { background-color: var(--accent) !important; }
+      .el-slider__button { border-color: var(--accent) !important; background-color: var(--bg-base) !important; }
+
+      /* ── el-overlay ── */
+      .el-overlay { background-color: var(--el-mask-color, rgba(0,0,0,0.5)) !important; }
+
+      /* ── el-popper (dropdowns) ── */
+      .el-popper {
+        background: var(--bg-glass-strong) !important;
+        border: 1px solid var(--border-glass) !important;
+        backdrop-filter: blur(20px) !important;
+        -webkit-backdrop-filter: blur(20px) !important;
+      }
+      .el-select-dropdown__item { color: var(--text-secondary) !important; }
+      .el-select-dropdown__item.hover,
+      .el-select-dropdown__item:hover { background: var(--bg-hover) !important; }
+      .el-select-dropdown__item.selected { color: var(--accent) !important; }
+
+      /* ── Glass Calendar Picker ── */
       .glass-picker {
         border-radius: 20px !important;
-        border: 1px solid rgba(255, 255, 255, 0.6) !important;
-        background: rgba(255, 255, 255, 0.72) !important;
+        border: 1px solid var(--border-glass) !important;
+        background: var(--bg-glass-strong) !important;
         backdrop-filter: blur(40px) saturate(200%) !important;
         -webkit-backdrop-filter: blur(40px) saturate(200%) !important;
-        box-shadow: 0 12px 48px rgba(0, 0, 0, 0.1), 0 4px 16px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+        box-shadow: 0 12px 48px rgba(0,0,0,0.1), 0 4px 16px rgba(0,0,0,0.05), var(--inset-highlight) !important;
         overflow: hidden;
       }
       .glass-picker .el-date-range-picker { background: transparent !important; }
@@ -98,250 +191,32 @@
       .glass-picker .el-date-range-picker__header button,
       .glass-picker .el-date-picker__header button {
         border-radius: 8px !important; border: none !important;
-        background: rgba(0, 0, 0, 0.04) !important; transition: background 0.2s ease !important;
+        background: var(--bg-glass-subtle) !important; color: var(--text-secondary) !important;
+        transition: background 0.2s ease !important;
       }
       .glass-picker .el-date-range-picker__header button:hover,
-      .glass-picker .el-date-picker__header button:hover { background: rgba(0, 0, 0, 0.08) !important; }
-      .glass-picker .el-date-table th { border-bottom: 1px solid rgba(0, 0, 0, 0.04) !important; color: #a1a1aa !important; font-size: 12px !important; }
-      .glass-picker .el-date-table td .el-date-table-cell { border-radius: 10px !important; transition: all 0.2s ease !important; }
-      .glass-picker .el-date-table td .el-date-table-cell:hover { background: rgba(124, 124, 255, 0.08) !important; }
-      .glass-picker .el-date-table td.current:not(.disabled) .el-date-table-cell__number {
-        background: rgba(24, 24, 27, 0.85) !important; border-radius: 10px !important; color: #fff !important;
+      .glass-picker .el-date-picker__header button:hover { background: var(--bg-hover) !important; }
+      .glass-picker .el-date-table th {
+        border-bottom: 1px solid var(--border-faint) !important;
+        color: var(--text-muted) !important; font-size: 12px !important;
       }
-      .glass-picker .el-date-table td.in-range .el-date-table-cell { background: rgba(124, 124, 255, 0.08) !important; }
+      .glass-picker .el-date-table td .el-date-table-cell { border-radius: 10px !important; transition: all 0.2s ease !important; }
+      .glass-picker .el-date-table td .el-date-table-cell:hover { background: var(--accent-light) !important; }
+      .glass-picker .el-date-table td .el-date-table-cell__number { color: var(--text-secondary) !important; }
+      .glass-picker .el-date-table td.current:not(.disabled) .el-date-table-cell__number,
       .glass-picker .el-date-table td.start-date .el-date-table-cell,
       .glass-picker .el-date-table td.end-date .el-date-table-cell {
-        background: rgba(24, 24, 27, 0.85) !important; border-radius: 10px !important; color: #fff !important;
+        background: var(--accent) !important; border-radius: 10px !important; color: #fff !important;
       }
-      .glass-picker .el-date-table td.today .el-date-table-cell__number { color: #7c7cff !important; font-weight: 700 !important; }
-      .glass-picker .el-picker-panel__footer { background: transparent !important; border-top: 1px solid rgba(0, 0, 0, 0.04) !important; }
-      .glass-picker .el-picker-panel__footer button { border-radius: 10px !important; }
+      .glass-picker .el-date-table td.in-range .el-date-table-cell { background: var(--accent-light) !important; }
+      .glass-picker .el-date-table td.today .el-date-table-cell__number { color: var(--accent) !important; font-weight: 700 !important; }
+      .glass-picker .el-picker-panel__footer {
+        background: transparent !important; border-top: 1px solid var(--border-faint) !important;
+      }
+      .glass-picker .el-picker-panel__footer button {
+        border-radius: 10px !important; background: var(--bg-glass-subtle) !important; color: var(--text-secondary) !important;
+      }
       .glass-picker .el-popper__arrow { display: none !important; }
-
-      /* ═══════════════════════════════════════════════════
-         Dark Theme Overrides — Deep Black
-         ═══════════════════════════════════════════════════ */
-
-      /* ── Glass Input (dark) ── */
-      :root[data-theme="dark"] .el-input__wrapper {
-        background: rgba(28, 28, 28, 0.5) !important;
-        box-shadow: 0 0 0 1px rgba(55, 55, 55, 0.6) inset, 0 1px 2px rgba(0, 0, 0, 0.3) !important;
-      }
-      :root[data-theme="dark"] .el-input__wrapper:hover {
-        box-shadow: 0 0 0 1px rgba(124, 124, 255, 0.3) inset, 0 1px 3px rgba(0, 0, 0, 0.4) !important;
-      }
-      :root[data-theme="dark"] .el-input__wrapper.is-focus {
-        box-shadow: 0 0 0 2px rgba(124, 124, 255, 0.2), 0 0 0 1px rgba(55, 55, 55, 0.6) inset !important;
-      }
-      :root[data-theme="dark"] .el-input__inner { color: #fff !important; }
-      :root[data-theme="dark"] .el-input__inner::placeholder { color: #555 !important; }
-
-      /* ── Glass Select (dark) ── */
-      :root[data-theme="dark"] .el-select__wrapper {
-        background: rgba(28, 28, 28, 0.5) !important;
-        box-shadow: 0 0 0 1px rgba(55, 55, 55, 0.6) inset !important;
-      }
-      :root[data-theme="dark"] .el-select__placeholder { color: #555 !important; }
-      :root[data-theme="dark"] .el-select__selected-item { color: #fff !important; }
-
-      /* ── Glass Date Picker (dark) ── */
-      :root[data-theme="dark"] .el-range-editor {
-        background: rgba(28, 28, 28, 0.5) !important;
-        border: 1px solid rgba(55, 55, 55, 0.6) !important;
-      }
-      :root[data-theme="dark"] .el-range-editor:hover { border-color: rgba(124, 124, 255, 0.3) !important; }
-      :root[data-theme="dark"] .el-range-input { color: #fff !important; }
-      :root[data-theme="dark"] .el-range-input::placeholder { color: #555 !important; }
-      :root[data-theme="dark"] .el-range-separator { color: #808080 !important; }
-      :root[data-theme="dark"] .el-range__icon,
-      :root[data-theme="dark"] .el-range__close-icon { color: #808080 !important; }
-
-      /* ── Glass Dialog (dark) ── */
-      :root[data-theme="dark"] .el-dialog {
-        background: rgba(20, 20, 20, 0.9) !important;
-        border: 1px solid rgba(55, 55, 55, 0.6) !important;
-        box-shadow: 0 12px 48px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.03) !important;
-      }
-      :root[data-theme="dark"] .el-dialog__title { color: #fff !important; }
-      :root[data-theme="dark"] .el-dialog__headerbtn .el-dialog__close { color: #808080 !important; }
-      :root[data-theme="dark"] .el-dialog__headerbtn:hover .el-dialog__close { color: #fff !important; }
-      :root[data-theme="dark"] .el-dialog__body { color: #e5e5e5 !important; }
-
-      /* ── Glass Card (dark) ── */
-      :root[data-theme="dark"] .stat-card,
-      :root[data-theme="dark"] .module-card,
-      :root[data-theme="dark"] .status-card,
-      :root[data-theme="dark"] .tool-card,
-      :root[data-theme="dark"] .stat-chip,
-      :root[data-theme="dark"] .result-card,
-      :root[data-theme="dark"] .recent-card,
-      :root[data-theme="dark"] .repo-card,
-      :root[data-theme="dark"] .mode-option,
-      :root[data-theme="dark"] .radar-card,
-      :root[data-theme="dark"] .combo-result,
-      :root[data-theme="dark"] .question-result,
-      :root[data-theme="dark"] .counterpoint-result,
-      :root[data-theme="dark"] .concept-chip,
-      :root[data-theme="dark"] .question-item,
-      :root[data-theme="dark"] .counterpoint-item,
-      :root[data-theme="dark"] .assessment,
-      :root[data-theme="dark"] .insight-card,
-      :root[data-theme="dark"] .config-card {
-        background: rgba(15, 15, 15, 0.7) !important;
-        backdrop-filter: blur(12px) saturate(180%) !important;
-        -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
-        border: 1px solid rgba(55, 55, 55, 0.6) !important;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.03) !important;
-      }
-
-      /* ── Glass Tag (dark) ── */
-      :root[data-theme="dark"] .lang-tag,
-      :root[data-theme="dark"] .tag {
-        background: rgba(28, 28, 28, 0.5) !important;
-        border: 1px solid rgba(45, 45, 45, 0.5) !important;
-        color: #b3b3b3 !important;
-      }
-
-      /* ── Glass Calendar Picker (dark) ── */
-      :root[data-theme="dark"] .glass-picker {
-        background: rgba(20, 20, 20, 0.9) !important;
-        border: 1px solid rgba(55, 55, 55, 0.6) !important;
-        box-shadow: 0 12px 48px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.03) !important;
-      }
-      :root[data-theme="dark"] .glass-picker .el-date-range-picker__header button,
-      :root[data-theme="dark"] .glass-picker .el-date-picker__header button {
-        background: rgba(28, 28, 28, 0.5) !important;
-        color: #e5e5e5 !important;
-      }
-      :root[data-theme="dark"] .glass-picker .el-date-range-picker__header button:hover,
-      :root[data-theme="dark"] .glass-picker .el-date-picker__header button:hover {
-        background: rgba(35, 35, 35, 0.6) !important;
-      }
-      :root[data-theme="dark"] .glass-picker .el-date-table th {
-        border-bottom-color: rgba(255, 255, 255, 0.06) !important;
-        color: #808080 !important;
-      }
-      :root[data-theme="dark"] .glass-picker .el-date-table td .el-date-table-cell:hover {
-        background: rgba(124, 124, 255, 0.12) !important;
-      }
-      :root[data-theme="dark"] .glass-picker .el-date-table td .el-date-table-cell__number {
-        color: #e5e5e5 !important;
-      }
-      :root[data-theme="dark"] .glass-picker .el-date-table td.current:not(.disabled) .el-date-table-cell__number,
-      :root[data-theme="dark"] .glass-picker .el-date-table td.start-date .el-date-table-cell,
-      :root[data-theme="dark"] .glass-picker .el-date-table td.end-date .el-date-table-cell {
-        background: #7c7cff !important;
-        color: #fff !important;
-      }
-      :root[data-theme="dark"] .glass-picker .el-date-table td.in-range .el-date-table-cell {
-        background: rgba(124, 124, 255, 0.12) !important;
-      }
-      :root[data-theme="dark"] .glass-picker .el-date-table td.today .el-date-table-cell__number {
-        color: #7c7cff !important;
-      }
-      :root[data-theme="dark"] .glass-picker .el-picker-panel__footer {
-        border-top-color: rgba(255, 255, 255, 0.06) !important;
-      }
-      :root[data-theme="dark"] .glass-picker .el-picker-panel__footer button {
-        background: rgba(28, 28, 28, 0.5) !important;
-        color: #e5e5e5 !important;
-      }
-
-      /* ── el-overlay (dialog backdrop) dark ── */
-      :root[data-theme="dark"] .el-overlay {
-        background-color: rgba(0, 0, 0, 0.7) !important;
-      }
-
-      /* ── el-popper (dropdowns) dark ── */
-      :root[data-theme="dark"] .el-popper {
-        background: rgba(20, 20, 20, 0.9) !important;
-        border: 1px solid rgba(55, 55, 55, 0.6) !important;
-      }
-      :root[data-theme="dark"] .el-select-dropdown__item { color: #e5e5e5 !important; }
-      :root[data-theme="dark"] .el-select-dropdown__item.hover,
-      :root[data-theme="dark"] .el-select-dropdown__item:hover { background: rgba(35, 35, 35, 0.6) !important; }
-      :root[data-theme="dark"] .el-select-dropdown__item.selected { color: #7c7cff !important; }
-
-      /* ── el-button dark ── */
-      :root[data-theme="dark"] .el-button {
-        background: rgba(15, 15, 15, 0.7) !important;
-        border: 1px solid rgba(55, 55, 55, 0.6) !important;
-        color: #e5e5e5 !important;
-      }
-      :root[data-theme="dark"] .el-button:hover {
-        background: rgba(35, 35, 35, 0.6) !important;
-        border-color: rgba(124, 124, 255, 0.3) !important;
-        color: #fff !important;
-      }
-      :root[data-theme="dark"] .el-button--primary {
-        background: #7c7cff !important;
-        border-color: #7c7cff !important;
-        color: #fff !important;
-      }
-      :root[data-theme="dark"] .el-button--primary:hover {
-        background: #6a6aff !important;
-        border-color: #6a6aff !important;
-      }
-
-      /* ── el-tag dark ── */
-      :root[data-theme="dark"] .el-tag {
-        background: rgba(28, 28, 28, 0.5) !important;
-        border: 1px solid rgba(45, 45, 45, 0.5) !important;
-        color: #b3b3b3 !important;
-      }
-      :root[data-theme="dark"] .el-tag--success {
-        background: rgba(74, 222, 128, 0.1) !important;
-        border-color: rgba(74, 222, 128, 0.2) !important;
-        color: #4ade80 !important;
-      }
-      :root[data-theme="dark"] .el-tag--warning {
-        background: rgba(251, 191, 36, 0.1) !important;
-        border-color: rgba(251, 191, 36, 0.2) !important;
-        color: #fbbf24 !important;
-      }
-
-      /* ── el-switch dark ── */
-      :root[data-theme="dark"] .el-switch__core {
-        background-color: rgba(28, 28, 28, 0.5) !important;
-        border-color: rgba(55, 55, 55, 0.6) !important;
-      }
-      :root[data-theme="dark"] .el-switch.is-checked .el-switch__core {
-        background-color: #7c7cff !important;
-        border-color: #7c7cff !important;
-      }
-
-      /* ── el-message dark ── */
-      :root[data-theme="dark"] .el-message {
-        background: rgba(20, 20, 20, 0.9) !important;
-        border: 1px solid rgba(55, 55, 55, 0.6) !important;
-        color: #fff !important;
-      }
-
-      /* ── el-descriptions dark ── */
-      :root[data-theme="dark"] .el-descriptions__label {
-        background: rgba(28, 28, 28, 0.5) !important;
-        color: #808080 !important;
-      }
-      :root[data-theme="dark"] .el-descriptions__content {
-        background: transparent !important;
-        color: #e5e5e5 !important;
-      }
-      :root[data-theme="dark"] .el-descriptions__cell {
-        border-color: rgba(255, 255, 255, 0.06) !important;
-      }
-
-      /* ── el-empty dark ── */
-      :root[data-theme="dark"] .el-empty__description p { color: #808080 !important; }
-
-      /* ── el-slider dark ── */
-      :root[data-theme="dark"] .el-slider__runway { background-color: rgba(28, 28, 28, 0.5) !important; }
-      :root[data-theme="dark"] .el-slider__bar { background-color: #7c7cff !important; }
-      :root[data-theme="dark"] .el-slider__button { border-color: #7c7cff !important; background-color: #000 !important; }
-
-      /* ── el-input-number dark ── */
-      :root[data-theme="dark"] .el-input-number .el-input__wrapper {
-        background: rgba(28, 28, 28, 0.5) !important;
-      }
     </style>
   </body>
 </html>
