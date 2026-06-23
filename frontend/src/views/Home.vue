@@ -262,8 +262,8 @@ onMounted(() => { loadAll() })
 }
 .stat-icon {
   width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
-  background: rgba(255,255,255,0.5); backdrop-filter: blur(8px);
-  border: 1px solid rgba(255,255,255,0.5);
+  background: var(--bg-glass-subtle); backdrop-filter: blur(8px);
+  border: 1px solid var(--border-subtle);
   border-radius: 14px; flex-shrink: 0;
 }
 .stat-content { display: flex; flex-direction: column; }
@@ -277,8 +277,8 @@ onMounted(() => { loadAll() })
 .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
 .status-item {
   display: flex; align-items: center; gap: 10px; padding: 8px 14px;
-  border-radius: 10px; background: rgba(255,255,255,0.35);
-  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: 10px; background: var(--bg-glass-subtle);
+  border: 1px solid var(--border-subtle);
 }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .status-dot.ok { background: #10b981; box-shadow: 0 0 6px rgba(16,185,129,0.3); }

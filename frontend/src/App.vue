@@ -528,8 +528,7 @@ html, body, #app {
   background:
     radial-gradient(ellipse at 75% 15%, rgba(196, 181, 253, 0.25), transparent 55%),
     radial-gradient(ellipse at 15% 85%, rgba(165, 243, 252, 0.2), transparent 55%),
-    radial-gradient(ellipse at 50% 50%, rgba(253, 230, 138, 0.12), transparent 50%),
-    #fafafa;
+    radial-gradient(ellipse at 50% 50%, rgba(253, 230, 138, 0.12), transparent 50%);
   animation: meshDrift 40s ease-in-out infinite alternate;
 }
 .orb { display: none; }
