@@ -8,7 +8,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::api::handlers::health::health_check;
 use crate::api::handlers::tool_handler::{call_tool, list_tools};
-use crate::api::handlers::upload::{upload_images, serve_vault_image};
+use crate::api::handlers::upload::{upload_images, serve_vault_image, serve_thumbnail};
 use crate::AppContext;
 
 /// Create the application router with all routes, middleware, and fallbacks.
@@ -27,6 +27,7 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
         .route("/upload/images", post(upload_images))
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024)) // 50MB for image uploads
         .route("/vault/images/*path", get(serve_vault_image))
+        .route("/vault/thumbnails/*path", get(serve_thumbnail))
         .with_state(ctx);
 
     // Compose the main router with middleware.

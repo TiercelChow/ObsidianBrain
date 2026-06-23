@@ -136,7 +136,7 @@
                         <img
                           v-for="(img, i) in memo.images"
                           :key="i"
-                          :src="vaultImageUrl(img)"
+                          :src="thumbnailUrl(img)"
                           class="memo-image"
                           @click="openImageViewer(memo.images, i)"
                         />
@@ -641,6 +641,9 @@ async function submitMemo() {
 // ── Formatting ──
 function vaultImageUrl(path: string): string {
   return `/v1/vault/images/${path}`
+}
+function thumbnailUrl(path: string): string {
+  return `/v1/vault/thumbnails/${path}`
 }
 function imageGridClass(count: number): string {
   if (count <= 1) return '1'
