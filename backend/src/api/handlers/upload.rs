@@ -86,7 +86,14 @@ pub async fn upload_images(
 fn generate_thumbnail(data: &[u8], filename: &str, _ext: &str) {
     // Change extension to .jpg for thumbnails (smaller file size)
     let thumb_name = filename.rsplit_once('.').map(|(stem, _)| format!("{}.jpg", stem)).unwrap_or_else(|| format!("{}.jpg", filename));
-    let thumb_path = std::path::Path::new("./data/thumbnails").join(&thumb_name);
+    let thumb_dir = std::path::Path::new("./data/thumbnails");
+    let thumb_path = thumb_dir.join(&thumb_name);
+
+    // Ensure thumbnail directory exists
+    if let Err(e) = std::fs::create_dir_all(thumb_dir) {
+        tracing::warn!("缩略图目录创建失败: {e}");
+        return;
+    }
 
     match image::load_from_memory(data) {
         Ok(img) => {
