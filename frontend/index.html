@@ -15,8 +15,8 @@
       .el-input__wrapper {
         border-radius: 12px !important;
         background: var(--bg-glass-subtle) !important;
-        backdrop-filter: blur(12px) saturate(180%) !important;
-        -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
         box-shadow: 0 0 0 1px var(--border-glass) inset, var(--shadow-sm) !important;
         transition: all 0.25s ease !important;
       }
@@ -34,8 +34,8 @@
       .el-select__wrapper {
         border-radius: 10px !important;
         background: var(--bg-glass-subtle) !important;
-        backdrop-filter: blur(12px) saturate(180%) !important;
-        -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
         box-shadow: 0 0 0 1px var(--border-glass) inset !important;
       }
       .el-select__placeholder { color: var(--text-faint) !important; }
@@ -46,8 +46,8 @@
       .el-range-editor {
         border-radius: 12px !important;
         background: var(--bg-glass-subtle) !important;
-        backdrop-filter: blur(12px) saturate(180%) !important;
-        -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
         border: 1px solid var(--border-glass) !important;
       }
       .el-range-input { color: var(--text-primary) !important; }
@@ -58,8 +58,8 @@
       .el-dialog {
         border-radius: 20px !important;
         background: var(--bg-glass-strong) !important;
-        backdrop-filter: blur(40px) saturate(200%) !important;
-        -webkit-backdrop-filter: blur(40px) saturate(200%) !important;
+        backdrop-filter: blur(calc(var(--glass-blur) + 20px)) saturate(var(--glass-saturate)) !important;
+        -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 20px)) saturate(var(--glass-saturate)) !important;
         border: 1px solid var(--border-glass) !important;
         box-shadow: 0 12px 48px rgba(0,0,0,0.1), 0 4px 16px rgba(0,0,0,0.05), var(--inset-highlight) !important;
         overflow: hidden;
@@ -80,8 +80,8 @@
       .concept-chip, .question-item, .counterpoint-item,
       .assessment {
         background: var(--bg-glass) !important;
-        backdrop-filter: blur(12px) saturate(180%) !important;
-        -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
         border: 1px solid var(--border-glass) !important;
         box-shadow: var(--shadow-md), var(--inset-highlight) !important;
       }
@@ -89,8 +89,8 @@
       /* ── Glass Tag ── */
       .lang-tag, .tag {
         background: var(--bg-glass-subtle) !important;
-        backdrop-filter: blur(8px) !important;
-        -webkit-backdrop-filter: blur(8px) !important;
+        backdrop-filter: blur(var(--glass-blur)) !important;
+        -webkit-backdrop-filter: blur(var(--glass-blur)) !important;
         border: 1px solid var(--border-subtle) !important;
         color: var(--text-tertiary) !important;
       }
@@ -179,8 +179,8 @@
         border-radius: 20px !important;
         border: 1px solid var(--border-glass) !important;
         background: var(--bg-glass-strong) !important;
-        backdrop-filter: blur(40px) saturate(200%) !important;
-        -webkit-backdrop-filter: blur(40px) saturate(200%) !important;
+        backdrop-filter: blur(calc(var(--glass-blur) + 20px)) saturate(var(--glass-saturate)) !important;
+        -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 20px)) saturate(var(--glass-saturate)) !important;
         box-shadow: 0 12px 48px rgba(0,0,0,0.1), 0 4px 16px rgba(0,0,0,0.05), var(--inset-highlight) !important;
         overflow: hidden;
       }

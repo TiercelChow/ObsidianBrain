@@ -119,14 +119,14 @@ html, body, #app {
 
 /* ── Light Theme (default) ── */
 :root, :root[data-theme="light"] {
-  --bg-base: #fafafa;
-  --bg-glass: rgba(255, 255, 255, 0.55);
-  --bg-glass-strong: rgba(255, 255, 255, 0.7);
-  --bg-glass-subtle: rgba(255, 255, 255, 0.45);
-  --bg-hover: rgba(255, 255, 255, 0.5);
-  --border-glass: rgba(255, 255, 255, 0.6);
+  --bg-base: #f0f0f3;
+  --bg-glass: rgba(255, 255, 255, 0.45);
+  --bg-glass-strong: rgba(255, 255, 255, 0.65);
+  --bg-glass-subtle: rgba(255, 255, 255, 0.3);
+  --bg-hover: rgba(255, 255, 255, 0.4);
+  --border-glass: rgba(255, 255, 255, 0.7);
   --border-subtle: rgba(255, 255, 255, 0.5);
-  --border-faint: rgba(0, 0, 0, 0.04);
+  --border-faint: rgba(0, 0, 0, 0.05);
 
   --text-primary: #18181b;
   --text-secondary: #27272a;
@@ -143,10 +143,12 @@ html, body, #app {
   --code-block-bg: #1e1e2e;
   --code-block-text: #cdd6f4;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.03);
-  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.03), 0 4px 16px rgba(0, 0, 0, 0.04);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.06);
-  --inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.08);
+  --inset-highlight: inset 0 1px 1px rgba(255, 255, 255, 0.6);
+  --glass-blur: 20px;
+  --glass-saturate: 180%;
 
   --orb-opacity: 1;
 }
@@ -154,13 +156,13 @@ html, body, #app {
 /* ── Dark Theme — Deep Black ── */
 :root[data-theme="dark"] {
   --bg-base: #000000;
-  --bg-glass: rgba(15, 15, 15, 0.7);
-  --bg-glass-strong: rgba(20, 20, 20, 0.9);
-  --bg-glass-subtle: rgba(28, 28, 28, 0.5);
-  --bg-hover: rgba(35, 35, 35, 0.6);
-  --border-glass: rgba(55, 55, 55, 0.6);
-  --border-subtle: rgba(45, 45, 45, 0.5);
-  --border-faint: rgba(255, 255, 255, 0.06);
+  --bg-glass: rgba(20, 20, 25, 0.4);
+  --bg-glass-strong: rgba(25, 25, 30, 0.6);
+  --bg-glass-subtle: rgba(30, 30, 35, 0.25);
+  --bg-hover: rgba(40, 40, 45, 0.4);
+  --border-glass: rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-faint: rgba(255, 255, 255, 0.04);
 
   --text-primary: #ffffff;
   --text-secondary: #e5e5e5;
@@ -177,12 +179,14 @@ html, body, #app {
   --code-block-bg: #0d0d0d;
   --code-block-text: #e5e5e5;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.2);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.3);
-  --inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.25);
+  --inset-highlight: inset 0 1px 1px rgba(255, 255, 255, 0.05);
+  --glass-blur: 24px;
+  --glass-saturate: 160%;
 
-  --orb-opacity: 0.3;
+  --orb-opacity: 0.35;
 }
 
 /* ── Glass Card 全局覆盖 ── */
@@ -197,8 +201,8 @@ html, body, #app {
 .counterpoint-result .counterpoint-item,
 .assessment {
   background: var(--bg-glass) !important;
-  backdrop-filter: blur(12px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
   border: 1px solid var(--border-glass) !important;
   box-shadow: var(--shadow-md), var(--inset-highlight) !important;
 }

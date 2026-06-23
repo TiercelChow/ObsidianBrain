@@ -91,8 +91,8 @@ function isActive(path: string) {
   display: flex;
   flex-direction: column;
   background: var(--bg-glass);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   border-right: 1px solid var(--border-glass);
   box-shadow: inset -1px 0 0 var(--border-faint);
   padding: 0 12px;
