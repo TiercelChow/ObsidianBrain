@@ -1,589 +1,402 @@
-# LLM Wiki 知识引擎 — 需求设计文档
+# LLM Wiki 知识引擎 — 需求设计文档（v2）
 
-> **文档编号**: 08 | **版本**: v1.0 | **状态**: 需求分析 | **日期**: 2026-06-24
+> **文档编号**: 08 | **版本**: v2.0 | **状态**: 需求分析 | **日期**: 2026-06-24
 >
 > **灵感来源**: [Karpathy 的 LLM Wiki 模式](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)
 >
-> **上游依赖**: [顶层设计](../top_design.md) · [工具协议](02-tool-protocol.md) · [知识库洞察](03-memory-engine.md)
+> **架构变更**: 移除灵感熔炉（06）和智识雷达（07）作为独立模块，重新整合为 Wiki 驱动的功能
 
 ---
 
-## 1. 背景与动机
+## 1. 总体架构变更
 
-### 1.1 Karpathy 的 LLM Wiki 思想
+### 1.1 模块调整
 
-Andrej Karpathy 提出了一种与 RAG 截然不同的知识管理模式：
+| 原模块 | 处置 | 新定位 |
+|--------|------|--------|
+| 首页（01） | 保留+增强 | 系统状态 + 配置 + Wiki 概览 |
+| 知识库（03） | 重构 | 拆分为「Wiki 看板」+「Wiki 工作台」 |
+| 时光机（04） | 保留 | 小记可批量 ingest 到 Wiki |
+| 代码仓（05） | 保留 | 代码文档可关联到 Wiki 实体 |
+| 灵感熔炉（06） | **移除** | 核心能力重构为「知识探索」 |
+| 智识雷达（07） | **移除** | 核心能力重构为「外部摄入」 |
 
-> **RAG**：每次查询时从原始文档检索片段，LLM 从零开始推导。没有积累，没有复利。
->
-> **LLM Wiki**：LLM 增量地构建和维护一个持久的、交叉引用的 Markdown Wiki。新源加入时，LLM 不只是索引它，而是读取、提取关键信息、集成到已有 Wiki 中——更新实体页、修订主题摘要、标注矛盾、强化综合论述。知识编译一次，然后持续保持最新。
-
-核心比喻：**"Obsidian 是 IDE，LLM 是程序员，Wiki 是代码库。"**
-
-三层架构：
-- **Raw Sources**（原始资料）：不可变的信息源，LLM 只读
-- **The Wiki**（知识 Wiki）：LLM 完全拥有的 Markdown 文件目录，人类只读
-- **The Schema**（维护规则）：CLAUDE.md 等配置文件，告诉 LLM 如何维护 Wiki
-
-三种操作：
-- **Ingest**（摄入）：新资料 → LLM 读取 → 写摘要 → 更新 index → 更新 10-15 个相关页 → 记录到 log
-- **Query**（查询）：提问 → LLM 读 index 找相关页 → 综合回答+引用 → 好的回答归档为新 Wiki 页
-- **Lint**（体检）：定期健康检查 → 找矛盾、过时信息、孤岛页、缺失引用
-
-### 1.2 与 ObsidianBrain 的结合点
-
-ObsidianBrain 已有的能力恰好是 LLM Wiki 模式的基础设施：
-
-| LLM Wiki 需要的能力 | ObsidianBrain 已有 |
-|---|---|
-| 读写 Vault 中的 Markdown 文件 | ObsidianClient（REST API 读写笔记） |
-| LLM 调用（摘要、综合、问答） | LlmClient（OpenAI/Claude/Ollama） |
-| 工具协议（让 LLM 操作文件） | Tool API（Axum + ToolRegistry） |
-| 知识健康度分析 | KnowledgeInsightEngine（孤岛、枢纽、尘封） |
-| 原始资料来源 | 智识雷达（RSS/arXiv 纳藏到 Vault） |
-| 碎片记录 | 时光机（小记存储到 Vault） |
-
-**缺口**：ObsidianBrain 目前是 LLM 的"手和眼"——帮 LLM 读写文件。但缺少一个**让 LLM 成为知识维护者**的编排层：自动摄入、交叉引用、矛盾检测、索引维护。
-
-### 1.3 目标
-
-在 ObsidianBrain 中实现 LLM Wiki 引擎，让 LLM 从"工具调用者"升级为"知识维护者"：
-
-- 用户投入新资料 → LLM 自动读取、摘要、交叉引用、更新 Wiki 页面
-- 用户提问 → LLM 基于已编译的 Wiki 综合回答（非 RAG 式从零检索）
-- 定期 Lint → LLM 主动发现矛盾、孤岛、过时信息
-- 所有 Wiki 文件存储在 Obsidian Vault 中，用户可在 Obsidian 中浏览图谱
-
----
-
-## 2. 数据模型
-
-### 2.1 目录结构
-
-在 Obsidian Vault 中新增 `Wiki/` 目录：
+### 1.2 新页面结构
 
 ```
-Vault/
-├── Wiki/                    ← LLM Wiki 引擎维护的目录
-│   ├── index.md             ← 内容目录（所有 Wiki 页的索引）
-│   ├── log.md               ← 操作日志（摄入/查询/Lint 记录）
-│   ├── schema.md            ← 维护规则（LLM 的"CLAUDE.md"）
-│   ├── entities/            ← 实体页（人物、项目、概念等）
-│   │   ├── andrej-karpathy.md
-│   │   └── obsidian-brain.md
-│   ├── concepts/            ← 概念页（技术主题、理论等）
-│   │   ├── llm-os.md
-│   │   └── second-brain.md
-│   ├── sources/             ← 源摘要页（每篇原始资料的摘要）
-│   │   ├── 2026-06-24-karpathy-llm-wiki.md
-│   │   └── 2026-06-20-ai-infra-article.md
-│   └── synthesis/           ← 综合论述页（跨源分析、对比、综述）
-│       └── knowledge-management-evolution.md
-├── Raw/                     ← 原始资料（不可变，用户/雷达纳入）
-│   ├── articles/
-│   │   ├── 2026-06-24-karpathy-llm-wiki.md
-│   │   └── 2026-06-20-ai-infra-article.md
-│   └── assets/
-│       └── image-001.png
-├── Timeline/                ← 时光机（已有）
-├── notes/                   ← 用户原有笔记（已有）
-└── ...
-```
-
-### 2.2 页面格式
-
-**实体页**（`Wiki/entities/xxx.md`）：
-```markdown
----
-type: entity
-name: Andrej Karpathy
-tags: [AI, LLM, researcher]
-sources: [2026-06-24-karpathy-llm-wiki]
-created: 2026-06-24
-updated: 2026-06-24
----
-
-# Andrej Karpathy
-
-前 Tesla AI 总监，OpenAI 创始成员。提出 "LLM OS" 概念和 LLM Wiki 知识管理模式。
-
-## 主要观点
-
-- LLM 正在成为新型操作系统的内核
-- 上下文窗口 = RAM，外部知识库 = 文件系统
-- LLM Wiki 模式：LLM 增量维护持久知识库，而非每次 RAG 从零检索
-
-## 相关概念
-
-- [[llm-os]]
-- [[second-brain]]
-```
-
-**源摘要页**（`Wiki/sources/xxx.md`）：
-```markdown
----
-type: source
-source_path: Raw/articles/2026-06-24-karpathy-llm-wiki.md
-source_type: article
-source_url: https://gist.github.com/karpathy/...
-ingested: 2026-06-24
-entities: [andrej-karpathy]
-concepts: [llm-os, second-brain, llm-wiki]
----
-
-# 摘要：LLM Wiki — 用 LLM 构建个人知识库
-
-## 核心观点
-
-与 RAG 不同，LLM Wiki 模式让 LLM 增量构建持久的知识 Wiki...
-（200-500 字摘要）
-
-## 关键实体
-
-- [[andrej-karpathy]]：提出者
-- [[llm-os]]：相关概念
-
-## 关键概念
-
-- [[second-brain]]：知识管理模式
-- [[llm-wiki]]：本文核心模式
-```
-
-**index.md**：
-```markdown
-# Wiki 索引
-
-最后更新：2026-06-24
-总页数：15 · 源摘要：3 · 实体：5 · 概念：4 · 综合论述：2
-
-## 实体
-
-- [[andrej-karpathy]] — AI 研究者，LLM OS 提出者
-- [[obsidian-brain]] — 本项目
-
-## 概念
-
-- [[llm-os]] — LLM 作为操作系统内核
-- [[second-brain]] — 个人知识管理系统
-- [[llm-wiki]] — LLM 维护的持久知识库
-
-## 源摘要
-
-- [[2026-06-24-karpathy-llm-wiki]] — Karpathy 的 LLM Wiki 模式
-- [[2026-06-20-ai-infra-article]] — AI Infra 基础系列
-
-## 综合论述
-
-- [[knowledge-management-evolution]] — 知识管理演进
-```
-
-**log.md**：
-```markdown
-# Wiki 操作日志
-
-## [2026-06-24] ingest | Karpathy LLM Wiki
-- 来源：Raw/articles/2026-06-24-karpathy-llm-wiki.md
-- 新建页面：sources/2026-06-24-karpathy-llm-wiki.md
-- 更新页面：entities/andrej-karpathy.md, concepts/llm-os.md, concepts/second-brain.md, concepts/llm-wiki.md, index.md
-- 新建页面：concepts/llm-wiki.md
-
-## [2026-06-24] query | LLM 和 RAG 的区别是什么？
-- 检索页面：concepts/llm-wiki.md, sources/2026-06-24-karpathy-llm-wiki.md
-- 回答已归档：synthesis/llm-wiki-vs-rag.md
-
-## [2026-06-24] lint | Wiki 健康检查
-- 检查页面：15
-- 发现孤岛：2（concepts/llm-wiki.md 缺少入链，已修复）
-- 发现矛盾：0
-- 建议新源：Van Bush Memex 原始论文
-```
-
-### 2.3 Schema 文件
-
-`Wiki/schema.md` 是 LLM 维护 Wiki 的规则手册，类似 CLAUDE.md：
-
-```markdown
-# LLM Wiki 维护规则
-
-## 目录结构
-- Wiki/entities/ — 实体页（人物、项目、工具）
-- Wiki/concepts/ — 概念页（技术主题、理论）
-- Wiki/sources/ — 源摘要页（每篇原始资料的摘要）
-- Wiki/synthesis/ — 综合论述页（跨源分析）
-
-## 命名规范
-- 文件名：kebab-case，如 `andrej-karpathy.md`
-- 源摘要：`YYYY-MM-DD-{简短描述}.md`
-
-## Ingest 流程
-1. 读取原始资料全文
-2. 与用户讨论关键要点（1-3 轮对话）
-3. 写源摘要页（200-500 字）
-4. 提取实体和概念，创建或更新对应页面
-5. 更新交叉引用（[[wikilink]]）
-6. 更新 index.md
-7. 追加 log.md
-
-## Query 流程
-1. 先读 index.md 找相关页面
-2. 读取相关页面内容
-3. 综合回答，附带 [[引用]]
-4. 如果回答有价值，归档为 synthesis/ 新页面
-
-## Lint 流程
-1. 检查所有页面的 frontmatter 完整性
-2. 检查交叉引用双向性（A 引用 B，B 应也引用 A）
-3. 检查孤岛页（无入链的页面）
-4. 检查矛盾声明（不同页面中的冲突信息）
-5. 建议新探索方向
+侧边栏:
+├── 首页          ← 系统状态 + 配置 + Wiki 概览统计
+├── Wiki 看板     ← Wiki 健康度、图谱、最近操作、页面统计
+├── Wiki 工作台   ← Ingest / Query / Lint 操作 + Schema 配置
+├── 知识探索      ← 基于 Wiki 缺口生成研究问题、推荐新源（原灵感熔炉）
+├── 外部摄入      ← RSS/arXiv 抓取 → LLM 预筛 → 一键 ingest（原智识雷达）
+├── 代码仓        ← 不变
+└── 时光机        ← 不变
 ```
 
 ---
 
-## 3. 工具接口
+## 2. Wiki 看板（Wiki Dashboard）
 
-### 3.1 ingest_source — 摄入原始资料
+### 2.1 定位
 
-```json
-{
-  "name": "ingest_source",
-  "description": "将一篇原始资料摄入 Wiki：LLM 读取、摘要、提取实体/概念、更新交叉引用",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "source_path": {
-        "type": "string",
-        "description": "Vault 中的原始资料路径（如 Raw/articles/xxx.md）"
-      },
-      "source_type": {
-        "type": "string",
-        "enum": ["article", "paper", "book_chapter", "podcast", "meeting", "note"],
-        "default": "article"
-      },
-      "source_url": {
-        "type": "string",
-        "description": "原始 URL（如有）"
-      },
-      "auto_update": {
-        "type": "boolean",
-        "default": true,
-        "description": "是否自动更新相关 Wiki 页面"
-      }
-    },
-    "required": ["source_path"]
-  }
-}
-```
+取代原「知识库」页面，作为 Wiki 的**只读监控视图**。用户在这里看 Wiki 的整体状态，不执行操作。
 
-**行为**：
-1. 通过 ObsidianClient 读取 `source_path` 的全文
-2. 调用 LLM 生成摘要（200-500 字），提取实体列表和概念列表
-3. 在 `Wiki/sources/` 创建源摘要页
-4. 对每个提取的实体/概念，在 `Wiki/entities/` 或 `Wiki/concepts/` 中创建或更新页面
-5. 更新所有相关页面的交叉引用
-6. 更新 `index.md`
-7. 追加 `log.md`
-8. 返回：新建/更新的页面列表
+### 2.2 页面内容
 
-**返回**：
-```json
-{
-  "summary_page": "Wiki/sources/2026-06-24-karpathy-llm-wiki.md",
-  "created_pages": ["Wiki/concepts/llm-wiki.md"],
-  "updated_pages": [
-    "Wiki/entities/andrej-karpathy.md",
-    "Wiki/concepts/llm-os.md",
-    "Wiki/index.md",
-    "Wiki/log.md"
-  ],
-  "entities_extracted": ["andrej-karpathy"],
-  "concepts_extracted": ["llm-os", "second-brain", "llm-wiki"]
-}
-```
+**统计概览**（顶部卡片）：
+- Wiki 总页数 / 实体数 / 概念数 / 源摘要数 / 综合论述数
+- 原始资料数（Raw/ 目录文件数）
+- 最后摄入 / 查询 / Lint 时间
+- Wiki 覆盖率（有摘要的源 / 总源数）
 
-### 3.2 query_wiki — 知识查询
+**知识图谱**（核心区域）：
+- 调用已有 `get_knowledge_insights` 分析 `Wiki/` 目录
+- 可视化展示：节点 = Wiki 页面，边 = `[[wikilink]]` 引用
+- 节点大小 = 入度（被引用次数），颜色 = 类型（实体/概念/源/综合）
+- 孤岛页高亮（红色边框）
+- 点击节点可预览页面摘要，跳转到 Obsidian 打开
 
-```json
-{
-  "name": "query_wiki",
-  "description": "基于已编译的 Wiki 回答问题（非 RAG，直接读 Wiki 页面综合）",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "question": {
-        "type": "string",
-        "description": "用户的问题"
-      },
-      "save_answer": {
-        "type": "boolean",
-        "default": false,
-        "description": "是否将回答归档为新的 synthesis 页面"
-      }
-    },
-    "required": ["question"]
-  }
-}
-```
+**知识健康度**（侧边卡片）：
+- 孤岛页数量 + 列表（点击可跳转到工作台执行 Lint 修复）
+- 知识枢纽 Top 5（被引用最多的页面）
+- 矛盾标记数量（如有）
+- 知识空白（被提及但无独立页面的概念）
 
-**行为**：
-1. 读取 `Wiki/index.md` 获取所有页面列表
-2. LLM 根据 index 判断哪些页面与问题相关
-3. 读取相关页面的完整内容
-4. LLM 基于这些页面综合回答，附带 `[[引用]]`
-5. 如果 `save_answer=true`，将回答保存为 `Wiki/synthesis/` 新页面
-6. 追加 `log.md`
+**最近操作时间线**（底部）：
+- 从 `Wiki/log.md` 解析最近 10 条操作
+- 每条显示：时间、类型（ingest/query/lint）、影响页面数
+- 可展开查看影响的页面列表
 
-**返回**：
-```json
-{
-  "answer": "根据你的 Wiki，LLM Wiki 和 RAG 的核心区别在于...",
-  "cited_pages": [
-    "Wiki/concepts/llm-wiki.md",
-    "Wiki/sources/2026-06-24-karpathy-llm-wiki.md"
-  ],
-  "saved_to": "Wiki/synthesis/llm-wiki-vs-rag.md"
-}
-```
+**知识领域分布**（底部）：
+- Wiki 页面按 `entities/` `concepts/` `sources/` `synthesis/` 分布
+- 横向柱状图
 
-### 3.3 lint_wiki — Wiki 健康检查
+### 2.3 数据来源
 
-```json
-{
-  "name": "lint_wiki",
-  "description": "检查 Wiki 健康度：孤岛页、矛盾、缺失引用、过时信息",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "auto_fix": {
-        "type": "boolean",
-        "default": false,
-        "description": "是否自动修复可修复的问题（如添加缺失引用）"
-      }
-    }
-  }
-}
-```
-
-**行为**：
-1. 列出 `Wiki/` 下所有 `.md` 文件
-2. 检查每个文件的 frontmatter 完整性
-3. 构建引用图谱，找出孤岛页（无入链）
-4. LLM 分析潜在矛盾（不同页面中的冲突信息）
-5. 找出被提及但没有独立页面的概念
-6. 如果 `auto_fix=true`，自动为孤岛页添加引用、为缺失概念创建页面
-7. 追加 `log.md`
-
-**返回**：
-```json
-{
-  "total_pages": 15,
-  "issues": {
-    "orphans": ["Wiki/concepts/some-concept.md"],
-    "contradictions": [],
-    "missing_pages": ["memex"],
-    "stale_info": []
-  },
-  "fixed": 2,
-  "suggestions": [
-    "建议摄入 Vannevar Bush 的 Memex 原始论文以完善 second-brain 概念"
-  ]
-}
-```
-
-### 3.4 get_wiki_status — Wiki 状态
-
-```json
-{
-  "name": "get_wiki_status",
-  "description": "获取 Wiki 当前状态：页数、最后操作、索引状态",
-  "inputSchema": {
-    "type": "object",
-    "properties": {}
-  }
-}
-```
-
-**返回**：
-```json
-{
-  "total_pages": 15,
-  "entities": 5,
-  "concepts": 4,
-  "sources": 3,
-  "synthesis": 2,
-  "last_ingest": "2026-06-24",
-  "last_query": "2026-06-24",
-  "last_lint": "2026-06-24",
-  "raw_sources_count": 5
-}
-```
+- Wiki 文件列表 → `list_all_files()` 限定 `Wiki/` 目录
+- 引用图谱 → 已有 `KnowledgeInsightEngine` 分析 `Wiki/`
+- 操作日志 → 读取 `Wiki/log.md` 解析
+- 统计数据 → 读取 `Wiki/index.md` frontmatter 或实时统计
 
 ---
 
-## 4. 前端界面
+## 3. Wiki 工作台（Wiki Workbench）
 
-### 4.1 新增「Wiki」页面
+### 3.1 定位
 
-在侧边栏新增「Wiki」入口，页面包含：
+Wiki 的**操作中心**。用户在这里执行 ingest、query、lint，以及配置 Wiki 维护规则。
 
-**状态卡片**：
-- Wiki 总页数、实体数、概念数、源摘要数
-- 最后摄入/查询/Lint 时间
-- 「摄入资料」「查询 Wiki」「Lint 检查」三个操作按钮
+### 3.2 Ingest 面板
 
-**Wiki 图谱预览**：
-- 调用已有的 `get_knowledge_insights` 分析 `Wiki/` 目录
-- 显示 Wiki 内部的链接图谱（孤岛、枢纽、领域分布）
+**界面**：
+- 原始资料路径输入框（支持从 `Raw/` 目录浏览选择）
+- 资料类型选择：文章 / 论文 / 书籍章节 / 播客笔记 / 会议记录
+- URL 输入（可选，用于溯源）
+- 「自动更新相关页面」开关（默认开）
+- 「开始摄入」按钮
 
-**最近操作**（从 log.md 解析）：
-- 时间线展示最近的 ingest/query/lint 操作
-- 每条操作可展开查看影响的页面列表
+**摄入过程**（步骤进度条）：
+```
+① 读取资料 → ② 生成摘要 → ③ 提取实体概念 → ④ 创建/更新页面 → ⑤ 更新索引
+```
 
-### 4.2 摄入对话框
+**摄入结果**：
+- 新建页面列表（可点击在 Obsidian 打开）
+- 更新页面列表 + 每个页面改了什么（一句话摘要）
+- 提取的实体和概念列表
 
-- 输入：Vault 中的原始资料路径（或从 Raw/ 目录选择）
-- 选项：资料类型、URL、是否自动更新
-- 摄入过程显示进度：读取中 → 摘要中 → 提取实体中 → 更新页面中
-- 完成后展示：新建/更新的页面列表，可点击在 Obsidian 中打开
+### 3.3 Query 面板
 
-### 4.3 知识查询
-
-- 聊天式界面（类似知识对话，但基于 Wiki 而非 RAG）
-- 回答附带引用来源（`[[wikilink]]` 格式，可点击）
+**界面**：聊天式
+- 用户输入问题
+- 回答区域显示 LLM 基于 Wiki 的综合回答
+- 回答中的 `[[引用]]` 可点击跳转
+- 引用来源列表（页面路径 + 相似度）
 - 「归档为综合论述」按钮
 
-### 4.4 Lint 报告
+**与 RAG 的区别**：
+- 不做向量检索，而是 LLM 读 `index.md` → 判断相关页 → 读页面 → 综合
+- 知识已经预编译在 Wiki 页面中，无需从原始文档重新推导
 
-- 问题列表：孤岛页、矛盾、缺失页面、过时信息
+### 3.4 Lint 面板
+
+**界面**：
+- 「执行检查」按钮
+- 问题列表（分类展示）：
+  - 🔴 孤岛页（无入链）
+  - 🟡 矛盾声明（不同页面冲突信息）
+  - 🔵 缺失页面（被提及但无独立页面）
+  - ⚪ 过时信息（可能被新源取代的旧声明）
 - 每个问题可展开查看详情
-- 「自动修复」按钮
+- 「自动修复」按钮（修复可修复的：添加引用、创建存根页面）
+- LLM 建议的新探索方向
+
+### 3.5 Schema 配置
+
+**界面**：
+- 直接编辑 `Wiki/schema.md` 的文本编辑器
+- 实时预览 Markdown
+- 保存按钮（写入 Obsidian）
+- 预设模板（研究模式 / 个人成长 / 读书笔记 / 团队知识库）
 
 ---
 
-## 5. 与现有模块的集成
+## 4. 知识探索（Wiki-Powered，原灵感熔炉重构）
 
-| 现有模块 | 集成方式 |
-|---------|---------|
-| **智识雷达** | 雷达纳藏的文章自动放入 `Raw/articles/`，可一键 ingest 到 Wiki |
-| **时光机** | 小记可作为碎片化原始资料 ingest 到 Wiki |
-| **灵感熔炉** | 概念碰撞时从 Wiki 的 concepts/ 目录选取概念 |
-| **知识库洞察** | 已有的孤岛/枢纽/尘封分析直接应用于 `Wiki/` 目录 |
-| **搜索** | `search_notes` 可搜索 `Wiki/` 目录下的页面 |
-| **配置** | LLM Wiki 的 schema.md 可在首页配置面板编辑 |
+### 4.1 定位
 
----
+基于 Wiki 的已有知识，主动发现**知识缺口**和**未探索的连接**，生成研究问题和阅读建议。
 
-## 6. 技术实现
+### 4.2 功能
 
-### 6.1 LLM Wiki 引擎
+**知识缺口分析**：
+- LLM 读取 `Wiki/index.md` 和所有概念页
+- 分析哪些概念之间应该有关联但还没有 `[[wikilink]]`
+- 分析哪些主题的源摘要很少（知识薄弱区）
+- 输出：「你了解了 A 和 B，但还没有探索 A∩B 的交叉领域」
 
-```
-backend/src/core/wiki/
-├── mod.rs              ← 模块入口
-├── engine.rs           ← WikiEngine：ingest/query/lint 编排
-├── page_writer.rs      ← Wiki 页面创建/更新（通过 ObsidianClient）
-├── index_manager.rs    ← index.md 和 log.md 维护
-└── link_graph.rs       ← 交叉引用图谱构建与分析
-```
+**研究问题生成**：
+- LLM 基于 Wiki 内容生成 5-10 个值得深入的问题
+- 每个问题附带：为什么值得问、相关 Wiki 页面、建议的探索方向
+- 用户选择感兴趣的问题 → 系统推荐相关的外部资料（来自外部摄入）
 
-### 6.2 Ingest 流程详解
+**概念碰撞**（保留原灵感熔炉的核心能力，但基于 Wiki）：
+- 从 `Wiki/concepts/` 中选取两个语义距离较远的概念
+- LLM 分析它们的潜在交叉点
+- 如果发现有价值的连接，自动在两个概念页之间添加 `[[wikilink]]` + 综合论述
 
-```
-1. read_source(path) → 获取原始资料全文
-2. llm.summarize(content) → 生成 200-500 字摘要
-3. llm.extract_entities(content) → 提取实体列表
-4. llm.extract_concepts(content) → 提取概念列表
-5. create_source_page(summary, entities, concepts) → 写源摘要页
-6. for each entity:
-     if page_exists(entity): update_page(entity, new_source_ref)
-     else: create_entity_page(entity)
-7. for each concept:
-     if page_exists(concept): update_page(concept, new_source_ref)
-     else: create_concept_page(concept)
-8. update_cross_references() → 在相关页面间添加 [[wikilink]]
-9. update_index() → 更新 index.md
-10. append_log("ingest", source_path, affected_pages) → 追加 log.md
-```
-
-### 6.3 Query 流程详解
-
-```
-1. read_index() → 获取所有 Wiki 页面列表+摘要
-2. llm.select_relevant_pages(question, index) → LLM 判断哪些页面相关
-3. for each relevant_page: read_page(page) → 读取完整内容
-4. llm.synthesize_answer(question, page_contents) → 综合回答+引用
-5. if save_answer: create_synthesis_page(answer) → 归档
-6. append_log("query", question, cited_pages)
-```
-
-### 6.4 Lint 流程详解
-
-```
-1. list_wiki_files() → 列出 Wiki/ 下所有 .md 文件
-2. for each file: parse_frontmatter() → 检查完整性
-3. build_link_graph() → 构建 [[wikilink]] 引用图谱
-4. find_orphans(graph) → 找无入链的页面
-5. find_missing_pages(graph) → 被提及但无独立页面的概念
-6. llm.detect_contradictions(pages) → LLM 分析矛盾
-7. if auto_fix:
-     for each orphan: suggest_and_add_links()
-     for each missing: create_stub_page()
-8. append_log("lint", issues_found, fixed_count)
-```
+**阅读建议**：
+- 基于 Wiki 的知识空白，推荐应该读什么
+- 结合外部摄入的 RSS/arXiv 源，推荐与知识缺口匹配的文章
 
 ---
 
-## 7. 工具注册
+## 5. 外部摄入（Wiki-Powered，原智识雷达重构）
 
-新增 4 个工具，注册到 `tools/handlers/wiki_handlers.rs`：
+### 5.1 定位
 
-| 工具名 | 模块 | 说明 |
-|--------|------|------|
-| `ingest_source` | wiki | 摄入原始资料到 Wiki |
-| `query_wiki` | wiki | 基于 Wiki 回答问题 |
-| `lint_wiki` | wiki | Wiki 健康检查 |
-| `get_wiki_status` | wiki | 获取 Wiki 状态 |
+不再只是"推荐文章"，而是 Wiki 的**自动喂养管道**：抓取外部内容 → LLM 预筛 → 一键 ingest。
+
+### 5.2 功能
+
+**源管理**：
+- RSS / arXiv / Hacker News 等外部源配置（保留原雷达源管理）
+- 抓取频率设置
+
+**LLM 预筛**：
+- 抓取到新文章后，LLM 读取标题+摘要
+- 与 `Wiki/index.md` 比对：这篇文章与你的已有知识库相关吗？
+- 评分：高相关（直接推荐 ingest）/ 中相关（需用户确认）/ 低相关（跳过）
+- LLM 生成一句话理由：「与你的 [[llm-os]] 概念高度相关」
+
+**一键 Ingest**：
+- 用户点击「摄入」→ 自动下载文章为 Markdown 到 `Raw/articles/`
+- 调用 `ingest_source` 工具完成 Wiki 集成
+- 摄入完成后在文章旁显示「已摄入」标记 + 影响的 Wiki 页面数
+
+**批量摄入**：
+- 选中多篇高相关文章 → 批量 ingest
+- 显示总体进度
 
 ---
 
-## 8. 验收标准
+## 6. 时光机与 Wiki 的集成
 
-### 8.1 功能验收
+### 6.1 小记 → Wiki
 
-- [ ] 输入一篇原始资料路径，LLM 自动生成摘要并创建/更新 Wiki 页面
-- [ ] 摄入后 index.md 和 log.md 正确更新
-- [ ] 提问后 LLM 基于 Wiki 页面综合回答，附带引用
-- [ ] 回答可归档为 synthesis 页面
-- [ ] Lint 能发现孤岛页、缺失页面、矛盾
-- [ ] auto_fix 能自动修复引用缺失
-- [ ] Wiki 文件在 Obsidian 中可正常浏览，图谱视图显示连接
+- 时光机小记可作为碎片化原始资料 ingest 到 Wiki
+- 批量操作：选中多条小记 → 合并为一个源摘要 → ingest
+- 适合将日常碎片思考整合进结构化知识库
 
-### 8.2 与现有模块集成验收
+### 6.2 Wiki 活动时间线
 
-- [ ] 智识雷达纳藏的文章可一键 ingest
-- [ ] 知识库洞察页面可分析 Wiki/ 目录
-- [ ] 灵感熔炉可从 Wiki concepts/ 选取概念
+- 从 `Wiki/log.md` 解析操作记录
+- 在时光机页面新增「Wiki 活动」分组
+- 与小记时间线并排展示，形成完整的知识活动记录
+
+---
+
+## 7. 工具接口
+
+### 7.1 Wiki 核心工具
+
+| 工具 | 说明 |
+|------|------|
+| `ingest_source` | 摄入原始资料：读取→摘要→提取→更新页面→更新index/log |
+| `query_wiki` | 基于 Wiki 回答问题：读index→选页→综合→引用 |
+| `lint_wiki` | 健康检查：孤岛/矛盾/缺失/过时→可自动修复 |
+| `get_wiki_status` | Wiki 状态：页数/类型分布/最后操作时间 |
+
+### 7.2 知识探索工具
+
+| 工具 | 说明 |
+|------|------|
+| `discover_gaps` | 分析 Wiki 知识缺口：缺失连接、薄弱主题 |
+| `generate_questions` | 基于 Wiki 生成研究问题 |
+| `concept_collision` | 从 Wiki concepts/ 选取概念对，分析交叉点 |
+
+### 7.3 外部摄入工具
+
+| 工具 | 说明 |
+|------|------|
+| `fetch_external` | 抓取外部源（RSS/arXiv/HN） |
+| `prescreen_article` | LLM 预筛：与 Wiki 相关性评分 |
+| `batch_ingest` | 批量摄入多篇文章 |
+
+---
+
+## 8. 前端页面设计
+
+### 8.1 Wiki 看板页面
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Wiki 看板                                          [刷新]    │
+├──────────┬──────────┬──────────┬──────────┬────────────────┤
+│ 总页数 15 │ 实体 5   │ 概念 4   │ 源摘要 3 │ 覆盖率 60%    │
+├──────────┴──────────┴──────────┴──────────┴────────────────┤
+│                                                             │
+│  知识图谱                          知识健康度               │
+│  ┌──────────────────────┐       ┌────────────────────┐     │
+│  │                      │       │ 🔴 孤岛: 2         │     │
+│  │   [节点-边图谱]      │       │ 🕸️ 枢纽: 3         │     │
+│  │   节点=页面          │       │ 🟡 矛盾: 0         │     │
+│  │   边=引用            │       │ 🔵 缺失: 1         │     │
+│  │   大小=入度          │       │ [执行 Lint →]      │     │
+│  │   颜色=类型          │       └────────────────────┘     │
+│  └──────────────────────┘                                 │
+│                                                             │
+│  最近操作                           知识领域分布            │
+│  ┌──────────────────────┐       ┌────────────────────┐     │
+│  │ 06-24 ingest 文章A   │       │ entities ████ 5    │     │
+│  │ 06-24 query 问题B    │       │ concepts ███  4    │     │
+│  │ 06-23 lint 检查      │       │ sources  ██   3    │     │
+│  │ 06-22 ingest 论文C   │       │ synthesis █   2    │     │
+│  └──────────────────────┘       └────────────────────┘     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 8.2 Wiki 工作台页面
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Wiki 工作台                                                 │
+├─────────────────────────────────────────────────────────────┤
+│ [Ingest] [Query] [Lint] [Schema]              ← Tab 切换   │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  Ingest 面板:                                               │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ 原始资料: [Raw/articles/xxx.md          ] [浏览]    │   │
+│  │ 类型: [文章 ▾]  URL: [_______________]              │   │
+│  │ ☑ 自动更新相关页面                                  │   │
+│  │                                    [开始摄入]       │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  进度: ① 读取 ✓ → ② 摘要 ✓ → ③ 提取中... → ④ → ⑤        │
+│                                                             │
+│  结果:                                                      │
+│  新建: concepts/llm-wiki.md (点击打开)                      │
+│  更新: entities/karpathy.md (+1 引用)                       │
+│        concepts/llm-os.md (+1 引用)                         │
+│  提取实体: karpathy, openai                                 │
+│  提取概念: llm-wiki, second-brain, memex                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 8.3 知识探索页面
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 知识探索                                                    │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  知识缺口                                                   │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ 你了解了 [[llm-os]] 和 [[second-brain]]，           │   │
+│  │ 但还没有探索它们的交叉领域：                         │   │
+│  │ "LLM OS 如何改变个人知识管理的方式？"               │   │
+│  │ [查看相关源 →]                                      │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  研究问题                                                   │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ 1. RAG 和 LLM Wiki 在大规模知识库下的性能差异？     │   │
+│  │    相关: [[llm-wiki]], [[rag]]                      │   │
+│  │ 2. 如何量化知识库的"健康度"？                        │   │
+│  │    相关: [[wiki-lint]]                               │   │
+│  │ 3. ...                                              │   │
+│  │ [生成更多问题]                                       │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  概念碰撞                                                   │
+│  ┌──────────────────────┐  ┌──────────────────────┐       │
+│  │ [[llm-os]]           │✕│ [[obsidian-brain]]   │       │
+│  └──────────────────────┘  └──────────────────────┘       │
+│  LLM 分析: "ObsidianBrain 可以作为 LLM OS 的文件系统层"    │
+│  [添加交叉引用] [生成综合论述]                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 8.4 外部摄入页面
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 外部摄入                                            [刷新]  │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ 📄 Attention Is All You Need                        │   │
+│  │ arXiv · 2026-06-24                                  │   │
+│  │ 与 [[llm-os]] 高度相关 — 讨论了 Transformer 架构    │   │
+│  │ [摄入到 Wiki]  [跳过]                               │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ 📄 Building a Second Brain with Obsidian            │   │
+│  │ Blog · 2026-06-23                                   │   │
+│  │ 与 [[second-brain]] 高度相关 — 直接讨论知识管理     │   │
+│  │ [摄入到 Wiki]  [跳过]                               │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ 📄 Cooking with Rust                                │   │
+│  │ Blog · 2026-06-22                                   │   │
+│  │ 低相关 — 与你的 Wiki 无直接关联                     │   │
+│  │ [跳过]                                              │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  已摄入: 3 篇 · 待处理: 2 篇 · [批量摄入高相关]            │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## 9. 实施路线
 
-### Phase 1: 基础引擎 + Ingest
-- `WikiEngine` 核心结构
-- `ingest_source` 工具（读取→摘要→提取→写页面→更新index/log）
-- Schema 文件初始化
-- 前端摄入对话框
+### Phase 1: Wiki 核心引擎
+- `WikiEngine`：ingest / query / lint 核心逻辑
+- 4 个核心工具注册
+- Schema 初始化
+- 前端 Wiki 工作台（Ingest + Query + Lint + Schema 四个 Tab）
 
-### Phase 2: Query + Lint
-- `query_wiki` 工具（读index→选页→综合回答→归档）
-- `lint_wiki` 工具（引用图谱→孤岛→矛盾→修复）
-- 前端查询聊天界面 + Lint 报告
+### Phase 2: Wiki 看板
+- 前端 Wiki 看板页面（统计 + 图谱 + 健康度 + 时间线）
+- 复用 `KnowledgeInsightEngine` 分析 `Wiki/` 目录
+- log.md 解析与时间线展示
 
-### Phase 3: 深度集成
-- 智识雷达 → 一键 ingest
-- 时光机小记 → 批量 ingest
-- 灵感熔炉 → 从 Wiki 选取概念
-- 首页 Wiki 状态卡片
+### Phase 3: 模块重构
+- 移除灵感熔炉前端页面，新建「知识探索」页面
+- 移除智识雷达前端页面，新建「外部摄入」页面
+- 侧边栏更新
+- 原有工具保留但标记为 deprecated（向后兼容）
+
+### Phase 4: 深度集成
+- 时光机小记 → Wiki 批量 ingest
+- 外部摄入 → 自动 ingest 管道
+- 代码仓文档 → Wiki 实体关联
+- 知识图谱交互式可视化
 
 ---
 
@@ -591,4 +404,5 @@ backend/src/core/wiki/
 
 | 版本 | 日期 | 内容 |
 |------|------|------|
-| v1.0 | 2026-06-24 | 初始需求分析，基于 Karpathy LLM Wiki 模式 |
+| v1.0 | 2026-06-24 | 初始需求分析 |
+| v2.0 | 2026-06-24 | 移除灵感熔炉/智识雷达，重构为 Wiki 驱动；拆分看板/工作台；新增知识探索和外部摄入 |
