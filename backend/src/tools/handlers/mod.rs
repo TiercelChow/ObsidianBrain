@@ -16,6 +16,7 @@ pub mod memory_handlers;
 pub mod radar_handlers;
 pub mod search_handlers;
 pub mod timeline_handlers;
+pub mod wiki_handlers;
 
 use std::sync::Arc;
 
@@ -27,6 +28,7 @@ use crate::tools::handlers::memory_handlers::GetMemoryStatsHandler;
 use crate::tools::handlers::radar_handlers::*;
 use crate::tools::handlers::search_handlers::*;
 use crate::tools::handlers::timeline_handlers::*;
+use crate::tools::handlers::wiki_handlers::*;
 use crate::tools::registry::ToolRegistry;
 use crate::AppContext;
 
@@ -71,4 +73,10 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     // System config
     registry.register(Arc::new(GetConfigHandler)).await;
     registry.register(Arc::new(SaveConfigHandler)).await;
+
+    // Wiki module
+    registry.register(Arc::new(IngestSourceHandler)).await;
+    registry.register(Arc::new(QueryWikiHandler)).await;
+    registry.register(Arc::new(LintWikiHandler)).await;
+    registry.register(Arc::new(GetWikiStatusHandler)).await;
 }

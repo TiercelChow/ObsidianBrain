@@ -22,6 +22,11 @@ impl LlmCreativeGenerator {
         Self { llm, config }
     }
 
+    /// 获取底层 LLM provider（供外部模块复用）
+    pub fn get_llm(&self) -> Arc<dyn LlmProvider> {
+        self.llm.clone()
+    }
+
     /// 生成概念组合
     pub async fn generate_combo(
         &self,

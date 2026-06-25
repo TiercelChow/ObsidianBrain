@@ -47,6 +47,11 @@ impl InspirationService {
         }
     }
 
+    /// 获取底层 LLM provider（供 Wiki 等其他模块复用）
+    pub fn get_llm(&self) -> Arc<dyn LlmProvider> {
+        self.generator.get_llm()
+    }
+
     /// 获取灵感（主入口）
     pub async fn get_inspiration(
         &self,

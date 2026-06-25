@@ -16,6 +16,12 @@ const router = createRouter({
       meta: { title: '知识库' },
     },
     {
+      path: '/wiki',
+      name: 'WikiWorkbench',
+      component: () => import('@/views/WikiWorkbench.vue'),
+      meta: { title: 'Wiki 工作台' },
+    },
+    {
       path: '/code-repo',
       name: 'CodeRepo',
       component: () => import('@/views/CodeRepo.vue'),
