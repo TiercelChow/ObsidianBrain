@@ -56,6 +56,7 @@ import {
   MagicStick,
   DataLine,
   Document,
+  Connection,
   Expand,
   Fold,
 } from '@element-plus/icons-vue'
