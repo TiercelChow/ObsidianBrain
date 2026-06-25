@@ -75,6 +75,7 @@ watch(() => route.path, () => {
 const navItems = [
   { path: '/', label: '首页', icon: House },
   { path: '/memory', label: '知识库', icon: Notebook },
+  { path: '/wiki-dashboard', label: 'Wiki 看板', icon: DataLine },
   { path: '/wiki', label: 'Wiki 工作台', icon: Document },
   { path: '/code-repo', label: '代码仓', icon: FolderOpened },
   { path: '/timeline', label: '时光机', icon: Calendar },
