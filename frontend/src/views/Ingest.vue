@@ -60,7 +60,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Loading } from '@element-plus/icons-vue'
 import { getRadar, dismissRadarItem } from '@/api'
@@ -160,10 +160,6 @@ async function batchIngestAll() {
 }
 
 onMounted(() => { loadArticles() })
-</script>
-
-<script lang="ts">
-import { onMounted } from 'vue'
 </script>
 
 <style scoped>
