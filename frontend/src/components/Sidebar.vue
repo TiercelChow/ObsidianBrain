@@ -77,10 +77,10 @@ const navItems = [
   { path: '/memory', label: '知识库', icon: Notebook },
   { path: '/wiki-dashboard', label: 'Wiki 看板', icon: DataLine },
   { path: '/wiki', label: 'Wiki 工作台', icon: Document },
+  { path: '/explore', label: '知识探索', icon: MagicStick },
+  { path: '/ingest', label: '外部摄入', icon: Connection },
   { path: '/code-repo', label: '代码仓', icon: FolderOpened },
   { path: '/timeline', label: '时光机', icon: Calendar },
-  { path: '/inspiration', label: '灵感熔炉', icon: MagicStick },
-  { path: '/radar', label: '智识雷达', icon: DataLine },
 ]
 
 function isActive(path: string) {

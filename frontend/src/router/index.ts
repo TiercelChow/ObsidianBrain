@@ -28,6 +28,18 @@ const router = createRouter({
       meta: { title: 'Wiki 看板' },
     },
     {
+      path: '/explore',
+      name: 'Explore',
+      component: () => import('@/views/Explore.vue'),
+      meta: { title: '知识探索' },
+    },
+    {
+      path: '/ingest',
+      name: 'Ingest',
+      component: () => import('@/views/Ingest.vue'),
+      meta: { title: '外部摄入' },
+    },
+    {
       path: '/code-repo',
       name: 'CodeRepo',
       component: () => import('@/views/CodeRepo.vue'),

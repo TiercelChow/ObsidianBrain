@@ -10,6 +10,7 @@
 
 pub mod code_repo_handlers;
 pub mod config_handlers;
+pub mod explore_handlers;
 pub mod inspiration_handlers;
 pub mod knowledge_handlers;
 pub mod memory_handlers;
@@ -22,6 +23,7 @@ use std::sync::Arc;
 
 use crate::tools::handlers::code_repo_handlers::*;
 use crate::tools::handlers::config_handlers::{GetConfigHandler, SaveConfigHandler};
+use crate::tools::handlers::explore_handlers::*;
 use crate::tools::handlers::inspiration_handlers::*;
 use crate::tools::handlers::knowledge_handlers::GetKnowledgeInsightsHandler;
 use crate::tools::handlers::memory_handlers::GetMemoryStatsHandler;
@@ -79,4 +81,9 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     registry.register(Arc::new(QueryWikiHandler)).await;
     registry.register(Arc::new(LintWikiHandler)).await;
     registry.register(Arc::new(GetWikiStatusHandler)).await;
+
+    // Knowledge exploration (Wiki-powered)
+    registry.register(Arc::new(DiscoverGapsHandler)).await;
+    registry.register(Arc::new(GenerateQuestionsHandler)).await;
+    registry.register(Arc::new(ConceptCollisionHandler)).await;
 }
