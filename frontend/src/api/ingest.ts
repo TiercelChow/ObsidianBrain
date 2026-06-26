@@ -1,3 +1,5 @@
+import { callTool } from '@/api'
+
 export function fetchExternal(limit = 10) {
   return callTool('get_radar', { limit })
 }

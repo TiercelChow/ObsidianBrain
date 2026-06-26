@@ -1,3 +1,5 @@
+import { callTool } from '@/api'
+
 export function discoverGaps() {
   return callTool('discover_gaps')
 }
