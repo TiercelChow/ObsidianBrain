@@ -1,3 +1,5 @@
+import { callTool } from '@/api'
+
 export function ingestSource(sourcePath: string, sourceType = 'article', sourceUrl?: string) {
   return callTool('ingest_source', {
     source_path: sourcePath,
