@@ -6,7 +6,7 @@
         <p class="page-subtitle">知识库健康度、图谱与活动监控</p>
       </div>
       <div class="header-actions">
-        <el-button size="small" @click="loadAll" :loading="loading">
+        <el-button size="small" @click="refreshAll" :loading="loading">
           <el-icon v-if="!loading"><Refresh /></el-icon>
           刷新
         </el-button>
@@ -207,7 +207,7 @@ function formatPageName(path: string): string {
 async function loadAll() {
   loading.value = true
   try {
-    // Fast path: load status + log in parallel (both < 1s)
+    // Only load status + log on mount (fast, < 1s)
     const [statusRes] = await Promise.allSettled([
       getWikiStatus(),
     ])
@@ -216,13 +216,26 @@ async function loadAll() {
       status.value = (statusRes.value as unknown as { result: WikiStatus }).result
     }
 
-    // Load log in parallel (fast)
     await loadLog()
-
-    // Lazy load lint in background (slow ~12s) — don't block the page
-    loadLintLazy()
   } catch (e) {
     console.error('加载失败:', e)
+  } finally {
+    loading.value = false
+  }
+}
+
+// Refresh button: load everything including lint
+async function refreshAll() {
+  loading.value = true
+  try {
+    const [statusRes] = await Promise.allSettled([getWikiStatus()])
+    if (statusRes.status === 'fulfilled') {
+      status.value = (statusRes.value as unknown as { result: WikiStatus }).result
+    }
+    await loadLog()
+    await loadLintLazy()
+  } catch (e) {
+    console.error('刷新失败:', e)
   } finally {
     loading.value = false
   }
