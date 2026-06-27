@@ -81,6 +81,10 @@
                 <div v-for="(s, i) in lintResult.suggestions.slice(0, 3)" :key="i" class="suggestion-item">{{ s }}</div>
               </div>
             </div>
+            <div v-else-if="lintLoading" class="card-empty">
+              <el-icon class="is-loading" :size="16"><Loading /></el-icon>
+              <span>分析中...</span>
+            </div>
             <div v-else class="card-empty">点击刷新加载</div>
           </div>
 
@@ -167,6 +171,7 @@ interface LogEntry {
 }
 
 const loading = ref(false)
+const lintLoading = ref(false)
 const status = ref<WikiStatus | null>(null)
 const lintResult = ref<LintResult | null>(null)
 const logEntries = ref<LogEntry[]>([])
@@ -202,20 +207,20 @@ function formatPageName(path: string): string {
 async function loadAll() {
   loading.value = true
   try {
-    const [statusRes, lintRes] = await Promise.allSettled([
+    // Fast path: load status + log in parallel (both < 1s)
+    const [statusRes] = await Promise.allSettled([
       getWikiStatus(),
-      lintWiki(false),
     ])
 
     if (statusRes.status === 'fulfilled') {
       status.value = (statusRes.value as unknown as { result: WikiStatus }).result
     }
-    if (lintRes.status === 'fulfilled') {
-      lintResult.value = (lintRes.value as unknown as { result: LintResult }).result
-    }
 
-    // 加载日志
+    // Load log in parallel (fast)
     await loadLog()
+
+    // Lazy load lint in background (slow ~12s) — don't block the page
+    loadLintLazy()
   } catch (e) {
     console.error('加载失败:', e)
   } finally {
@@ -273,6 +278,19 @@ function parseLog(content: string): LogEntry[] {
   return entries.reverse().slice(0, 10)
 }
 
+// Lazy load lint in background — doesn't block page render
+async function loadLintLazy() {
+  lintLoading.value = true
+  try {
+    const res = await lintWiki(false) as unknown as { result: LintResult }
+    lintResult.value = res.result
+  } catch (e) {
+    console.error('Lint 加载失败:', e)
+  } finally {
+    lintLoading.value = false
+  }
+}
+
 onMounted(() => { loadAll() })
 </script>
 
@@ -304,7 +322,7 @@ onMounted(() => { loadAll() })
 .card-icon { font-size: 20px; }
 .card-title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 0; flex: 1; }
 .card-body { display: flex; flex-direction: column; gap: 8px; }
-.card-empty { text-align: center; color: var(--text-faint); font-size: 13px; padding: 20px 0; }
+.card-empty { text-align: center; color: var(--text-faint); font-size: 13px; padding: 20px 0; display: flex; align-items: center; justify-content: center; gap: 6px; }
 
 .health-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
 .health-icon { font-size: 14px; width: 20px; }
