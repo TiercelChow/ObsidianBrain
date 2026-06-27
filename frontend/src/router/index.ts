@@ -40,6 +40,12 @@ const router = createRouter({
       meta: { title: '外部摄入' },
     },
     {
+      path: '/manual',
+      name: 'Manual',
+      component: () => import('@/views/Manual.vue'),
+      meta: { title: '使用手册' },
+    },
+    {
       path: '/code-repo',
       name: 'CodeRepo',
       component: () => import('@/views/CodeRepo.vue'),
