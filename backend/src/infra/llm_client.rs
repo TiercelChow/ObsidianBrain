@@ -152,7 +152,7 @@ impl OpenAiProvider {
             .unwrap_or_default();
 
         let client = Client::builder()
-            .timeout(Duration::from_secs(60))
+            .timeout(Duration::from_secs(120))
             .build()
             .map_err(|e| BrainError::LlmApiError {
                 provider: "openai".to_string(),

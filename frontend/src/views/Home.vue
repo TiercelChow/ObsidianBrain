@@ -110,18 +110,27 @@
             <div class="config-field inline">
               <label>提供商</label>
               <el-select v-model="config.llm.provider" size="small" style="width: 140px">
-                <el-option label="OpenAI" value="openai" />
-                <el-option label="Claude" value="claude" />
-                <el-option label="Ollama" value="ollama" />
+                <el-option label="OpenAI 兼容" value="openai" />
+                <el-option label="Ollama (本地)" value="ollama" />
               </el-select>
             </div>
             <div class="config-field">
-              <label>模型</label>
-              <el-input v-model="config.llm.model" size="small" placeholder="gpt-4o-mini" />
+              <label>模型名称</label>
+              <el-input v-model="config.llm.model" size="small" placeholder="glm-5.2 / gpt-4o-mini / qwen2.5" />
+            </div>
+            <div class="config-field">
+              <label>API Key 环境变量名</label>
+              <el-input v-model="config.llm.api_key_env" size="small" placeholder="如 ANTHROPIC_AUTH_TOKEN 或 OPENAI_API_KEY" />
+              <span class="field-hint">系统会从环境变量读取 API Key，不直接存储密钥</span>
+            </div>
+            <div class="config-field">
+              <label>API Base URL</label>
+              <el-input v-model="config.llm.base_url" size="small" placeholder="如 https://dashscope.aliyuncs.com/compatible-mode/v1" />
+              <span class="field-hint">OpenAI 官方留空即可，第三方服务填兼容地址</span>
             </div>
             <div class="config-field inline">
               <label>最大 Token</label>
-              <el-input-number v-model="config.llm.max_tokens" size="small" :min="256" :max="8192" :step="256" />
+              <el-input-number v-model="config.llm.max_tokens" size="small" :min="256" :max="32768" :step="256" />
             </div>
             <div class="config-field inline">
               <label>温度</label>
@@ -166,7 +175,7 @@ interface HealthData {
 interface ConfigData {
   vault: { path: string; name: string }
   obsidian: { enabled: boolean; url: string; api_key: string }
-  llm: { provider: string; model: string; max_tokens: number; temperature: number }
+  llm: { provider: string; model: string; api_key_env: string; base_url: string; max_tokens: number; temperature: number }
 }
 
 const health = ref<HealthData | null>(null)
@@ -311,6 +320,7 @@ onMounted(() => { loadAll() })
 .config-fields { display: flex; flex-direction: column; gap: 10px; }
 .config-field { display: flex; flex-direction: column; gap: 4px; }
 .config-field label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+.field-hint { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
 .config-field.inline { flex-direction: row; align-items: center; gap: 12px; }
 .config-field.inline label { min-width: 72px; flex-shrink: 0; }
 .config-field.small { max-width: 200px; }

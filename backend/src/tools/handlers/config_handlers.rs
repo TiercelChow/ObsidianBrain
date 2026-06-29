@@ -44,6 +44,8 @@ impl ToolHandler for GetConfigHandler {
             "llm": {
                 "provider": config.llm.provider,
                 "model": config.llm.model,
+                "api_key_env": config.llm.api_key_env.as_deref().unwrap_or(""),
+                "base_url": config.llm.base_url.as_deref().unwrap_or(""),
                 "max_tokens": config.llm.max_tokens,
                 "temperature": config.llm.temperature,
             }
