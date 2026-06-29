@@ -158,3 +158,55 @@ impl ToolHandler for ListRecentNotesHandler {
         Ok(json!({ "notes": notes_json, "total": notes_json.len() }))
     }
 }
+
+/// List files in a specific directory (e.g., Raw/)
+pub struct ListFilesHandler;
+
+#[async_trait]
+impl ToolHandler for ListFilesHandler {
+    fn name(&self) -> &str { "list_files" }
+    fn description(&self) -> &str { "列出指定目录下的文件" }
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "directory": { "type": "string", "default": "", "description": "目录路径（如 Raw/articles）" },
+                "recursive": { "type": "boolean", "default": true, "description": "是否递归子目录" }
+            }
+        })
+    }
+    fn module(&self) -> &str { "search" }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let dir = args.get("directory").and_then(|v| v.as_str()).unwrap_or("");
+        let recursive = args.get("recursive").and_then(|v| v.as_bool()).unwrap_or(true);
+
+        let obsidian = crate::infra::obsidian_client::get_client(&ctx.obsidian)?;
+
+        let files = if recursive {
+            obsidian.list_all_files().await?
+        } else {
+            obsidian.list_files(if dir.is_empty() { None } else { Some(dir) }).await?
+        };
+
+        let prefix = if dir.is_empty() { String::new() } else { format!("{}/", dir.trim_end_matches('/')) };
+
+        let filtered: Vec<String> = files
+            .into_iter()
+            .filter(|f| f.starts_with(&prefix) && f.ends_with(".md"))
+            .collect();
+
+        let files_json: Vec<Value> = filtered
+            .iter()
+            .map(|path| {
+                let title = std::path::Path::new(path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("");
+                json!({ "path": path, "title": title })
+            })
+            .collect();
+
+        Ok(json!({ "files": files_json, "total": files_json.len() }))
+    }
+}

@@ -260,10 +260,9 @@ const rawFilesLoading = ref(false)
 async function loadRawFiles() {
   rawFilesLoading.value = true
   try {
-    const res = await callTool('search_notes', { query: '', top_k: 100 }) as unknown as { result: { notes: { path: string; title?: string }[] } }
-    const allNotes = res.result?.notes || []
-    rawFiles.value = allNotes
-      .filter(n => n.path.startsWith('Raw/') && n.path.endsWith('.md'))
+    const res = await callTool('list_files', { directory: 'Raw', recursive: true }) as unknown as { result: { files: { path: string; title?: string }[] } }
+    const allFiles = res.result?.files || []
+    rawFiles.value = allFiles
       .map(n => ({
         path: n.path,
         label: n.title || n.path.replace(/^Raw\/[^/]+\//, ''),

@@ -43,6 +43,7 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     registry.register(Arc::new(SearchNotesHandler)).await;
     registry.register(Arc::new(GetNoteHandler)).await;
     registry.register(Arc::new(ListRecentNotesHandler)).await;
+    registry.register(Arc::new(ListFilesHandler)).await;
 
     // Memory module
     registry.register(Arc::new(GetMemoryStatsHandler)).await;
