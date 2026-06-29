@@ -13,18 +13,27 @@ use crate::models::inspiration::{
 
 /// LLM 创意生成器
 pub struct LlmCreativeGenerator {
-    llm: Arc<dyn LlmProvider>,
+    llm: Arc<std::sync::RwLock<Arc<dyn LlmProvider>>>,
+    #[allow(dead_code)]
     config: InspirationConfig,
 }
 
 impl LlmCreativeGenerator {
     pub fn new(llm: Arc<dyn LlmProvider>, config: InspirationConfig) -> Self {
-        Self { llm, config }
+        Self {
+            llm: Arc::new(std::sync::RwLock::new(llm)),
+            config,
+        }
     }
 
     /// 获取底层 LLM provider（供外部模块复用）
     pub fn get_llm(&self) -> Arc<dyn LlmProvider> {
-        self.llm.clone()
+        self.llm.read().unwrap().clone()
+    }
+
+    /// 热更新 LLM provider
+    pub fn set_llm(&self, new_llm: Arc<dyn LlmProvider>) {
+        *self.llm.write().unwrap() = new_llm;
     }
 
     /// 生成概念组合
@@ -64,7 +73,7 @@ impl LlmCreativeGenerator {
             term_a, context_a, term_b, context_b
         );
 
-        let response = self.llm.generate(&prompt).await?;
+        let response = self.get_llm().generate(&prompt).await?;
         self.parse_json_response(&response)
     }
 
@@ -111,7 +120,7 @@ impl LlmCreativeGenerator {
             title, truncated
         );
 
-        let response = self.llm.generate(&prompt).await?;
+        let response = self.get_llm().generate(&prompt).await?;
         self.parse_json_response(&response)
     }
 
@@ -160,7 +169,7 @@ impl LlmCreativeGenerator {
             title, truncated
         );
 
-        let response = self.llm.generate(&prompt).await?;
+        let response = self.get_llm().generate(&prompt).await?;
         self.parse_json_response(&response)
     }
 

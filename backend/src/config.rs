@@ -164,6 +164,8 @@ pub struct LlmConfig {
     #[serde(default = "default_llm_model")]
     pub model: String,
     #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
     pub api_key_env: Option<String>,
     #[serde(default)]
     pub base_url: Option<String>,
@@ -177,6 +179,7 @@ impl Default for LlmConfig {
         Self {
             provider: default_openai(),
             model: default_llm_model(),
+            api_key: None,
             api_key_env: None,
             base_url: None,
             max_tokens: default_max_tokens(),

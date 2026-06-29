@@ -22,7 +22,7 @@ pub mod wiki_handlers;
 use std::sync::Arc;
 
 use crate::tools::handlers::code_repo_handlers::*;
-use crate::tools::handlers::config_handlers::{GetConfigHandler, SaveConfigHandler};
+use crate::tools::handlers::config_handlers::{GetConfigHandler, SaveConfigHandler, VerifyLlmHandler};
 use crate::tools::handlers::explore_handlers::*;
 use crate::tools::handlers::inspiration_handlers::*;
 use crate::tools::handlers::knowledge_handlers::GetKnowledgeInsightsHandler;
@@ -76,6 +76,7 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     // System config
     registry.register(Arc::new(GetConfigHandler)).await;
     registry.register(Arc::new(SaveConfigHandler)).await;
+    registry.register(Arc::new(VerifyLlmHandler)).await;
 
     // Wiki module
     registry.register(Arc::new(IngestSourceHandler)).await;

@@ -52,6 +52,11 @@ impl InspirationService {
         self.generator.get_llm()
     }
 
+    /// 热更新 LLM provider
+    pub fn set_llm(&self, new_llm: Arc<dyn LlmProvider>) {
+        self.generator.set_llm(new_llm);
+    }
+
     /// 获取灵感（主入口）
     pub async fn get_inspiration(
         &self,

@@ -145,10 +145,18 @@ fn role_to_string(role: &MessageRole) -> String {
 
 impl OpenAiProvider {
     pub fn new(config: &LlmConfig) -> Result<Self, BrainError> {
+        // Priority: direct api_key > env var
         let api_key = config
-            .api_key_env
+            .api_key
             .as_ref()
-            .and_then(|env| std::env::var(env).ok())
+            .filter(|k| !k.is_empty())
+            .cloned()
+            .or_else(|| {
+                config
+                    .api_key_env
+                    .as_ref()
+                    .and_then(|env| std::env::var(env).ok())
+            })
             .unwrap_or_default();
 
         let client = Client::builder()

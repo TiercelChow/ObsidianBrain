@@ -119,9 +119,13 @@
               <el-input v-model="config.llm.model" size="small" placeholder="glm-5.2 / gpt-4o-mini / qwen2.5" />
             </div>
             <div class="config-field">
-              <label>API Key 环境变量名</label>
-              <el-input v-model="config.llm.api_key_env" size="small" placeholder="如 ANTHROPIC_AUTH_TOKEN 或 OPENAI_API_KEY" />
-              <span class="field-hint">系统会从环境变量读取 API Key，不直接存储密钥</span>
+              <label>API Key</label>
+              <el-input v-model="config.llm.api_key" size="small" placeholder="直接输入 API Key" show-password />
+              <span class="field-hint">密钥保存后不再显示，留空则使用环境变量</span>
+            </div>
+            <div class="config-field">
+              <label>API Key 环境变量名（可选）</label>
+              <el-input v-model="config.llm.api_key_env" size="small" placeholder="如 ANTHROPIC_AUTH_TOKEN（API Key 为空时使用）" />
             </div>
             <div class="config-field">
               <label>API Base URL</label>
@@ -141,10 +145,13 @@
         </div>
 
         <div class="config-actions">
+          <el-button size="small" @click="verifyLlm" :loading="verifyingLlm">
+            验证 LLM
+          </el-button>
           <el-button type="primary" size="small" @click="saveSettings" :loading="saving">
             保存配置
           </el-button>
-          <span class="config-hint">配置保存后需重启服务生效</span>
+          <span class="config-hint">配置保存后立即生效（热更新）</span>
         </div>
       </div>
     </section>
@@ -153,7 +160,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { getHealth, getMemoryStats, getMemoStats, getConfig, saveConfig, listCodeRepos } from '@/api'
+import { getHealth, getMemoryStats, getMemoStats, getConfig, saveConfig, listCodeRepos, callTool } from '@/api'
 import { useAppStore } from '@/stores/app'
 import {
   Refresh, Notebook, FolderOpened, Calendar,
@@ -175,7 +182,7 @@ interface HealthData {
 interface ConfigData {
   vault: { path: string; name: string }
   obsidian: { enabled: boolean; url: string; api_key: string }
-  llm: { provider: string; model: string; api_key_env: string; base_url: string; max_tokens: number; temperature: number }
+  llm: { provider: string; model: string; api_key: string; api_key_env: string; base_url: string; max_tokens: number; temperature: number }
 }
 
 const health = ref<HealthData | null>(null)
@@ -185,6 +192,7 @@ const config = ref<ConfigData | null>(null)
 const repoCount = ref<number | null>(null)
 const loading = ref(false)
 const saving = ref(false)
+const verifyingLlm = ref(false)
 
 const stats = computed(() => [
   { icon: Notebook, label: '笔记总数', value: memStats.value?.total_notes ?? '—', color: '#6366f1' },
@@ -240,11 +248,35 @@ async function saveSettings() {
   saving.value = true
   try {
     await saveConfig(config.value)
-    ElMessage.success('配置已保存，重启服务后生效')
+    ElMessage.success('配置已保存并生效')
   } catch (e) {
     ElMessage.error('保存失败')
   } finally {
     saving.value = false
+  }
+}
+
+async function verifyLlm() {
+  if (!config.value) return
+  verifyingLlm.value = true
+  try {
+    const res = await callTool('verify_llm', {
+      provider: config.value.llm.provider,
+      model: config.value.llm.model,
+      api_key: config.value.llm.api_key,
+      api_key_env: config.value.llm.api_key_env,
+      base_url: config.value.llm.base_url,
+    }) as unknown as { result: { valid: boolean; message: string; response?: string } }
+    const r = res.result
+    if (r.valid) {
+      ElMessage.success(`✅ ${r.message}（回复：${r.response || ''}）`)
+    } else {
+      ElMessage.error(`❌ ${r.message}`)
+    }
+  } catch (e: any) {
+    ElMessage.error('验证失败：' + (e?.message || '未知错误'))
+  } finally {
+    verifyingLlm.value = false
   }
 }
 

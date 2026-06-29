@@ -129,17 +129,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(m) = llm.get("model").and_then(|v| v.as_str()) {
                     config.llm.model = m.to_string();
                 }
+                if let Some(k) = llm.get("api_key").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                    config.llm.api_key = Some(k.to_string());
+                }
+                if let Some(k) = llm.get("api_key_env").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                    config.llm.api_key_env = Some(k.to_string());
+                }
+                if let Some(u) = llm.get("base_url").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                    config.llm.base_url = Some(u.to_string());
+                }
                 if let Some(t) = llm.get("max_tokens").and_then(|v| v.as_u64()) {
                     config.llm.max_tokens = t as u32;
                 }
                 if let Some(t) = llm.get("temperature").and_then(|v| v.as_f64()) {
                     config.llm.temperature = t;
-                }
-                if let Some(k) = llm.get("api_key_env").and_then(|v| v.as_str()) {
-                    config.llm.api_key_env = Some(k.to_string());
-                }
-                if let Some(u) = llm.get("base_url").and_then(|v| v.as_str()) {
-                    config.llm.base_url = Some(u.to_string());
                 }
             }
             tracing::info!("已从数据库加载保存的配置");
