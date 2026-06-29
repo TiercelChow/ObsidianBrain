@@ -309,14 +309,20 @@ async function doIngest() {
       ingestForm.value.sourcePath,
       ingestForm.value.sourceType,
       ingestForm.value.sourceUrl || undefined,
-    ) as unknown as { result: IngestResult }
+    ) as unknown as { result: IngestResult; error?: { message?: string } }
+    if (res.error) {
+      throw new Error(res.error.message || '摄入失败')
+    }
     ingestStep.value = 5
     ingestResult.value = res.result
     ElMessage.success('摄入完成')
     await loadStatus()
-  } catch (e) {
+    await loadRawFiles()
+  } catch (e: any) {
     console.error('摄入失败:', e)
-    ElMessage.error('摄入失败')
+    const msg = e?.response?.data?.error?.message || e?.message || '摄入失败，请检查 LLM 配置'
+    ElMessage.error(msg)
+    ingestStep.value = 0
   } finally {
     ingesting.value = false
   }
