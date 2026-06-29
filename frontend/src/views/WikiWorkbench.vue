@@ -34,8 +34,29 @@
     <div v-if="activeTab === 'ingest'" class="tab-panel">
       <div class="form-card">
         <div class="form-row">
-          <label>原始资料路径</label>
-          <el-input v-model="ingestForm.sourcePath" placeholder="Raw/articles/xxx.md" size="default" />
+          <label>原始资料</label>
+          <div class="select-row">
+            <el-select
+              v-model="ingestForm.sourcePath"
+              filterable
+              clearable
+              placeholder="选择 Raw/ 目录下的文件..."
+              size="default"
+              :loading="rawFilesLoading"
+              style="flex: 1"
+            >
+              <el-option
+                v-for="f in rawFiles"
+                :key="f.path"
+                :label="f.label"
+                :value="f.path"
+              />
+            </el-select>
+            <button class="refresh-raw-btn" @click="loadRawFiles" :disabled="rawFilesLoading" title="刷新文件列表">
+              <el-icon v-if="rawFilesLoading" class="is-loading"><Loading /></el-icon>
+              <el-icon v-else><Refresh /></el-icon>
+            </button>
+          </div>
         </div>
         <div class="form-row">
           <label>资料类型</label>
@@ -181,7 +202,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
+import { Refresh, Loading } from '@element-plus/icons-vue'
 import { ingestSource, queryWiki, lintWiki, getWikiStatus } from '@/api/wiki'
 import { callTool } from '@/api'
 
@@ -232,6 +253,29 @@ const ingestForm = ref({ sourcePath: '', sourceType: 'article', sourceUrl: '' })
 const ingestStep = ref(0)
 const ingesting = ref(false)
 const ingestResult = ref<IngestResult | null>(null)
+
+const rawFiles = ref<{ path: string; label: string }[]>([])
+const rawFilesLoading = ref(false)
+
+async function loadRawFiles() {
+  rawFilesLoading.value = true
+  try {
+    const res = await callTool('search_notes', { query: '', top_k: 100 }) as unknown as { result: { notes: { path: string; title?: string }[] } }
+    const allNotes = res.result?.notes || []
+    rawFiles.value = allNotes
+      .filter(n => n.path.startsWith('Raw/') && n.path.endsWith('.md'))
+      .map(n => ({
+        path: n.path,
+        label: n.title || n.path.replace(/^Raw\/[^/]+\//, ''),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  } catch (e) {
+    console.error('加载 Raw 文件列表失败:', e)
+    rawFiles.value = []
+  } finally {
+    rawFilesLoading.value = false
+  }
+}
 
 const queryForm = ref({ question: '', saveAnswer: false })
 const querying = ref(false)
@@ -346,6 +390,7 @@ function renderMarkdown(text: string): string {
 onMounted(() => {
   loadStatus()
   loadSchema()
+  loadRawFiles()
 })
 </script>
 
@@ -372,6 +417,10 @@ onMounted(() => {
 .form-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
 .form-row label { font-size: 13px; color: var(--text-muted); font-weight: 500; }
 .form-row.inline { flex-direction: row; align-items: center; gap: 10px; }
+.refresh-raw-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border-glass); background: var(--bg-glass); color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.2s ease; }
+.refresh-raw-btn:hover { color: var(--text-primary); border-color: var(--accent-border); }
+.refresh-raw-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.select-row { display: flex; gap: 8px; align-items: center; }
 .switch-label { font-size: 13px; color: var(--text-secondary); }
 
 .progress-bar { display: flex; gap: 8px; padding: 16px 0; align-items: center; }
