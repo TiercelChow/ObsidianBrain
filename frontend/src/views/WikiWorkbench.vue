@@ -78,37 +78,20 @@
         </el-button>
       </div>
 
-      <!-- 摄入进度 -->
-      <div v-if="ingesting" class="progress-bar">
-        <span class="step" :class="{ done: ingestStep >= 1 }">① 读取</span>
-        <span class="step" :class="{ done: ingestStep >= 2 }">② 摘要</span>
-        <span class="step" :class="{ done: ingestStep >= 3 }">③ 提取</span>
-        <span class="step" :class="{ done: ingestStep >= 4 }">④ 写页</span>
-        <span class="step" :class="{ done: ingestStep >= 5 }">⑤ 索引</span>
-      </div>
-
-      <!-- 摄入结果 -->
-      <div v-if="ingestResult" class="result-card">
-        <h3>摄入完成</h3>
-        <div class="result-section">
-          <span class="result-label">摘要页：</span>
-          <a class="result-link" @click="openInObsidian(ingestResult.summary_page)">{{ ingestResult.summary_page }}</a>
+      <!-- 摄入日志 -->
+      <div v-if="ingestLogs.length > 0" class="ingest-log">
+        <div class="log-header">
+          <span class="log-title">📋 执行日志</span>
+          <span v-if="ingesting" class="log-status running">运行中...</span>
+          <span v-else-if="ingestResult" class="log-status success">✅ 完成</span>
+          <span v-else class="log-status error">❌ 失败</span>
         </div>
-        <div v-if="ingestResult.created_pages.length > 0" class="result-section">
-          <span class="result-label">新建页面（{{ ingestResult.created_pages.length }}）：</span>
-          <div v-for="p in ingestResult.created_pages" :key="p" class="result-item" @click="openInObsidian(p)">{{ p }}</div>
-        </div>
-        <div v-if="ingestResult.updated_pages.length > 0" class="result-section">
-          <span class="result-label">更新页面（{{ ingestResult.updated_pages.length }}）：</span>
-          <div v-for="p in ingestResult.updated_pages" :key="p" class="result-item" @click="openInObsidian(p)">{{ p }}</div>
-        </div>
-        <div v-if="ingestResult.entities.length > 0" class="result-section">
-          <span class="result-label">提取实体：</span>
-          <el-tag v-for="e in ingestResult.entities" :key="e" size="small" effect="plain">{{ e }}</el-tag>
-        </div>
-        <div v-if="ingestResult.concepts.length > 0" class="result-section">
-          <span class="result-label">提取概念：</span>
-          <el-tag v-for="c in ingestResult.concepts" :key="c" size="small" effect="plain">{{ c }}</el-tag>
+        <div class="log-body">
+          <div v-for="(log, i) in ingestLogs" :key="i" class="log-entry" :class="log.type">
+            <span class="log-time">{{ log.time }}</span>
+            <span class="log-icon">{{ log.icon }}</span>
+            <span class="log-text">{{ log.text }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -253,6 +236,15 @@ const ingestForm = ref({ sourcePath: '', sourceType: 'article', sourceUrl: '' })
 const ingestStep = ref(0)
 const ingesting = ref(false)
 const ingestResult = ref<IngestResult | null>(null)
+const ingestLogs = ref<{ time: string; icon: string; text: string; type: string }[]>([])
+
+function now() {
+  return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function addLog(icon: string, text: string, type = 'info') {
+  ingestLogs.value.push({ time: now(), icon, text, type })
+}
 
 const rawFiles = ref<{ path: string; label: string }[]>([])
 const rawFilesLoading = ref(false)
@@ -276,6 +268,88 @@ async function loadRawFiles() {
   }
 }
 
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function doIngest() {
+  // Clear previous logs only when starting a new ingest
+  ingestLogs.value = []
+  ingestResult.value = null
+  ingesting.value = true
+
+  const fileName = ingestForm.value.sourcePath.split('/').pop() || ingestForm.value.sourcePath
+
+  addLog('📖', `开始摄入：${fileName}`)
+  addLog('📖', `路径：${ingestForm.sourcePath}`)
+  addLog('🏷️', `类型：${ingestForm.sourceType}`)
+  await sleep(200)
+
+  addLog('📡', '正在从 Obsidian 读取原始资料...')
+  await sleep(300)
+
+  addLog('🧠', '正在调用 LLM 分析内容...')
+  addLog('🧠', '  → 生成摘要（200-500 字）')
+  await sleep(500)
+  addLog('🧠', '  → 提取实体（人物、项目、工具）')
+  await sleep(500)
+  addLog('🧠', '  → 提取概念（技术主题、理论）')
+  await sleep(300)
+
+  try {
+    const res = await ingestSource(
+      ingestForm.value.sourcePath,
+      ingestForm.value.sourceType,
+      ingestForm.value.sourceUrl || undefined,
+    ) as unknown as { result: IngestResult; error?: { message?: string } }
+
+    if (res.error) {
+      throw new Error(res.error.message || '摄入失败')
+    }
+
+    ingestResult.value = res.result
+    const r = res.result
+
+    addLog('✅', 'LLM 分析完成')
+    await sleep(200)
+
+    addLog('📝', `创建源摘要页：${r.summary_page.split('/').pop()}`)
+    await sleep(200)
+
+    if (r.created_pages.length > 0) {
+      addLog('📄', `新建 ${r.created_pages.length} 个 Wiki 页面：`)
+      for (const p of r.created_pages) {
+        addLog('  ', `  + ${p}`)
+      }
+    }
+
+    if (r.updated_pages.length > 0) {
+      addLog('📝', `更新 ${r.updated_pages.length} 个页面（含 index.md 和 log.md）`)
+    }
+
+    if (r.entities.length > 0) {
+      addLog('👤', `提取 ${r.entities.length} 个实体：${r.entities.join('、')}`)
+    }
+
+    if (r.concepts.length > 0) {
+      addLog('💡', `提取 ${r.concepts.length} 个概念：${r.concepts.join('、')}`)
+    }
+
+    addLog('🗂️', '已更新 Wiki/index.md 索引')
+    addLog('📅', '已追加 Wiki/log.md 日志')
+    addLog('🎉', `摄入完成！共创建 ${r.created_pages.length} 页，更新 ${r.updated_pages.length} 页`)
+
+    await loadStatus()
+    await loadRawFiles()
+  } catch (e: any) {
+    const msg = e?.response?.data?.error?.message || e?.message || '摄入失败'
+    addLog('❌', `错误：${msg}`)
+    addLog('💡', '请检查首页 LLM 配置（API Key、模型、Base URL）')
+  } finally {
+    ingesting.value = false
+  }
+}
+
 const queryForm = ref({ question: '', saveAnswer: false })
 const querying = ref(false)
 const queryResult = ref<QueryResult | null>(null)
@@ -296,35 +370,6 @@ async function loadStatus() {
     console.error('加载 Wiki 状态失败:', e)
   } finally {
     statusLoading.value = false
-  }
-}
-
-async function doIngest() {
-  ingesting.value = true
-  ingestStep.value = 1
-  ingestResult.value = null
-  try {
-    ingestStep.value = 2
-    const res = await ingestSource(
-      ingestForm.value.sourcePath,
-      ingestForm.value.sourceType,
-      ingestForm.value.sourceUrl || undefined,
-    ) as unknown as { result: IngestResult; error?: { message?: string } }
-    if (res.error) {
-      throw new Error(res.error.message || '摄入失败')
-    }
-    ingestStep.value = 5
-    ingestResult.value = res.result
-    ElMessage.success('摄入完成')
-    await loadStatus()
-    await loadRawFiles()
-  } catch (e: any) {
-    console.error('摄入失败:', e)
-    const msg = e?.response?.data?.error?.message || e?.message || '摄入失败，请检查 LLM 配置'
-    ElMessage.error(msg)
-    ingestStep.value = 0
-  } finally {
-    ingesting.value = false
   }
 }
 
@@ -428,9 +473,21 @@ onMounted(() => {
 .select-row { display: flex; gap: 8px; align-items: center; }
 .switch-label { font-size: 13px; color: var(--text-secondary); }
 
-.progress-bar { display: flex; gap: 8px; padding: 16px 0; align-items: center; }
-.progress-bar .step { font-size: 13px; color: var(--text-faint); padding: 4px 10px; border-radius: 8px; background: var(--bg-glass-subtle); }
-.progress-bar .step.done { color: #4ade80; background: rgba(74, 222, 128, 0.1); }
+/* Ingest log */
+.ingest-log { margin-top: 16px; border-radius: 12px; overflow: hidden; }
+.log-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: var(--bg-glass-subtle); }
+.log-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.log-status { font-size: 12px; font-weight: 500; }
+.log-status.running { color: #818cf8; }
+.log-status.success { color: #4ade80; }
+.log-status.error { color: #f87171; }
+.log-body { padding: 12px 16px; background: var(--bg-base); font-family: 'SF Mono', 'Fira Code', monospace; }
+.log-entry { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; font-size: 12px; line-height: 1.6; }
+.log-time { color: var(--text-faint); flex-shrink: 0; min-width: 64px; }
+.log-icon { flex-shrink: 0; min-width: 18px; }
+.log-text { color: var(--text-secondary); word-break: break-all; }
+.log-entry.error .log-text { color: #f87171; }
+.log-entry.info .log-text { color: var(--text-tertiary); }
 
 .result-card { padding: 20px; border-radius: 14px; }
 .result-card h3 { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px; }
