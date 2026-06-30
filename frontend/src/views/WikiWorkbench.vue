@@ -281,8 +281,8 @@ async function doIngest() {
   const fileName = ingestForm.value.sourcePath.split('/').pop() || ingestForm.value.sourcePath
 
   addLog('📖', `开始摄入：${fileName}`)
-  addLog('📖', `路径：${ingestForm.sourcePath}`)
-  addLog('🏷️', `类型：${ingestForm.sourceType}`)
+  addLog('📖', `路径：${ingestForm.value.sourcePath}`)
+  addLog('🏷️', `类型：${ingestForm.value.sourceType}`)
   await sleep(200)
 
   addLog('📡', '正在从 Obsidian 读取原始资料...')
