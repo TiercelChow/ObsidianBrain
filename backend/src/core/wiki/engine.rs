@@ -90,17 +90,17 @@ impl WikiEngine {
             .trim_end_matches(".md");
 
         let extract_prompt = format!(
-            "你是一个知识库维护助手。请阅读以下资料，生成一个结构化的摘要。\n\n\
+            "你是一个知识库维护助手。请阅读以下资料，生成结构化的知识内容。\n\n\
             要求：\n\
             1. 生成 200-500 字的中文摘要，提炼核心观点和关键信息\n\
-            2. 提取文中提到的实体（人物、项目、工具、组织等）\n\
-            3. 提取核心概念（技术主题、理论、方法等）\n\n\
+            2. 提取文中提到的实体（人物、项目、工具、组织等），每个实体附 50-100 字的描述\n\
+            3. 提取核心概念（技术主题、理论、方法等），每个概念附 50-100 字的描述\n\n\
             请严格按以下 JSON 格式返回（不要包含其他文字）：\n\
             ```json\n\
             {{\n\
               \"summary\": \"摘要内容\",\n\
-              \"entities\": [\"实体1\", \"实体2\"],\n\
-              \"concepts\": [\"概念1\", \"概念2\"]\n\
+              \"entities\": [{{\"name\": \"实体名\", \"description\": \"该实体的描述\"}}],\n\
+              \"concepts\": [{{\"name\": \"概念名\", \"description\": \"该概念的描述\"}}]\n\
             }}\n\
             ```\n\n\
             资料内容：\n{}",
@@ -114,22 +114,36 @@ impl WikiEngine {
             .as_str()
             .unwrap_or("无法生成摘要")
             .to_string();
-        let entities: Vec<String> = parsed["entities"]
+
+        // 解析实体（带描述）
+        let entity_list: Vec<(String, String)> = parsed["entities"]
             .as_array()
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
+                    .filter_map(|v| {
+                        let name = v.get("name")?.as_str()?.to_string();
+                        let desc = v.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string();
+                        Some((name, desc))
+                    })
                     .collect()
             })
             .unwrap_or_default();
-        let concepts: Vec<String> = parsed["concepts"]
+
+        let concept_list: Vec<(String, String)> = parsed["concepts"]
             .as_array()
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
+                    .filter_map(|v| {
+                        let name = v.get("name")?.as_str()?.to_string();
+                        let desc = v.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string();
+                        Some((name, desc))
+                    })
                     .collect()
             })
             .unwrap_or_default();
+
+        let entities: Vec<String> = entity_list.iter().map(|(n, _)| n.clone()).collect();
+        let concepts: Vec<String> = concept_list.iter().map(|(n, _)| n.clone()).collect();
 
         // 3. 创建源摘要页
         let source_page_name = format!("{}-{}", now, source_name);
@@ -149,24 +163,22 @@ impl WikiEngine {
         let mut updated_pages = Vec::new();
 
         // 4. 创建/更新实体页
-        for entity in &entities {
+        for (entity, description) in &entity_list {
             let path = page_path(&PageType::Entity, entity);
             if page_exists(&self.obsidian, &path).await {
-                // 更新：追加源引用
                 let existing = read_page(&self.obsidian, &path).await.unwrap_or_default();
                 let updated = add_source_ref(&existing, &source_page_name, &now);
                 write_page(&self.obsidian, &path, &updated).await?;
                 updated_pages.push(path);
             } else {
-                // 创建新实体页
-                let content = format_entity_page(entity, &source_page_name, &now, &concepts);
+                let content = format_entity_page(entity, description, &source_page_name, &now, &concepts);
                 write_page(&self.obsidian, &path, &content).await?;
                 created_pages.push(path);
             }
         }
 
         // 5. 创建/更新概念页
-        for concept in &concepts {
+        for (concept, description) in &concept_list {
             let path = page_path(&PageType::Concept, concept);
             if page_exists(&self.obsidian, &path).await {
                 let existing = read_page(&self.obsidian, &path).await.unwrap_or_default();
@@ -174,7 +186,7 @@ impl WikiEngine {
                 write_page(&self.obsidian, &path, &updated).await?;
                 updated_pages.push(path);
             } else {
-                let content = format_concept_page(concept, &source_page_name, &now, &entities);
+                let content = format_concept_page(concept, description, &source_page_name, &now, &entities);
                 write_page(&self.obsidian, &path, &content).await?;
                 created_pages.push(path);
             }
@@ -482,21 +494,33 @@ fn format_source_page(
 }
 
 /// 格式化实体页
-fn format_entity_page(name: &str, source: &str, date: &str, concepts: &[String]) -> String {
+fn format_entity_page(name: &str, description: &str, source: &str, date: &str, concepts: &[String]) -> String {
     let concept_links: Vec<String> = concepts.iter().map(|c| format!("- [[{}]]", c)).collect();
+    let desc = if description.is_empty() {
+        format!("{}是一个从资料中提取的实体。", name)
+    } else {
+        description.to_string()
+    };
     format!(
-        "---\ntype: entity\nname: \"{}\"\nsources: [\"{}\"]\ncreated: \"{}\"\nupdated: \"{}\"\n---\n\n# {}\n\n（待补充详细内容）\n\n## 相关概念\n\n{}",
+        "---\ntype: entity\nname: \"{}\"\nsources: [\"{}\"]\ncreated: \"{}\"\nupdated: \"{}\"\n---\n\n# {}\n\n{}\n\n## 相关概念\n\n{}",
         name, source, date, date, name,
+        desc,
         concept_links.join("\n")
     )
 }
 
 /// 格式化概念页
-fn format_concept_page(name: &str, source: &str, date: &str, entities: &[String]) -> String {
+fn format_concept_page(name: &str, description: &str, source: &str, date: &str, entities: &[String]) -> String {
     let entity_links: Vec<String> = entities.iter().map(|e| format!("- [[{}]]", e)).collect();
+    let desc = if description.is_empty() {
+        format!("{}是一个从资料中提取的概念。", name)
+    } else {
+        description.to_string()
+    };
     format!(
-        "---\ntype: concept\nsources: [\"{}\"]\ncreated: \"{}\"\nupdated: \"{}\"\n---\n\n# {}\n\n（待补充详细内容）\n\n## 相关实体\n\n{}",
+        "---\ntype: concept\nsources: [\"{}\"]\ncreated: \"{}\"\nupdated: \"{}\"\n---\n\n# {}\n\n{}\n\n## 相关实体\n\n{}",
         source, date, date, name,
+        desc,
         entity_links.join("\n")
     )
 }
