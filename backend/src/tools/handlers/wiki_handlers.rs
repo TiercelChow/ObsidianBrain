@@ -1,4 +1,4 @@
-//! LLM Wiki 工具处理器
+//! LLM Wiki 工具处理器 — Karpathy 模式
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -15,7 +15,7 @@ pub struct IngestSourceHandler;
 #[async_trait]
 impl ToolHandler for IngestSourceHandler {
     fn name(&self) -> &str { "ingest_source" }
-    fn description(&self) -> &str { "将原始资料摄入 Wiki：LLM 读取、摘要、提取实体概念、更新交叉引用" }
+    fn description(&self) -> &str { "将原始资料摄入 Wiki：LLM 编译完整文章，合并或新建" }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -41,11 +41,11 @@ impl ToolHandler for IngestSourceHandler {
         let result = engine.ingest(source_path, source_type, source_url).await?;
 
         Ok(json!({
-            "summary_page": result.summary_page,
-            "created_pages": result.created_pages,
-            "updated_pages": result.updated_pages,
-            "entities": result.entities,
-            "concepts": result.concepts,
+            "article_path": result.article_path,
+            "action": result.action,
+            "title": result.title,
+            "topic": result.topic,
+            "cascade_updated": result.cascade_updated,
         }))
     }
 }
@@ -56,13 +56,13 @@ pub struct QueryWikiHandler;
 #[async_trait]
 impl ToolHandler for QueryWikiHandler {
     fn name(&self) -> &str { "query_wiki" }
-    fn description(&self) -> &str { "基于已编译的 Wiki 回答问题（非 RAG）" }
+    fn description(&self) -> &str { "基于已编译的 Wiki 文章回答问题" }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
                 "question": { "type": "string", "description": "用户的问题" },
-                "save_answer": { "type": "boolean", "default": false, "description": "是否归档为综合论述" }
+                "save_answer": { "type": "boolean", "default": false, "description": "是否归档为 Wiki 文章" }
             },
             "required": ["question"]
         })
@@ -93,7 +93,7 @@ pub struct LintWikiHandler;
 #[async_trait]
 impl ToolHandler for LintWikiHandler {
     fn name(&self) -> &str { "lint_wiki" }
-    fn description(&self) -> &str { "检查 Wiki 健康度：孤岛页、矛盾、缺失引用" }
+    fn description(&self) -> &str { "检查 Wiki 健康度：索引一致性、孤岛页、链接有效性" }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -113,9 +113,7 @@ impl ToolHandler for LintWikiHandler {
 
         Ok(json!({
             "total_pages": result.total_pages,
-            "orphans": result.orphans,
-            "missing_pages": result.missing_pages,
-            "hubs": result.hubs,
+            "issues": result.issues,
             "fixed": result.fixed,
             "suggestions": result.suggestions,
         }))
@@ -128,7 +126,7 @@ pub struct GetWikiStatusHandler;
 #[async_trait]
 impl ToolHandler for GetWikiStatusHandler {
     fn name(&self) -> &str { "get_wiki_status" }
-    fn description(&self) -> &str { "获取 Wiki 当前状态：页数、类型分布" }
+    fn description(&self) -> &str { "获取 Wiki 当前状态：文章数、主题数、原始资料数" }
     fn input_schema(&self) -> Value {
         json!({ "type": "object", "properties": {} })
     }
@@ -141,10 +139,8 @@ impl ToolHandler for GetWikiStatusHandler {
 
         Ok(json!({
             "total_pages": status.total_pages,
-            "entities": status.entities,
-            "concepts": status.concepts,
-            "sources": status.sources,
-            "synthesis": status.synthesis,
+            "topics": status.topics,
+            "raw_sources": status.raw_sources,
             "initialized": status.initialized,
         }))
     }

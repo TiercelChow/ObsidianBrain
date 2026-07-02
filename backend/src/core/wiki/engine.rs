@@ -1,30 +1,25 @@
-//! Wiki 引擎核心
+//! Wiki 引擎核心 — Karpathy LLM Wiki 模式
 //!
-//! 编排 Ingest / Query / Lint 三大操作。
+//! LLM 是知识编译器：读取原始资料 → 综合改写成完整文章 → 合并/新建/级联更新。
 
 use std::sync::Arc;
 
 use crate::error::BrainError;
 use crate::infra::llm_client::LlmProvider;
 use crate::infra::obsidian_client::ObsidianProvider;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 
-use super::index_manager::{append_log, list_pages, update_index};
-use super::link_graph::LinkGraph;
-use super::page_writer::{
-    ensure_wiki_structure, page_exists, page_path, read_page, to_filename, write_page,
-    PageType,
-};
+use super::page_writer::{ensure_wiki_structure, page_exists, read_page, write_page};
 
 /// Wiki 摄入结果
 #[derive(Debug, Clone, Serialize)]
 pub struct IngestResult {
-    pub summary_page: String,
-    pub created_pages: Vec<String>,
-    pub updated_pages: Vec<String>,
-    pub entities: Vec<String>,
-    pub concepts: Vec<String>,
+    pub article_path: String,
+    pub action: String, // "created" | "merged" | "updated"
+    pub title: String,
+    pub topic: String,
+    pub cascade_updated: Vec<String>,
 }
 
 /// Wiki 查询结果
@@ -39,21 +34,25 @@ pub struct QueryResult {
 #[derive(Debug, Clone, Serialize)]
 pub struct LintResult {
     pub total_pages: usize,
-    pub orphans: Vec<String>,
-    pub missing_pages: Vec<String>,
-    pub hubs: Vec<(String, usize)>,
+    pub issues: Vec<LintIssue>,
     pub fixed: usize,
     pub suggestions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LintIssue {
+    pub severity: String, // "error" | "warning" | "info"
+    pub category: String,
+    pub description: String,
+    pub file: Option<String>,
 }
 
 /// Wiki 状态
 #[derive(Debug, Clone, Serialize)]
 pub struct WikiStatus {
     pub total_pages: usize,
-    pub entities: usize,
-    pub concepts: usize,
-    pub sources: usize,
-    pub synthesis: usize,
+    pub topics: Vec<String>,
+    pub raw_sources: usize,
     pub initialized: bool,
 }
 
@@ -68,176 +67,226 @@ impl WikiEngine {
         Self { obsidian, llm }
     }
 
-    /// 摄入一篇原始资料
+    /// 摄入一篇原始资料：LLM 读取 → 决定合并或新建 → 编译完整文章 → 更新索引
     pub async fn ingest(
         &self,
         source_path: &str,
         source_type: &str,
         source_url: Option<&str>,
     ) -> Result<IngestResult, BrainError> {
-        // 确保 Wiki 结构存在
         ensure_wiki_structure(&self.obsidian).await?;
 
-        // 1. 读取原始资料
         let content = read_page(&self.obsidian, source_path).await?;
-
-        // 2. LLM 生成摘要 + 提取实体和概念
         let now = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let source_name = source_path
-            .rsplit('/')
-            .next()
-            .unwrap_or(source_path)
-            .trim_end_matches(".md");
 
-        let extract_prompt = format!(
-            "你是一个知识库维护助手。请阅读以下资料，生成结构化的知识内容。\n\n\
-            要求：\n\
-            1. 生成 200-500 字的中文摘要，提炼核心观点和关键信息\n\
-            2. 提取文中提到的实体（人物、项目、工具、组织等），每个实体附 50-100 字的描述\n\
-            3. 提取核心概念（技术主题、理论、方法等），每个概念附 50-100 字的描述\n\n\
-            请严格按以下 JSON 格式返回（不要包含其他文字）：\n\
+        // 1. 读取现有索引，让 LLM 决定如何处理这篇资料
+        let index = read_page(&self.obsidian, "Wiki/index.md")
+            .await
+            .unwrap_or_else(|_| "# Knowledge Base Index\n".to_string());
+
+        let decide_prompt = format!(
+            "你是一个知识库编译器。请阅读以下原始资料和现有 Wiki 索引，决定如何处理。\n\n\
+            ## 任务\n\
+            1. 确定这篇资料属于什么主题（topic），用英文 kebab-case\n\
+            2. 判断应该合并到已有文章还是创建新文章\n\
+            3. 如果创建新文章，给出文章标题和文件名\n\n\
+            ## 严格按 JSON 格式返回：\n\
             ```json\n\
             {{\n\
-              \"summary\": \"摘要内容\",\n\
-              \"entities\": [{{\"name\": \"实体名\", \"description\": \"该实体的描述\"}}],\n\
-              \"concepts\": [{{\"name\": \"概念名\", \"description\": \"该概念的描述\"}}]\n\
+              \"topic\": \"主题名（kebab-case）\",\n\
+              \"action\": \"create\" 或 \"merge\",\n\
+              \"merge_target\": \"要合并的文章路径（如 wiki/llm/llm-wiki.md），action=create 时为空\",\n\
+              \"title\": \"文章标题\",\n\
+              \"filename\": \"文件名（不含 .md，kebab-case）\"\n\
             }}\n\
             ```\n\n\
-            资料内容：\n{}",
-            content
+            ## 现有索引：\n{}\n\n\
+            ## 原始资料（前 3000 字）：\n{}",
+            index,
+            content.chars().take(3000).collect::<String>()
         );
 
-        let llm_response = self.llm.generate(&extract_prompt).await?;
-        let parsed = parse_llm_json(&llm_response)?;
+        let decide_response = self.llm.generate(&decide_prompt).await?;
+        let decision = parse_llm_json(&decide_response)?;
 
-        let summary = parsed["summary"]
+        let topic = decision["topic"].as_str().unwrap_or("general").to_string();
+        let action = decision["action"].as_str().unwrap_or("create").to_string();
+        let title = decision["title"].as_str().unwrap_or("Untitled").to_string();
+        let filename = decision["filename"]
             .as_str()
-            .unwrap_or("无法生成摘要")
+            .unwrap_or("untitled")
             .to_string();
+        let merge_target = decision["merge_target"].as_str().unwrap_or("").to_string();
 
-        // 解析实体（带描述）
-        let entity_list: Vec<(String, String)> = parsed["entities"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| {
-                        let name = v.get("name")?.as_str()?.to_string();
-                        let desc = v.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string();
-                        Some((name, desc))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let article_path = format!("Wiki/{}/{}.md", topic, filename);
 
-        let concept_list: Vec<(String, String)> = parsed["concepts"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| {
-                        let name = v.get("name")?.as_str()?.to_string();
-                        let desc = v.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string();
-                        Some((name, desc))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        // 2. 编译文章
+        let (article_content, action_label) = if action == "merge" && !merge_target.is_empty() {
+            // 合并模式：读取已有文章，LLM 合并新内容
+            let existing = read_page(&self.obsidian, &merge_target).await.unwrap_or_default();
+            let merge_prompt = format!(
+                "你是一个知识库编译器。请将新资料合并到已有文章中。\n\n\
+                ## 要求\n\
+                1. 保留已有文章的结构和内容\n\
+                2. 将新资料的信息整合到相关章节\n\
+                3. 如果新资料与已有内容冲突，标注冲突\n\
+                4. 更新 Sources 和 Raw 字段\n\
+                5. 输出完整的合并后文章（Markdown 格式，包含 frontmatter）\n\n\
+                ## 已有文章：\n{}\n\n\
+                ## 新资料（前 5000 字）：\n{}",
+                existing,
+                content.chars().take(5000).collect::<String>()
+            );
+            let merged = self.llm.generate(&merge_prompt).await?;
+            (merged, "merged")
+        } else {
+            // 新建模式：LLM 从资料编译完整文章
+            let source_desc = format!("{}, {}", source_type, now);
+            let source_name = source_path.rsplit('/').next().unwrap_or(source_path);
+            let content_preview: String = content.chars().take(8000).collect();
+            let compile_prompt = format!(
+                "你是一个知识库编译器。请阅读以下资料，编写一篇完整的知识文章。\n\n\
+                ## 要求\n\
+                1. 不要逐字复制原文，要综合改写和重新组织\n\
+                2. 文章应该是一篇完整的知识论述，不是简单的摘要\n\
+                3. 包含 Overview 概述段落和多个正文章节\n\
+                4. 使用 Markdown 格式\n\n\
+                ## 文章格式：\n\
+                ```markdown\n\
+                # {title}\n\n\
+                > Sources: {source_desc}\n\
+                > Raw: [{source_name}](../../{source_path})\n\n\
+                ## Overview\n\n\
+                {{概述段落}}\n\n\
+                ## {{正文章节}}\n\n\
+                {{综合改写的内容}}\n\
+                ```\n\n\
+                ## 资料（前 8000 字）：\n{content_preview}",
+            );
+            let compiled = self.llm.generate(&compile_prompt).await?;
+            (compiled, "created")
+        };
 
-        let entities: Vec<String> = entity_list.iter().map(|(n, _)| n.clone()).collect();
-        let concepts: Vec<String> = concept_list.iter().map(|(n, _)| n.clone()).collect();
+        write_page(&self.obsidian, &article_path, &article_content).await?;
 
-        // 3. 创建源摘要页
-        let source_page_name = format!("{}-{}", now, source_name);
-        let source_page_path = page_path(&PageType::Source, &source_page_name);
-        let source_content = format_source_page(
-            &summary,
-            source_path,
-            source_type,
-            source_url,
-            &now,
-            &entities,
-            &concepts,
-        );
-        write_page(&self.obsidian, &source_page_path, &source_content).await?;
+        // 3. 级联更新：检查同主题其他文章是否需要更新
+        let cascade_updated = self.cascade_updates(&topic, &article_path, &content).await?;
 
-        let mut created_pages = vec![source_page_path.clone()];
-        let mut updated_pages = Vec::new();
+        // 4. 更新索引
+        self.update_index(&topic, &title, &article_path, &now).await?;
 
-        // 4. 创建/更新实体页
-        for (entity, description) in &entity_list {
-            let path = page_path(&PageType::Entity, entity);
-            if page_exists(&self.obsidian, &path).await {
-                let existing = read_page(&self.obsidian, &path).await.unwrap_or_default();
-                let updated = add_source_ref(&existing, &source_page_name, &now);
-                write_page(&self.obsidian, &path, &updated).await?;
-                updated_pages.push(path);
-            } else {
-                let content = format_entity_page(entity, description, &source_page_name, &now, &concepts);
-                write_page(&self.obsidian, &path, &content).await?;
-                created_pages.push(path);
-            }
-        }
-
-        // 5. 创建/更新概念页
-        for (concept, description) in &concept_list {
-            let path = page_path(&PageType::Concept, concept);
-            if page_exists(&self.obsidian, &path).await {
-                let existing = read_page(&self.obsidian, &path).await.unwrap_or_default();
-                let updated = add_source_ref(&existing, &source_page_name, &now);
-                write_page(&self.obsidian, &path, &updated).await?;
-                updated_pages.push(path);
-            } else {
-                let content = format_concept_page(concept, description, &source_page_name, &now, &entities);
-                write_page(&self.obsidian, &path, &content).await?;
-                created_pages.push(path);
-            }
-        }
-
-        // 6. 更新索引
-        let all_entities = list_pages(&self.obsidian, "Wiki/entities").await.unwrap_or_default();
-        let all_concepts = list_pages(&self.obsidian, "Wiki/concepts").await.unwrap_or_default();
-        let all_sources = list_pages(&self.obsidian, "Wiki/sources").await.unwrap_or_default();
-        let all_synthesis = list_pages(&self.obsidian, "Wiki/synthesis").await.unwrap_or_default();
-        update_index(
-            &self.obsidian,
-            &all_entities,
-            &all_concepts,
-            &all_sources,
-            &all_synthesis,
-        )
-        .await?;
-        updated_pages.push("Wiki/index.md".to_string());
-
-        // 7. 追加日志
-        let all_affected: Vec<String> = created_pages
-            .iter()
-            .chain(updated_pages.iter())
-            .cloned()
-            .collect();
-        append_log(
-            &self.obsidian,
-            "ingest",
-            source_path,
-            &all_affected,
-        )
-        .await?;
-        updated_pages.push("Wiki/log.md".to_string());
+        // 5. 追加日志
+        let log_entry = if cascade_updated.is_empty() {
+            format!("\n## [{}] ingest | {}\n", now, title)
+        } else {
+            let updated_lines: Vec<String> = cascade_updated
+                .iter()
+                .map(|p| format!("- Updated: {}", p))
+                .collect();
+            format!("\n## [{}] ingest | {}\n{}\n", now, title, updated_lines.join("\n"))
+        };
+        let log_path = "Wiki/log.md";
+        let existing_log = read_page(&self.obsidian, log_path).await.unwrap_or_default();
+        write_page(&self.obsidian, log_path, &format!("{}{}", existing_log, log_entry)).await?;
 
         tracing::info!(
             source = source_path,
-            created = created_pages.len(),
-            updated = updated_pages.len(),
-            entities = entities.len(),
-            concepts = concepts.len(),
+            action = action_label,
+            article = article_path,
+            cascade = cascade_updated.len(),
             "Wiki ingest 完成"
         );
 
         Ok(IngestResult {
-            summary_page: source_page_path,
-            created_pages,
-            updated_pages,
-            entities,
-            concepts,
+            article_path,
+            action: action_label.to_string(),
+            title,
+            topic,
+            cascade_updated,
         })
+    }
+
+    /// 级联更新：检查同主题其他文章是否需要因新资料而更新
+    async fn cascade_updates(
+        &self,
+        topic: &str,
+        new_article_path: &str,
+        source_content: &str,
+    ) -> Result<Vec<String>, BrainError> {
+        // 列出同主题的其他文章
+        let client = crate::infra::obsidian_client::get_client(&self.obsidian)?;
+        let all_files = client.list_all_files().await?;
+        let same_topic: Vec<String> = all_files
+            .iter()
+            .filter(|f| {
+                f.starts_with(&format!("Wiki/{}/", topic))
+                    && f.ends_with(".md")
+                    && *f != new_article_path
+                    && !f.ends_with("index.md")
+                    && !f.ends_with("log.md")
+            })
+            .cloned()
+            .collect();
+
+        if same_topic.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // 读取同主题文章的标题，让 LLM 判断是否需要级联更新
+        let mut titles = Vec::new();
+        for path in &same_topic {
+            if let Ok(content) = read_page(&self.obsidian, path).await {
+                let title = content.lines().next().unwrap_or("").trim_start_matches("# ").to_string();
+                titles.push(format!("- {} ({})", title, path));
+            }
+        }
+
+        let cascade_prompt = format!(
+            "你是一个知识库维护助手。刚摄入了一篇新资料到 Wiki，请判断同主题的其他文章是否需要更新。\n\n\
+            ## 新资料摘要（前 1000 字）：\n{}\n\n\
+            ## 同主题已有文章：\n{}\n\n\
+            ## 要求\n\
+            判断哪些文章的内容可能受到新资料影响，需要更新。\n\
+            严格按 JSON 格式返回：{{\"need_update\": [\"文章路径1\", \"文章路径2\"]}}\n\
+            如果都不需要更新，返回空数组。",
+            source_content.chars().take(1000).collect::<String>(),
+            titles.join("\n")
+        );
+
+        let response = self.llm.generate(&cascade_prompt).await?;
+        let parsed = parse_llm_json(&response).unwrap_or(json!({}));
+        let to_update: Vec<String> = parsed["need_update"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // 对每篇需要更新的文章，让 LLM 执行更新
+        let mut updated = Vec::new();
+        for path in &to_update {
+            if let Ok(existing) = read_page(&self.obsidian, path).await {
+                let update_prompt = format!(
+                    "你是一个知识库维护助手。请根据新资料更新这篇已有文章的相关内容。\n\n\
+                    ## 要求\n\
+                    1. 只更新与新资料相关的部分\n\
+                    2. 保留不相关的内容\n\
+                    3. 输出完整的更新后文章\n\n\
+                    ## 已有文章：\n{}\n\n\
+                    ## 新资料（前 3000 字）：\n{}",
+                    existing,
+                    source_content.chars().take(3000).collect::<String>()
+                );
+                if let Ok(updated_content) = self.llm.generate(&update_prompt).await {
+                    write_page(&self.obsidian, path, &updated_content).await?;
+                    updated.push(path.clone());
+                }
+            }
+        }
+
+        Ok(updated)
     }
 
     /// 基于 Wiki 回答问题
@@ -246,18 +295,16 @@ impl WikiEngine {
         question: &str,
         save_answer: bool,
     ) -> Result<QueryResult, BrainError> {
-        // 1. 读取索引
         let index = read_page(&self.obsidian, "Wiki/index.md")
             .await
-            .unwrap_or_else(|_| "# Wiki 索引\n\n（空）".to_string());
+            .unwrap_or_else(|_| "# Knowledge Base Index\n".to_string());
 
-        // 2. LLM 选择相关页面
+        // LLM 选择相关文章
         let select_prompt = format!(
-            "你是一个知识库查询助手。以下是 Wiki 的索引文件，列出了所有可用的知识页面。\n\n\
-            用户问题：{}\n\n\
-            请从索引中选出与问题最相关的页面（最多 5 个），返回页面名称列表（不含路径和 .md）。\n\
-            严格按 JSON 格式返回：{{\"pages\": [\"页面1\", \"页面2\"]}}\n\n\
-            索引内容：\n{}",
+            "你是一个知识库查询助手。以下是 Wiki 的索引。请选出与问题最相关的文章（最多 5 个）。\n\
+            严格按 JSON 格式返回：{{\"pages\": [\"wiki/topic/article.md\"]}}\n\n\
+            ## 问题：{}\n\n\
+            ## 索引：\n{}",
             question, index
         );
 
@@ -272,20 +319,15 @@ impl WikiEngine {
             })
             .unwrap_or_default();
 
-        // 3. 读取相关页面内容
+        // 读取相关文章
         let mut page_contents = Vec::new();
-        for page_name in &selected_pages {
-            // 在各子目录中查找
-            for dir in &["Wiki/entities", "Wiki/concepts", "Wiki/sources", "Wiki/synthesis"] {
-                let path = format!("{}/{}.md", dir, to_filename(page_name));
-                if let Ok(content) = read_page(&self.obsidian, &path).await {
-                    page_contents.push((path, content));
-                    break;
-                }
+        for path in &selected_pages {
+            if let Ok(content) = read_page(&self.obsidian, path).await {
+                page_contents.push((path.clone(), content));
             }
         }
 
-        // 4. LLM 综合回答
+        // LLM 综合回答
         let context = page_contents
             .iter()
             .map(|(path, content)| format!("---\n来源：{}\n{}\n", path, content))
@@ -293,31 +335,37 @@ impl WikiEngine {
             .join("\n");
 
         let answer_prompt = format!(
-            "你是一个知识库问答助手。请基于以下 Wiki 页面内容回答用户的问题。\n\n\
+            "你是一个知识库问答助手。请基于以下 Wiki 文章回答问题。\n\n\
             要求：\n\
             1. 回答必须基于提供的 Wiki 内容，不要编造\n\
-            2. 引用相关页面时使用 [[页面名]] 格式\n\
-            3. 如果信息不足，说明还需要哪些方面的资料\n\n\
-            用户问题：{}\n\n\
-            Wiki 内容：\n{}",
+            2. 引用相关文章\n\
+            3. 如果信息不足，说明还需要哪些资料\n\n\
+            ## 问题：{}\n\n\
+            ## Wiki 内容：\n{}",
             question, context
         );
 
         let answer = self.llm.generate(&answer_prompt).await?;
-
         let cited_pages: Vec<String> = page_contents.iter().map(|(p, _)| p.clone()).collect();
 
-        // 5. 可选归档
+        // 可选归档
         let saved_to = if save_answer {
             let now = chrono::Local::now().format("%Y-%m-%d").to_string();
-            let name = format!("{}-query-{}", now, to_filename(&question.chars().take(20).collect::<String>()));
-            let path = page_path(&PageType::Synthesis, &name);
-            let content = format!(
-                "---\ntype: synthesis\ncreated: {}\nquery: {}\n---\n\n# {}\n\n{}",
-                now, question, question, answer
+            let filename = format!("{}-archived-{}", now, question.chars().take(20).collect::<String>().replace(' ', "-"));
+            let path = format!("Wiki/archived/{}.md", filename);
+
+            let archive_content = format!(
+                "# {}\n\n> Archived: {}\n\n## Overview\n\n{}\n",
+                question, now, answer
             );
-            write_page(&self.obsidian, &path, &content).await?;
-            append_log(&self.obsidian, "query", question, &cited_pages).await?;
+            write_page(&self.obsidian, &path, &archive_content).await?;
+
+            // 追加日志
+            let log_path = "Wiki/log.md";
+            let existing_log = read_page(&self.obsidian, log_path).await.unwrap_or_default();
+            let log_entry = format!("\n## [{}] query | Archived: {}\n", now, question);
+            write_page(&self.obsidian, log_path, &format!("{}{}", existing_log, log_entry)).await?;
+
             Some(path)
         } else {
             None
@@ -331,219 +379,198 @@ impl WikiEngine {
     }
 
     /// Wiki 健康检查
-    pub async fn lint(&self, auto_fix: bool) -> Result<LintResult, BrainError> {
-        // 1. 列出所有 Wiki 页面
+    pub async fn lint(&self, _auto_fix: bool) -> Result<LintResult, BrainError> {
         let client = crate::infra::obsidian_client::get_client(&self.obsidian)?;
         let all_files = client.list_all_files().await?;
         let wiki_files: Vec<String> = all_files
-            .into_iter()
+            .iter()
             .filter(|f| f.starts_with("Wiki/") && f.ends_with(".md") && !f.ends_with(".gitkeep"))
+            .cloned()
             .collect();
 
-        // 2. 读取所有页面内容
+        let mut issues = Vec::new();
+
+        // 检查索引一致性
+        let index_content = read_page(&self.obsidian, "Wiki/index.md").await.unwrap_or_default();
+        for f in &wiki_files {
+            if f == "Wiki/index.md" || f == "Wiki/log.md" || f == "Wiki/schema.md" {
+                continue;
+            }
+            if !index_content.contains(f) && !index_content.contains(&f.replace("Wiki/", "")) {
+                issues.push(LintIssue {
+                    severity: "warning".to_string(),
+                    category: "index".to_string(),
+                    description: format!("文章不在索引中: {}", f),
+                    file: Some(f.clone()),
+                });
+            }
+        }
+
+        // 检查孤岛页
         let mut page_contents = Vec::new();
         for path in &wiki_files {
             if let Ok(content) = client.read_file(path).await {
                 page_contents.push((path.clone(), content));
             }
         }
-
-        // 3. 构建链接图谱
-        let graph = LinkGraph::build(&page_contents);
-
+        let graph = super::link_graph::LinkGraph::build(&page_contents);
         let orphans = graph.find_orphans();
-        let missing_pages = graph.find_missing_pages();
-        let hubs = graph.find_hubs(5);
-
-        // 4. 自动修复
-        let mut fixed = 0;
-        if auto_fix {
-            // 为缺失页面创建存根
-            for missing in &missing_pages {
-                let name = missing.rsplit('/').next().unwrap_or(missing).trim_end_matches(".md");
-                // 判断是实体还是概念（简化：都放 concepts）
-                let path = page_path(&PageType::Concept, name);
-                if !page_exists(&self.obsidian, &path).await {
-                    let now = chrono::Local::now().format("%Y-%m-%d").to_string();
-                    let content = format!(
-                        "---\ntype: concept\ncreated: {}\nupdated: {}\n---\n\n# {}\n\n（待补充）\n",
-                        now, now, name
-                    );
-                    write_page(&self.obsidian, &path, &content).await?;
-                    fixed += 1;
-                }
+        for o in &orphans {
+            if o == "Wiki/index.md" || o == "Wiki/log.md" {
+                continue;
             }
-
-            // 为孤岛页添加引用（在 index 中列出即可发现）
-            // 更复杂的引用添加留给 LLM 后续处理
+            issues.push(LintIssue {
+                severity: "info".to_string(),
+                category: "orphan".to_string(),
+                description: format!("孤岛页（无入链）: {}", o),
+                file: Some(o.clone()),
+            });
         }
 
-        // 5. LLM 生成建议
+        let hubs = graph.find_hubs(5);
+
+        // LLM 生成建议
         let suggestions_prompt = format!(
-            "你是一个知识库维护助手。以下是 Wiki 的健康检查结果，请给出 2-3 条改进建议。\n\n\
-            总页面数：{}\n孤岛页：{:?}\n缺失页面：{:?}\n枢纽页：{:?}\n\n\
-            请返回建议列表，每条一句话。严格按 JSON 格式：{{\"suggestions\": [\"建议1\", \"建议2\"]}}",
+            "你是一个知识库维护助手。以下是检查结果，请给出 2-3 条改进建议。\n\
+            严格按 JSON 格式：{{\"suggestions\": [\"建议1\", \"建议2\"]}}\n\n\
+            总文章数：{}\n问题数：{}\n孤岛页：{} 个\n知识枢纽：{} 个",
             wiki_files.len(),
-            orphans,
-            missing_pages,
-            hubs.iter().map(|(p, c)| format!("{}({})", p, c)).collect::<Vec<_>>()
+            issues.len(),
+            orphans.len(),
+            hubs.len()
         );
 
         let suggestions_response = self.llm.generate(&suggestions_prompt).await.unwrap_or_default();
         let suggestions_parsed = parse_llm_json(&suggestions_response).ok();
         let suggestions: Vec<String> = suggestions_parsed
-            .and_then(|p| p["suggestions"].as_array().map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            }))
+            .and_then(|p| {
+                p["suggestions"]
+                    .as_array()
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            })
             .unwrap_or_default();
 
-        // 6. 追加日志
-        append_log(
-            &self.obsidian,
-            "lint",
-            &format!("检查 {} 页，修复 {} 处", wiki_files.len(), fixed),
-            &[],
-        )
-        .await?;
+        // 追加日志
+        let log_path = "Wiki/log.md";
+        let existing_log = read_page(&self.obsidian, log_path).await.unwrap_or_default();
+        let now = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let log_entry = format!("\n## [{}] lint | {} issues found\n", now, issues.len());
+        write_page(&self.obsidian, log_path, &format!("{}{}", existing_log, log_entry)).await?;
 
         Ok(LintResult {
             total_pages: wiki_files.len(),
-            orphans,
-            missing_pages,
-            hubs,
-            fixed,
+            issues,
+            fixed: 0,
             suggestions,
         })
     }
 
     /// 获取 Wiki 状态
     pub async fn status(&self) -> Result<WikiStatus, BrainError> {
-        let entities = list_pages(&self.obsidian, "Wiki/entities").await.unwrap_or_default();
-        let concepts = list_pages(&self.obsidian, "Wiki/concepts").await.unwrap_or_default();
-        let sources = list_pages(&self.obsidian, "Wiki/sources").await.unwrap_or_default();
-        let synthesis = list_pages(&self.obsidian, "Wiki/synthesis").await.unwrap_or_default();
+        let client = crate::infra::obsidian_client::get_client(&self.obsidian)?;
+        let all_files = client.list_all_files().await?;
+
+        let wiki_files: Vec<String> = all_files
+            .iter()
+            .filter(|f| f.starts_with("Wiki/") && f.ends_with(".md") && !f.ends_with(".gitkeep"))
+            .cloned()
+            .collect();
+
+        let raw_files: Vec<String> = all_files
+            .iter()
+            .filter(|f| f.starts_with("Raw/") && f.ends_with(".md"))
+            .cloned()
+            .collect();
+
+        // 提取主题目录
+        let mut topics = std::collections::HashSet::new();
+        for f in &wiki_files {
+            if let Some(rest) = f.strip_prefix("Wiki/") {
+                if let Some(slash_pos) = rest.find('/') {
+                    topics.insert(rest[..slash_pos].to_string());
+                }
+            }
+        }
 
         let initialized = page_exists(&self.obsidian, "Wiki/index.md").await;
 
         Ok(WikiStatus {
-            total_pages: entities.len() + concepts.len() + sources.len() + synthesis.len(),
-            entities: entities.len(),
-            concepts: concepts.len(),
-            sources: sources.len(),
-            synthesis: synthesis.len(),
+            total_pages: wiki_files.len(),
+            topics: topics.into_iter().collect(),
+            raw_sources: raw_files.len(),
             initialized,
         })
     }
+
+    /// 更新索引（表格格式）
+    async fn update_index(
+        &self,
+        topic: &str,
+        title: &str,
+        article_path: &str,
+        date: &str,
+    ) -> Result<(), BrainError> {
+        let index_path = "Wiki/index.md";
+        let mut index = read_page(&self.obsidian, index_path).await.unwrap_or_default();
+
+        // 检查是否已有这个主题的 section
+        let section_header = format!("## {}", topic);
+        let article_link = article_path.strip_prefix("Wiki/").unwrap_or(article_path);
+
+        if !index.contains(&section_header) {
+            // 新主题
+            let new_section = format!(
+                "\n\n## {}\n\n| Article | Summary | Updated |\n|---------|---------|---------|\n| [{}]({}) | {} | {} |\n",
+                topic, title, article_link, title, date
+            );
+            index.push_str(&new_section);
+        } else {
+            // 检查是否已有这个文章的条目
+            if index.contains(article_link) {
+                // 更新日期
+                // 简单策略：替换该行的 Updated 列
+                let old_line_pattern = format!("[{}]({})", title, article_link);
+                if let Some(pos) = index.find(&old_line_pattern) {
+                    // 找到这行的末尾，更新日期
+                    let line_start = index[..pos].rfind('|').map(|p| p + 1).unwrap_or(pos);
+                    let line_end = index[pos..].find('\n').map(|e| pos + e).unwrap_or(index.len());
+                    let new_line = format!(" [{}]({}) | {} | {} ", title, article_link, title, date);
+                    index.replace_range(line_start..line_end, &new_line);
+                }
+            } else {
+                // 在该主题的表格中添加新行
+                let entry = format!("| [{}]({}) | {} | {} |\n", title, article_link, title, date);
+                // 找到该 section 的下一个 section 或文件末尾
+                if let Some(section_start) = index.find(&section_header) {
+                    let after_section = &index[section_start..];
+                    let next_section = after_section[1..].find("\n## ");
+                    let insert_pos = match next_section {
+                        Some(offset) => section_start + 1 + offset,
+                        None => index.len(),
+                    };
+                    index.insert_str(insert_pos, &entry);
+                }
+            }
+        }
+
+        write_page(&self.obsidian, index_path, &index).await
+    }
 }
 
-// ── 辅助函数 ──
-
-/// 解析 LLM 返回的 JSON（容错：提取 ```json 块或裸 JSON）
+/// 解析 LLM 返回的 JSON
 fn parse_llm_json(text: &str) -> Result<serde_json::Value, BrainError> {
-    // 尝试提取 ```json ... ``` 块
     if let Some(start) = text.find("```json") {
         let rest = &text[start + 7..];
         if let Some(end) = rest.find("```") {
-            let json_str = rest[..end].trim();
-            return serde_json::from_str(json_str)
+            return serde_json::from_str(rest[..end].trim())
                 .map_err(|e| BrainError::Internal(format!("LLM JSON 解析失败: {e}")));
         }
     }
-
-    // 尝试提取第一个 { ... } 块
     if let Some(start) = text.find('{') {
         if let Some(end) = text.rfind('}') {
-            let json_str = &text[start..=end];
-            return serde_json::from_str(json_str)
+            return serde_json::from_str(&text[start..=end])
                 .map_err(|e| BrainError::Internal(format!("LLM JSON 解析失败: {e}")));
         }
     }
-
     Err(BrainError::Internal("LLM 未返回有效 JSON".to_string()))
-}
-
-/// 格式化源摘要页
-fn format_source_page(
-    summary: &str,
-    source_path: &str,
-    source_type: &str,
-    source_url: Option<&str>,
-    date: &str,
-    entities: &[String],
-    concepts: &[String],
-) -> String {
-    let entity_links: Vec<String> = entities.iter().map(|e| format!("- [[{}]]", e)).collect();
-    let concept_links: Vec<String> = concepts.iter().map(|c| format!("- [[{}]]", c)).collect();
-    let url_line = source_url.map(|u| format!("source_url: \"{}\"\n", u)).unwrap_or_default();
-
-    format!(
-        "---\ntype: source\nsource_path: \"{}\"\nsource_type: \"{}\"\n{}\ningested: \"{}\"\nentities: [{}]\nconcepts: [{}]\n---\n\n# 摘要：{}\n\n## 核心摘要\n\n{}\n\n## 关键实体\n\n{}\n\n## 关键概念\n\n{}",
-        source_path,
-        source_type,
-        url_line,
-        date,
-        entities.iter().map(|e| format!("\"{}\"", e)).collect::<Vec<_>>().join(", "),
-        concepts.iter().map(|c| format!("\"{}\"", c)).collect::<Vec<_>>().join(", "),
-        source_path.rsplit('/').next().unwrap_or(source_path),
-        summary,
-        entity_links.join("\n"),
-        concept_links.join("\n"),
-    )
-}
-
-/// 格式化实体页
-fn format_entity_page(name: &str, description: &str, source: &str, date: &str, concepts: &[String]) -> String {
-    let concept_links: Vec<String> = concepts.iter().map(|c| format!("- [[{}]]", c)).collect();
-    let desc = if description.is_empty() {
-        format!("{}是一个从资料中提取的实体。", name)
-    } else {
-        description.to_string()
-    };
-    format!(
-        "---\ntype: entity\nname: \"{}\"\nsources: [\"{}\"]\ncreated: \"{}\"\nupdated: \"{}\"\n---\n\n# {}\n\n{}\n\n## 相关概念\n\n{}",
-        name, source, date, date, name,
-        desc,
-        concept_links.join("\n")
-    )
-}
-
-/// 格式化概念页
-fn format_concept_page(name: &str, description: &str, source: &str, date: &str, entities: &[String]) -> String {
-    let entity_links: Vec<String> = entities.iter().map(|e| format!("- [[{}]]", e)).collect();
-    let desc = if description.is_empty() {
-        format!("{}是一个从资料中提取的概念。", name)
-    } else {
-        description.to_string()
-    };
-    format!(
-        "---\ntype: concept\nsources: [\"{}\"]\ncreated: \"{}\"\nupdated: \"{}\"\n---\n\n# {}\n\n{}\n\n## 相关实体\n\n{}",
-        source, date, date, name,
-        desc,
-        entity_links.join("\n")
-    )
-}
-
-/// 在已有页面中追加源引用
-fn add_source_ref(existing: &str, source_name: &str, date: &str) -> String {
-    // 简单策略：在文件末尾追加来源引用
-    if existing.contains(&format!("[[{}]]", source_name)) {
-        // 已引用，只更新 updated 日期
-        return existing.replace(
-            "updated: \"",
-            &format!("updated: \"{}", date),
-        ).replace(
-            &format!("updated: \"{}\"", date.chars().take(10).collect::<String>()),
-            &format!("updated: \"{}\"", date),
-        );
-    }
-
-    // 追加引用
-    format!(
-        "{}\n\n## 新增来源\n\n- [[{}]] ({})\n",
-        existing.trim_end(),
-        source_name,
-        date
-    )
 }
