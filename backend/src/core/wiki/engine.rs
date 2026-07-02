@@ -114,16 +114,31 @@ impl WikiEngine {
         let title = decision["title"].as_str().unwrap_or("Untitled").to_string();
         let filename = decision["filename"]
             .as_str()
+            .filter(|s| !s.is_empty())
             .unwrap_or("untitled")
             .to_string();
-        let merge_target = decision["merge_target"].as_str().unwrap_or("").to_string();
+        let merge_target = decision["merge_target"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
 
-        let article_path = format!("Wiki/{}/{}.md", topic, filename);
+        // For merge: use merge_target as the article path
+        // For create: compute path from topic + filename
+        let article_path = if action == "merge" {
+            if let Some(ref target) = merge_target {
+                target.clone()
+            } else {
+                format!("Wiki/{}/{}.md", topic, filename)
+            }
+        } else {
+            format!("Wiki/{}/{}.md", topic, filename)
+        };
 
         // 2. 编译文章
-        let (article_content, action_label) = if action == "merge" && !merge_target.is_empty() {
+        let (article_content, action_label) = if action == "merge" && merge_target.is_some() {
             // 合并模式：读取已有文章，LLM 合并新内容
-            let existing = read_page(&self.obsidian, &merge_target).await.unwrap_or_default();
+            let target = merge_target.as_ref().unwrap();
+            let existing = read_page(&self.obsidian, target).await.unwrap_or_default();
             let merge_prompt = format!(
                 "你是一个知识库编译器。请将新资料合并到已有文章中。\n\n\
                 ## 要求\n\
