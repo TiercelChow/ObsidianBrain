@@ -138,7 +138,7 @@ impl WikiEngine {
                 content.chars().take(5000).collect::<String>()
             );
             let merged = self.llm.generate(&merge_prompt).await?;
-            (merged, "merged")
+            (strip_code_block(&merged), "merged")
         } else {
             // 新建模式：LLM 从资料编译完整文章
             let source_desc = format!("{}, {}", source_type, now);
@@ -164,7 +164,7 @@ impl WikiEngine {
                 ## 资料（前 8000 字）：\n{content_preview}",
             );
             let compiled = self.llm.generate(&compile_prompt).await?;
-            (compiled, "created")
+            (strip_code_block(&compiled), "created")
         };
 
         write_page(&self.obsidian, &article_path, &article_content).await?;
@@ -573,4 +573,19 @@ fn parse_llm_json(text: &str) -> Result<serde_json::Value, BrainError> {
         }
     }
     Err(BrainError::Internal("LLM 未返回有效 JSON".to_string()))
+}
+
+/// 去除 LLM 返回内容中的 markdown 代码块标记
+fn strip_code_block(text: &str) -> String {
+    let mut result = text.trim().to_string();
+    // 去除开头的 ```markdown 或 ```
+    if result.starts_with("```") {
+        let first_newline = result.find('\n').unwrap_or(result.len());
+        result = result[first_newline..].trim_start().to_string();
+    }
+    // 去除结尾的 ```
+    if result.ends_with("```") {
+        result = result[..result.len() - 3].trim_end().to_string();
+    }
+    result
 }
