@@ -6,10 +6,7 @@ use crate::error::BrainError;
 use crate::infra::obsidian_client::{get_client, ObsidianProvider};
 
 /// 检查 Wiki 页面是否存在
-pub async fn page_exists(
-    provider: &ObsidianProvider,
-    path: &str,
-) -> bool {
+pub async fn page_exists(provider: &ObsidianProvider, path: &str) -> bool {
     let client = match get_client(provider) {
         Ok(c) => c,
         Err(_) => return false,
@@ -18,10 +15,7 @@ pub async fn page_exists(
 }
 
 /// 读取 Wiki 页面内容
-pub async fn read_page(
-    provider: &ObsidianProvider,
-    path: &str,
-) -> Result<String, BrainError> {
+pub async fn read_page(provider: &ObsidianProvider, path: &str) -> Result<String, BrainError> {
     let client = get_client(provider)?;
     client.read_file(path).await
 }

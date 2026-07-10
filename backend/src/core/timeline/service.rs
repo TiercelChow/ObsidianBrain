@@ -53,10 +53,12 @@ impl TimelineService {
         &self,
         request: GetTimelineRequest,
     ) -> Result<TimelineResponse, BrainError> {
-        let daily_events =
-            self.store.get_daily_events(&request.start_date, &request.end_date)?;
-        let statistics =
-            self.store.get_statistics(&request.start_date, &request.end_date)?;
+        let daily_events = self
+            .store
+            .get_daily_events(&request.start_date, &request.end_date)?;
+        let statistics = self
+            .store
+            .get_statistics(&request.start_date, &request.end_date)?;
 
         Ok(TimelineResponse {
             date_range: DateRange {

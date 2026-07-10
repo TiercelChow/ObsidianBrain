@@ -27,12 +27,12 @@ impl GitExtractor {
 
     /// 获取所有本地分支
     pub fn branches(repo: &Repository) -> Result<Vec<String>, BrainError> {
-        let branches = repo
-            .branches(Some(BranchType::Local))
-            .map_err(|e| BrainError::GitError {
-                path: repo.path().to_path_buf(),
-                detail: format!("获取分支列表失败: {e}"),
-            })?;
+        let branches =
+            repo.branches(Some(BranchType::Local))
+                .map_err(|e| BrainError::GitError {
+                    path: repo.path().to_path_buf(),
+                    detail: format!("获取分支列表失败: {e}"),
+                })?;
 
         let mut branch_names = Vec::new();
         for branch in branches {
@@ -103,10 +103,12 @@ impl GitExtractor {
             .recurse_untracked_dirs(false)
             .include_ignored(false);
 
-        let statuses = repo.statuses(Some(&mut opts)).map_err(|e| BrainError::GitError {
-            path: repo.path().to_path_buf(),
-            detail: format!("获取状态失败: {e}"),
-        })?;
+        let statuses = repo
+            .statuses(Some(&mut opts))
+            .map_err(|e| BrainError::GitError {
+                path: repo.path().to_path_buf(),
+                detail: format!("获取状态失败: {e}"),
+            })?;
 
         Ok(!statuses.is_empty())
     }
@@ -118,10 +120,12 @@ impl GitExtractor {
             .recurse_untracked_dirs(false)
             .include_ignored(false);
 
-        let statuses = repo.statuses(Some(&mut opts)).map_err(|e| BrainError::GitError {
-            path: repo.path().to_path_buf(),
-            detail: format!("获取状态失败: {e}"),
-        })?;
+        let statuses = repo
+            .statuses(Some(&mut opts))
+            .map_err(|e| BrainError::GitError {
+                path: repo.path().to_path_buf(),
+                detail: format!("获取状态失败: {e}"),
+            })?;
 
         let mut status = WorkingDirStatus::default();
         for entry in statuses.iter() {
@@ -176,7 +180,10 @@ impl GitExtractor {
     /// 获取最后活动时间
     pub fn last_activity(repo: &Repository) -> Result<DateTime<Utc>, BrainError> {
         let commits = Self::recent_commits(repo, 1)?;
-        Ok(commits.first().map(|c| c.timestamp).unwrap_or_else(Utc::now))
+        Ok(commits
+            .first()
+            .map(|c| c.timestamp)
+            .unwrap_or_else(Utc::now))
     }
 
     /// 获取总 commit 数量（采样，最多统计 max_count）
@@ -238,10 +245,7 @@ mod tests {
         let (_dir, repo) = create_test_repo();
         let branches = GitExtractor::branches(&repo).unwrap();
         // Default branch could be "main" or "master"
-        assert!(
-            branches.contains(&"main".to_string()) ||
-            branches.contains(&"master".to_string())
-        );
+        assert!(branches.contains(&"main".to_string()) || branches.contains(&"master".to_string()));
     }
 
     #[test]

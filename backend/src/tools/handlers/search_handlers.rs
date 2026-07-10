@@ -164,8 +164,12 @@ pub struct ListFilesHandler;
 
 #[async_trait]
 impl ToolHandler for ListFilesHandler {
-    fn name(&self) -> &str { "list_files" }
-    fn description(&self) -> &str { "列出指定目录下的文件" }
+    fn name(&self) -> &str {
+        "list_files"
+    }
+    fn description(&self) -> &str {
+        "列出指定目录下的文件"
+    }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -175,21 +179,32 @@ impl ToolHandler for ListFilesHandler {
             }
         })
     }
-    fn module(&self) -> &str { "search" }
+    fn module(&self) -> &str {
+        "search"
+    }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
         let dir = args.get("directory").and_then(|v| v.as_str()).unwrap_or("");
-        let recursive = args.get("recursive").and_then(|v| v.as_bool()).unwrap_or(true);
+        let recursive = args
+            .get("recursive")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
 
         let obsidian = crate::infra::obsidian_client::get_client(&ctx.obsidian)?;
 
         let files = if recursive {
             obsidian.list_all_files().await?
         } else {
-            obsidian.list_files(if dir.is_empty() { None } else { Some(dir) }).await?
+            obsidian
+                .list_files(if dir.is_empty() { None } else { Some(dir) })
+                .await?
         };
 
-        let prefix = if dir.is_empty() { String::new() } else { format!("{}/", dir.trim_end_matches('/')) };
+        let prefix = if dir.is_empty() {
+            String::new()
+        } else {
+            format!("{}/", dir.trim_end_matches('/'))
+        };
 
         let filtered: Vec<String> = files
             .into_iter()

@@ -20,7 +20,8 @@ impl NoteLinker {
     /// 关联笔记到仓库
     pub fn link_note(&self, note_path: &str, repo_name: &str) -> Result<NoteRepoLink, BrainError> {
         // 验证仓库存在
-        self.db.get_code_repo_by_name(repo_name)?
+        self.db
+            .get_code_repo_by_name(repo_name)?
             .ok_or_else(|| BrainError::Internal(format!("仓库 '{}' 不存在", repo_name)))?;
 
         self.db.insert_note_repo_link(note_path, repo_name)?;

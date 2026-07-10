@@ -85,7 +85,9 @@ impl InspirationService {
         let recent_pairs = self.get_recent_pairs()?;
 
         // 3. 选择两个概念
-        let (idx_a, idx_b) = self.selector.select_pair(&pool, &recent_pairs)
+        let (idx_a, idx_b) = self
+            .selector
+            .select_pair(&pool, &recent_pairs)
             .ok_or_else(|| BrainError::Internal("无法选择概念对，概念池可能太小".to_string()))?;
 
         let concept_a = &pool.concepts[idx_a];
@@ -96,10 +98,10 @@ impl InspirationService {
         let context_b = self.get_concept_context(concept_b).await;
 
         // 5. LLM 生成创意
-        let output = self.generator.generate_combo(
-            &concept_a.term, &context_a,
-            &concept_b.term, &context_b,
-        ).await?;
+        let output = self
+            .generator
+            .generate_combo(&concept_a.term, &context_a, &concept_b.term, &context_b)
+            .await?;
 
         // 6. 保存到历史
         self.save_history(
@@ -114,13 +116,19 @@ impl InspirationService {
                 term: concept_a.term.clone(),
                 source: format!("{:?}", concept_a.source),
                 source_path: concept_a.note_paths.first().cloned(),
-                obsidian_uri: concept_a.note_paths.first().map(|p| self.make_obsidian_uri(p)),
+                obsidian_uri: concept_a
+                    .note_paths
+                    .first()
+                    .map(|p| self.make_obsidian_uri(p)),
             },
             concept_b: ConceptRef {
                 term: concept_b.term.clone(),
                 source: format!("{:?}", concept_b.source),
                 source_path: concept_b.note_paths.first().cloned(),
-                obsidian_uri: concept_b.note_paths.first().map(|p| self.make_obsidian_uri(p)),
+                obsidian_uri: concept_b
+                    .note_paths
+                    .first()
+                    .map(|p| self.make_obsidian_uri(p)),
             },
             inspiration: output.inspiration,
             suggestions: output.suggestions,
@@ -130,10 +138,15 @@ impl InspirationService {
     }
 
     /// 处理反向提问
-    async fn handle_reverse_question(&self, note_path: Option<&str>) -> Result<InspirationResult, BrainError> {
+    async fn handle_reverse_question(
+        &self,
+        note_path: Option<&str>,
+    ) -> Result<InspirationResult, BrainError> {
         let obsidian = match get_client(&self.obsidian) {
             Ok(c) => c,
-            Err(e) => { return Err(e); }
+            Err(e) => {
+                return Err(e);
+            }
         };
 
         // 1. 确定笔记路径
@@ -145,7 +158,9 @@ impl InspirationService {
         // 2. 读取笔记内容
         let content = obsidian.read_file(&path).await?;
         if content.len() < 200 {
-            return Err(BrainError::Internal("笔记内容太短（<200字），无法生成有意义的问题".to_string()));
+            return Err(BrainError::Internal(
+                "笔记内容太短（<200字），无法生成有意义的问题".to_string(),
+            ));
         }
 
         let title = std::path::Path::new(&path)
@@ -177,10 +192,15 @@ impl InspirationService {
     }
 
     /// 处理对立观点
-    async fn handle_counterpoint(&self, note_path: Option<&str>) -> Result<InspirationResult, BrainError> {
+    async fn handle_counterpoint(
+        &self,
+        note_path: Option<&str>,
+    ) -> Result<InspirationResult, BrainError> {
         let obsidian = match get_client(&self.obsidian) {
             Ok(c) => c,
-            Err(e) => { return Err(e); }
+            Err(e) => {
+                return Err(e);
+            }
         };
 
         let path = note_path
@@ -190,7 +210,9 @@ impl InspirationService {
         // 1. 读取笔记内容
         let content = obsidian.read_file(&path).await?;
         if content.len() < 300 {
-            return Err(BrainError::Internal("笔记内容太短（<300字），无法生成有意义的对立观点".to_string()));
+            return Err(BrainError::Internal(
+                "笔记内容太短（<300字），无法生成有意义的对立观点".to_string(),
+            ));
         }
 
         let title = std::path::Path::new(&path)
@@ -200,7 +222,10 @@ impl InspirationService {
             .to_string();
 
         // 2. LLM 生成对立观点
-        let output = self.generator.generate_counterpoints(&title, &content).await?;
+        let output = self
+            .generator
+            .generate_counterpoints(&title, &content)
+            .await?;
 
         // 3. 保存到历史
         self.save_history(
@@ -255,7 +280,10 @@ impl InspirationService {
 
         for (_, _, input_refs, _) in rows {
             if let Ok(refs) = serde_json::from_str::<serde_json::Value>(&input_refs) {
-                if let (Some(a), Some(b)) = (refs.get("a").and_then(|v| v.as_str()), refs.get("b").and_then(|v| v.as_str())) {
+                if let (Some(a), Some(b)) = (
+                    refs.get("a").and_then(|v| v.as_str()),
+                    refs.get("b").and_then(|v| v.as_str()),
+                ) {
                     let pair = if a < b {
                         (a.to_string(), b.to_string())
                     } else {
@@ -273,7 +301,9 @@ impl InspirationService {
     async fn get_concept_context(&self, concept: &Concept) -> String {
         let obsidian = match get_client(&self.obsidian) {
             Ok(c) => c,
-            Err(_) => { return String::new(); }
+            Err(_) => {
+                return String::new();
+            }
         };
         if let Some(path) = concept.note_paths.first() {
             if let Ok(content) = obsidian.read_file(path).await {
@@ -292,14 +322,17 @@ impl InspirationService {
     async fn get_recent_note_path(&self) -> Result<String, BrainError> {
         let obsidian = match get_client(&self.obsidian) {
             Ok(c) => c,
-            Err(e) => { return Err(e); }
+            Err(e) => {
+                return Err(e);
+            }
         };
 
         let files = obsidian.list_all_files().await?;
         let md_files: Vec<&String> = files.iter().filter(|f| f.ends_with(".md")).collect();
 
         // 返回第一个找到的 markdown 文件（后续可以改进为按修改时间排序）
-        md_files.first()
+        md_files
+            .first()
             .map(|s| s.to_string())
             .ok_or_else(|| BrainError::Internal("Vault 中没有找到笔记".to_string()))
     }
@@ -312,21 +345,27 @@ impl InspirationService {
     }
 
     /// 保存灵感记录到历史
-    fn save_history(&self, insp_type: InspirationType, input_refs: &serde_json::Value, output: &str) -> Result<(), BrainError> {
+    fn save_history(
+        &self,
+        insp_type: InspirationType,
+        input_refs: &serde_json::Value,
+        output: &str,
+    ) -> Result<(), BrainError> {
         let id = Uuid::new_v4().to_string();
         let refs_str = serde_json::to_string(input_refs).unwrap_or_default();
-        self.db.insert_inspiration(&id, &insp_type.to_string(), &refs_str, output)
+        self.db
+            .insert_inspiration(&id, &insp_type.to_string(), &refs_str, output)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
-    use crate::infra::sqlite_store::SqliteStore;
+    use crate::config::LlmConfig;
     use crate::infra::llm_client::OllamaProvider;
     use crate::infra::obsidian_client::new_provider;
-    use crate::config::LlmConfig;
+    use crate::infra::sqlite_store::SqliteStore;
+    use tempfile::TempDir;
 
     fn create_service() -> (TempDir, InspirationService) {
         let dir = TempDir::new().unwrap();
@@ -348,7 +387,9 @@ mod tests {
     #[tokio::test]
     async fn test_get_inspiration_requires_obsidian_for_questions() {
         let (_dir, service) = create_service();
-        let result = service.get_inspiration(Some("reverse_question"), Some("test.md")).await;
+        let result = service
+            .get_inspiration(Some("reverse_question"), Some("test.md"))
+            .await;
         assert!(result.is_err()); // Obsidian 未配置
     }
 

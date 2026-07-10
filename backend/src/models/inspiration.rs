@@ -202,9 +202,18 @@ mod tests {
 
     #[test]
     fn test_inspiration_type_roundtrip() {
-        assert_eq!(InspirationType::from_str("concept_combo"), Some(InspirationType::ConceptCombo));
-        assert_eq!(InspirationType::from_str("reverse_question"), Some(InspirationType::ReverseQuestion));
-        assert_eq!(InspirationType::from_str("counterpoint"), Some(InspirationType::Counterpoint));
+        assert_eq!(
+            InspirationType::from_str("concept_combo"),
+            Some(InspirationType::ConceptCombo)
+        );
+        assert_eq!(
+            InspirationType::from_str("reverse_question"),
+            Some(InspirationType::ReverseQuestion)
+        );
+        assert_eq!(
+            InspirationType::from_str("counterpoint"),
+            Some(InspirationType::Counterpoint)
+        );
         assert_eq!(InspirationType::from_str("unknown"), None);
     }
 

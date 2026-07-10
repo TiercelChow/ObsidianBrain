@@ -68,9 +68,7 @@ impl MemoManager {
                         obsidian
                             .append_file(&file_path, &date_header)
                             .await
-                            .map_err(|e| {
-                                BrainError::Internal(format!("追加日期标题失败: {e}"))
-                            })?;
+                            .map_err(|e| BrainError::Internal(format!("追加日期标题失败: {e}")))?;
                     }
                 }
                 Err(_) => {
@@ -78,9 +76,7 @@ impl MemoManager {
                     obsidian
                         .write_file(&file_path, &month_title)
                         .await
-                        .map_err(|e| {
-                            BrainError::Internal(format!("创建月份文件失败: {e}"))
-                        })?;
+                        .map_err(|e| BrainError::Internal(format!("创建月份文件失败: {e}")))?;
                 }
             }
 
@@ -96,8 +92,7 @@ impl MemoManager {
         // 序列化 images 和 tags 为 JSON
         let images_json =
             serde_json::to_string(&request.images).unwrap_or_else(|_| "[]".to_string());
-        let tags_json =
-            serde_json::to_string(&request.tags).unwrap_or_else(|_| "[]".to_string());
+        let tags_json = serde_json::to_string(&request.tags).unwrap_or_else(|_| "[]".to_string());
 
         // 写入 SQLite 元数据
         self.db.insert_memo(
@@ -230,20 +225,27 @@ impl MemoManager {
         // 计算需要同步的月份列表和完整日期范围
         let now = Local::now();
         let mut month_files = Vec::new();
-        let mut all_dates_in_range: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut all_dates_in_range: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         for i in 0..months {
             let target = now - chrono::Duration::days(30 * i as i64);
-            month_files.push(format!("Timeline/{:04}-{:02}.md", target.year(), target.month()));
+            month_files.push(format!(
+                "Timeline/{:04}-{:02}.md",
+                target.year(),
+                target.month()
+            ));
             // Generate all dates in this month for the deletion scope
             let year = target.year();
             let month = target.month();
-            let days_in_month = chrono::NaiveDate::from_ymd_opt(
-                year,
-                if month == 12 { 1 } else { month + 1 },
-                1,
-            )
-            .map(|d| d.signed_duration_since(chrono::NaiveDate::from_ymd_opt(year, month, 1).unwrap()).num_days())
-            .unwrap_or(30);
+            let days_in_month =
+                chrono::NaiveDate::from_ymd_opt(year, if month == 12 { 1 } else { month + 1 }, 1)
+                    .map(|d| {
+                        d.signed_duration_since(
+                            chrono::NaiveDate::from_ymd_opt(year, month, 1).unwrap(),
+                        )
+                        .num_days()
+                    })
+                    .unwrap_or(30);
             for day in 1..=days_in_month {
                 if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day as u32) {
                     all_dates_in_range.insert(date.format("%Y-%m-%d").to_string());
@@ -272,7 +274,9 @@ impl MemoManager {
         }
 
         // Delete memos in synced date range that no longer exist in Obsidian
-        let deleted = self.db.delete_memos_not_by_ids(&all_dates_in_range, &all_sync_ids)?;
+        let deleted = self
+            .db
+            .delete_memos_not_by_ids(&all_dates_in_range, &all_sync_ids)?;
         if deleted > 0 {
             tracing::info!(deleted = deleted, "已删除 Obsidian 中不存在的小记");
         }
@@ -282,8 +286,7 @@ impl MemoManager {
             let ts = memo.timestamp.to_rfc3339();
             let images_json =
                 serde_json::to_string(&memo.images).unwrap_or_else(|_| "[]".to_string());
-            let tags_json =
-                serde_json::to_string(&memo.tags).unwrap_or_else(|_| "[]".to_string());
+            let tags_json = serde_json::to_string(&memo.tags).unwrap_or_else(|_| "[]".to_string());
 
             self.db.upsert_memo(
                 &memo.id,

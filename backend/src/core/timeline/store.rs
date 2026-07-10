@@ -60,8 +60,7 @@ impl TimelineStore {
 
         for (id, date, event_type, title, summary, tags_json, paths_json, source) in rows {
             let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-            let related_paths: Vec<String> =
-                serde_json::from_str(&paths_json).unwrap_or_default();
+            let related_paths: Vec<String> = serde_json::from_str(&paths_json).unwrap_or_default();
 
             events.push(TimelineEvent {
                 id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::new_v4()),
@@ -233,8 +232,20 @@ mod tests {
     #[test]
     fn test_date_range_filter() {
         let (_dir, store) = create_store();
-        store.insert_event(&create_test_event("2026-05-15", "May", EventType::NoteCreated)).unwrap();
-        store.insert_event(&create_test_event("2026-06-15", "June", EventType::NoteCreated)).unwrap();
+        store
+            .insert_event(&create_test_event(
+                "2026-05-15",
+                "May",
+                EventType::NoteCreated,
+            ))
+            .unwrap();
+        store
+            .insert_event(&create_test_event(
+                "2026-06-15",
+                "June",
+                EventType::NoteCreated,
+            ))
+            .unwrap();
 
         let may_events = store.get_events("2026-05-01", "2026-05-31").unwrap();
         assert_eq!(may_events.len(), 1);
@@ -248,9 +259,27 @@ mod tests {
     #[test]
     fn test_daily_events_grouping() {
         let (_dir, store) = create_store();
-        store.insert_event(&create_test_event("2026-05-31", "A", EventType::NoteCreated)).unwrap();
-        store.insert_event(&create_test_event("2026-05-31", "B", EventType::NoteModified)).unwrap();
-        store.insert_event(&create_test_event("2026-06-01", "C", EventType::NoteCreated)).unwrap();
+        store
+            .insert_event(&create_test_event(
+                "2026-05-31",
+                "A",
+                EventType::NoteCreated,
+            ))
+            .unwrap();
+        store
+            .insert_event(&create_test_event(
+                "2026-05-31",
+                "B",
+                EventType::NoteModified,
+            ))
+            .unwrap();
+        store
+            .insert_event(&create_test_event(
+                "2026-06-01",
+                "C",
+                EventType::NoteCreated,
+            ))
+            .unwrap();
 
         let daily = store.get_daily_events("2026-05-01", "2026-06-30").unwrap();
         assert_eq!(daily.len(), 2);
@@ -261,9 +290,23 @@ mod tests {
     #[test]
     fn test_statistics() {
         let (_dir, store) = create_store();
-        store.insert_event(&create_test_event("2026-05-31", "A", EventType::NoteCreated)).unwrap();
-        store.insert_event(&create_test_event("2026-05-31", "B", EventType::NoteModified)).unwrap();
-        store.insert_event(&create_test_event("2026-06-01", "C", EventType::RepoCommit)).unwrap();
+        store
+            .insert_event(&create_test_event(
+                "2026-05-31",
+                "A",
+                EventType::NoteCreated,
+            ))
+            .unwrap();
+        store
+            .insert_event(&create_test_event(
+                "2026-05-31",
+                "B",
+                EventType::NoteModified,
+            ))
+            .unwrap();
+        store
+            .insert_event(&create_test_event("2026-06-01", "C", EventType::RepoCommit))
+            .unwrap();
 
         let stats = store.get_statistics("2026-05-01", "2026-06-30").unwrap();
         assert_eq!(stats.total_events, 3);
@@ -275,8 +318,20 @@ mod tests {
     #[test]
     fn test_delete_before() {
         let (_dir, store) = create_store();
-        store.insert_event(&create_test_event("2026-05-01", "Old", EventType::NoteCreated)).unwrap();
-        store.insert_event(&create_test_event("2026-06-01", "New", EventType::NoteCreated)).unwrap();
+        store
+            .insert_event(&create_test_event(
+                "2026-05-01",
+                "Old",
+                EventType::NoteCreated,
+            ))
+            .unwrap();
+        store
+            .insert_event(&create_test_event(
+                "2026-06-01",
+                "New",
+                EventType::NoteCreated,
+            ))
+            .unwrap();
 
         let deleted = store.delete_before("2026-05-15").unwrap();
         assert_eq!(deleted, 1);

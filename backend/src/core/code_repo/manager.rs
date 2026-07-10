@@ -122,8 +122,8 @@ impl RepoManager {
         let mut cards = Vec::new();
 
         for (name, path, metadata_json) in rows {
-            let metadata: RepoMetadataCache = serde_json::from_str(&metadata_json)
-                .unwrap_or(RepoMetadataCache {
+            let metadata: RepoMetadataCache =
+                serde_json::from_str(&metadata_json).unwrap_or(RepoMetadataCache {
                     current_branch: "unknown".to_string(),
                     language_stats: Default::default(),
                     is_dirty: false,
@@ -155,7 +155,8 @@ impl RepoManager {
 
     /// 获取仓库详情
     pub fn detail(&self, name: &str) -> Result<RepoDetail, BrainError> {
-        let (_, path, metadata_json) = self.db
+        let (_, path, metadata_json) = self
+            .db
             .get_code_repo_by_name(name)?
             .ok_or_else(|| BrainError::Internal(format!("仓库 '{}' 不存在", name)))?;
 
@@ -208,7 +209,8 @@ impl RepoManager {
 
     /// 刷新仓库元数据
     pub fn refresh_metadata(&self, name: &str) -> Result<(), BrainError> {
-        let (_, path, _) = self.db
+        let (_, path, _) = self
+            .db
             .get_code_repo_by_name(name)?
             .ok_or_else(|| BrainError::Internal(format!("仓库 '{}' 不存在", name)))?;
 
@@ -295,7 +297,9 @@ mod tests {
         let (dir, manager) = create_manager();
         let repo_path = create_test_git_repo(dir.path());
 
-        let repo = manager.register(repo_path.to_str().unwrap(), "test-repo").unwrap();
+        let repo = manager
+            .register(repo_path.to_str().unwrap(), "test-repo")
+            .unwrap();
         assert_eq!(repo.name, "test-repo");
         assert_eq!(repo.path, repo_path);
     }
@@ -305,7 +309,9 @@ mod tests {
         let (dir, manager) = create_manager();
         let repo_path = create_test_git_repo(dir.path());
 
-        manager.register(repo_path.to_str().unwrap(), "test-repo").unwrap();
+        manager
+            .register(repo_path.to_str().unwrap(), "test-repo")
+            .unwrap();
         let repos = manager.list().unwrap();
         assert_eq!(repos.len(), 1);
         assert_eq!(repos[0].name, "test-repo");
@@ -316,7 +322,9 @@ mod tests {
         let (dir, manager) = create_manager();
         let repo_path = create_test_git_repo(dir.path());
 
-        manager.register(repo_path.to_str().unwrap(), "test-repo").unwrap();
+        manager
+            .register(repo_path.to_str().unwrap(), "test-repo")
+            .unwrap();
         let deleted = manager.delete("test-repo").unwrap();
         assert!(deleted);
 

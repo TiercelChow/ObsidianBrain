@@ -185,10 +185,13 @@ impl WikiEngine {
         write_page(&self.obsidian, &article_path, &article_content).await?;
 
         // 3. 级联更新：检查同主题其他文章是否需要更新
-        let cascade_updated = self.cascade_updates(&topic, &article_path, &content).await?;
+        let cascade_updated = self
+            .cascade_updates(&topic, &article_path, &content)
+            .await?;
 
         // 4. 更新索引
-        self.update_index(&topic, &title, &article_path, &now).await?;
+        self.update_index(&topic, &title, &article_path, &now)
+            .await?;
 
         // 5. 追加日志
         let log_entry = if cascade_updated.is_empty() {
@@ -198,11 +201,23 @@ impl WikiEngine {
                 .iter()
                 .map(|p| format!("- Updated: {}", p))
                 .collect();
-            format!("\n## [{}] ingest | {}\n{}\n", now, title, updated_lines.join("\n"))
+            format!(
+                "\n## [{}] ingest | {}\n{}\n",
+                now,
+                title,
+                updated_lines.join("\n")
+            )
         };
         let log_path = "Wiki/log.md";
-        let existing_log = read_page(&self.obsidian, log_path).await.unwrap_or_default();
-        write_page(&self.obsidian, log_path, &format!("{}{}", existing_log, log_entry)).await?;
+        let existing_log = read_page(&self.obsidian, log_path)
+            .await
+            .unwrap_or_default();
+        write_page(
+            &self.obsidian,
+            log_path,
+            &format!("{}{}", existing_log, log_entry),
+        )
+        .await?;
 
         tracing::info!(
             source = source_path,
@@ -251,7 +266,12 @@ impl WikiEngine {
         let mut titles = Vec::new();
         for path in &same_topic {
             if let Ok(content) = read_page(&self.obsidian, path).await {
-                let title = content.lines().next().unwrap_or("").trim_start_matches("# ").to_string();
+                let title = content
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim_start_matches("# ")
+                    .to_string();
                 titles.push(format!("- {} ({})", title, path));
             }
         }
@@ -366,7 +386,15 @@ impl WikiEngine {
         // 可选归档
         let saved_to = if save_answer {
             let now = chrono::Local::now().format("%Y-%m-%d").to_string();
-            let filename = format!("{}-archived-{}", now, question.chars().take(20).collect::<String>().replace(' ', "-"));
+            let filename = format!(
+                "{}-archived-{}",
+                now,
+                question
+                    .chars()
+                    .take(20)
+                    .collect::<String>()
+                    .replace(' ', "-")
+            );
             let path = format!("Wiki/archived/{}.md", filename);
 
             let archive_content = format!(
@@ -377,9 +405,16 @@ impl WikiEngine {
 
             // 追加日志
             let log_path = "Wiki/log.md";
-            let existing_log = read_page(&self.obsidian, log_path).await.unwrap_or_default();
+            let existing_log = read_page(&self.obsidian, log_path)
+                .await
+                .unwrap_or_default();
             let log_entry = format!("\n## [{}] query | Archived: {}\n", now, question);
-            write_page(&self.obsidian, log_path, &format!("{}{}", existing_log, log_entry)).await?;
+            write_page(
+                &self.obsidian,
+                log_path,
+                &format!("{}{}", existing_log, log_entry),
+            )
+            .await?;
 
             Some(path)
         } else {
@@ -406,7 +441,9 @@ impl WikiEngine {
         let mut issues = Vec::new();
 
         // 检查索引一致性
-        let index_content = read_page(&self.obsidian, "Wiki/index.md").await.unwrap_or_default();
+        let index_content = read_page(&self.obsidian, "Wiki/index.md")
+            .await
+            .unwrap_or_default();
         for f in &wiki_files {
             if f == "Wiki/index.md" || f == "Wiki/log.md" || f == "Wiki/schema.md" {
                 continue;
@@ -455,22 +492,35 @@ impl WikiEngine {
             hubs.len()
         );
 
-        let suggestions_response = self.llm.generate(&suggestions_prompt).await.unwrap_or_default();
+        let suggestions_response = self
+            .llm
+            .generate(&suggestions_prompt)
+            .await
+            .unwrap_or_default();
         let suggestions_parsed = parse_llm_json(&suggestions_response).ok();
         let suggestions: Vec<String> = suggestions_parsed
             .and_then(|p| {
-                p["suggestions"]
-                    .as_array()
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                p["suggestions"].as_array().map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
             })
             .unwrap_or_default();
 
         // 追加日志
         let log_path = "Wiki/log.md";
-        let existing_log = read_page(&self.obsidian, log_path).await.unwrap_or_default();
+        let existing_log = read_page(&self.obsidian, log_path)
+            .await
+            .unwrap_or_default();
         let now = chrono::Local::now().format("%Y-%m-%d").to_string();
         let log_entry = format!("\n## [{}] lint | {} issues found\n", now, issues.len());
-        write_page(&self.obsidian, log_path, &format!("{}{}", existing_log, log_entry)).await?;
+        write_page(
+            &self.obsidian,
+            log_path,
+            &format!("{}{}", existing_log, log_entry),
+        )
+        .await?;
 
         Ok(LintResult {
             total_pages: wiki_files.len(),
@@ -526,7 +576,9 @@ impl WikiEngine {
         date: &str,
     ) -> Result<(), BrainError> {
         let index_path = "Wiki/index.md";
-        let mut index = read_page(&self.obsidian, index_path).await.unwrap_or_default();
+        let mut index = read_page(&self.obsidian, index_path)
+            .await
+            .unwrap_or_default();
 
         // 检查是否已有这个主题的 section
         let section_header = format!("## {}", topic);
@@ -548,8 +600,12 @@ impl WikiEngine {
                 if let Some(pos) = index.find(&old_line_pattern) {
                     // 找到这行的末尾，更新日期
                     let line_start = index[..pos].rfind('|').map(|p| p + 1).unwrap_or(pos);
-                    let line_end = index[pos..].find('\n').map(|e| pos + e).unwrap_or(index.len());
-                    let new_line = format!(" [{}]({}) | {} | {} ", title, article_link, title, date);
+                    let line_end = index[pos..]
+                        .find('\n')
+                        .map(|e| pos + e)
+                        .unwrap_or(index.len());
+                    let new_line =
+                        format!(" [{}]({}) | {} | {} ", title, article_link, title, date);
                     index.replace_range(line_start..line_end, &new_line);
                 }
             } else {

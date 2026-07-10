@@ -27,7 +27,10 @@ impl RadarService {
         let source_manager = if config.sources_path.exists() {
             SourceManager::load_from_file(&config.sources_path)?
         } else {
-            tracing::warn!("雷达源配置文件不存在: {:?}，使用默认配置", config.sources_path);
+            tracing::warn!(
+                "雷达源配置文件不存在: {:?}，使用默认配置",
+                config.sources_path
+            );
             SourceManager::new()
         };
 
@@ -49,18 +52,21 @@ impl RadarService {
     pub async fn get_radar(&self, limit: usize) -> Result<Vec<RadarItemView>, BrainError> {
         let rows = self.db.get_radar_items("new", limit as i64)?;
 
-        let items = rows.into_iter().map(|(id, title, summary, source_name, url, status)| {
-            RadarItemView {
-                id,
-                title,
-                summary,
-                source: source_name,
-                url,
-                relevance_score: 0.0,
-                published_at: None,
-                status,
-            }
-        }).collect();
+        let items = rows
+            .into_iter()
+            .map(
+                |(id, title, summary, source_name, url, status)| RadarItemView {
+                    id,
+                    title,
+                    summary,
+                    source: source_name,
+                    url,
+                    relevance_score: 0.0,
+                    published_at: None,
+                    status,
+                },
+            )
+            .collect();
 
         Ok(items)
     }
@@ -71,7 +77,11 @@ impl RadarService {
     }
 
     /// 保存到 Vault
-    pub async fn add_to_vault(&self, article_id: &str, target_dir: Option<&str>) -> Result<VaultSaveResult, BrainError> {
+    pub async fn add_to_vault(
+        &self,
+        article_id: &str,
+        target_dir: Option<&str>,
+    ) -> Result<VaultSaveResult, BrainError> {
         let obsidian = match crate::infra::obsidian_client::get_client(&self.obsidian) {
             Ok(c) => c,
             Err(_) => {
@@ -81,7 +91,9 @@ impl RadarService {
 
         // 获取雷达条目信息
         let rows = self.db.get_radar_items("new", 1000)?;
-        let item = rows.iter().find(|(id, _, _, _, _, _)| id == article_id)
+        let item = rows
+            .iter()
+            .find(|(id, _, _, _, _, _)| id == article_id)
             .ok_or_else(|| BrainError::Internal(format!("雷达条目 '{}' 不存在", article_id)))?;
 
         let (_, title, summary, source_name, url, _) = item;
@@ -104,8 +116,11 @@ impl RadarService {
         // 更新状态
         self.db.update_radar_status(article_id, "saved")?;
 
-        let obsidian_uri = format!("obsidian://open?vault={}&file={}",
-            self.config.sources_path.parent()
+        let obsidian_uri = format!(
+            "obsidian://open?vault={}&file={}",
+            self.config
+                .sources_path
+                .parent()
                 .and_then(|p| p.file_name())
                 .and_then(|n| n.to_str())
                 .unwrap_or("brain"),
@@ -125,8 +140,10 @@ impl RadarService {
 
     /// 列出所有源
     pub fn list_sources(&self) -> Vec<RadarSourceStatus> {
-        self.source_manager.list_sources().iter().map(|s| {
-            RadarSourceStatus {
+        self.source_manager
+            .list_sources()
+            .iter()
+            .map(|s| RadarSourceStatus {
                 name: s.name.clone(),
                 source_type: s.source_type.to_string(),
                 enabled: s.enabled,
@@ -134,9 +151,13 @@ impl RadarService {
                 last_fetch_at: None,
                 last_success_at: None,
                 total_items_fetched: 0,
-                health: if s.enabled { "healthy".to_string() } else { "disabled".to_string() },
-            }
-        }).collect()
+                health: if s.enabled {
+                    "healthy".to_string()
+                } else {
+                    "disabled".to_string()
+                },
+            })
+            .collect()
     }
 
     /// 切换源状态

@@ -17,10 +17,18 @@ pub struct GetKnowledgeInsightsHandler;
 
 #[async_trait]
 impl ToolHandler for GetKnowledgeInsightsHandler {
-    fn name(&self) -> &str { "get_knowledge_insights" }
-    fn description(&self) -> &str { "获取知识库洞察：知识孤岛、枢纽、尘封笔记、新生知识、领域分布" }
-    fn input_schema(&self) -> Value { definitions::get_knowledge_insights_schema() }
-    fn module(&self) -> &str { "memory" }
+    fn name(&self) -> &str {
+        "get_knowledge_insights"
+    }
+    fn description(&self) -> &str {
+        "获取知识库洞察：知识孤岛、枢纽、尘封笔记、新生知识、领域分布"
+    }
+    fn input_schema(&self) -> Value {
+        definitions::get_knowledge_insights_schema()
+    }
+    fn module(&self) -> &str {
+        "memory"
+    }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
         let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);

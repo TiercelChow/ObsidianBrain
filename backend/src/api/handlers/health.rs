@@ -9,10 +9,7 @@ pub async fn health_check(State(ctx): State<Arc<AppContext>>) -> Json<Value> {
     // Collect component statuses then release the lock before any .await calls.
     let component_snapshot = {
         let components = ctx.components.lock().unwrap();
-        (
-            components.server.clone(),
-            components.obsidian.clone(),
-        )
+        (components.server.clone(), components.obsidian.clone())
     };
 
     // Vault status

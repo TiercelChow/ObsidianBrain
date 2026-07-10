@@ -41,11 +41,7 @@ impl MemoryService {
     // ── Search ──
 
     /// Search notes using Obsidian's native search.
-    pub async fn search(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<NoteSummary>, BrainError> {
+    pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<NoteSummary>, BrainError> {
         let client = self.client()?;
         let results = client.search(query, limit).await?;
 
@@ -62,9 +58,7 @@ impl MemoryService {
                         .to_string(),
                     tags: vec![],
                     updated_at: None,
-                    snippet: Some(
-                        r.result.as_str().unwrap_or("").to_string()
-                    ),
+                    snippet: Some(r.result.as_str().unwrap_or("").to_string()),
                 }
             })
             .collect();

@@ -65,7 +65,9 @@ pub struct SourceManager {
 
 impl SourceManager {
     pub fn new() -> Self {
-        Self { sources: Vec::new() }
+        Self {
+            sources: Vec::new(),
+        }
     }
 
     /// 从 TOML 文件加载源配置
@@ -76,7 +78,9 @@ impl SourceManager {
         let config: RadarSourcesConfig = toml::from_str(&content)
             .map_err(|e| BrainError::ConfigError(format!("解析雷达配置失败: {e}")))?;
 
-        Ok(Self { sources: config.sources })
+        Ok(Self {
+            sources: config.sources,
+        })
     }
 
     /// 列出所有源
@@ -96,7 +100,10 @@ impl SourceManager {
 
     /// 切换源的启用状态
     pub fn toggle_source(&mut self, name: &str, enabled: bool) -> Result<(), BrainError> {
-        let source = self.sources.iter_mut().find(|s| s.name == name)
+        let source = self
+            .sources
+            .iter_mut()
+            .find(|s| s.name == name)
             .ok_or_else(|| BrainError::Internal(format!("源 '{}' 不存在", name)))?;
         source.enabled = enabled;
         Ok(())

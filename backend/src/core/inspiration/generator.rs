@@ -7,8 +7,7 @@ use std::sync::Arc;
 use crate::error::BrainError;
 use crate::infra::llm_client::LlmProvider;
 use crate::models::inspiration::{
-    ComboOutput, CounterpointOutput, InspirationConfig, InspirationType,
-    QuestionOutput,
+    ComboOutput, CounterpointOutput, InspirationConfig, InspirationType, QuestionOutput,
 };
 
 /// LLM 创意生成器
@@ -174,7 +173,10 @@ impl LlmCreativeGenerator {
     }
 
     /// 解析 JSON 响应
-    fn parse_json_response<T: serde::de::DeserializeOwned>(&self, response: &str) -> Result<T, BrainError> {
+    fn parse_json_response<T: serde::de::DeserializeOwned>(
+        &self,
+        response: &str,
+    ) -> Result<T, BrainError> {
         // 尝试提取 JSON（可能被 markdown 代码块包裹）
         let json_str = if let Some(start) = response.find('{') {
             if let Some(end) = response.rfind('}') {
@@ -187,8 +189,13 @@ impl LlmCreativeGenerator {
         };
 
         serde_json::from_str(json_str).map_err(|e| {
-            BrainError::Internal(format!("LLM 响应解析失败: {e}\n原始响应: {}",
-                if response.len() > 500 { &response[..500] } else { response }
+            BrainError::Internal(format!(
+                "LLM 响应解析失败: {e}\n原始响应: {}",
+                if response.len() > 500 {
+                    &response[..500]
+                } else {
+                    response
+                }
             ))
         })
     }
@@ -217,8 +224,8 @@ mod tests {
     }
 
     fn create_test_generator() -> LlmCreativeGenerator {
-        use crate::infra::llm_client::OllamaProvider;
         use crate::config::LlmConfig;
+        use crate::infra::llm_client::OllamaProvider;
 
         let config = LlmConfig::default();
         let llm: Arc<dyn LlmProvider> = Arc::new(OllamaProvider::new(&config).unwrap());

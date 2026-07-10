@@ -7,8 +7,8 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 use crate::error::BrainError;
-use crate::infra::obsidian_client::{get_client, ObsidianProvider};
 use crate::infra::llm_client::LlmProvider;
+use crate::infra::obsidian_client::{get_client, ObsidianProvider};
 use crate::tools::traits::ToolHandler;
 use crate::AppContext;
 
@@ -19,26 +19,41 @@ pub struct DiscoverGapsHandler;
 
 #[async_trait]
 impl ToolHandler for DiscoverGapsHandler {
-    fn name(&self) -> &str { "discover_gaps" }
-    fn description(&self) -> &str { "分析 Wiki 知识缺口：缺失连接、薄弱主题" }
+    fn name(&self) -> &str {
+        "discover_gaps"
+    }
+    fn description(&self) -> &str {
+        "分析 Wiki 知识缺口：缺失连接、薄弱主题"
+    }
     fn input_schema(&self) -> Value {
         json!({ "type": "object", "properties": {} })
     }
-    fn module(&self) -> &str { "wiki" }
+    fn module(&self) -> &str {
+        "wiki"
+    }
 
     async fn handle(&self, _args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
         let obsidian = get_client(&ctx.obsidian)?;
         let llm: Arc<dyn LlmProvider> = ctx.inspiration_service.get_llm();
 
         // 读取 Wiki index
-        let index = obsidian.read_file("Wiki/index.md").await
+        let index = obsidian
+            .read_file("Wiki/index.md")
+            .await
             .unwrap_or_else(|_| "# Wiki 索引\n\n（空）".to_string());
 
         // 读取所有概念页面标题
         let all_files = obsidian.list_all_files().await?;
-        let concept_pages: Vec<String> = all_files.iter()
+        let concept_pages: Vec<String> = all_files
+            .iter()
             .filter(|f| f.starts_with("Wiki/concepts/") && f.ends_with(".md"))
-            .map(|f| f.rsplit('/').next().unwrap_or(f).trim_end_matches(".md").to_string())
+            .map(|f| {
+                f.rsplit('/')
+                    .next()
+                    .unwrap_or(f)
+                    .trim_end_matches(".md")
+                    .to_string()
+            })
             .collect();
 
         // LLM 分析缺口
@@ -82,18 +97,26 @@ pub struct GenerateQuestionsHandler;
 
 #[async_trait]
 impl ToolHandler for GenerateQuestionsHandler {
-    fn name(&self) -> &str { "generate_questions" }
-    fn description(&self) -> &str { "基于 Wiki 内容生成研究问题" }
+    fn name(&self) -> &str {
+        "generate_questions"
+    }
+    fn description(&self) -> &str {
+        "基于 Wiki 内容生成研究问题"
+    }
     fn input_schema(&self) -> Value {
         json!({ "type": "object", "properties": {} })
     }
-    fn module(&self) -> &str { "wiki" }
+    fn module(&self) -> &str {
+        "wiki"
+    }
 
     async fn handle(&self, _args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
         let obsidian = get_client(&ctx.obsidian)?;
         let llm: Arc<dyn LlmProvider> = ctx.inspiration_service.get_llm();
 
-        let index = obsidian.read_file("Wiki/index.md").await
+        let index = obsidian
+            .read_file("Wiki/index.md")
+            .await
             .unwrap_or_else(|_| "# Wiki 索引\n\n（空）".to_string());
 
         let prompt = format!(
@@ -132,8 +155,12 @@ pub struct ConceptCollisionHandler;
 
 #[async_trait]
 impl ToolHandler for ConceptCollisionHandler {
-    fn name(&self) -> &str { "concept_collision" }
-    fn description(&self) -> &str { "从 Wiki 概念中随机选取两个，分析交叉点" }
+    fn name(&self) -> &str {
+        "concept_collision"
+    }
+    fn description(&self) -> &str {
+        "从 Wiki 概念中随机选取两个，分析交叉点"
+    }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -143,16 +170,25 @@ impl ToolHandler for ConceptCollisionHandler {
             }
         })
     }
-    fn module(&self) -> &str { "wiki" }
+    fn module(&self) -> &str {
+        "wiki"
+    }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
         let obsidian = get_client(&ctx.obsidian)?;
         let llm: Arc<dyn LlmProvider> = ctx.inspiration_service.get_llm();
 
         let all_files = obsidian.list_all_files().await?;
-        let concepts: Vec<String> = all_files.iter()
+        let concepts: Vec<String> = all_files
+            .iter()
             .filter(|f| f.starts_with("Wiki/concepts/") && f.ends_with(".md"))
-            .map(|f| f.rsplit('/').next().unwrap_or(f).trim_end_matches(".md").to_string())
+            .map(|f| {
+                f.rsplit('/')
+                    .next()
+                    .unwrap_or(f)
+                    .trim_end_matches(".md")
+                    .to_string()
+            })
             .collect();
 
         if concepts.len() < 2 {
@@ -165,14 +201,16 @@ impl ToolHandler for ConceptCollisionHandler {
         }
 
         // 选择概念
-        let concept_a = args.get("concept_a")
+        let concept_a = args
+            .get("concept_a")
             .and_then(|v| v.as_str())
             .map(String::from)
             .unwrap_or_else(|| {
                 let ts = chrono::Local::now().timestamp() as usize;
                 concepts[ts % concepts.len()].clone()
             });
-        let concept_b = args.get("concept_b")
+        let concept_b = args
+            .get("concept_b")
             .and_then(|v| v.as_str())
             .map(String::from)
             .unwrap_or_else(|| {

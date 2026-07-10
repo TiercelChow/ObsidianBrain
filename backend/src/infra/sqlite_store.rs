@@ -204,7 +204,12 @@ impl SqliteStore {
 
     // ── Code Repos ──
 
-    pub fn insert_code_repo(&self, name: &str, path: &str, metadata: &str) -> Result<(), BrainError> {
+    pub fn insert_code_repo(
+        &self,
+        name: &str,
+        path: &str,
+        metadata: &str,
+    ) -> Result<(), BrainError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO code_repos (name, path, metadata) VALUES (?1, ?2, ?3)",
@@ -214,12 +219,21 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn get_code_repo_by_name(&self, name: &str) -> Result<Option<(String, String, String)>, BrainError> {
+    pub fn get_code_repo_by_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<(String, String, String)>, BrainError> {
         let conn = self.conn.lock().unwrap();
         let result = conn.query_row(
             "SELECT name, path, metadata FROM code_repos WHERE name = ?1",
             params![name],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
         );
         match result {
             Ok(val) => Ok(Some(val)),
@@ -269,7 +283,11 @@ impl SqliteStore {
 
     // ── Note-Repo Links ──
 
-    pub fn insert_note_repo_link(&self, note_path: &str, repo_name: &str) -> Result<(), BrainError> {
+    pub fn insert_note_repo_link(
+        &self,
+        note_path: &str,
+        repo_name: &str,
+    ) -> Result<(), BrainError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT OR IGNORE INTO note_repo_links (note_path, repo_name) VALUES (?1, ?2)",
@@ -332,7 +350,19 @@ impl SqliteStore {
         &self,
         start_date: &str,
         end_date: &str,
-    ) -> Result<Vec<(String, String, String, String, String, String, String, String)>, BrainError> {
+    ) -> Result<
+        Vec<(
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+        )>,
+        BrainError,
+    > {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
@@ -376,7 +406,13 @@ impl SqliteStore {
 
     // ── Inspiration History ──
 
-    pub fn insert_inspiration(&self, id: &str, insp_type: &str, input_refs: &str, output: &str) -> Result<(), BrainError> {
+    pub fn insert_inspiration(
+        &self,
+        id: &str,
+        insp_type: &str,
+        input_refs: &str,
+        output: &str,
+    ) -> Result<(), BrainError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO inspiration_history (id, type, input_refs, output) VALUES (?1, ?2, ?3, ?4)",
@@ -386,7 +422,11 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn get_recent_inspirations(&self, insp_type: &str, limit: i64) -> Result<Vec<(String, String, String, String)>, BrainError> {
+    pub fn get_recent_inspirations(
+        &self,
+        insp_type: &str,
+        limit: i64,
+    ) -> Result<Vec<(String, String, String, String)>, BrainError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
@@ -413,7 +453,14 @@ impl SqliteStore {
 
     // ── Radar Items ──
 
-    pub fn insert_radar_item(&self, id: &str, title: &str, summary: &str, source_name: &str, url: &str) -> Result<(), BrainError> {
+    pub fn insert_radar_item(
+        &self,
+        id: &str,
+        title: &str,
+        summary: &str,
+        source_name: &str,
+        url: &str,
+    ) -> Result<(), BrainError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT OR IGNORE INTO radar_items (id, title, summary, source_name, url) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -423,7 +470,11 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn get_radar_items(&self, status: &str, limit: i64) -> Result<Vec<(String, String, String, String, String, String)>, BrainError> {
+    pub fn get_radar_items(
+        &self,
+        status: &str,
+        limit: i64,
+    ) -> Result<Vec<(String, String, String, String, String, String)>, BrainError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
@@ -514,7 +565,11 @@ impl SqliteStore {
     pub fn find_memo_id_by_timestamp(&self, timestamp: &str) -> Result<Option<String>, BrainError> {
         let conn = self.conn.lock().unwrap();
         // Normalize: take first 19 chars (YYYY-MM-DDTHH:MM:SS)
-        let normalized = if timestamp.len() >= 19 { &timestamp[..19] } else { timestamp };
+        let normalized = if timestamp.len() >= 19 {
+            &timestamp[..19]
+        } else {
+            timestamp
+        };
         let pattern = format!("{}%", normalized);
         let result = conn.query_row(
             "SELECT id FROM memos WHERE timestamp LIKE ?1 LIMIT 1",
@@ -542,13 +597,17 @@ impl SqliteStore {
         let conn = self.conn.lock().unwrap();
 
         // Build date IN clause
-        let date_placeholders: Vec<String> = synced_dates.iter().enumerate()
+        let date_placeholders: Vec<String> = synced_dates
+            .iter()
+            .enumerate()
             .map(|(i, _)| format!("?{}", i + 1))
             .collect();
         let date_in = date_placeholders.join(", ");
 
         // Build ID NOT IN clause
-        let id_placeholders: Vec<String> = keep_ids.iter().enumerate()
+        let id_placeholders: Vec<String> = keep_ids
+            .iter()
+            .enumerate()
             .map(|(i, _)| format!("?{}", i + synced_dates.len() + 1))
             .collect();
         let id_not_in = if id_placeholders.is_empty() {
@@ -570,20 +629,41 @@ impl SqliteStore {
         for id in keep_ids {
             all_params.push(Box::new(id.clone()));
         }
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = all_params.iter().map(|p| p.as_ref()).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            all_params.iter().map(|p| p.as_ref()).collect();
 
-        let deleted = conn.execute(&sql, param_refs.as_slice())
+        let deleted = conn
+            .execute(&sql, param_refs.as_slice())
             .map_err(|e| BrainError::Internal(format!("删除过期小记失败: {e}")))?;
 
         Ok(deleted as u32)
     }
 
-    pub fn query_memos(&self, sql: &str, params: &[String]) -> Result<Vec<(String, String, String, String, String, String, String, String)>, BrainError> {
+    pub fn query_memos(
+        &self,
+        sql: &str,
+        params: &[String],
+    ) -> Result<
+        Vec<(
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+        )>,
+        BrainError,
+    > {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(sql)
             .map_err(|e| BrainError::Internal(format!("准备查询失败: {e}")))?;
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> = params
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
         let rows = stmt
             .query_map(params_refs.as_slice(), |row| {
                 Ok((

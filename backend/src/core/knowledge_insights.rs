@@ -114,7 +114,8 @@ impl KnowledgeInsightEngine {
 
         // 3. 构建链接图谱
         let mut inbound: HashMap<String, Vec<String>> = HashMap::new(); // target -> [sources]
-        let mut all_paths: HashSet<String> = note_data.iter().map(|(p, _, _, _)| p.clone()).collect();
+        let mut all_paths: HashSet<String> =
+            note_data.iter().map(|(p, _, _, _)| p.clone()).collect();
 
         for (source_path, content, _, _) in &note_data {
             let links = extract_links(content);
@@ -234,9 +235,7 @@ fn compute_islands(
             let modified = mtime
                 .map(|t| format_timestamp(t))
                 .unwrap_or_else(|| "unknown".to_string());
-            let days_ago = mtime
-                .map(|t| days_since(t, now))
-                .unwrap_or(0);
+            let days_ago = mtime.map(|t| days_since(t, now)).unwrap_or(0);
             NoteInfo {
                 path: path.clone(),
                 modified,
@@ -247,7 +246,10 @@ fn compute_islands(
     islands.sort_by(|a, b| b.days_ago.cmp(&a.days_ago));
     let count = islands.len();
     islands.truncate(20);
-    IslandData { count, notes: islands }
+    IslandData {
+        count,
+        notes: islands,
+    }
 }
 
 /// 知识枢纽：被引用最多的笔记
@@ -309,11 +311,7 @@ fn compute_domains(
 ) -> DomainData {
     let mut folder_counts: HashMap<String, usize> = HashMap::new();
     for (path, _, _, _) in note_data {
-        let folder = path
-            .split('/')
-            .next()
-            .unwrap_or("root")
-            .to_string();
+        let folder = path.split('/').next().unwrap_or("root").to_string();
         *folder_counts.entry(folder).or_insert(0) += 1;
     }
     let mut folders: Vec<FolderStat> = folder_counts

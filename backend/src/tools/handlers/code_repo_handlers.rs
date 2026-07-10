@@ -14,17 +14,27 @@ pub struct AddCodeRepoHandler;
 
 #[async_trait]
 impl ToolHandler for AddCodeRepoHandler {
-    fn name(&self) -> &str { "add_code_repo" }
-    fn description(&self) -> &str { "注册本地代码仓库" }
-    fn input_schema(&self) -> Value { definitions::add_code_repo_schema() }
-    fn module(&self) -> &str { "code_repo" }
+    fn name(&self) -> &str {
+        "add_code_repo"
+    }
+    fn description(&self) -> &str {
+        "注册本地代码仓库"
+    }
+    fn input_schema(&self) -> Value {
+        definitions::add_code_repo_schema()
+    }
+    fn module(&self) -> &str {
+        "code_repo"
+    }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
-        let path = args.get("path")
+        let path = args
+            .get("path")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .ok_or_else(|| BrainError::Internal("缺少必需参数 'path'".to_string()))?;
-        let name = args.get("name")
+        let name = args
+            .get("name")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .ok_or_else(|| BrainError::Internal("缺少必需参数 'name'".to_string()))?;
@@ -46,24 +56,35 @@ pub struct ListCodeReposHandler;
 
 #[async_trait]
 impl ToolHandler for ListCodeReposHandler {
-    fn name(&self) -> &str { "list_code_repos" }
-    fn description(&self) -> &str { "列出所有已注册的代码仓库" }
-    fn input_schema(&self) -> Value { definitions::list_code_repos_schema() }
-    fn module(&self) -> &str { "code_repo" }
+    fn name(&self) -> &str {
+        "list_code_repos"
+    }
+    fn description(&self) -> &str {
+        "列出所有已注册的代码仓库"
+    }
+    fn input_schema(&self) -> Value {
+        definitions::list_code_repos_schema()
+    }
+    fn module(&self) -> &str {
+        "code_repo"
+    }
 
     async fn handle(&self, _args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
         tracing::debug!("list_code_repos 调用");
         let repos = ctx.repo_manager.list()?;
-        let repos_json: Vec<Value> = repos.iter().map(|r| {
-            json!({
-                "name": r.name,
-                "path": r.path.to_string_lossy(),
-                "current_branch": r.current_branch,
-                "is_dirty": r.is_dirty,
-                "languages": r.languages,
-                "linked_notes_count": r.linked_notes_count,
+        let repos_json: Vec<Value> = repos
+            .iter()
+            .map(|r| {
+                json!({
+                    "name": r.name,
+                    "path": r.path.to_string_lossy(),
+                    "current_branch": r.current_branch,
+                    "is_dirty": r.is_dirty,
+                    "languages": r.languages,
+                    "linked_notes_count": r.linked_notes_count,
+                })
             })
-        }).collect();
+            .collect();
         Ok(json!({ "repos": repos_json, "total": repos_json.len() }))
     }
 }
@@ -73,13 +94,22 @@ pub struct GetRepoDetailHandler;
 
 #[async_trait]
 impl ToolHandler for GetRepoDetailHandler {
-    fn name(&self) -> &str { "get_repo_detail" }
-    fn description(&self) -> &str { "获取代码仓库的详细信息" }
-    fn input_schema(&self) -> Value { definitions::get_repo_detail_schema() }
-    fn module(&self) -> &str { "code_repo" }
+    fn name(&self) -> &str {
+        "get_repo_detail"
+    }
+    fn description(&self) -> &str {
+        "获取代码仓库的详细信息"
+    }
+    fn input_schema(&self) -> Value {
+        definitions::get_repo_detail_schema()
+    }
+    fn module(&self) -> &str {
+        "code_repo"
+    }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
-        let name = args.get("name")
+        let name = args
+            .get("name")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .ok_or_else(|| BrainError::Internal("缺少必需参数 'name'".to_string()))?;
@@ -110,17 +140,27 @@ pub struct LinkNoteToRepoHandler;
 
 #[async_trait]
 impl ToolHandler for LinkNoteToRepoHandler {
-    fn name(&self) -> &str { "link_note_to_repo" }
-    fn description(&self) -> &str { "将笔记关联到代码仓库" }
-    fn input_schema(&self) -> Value { definitions::link_note_to_repo_schema() }
-    fn module(&self) -> &str { "code_repo" }
+    fn name(&self) -> &str {
+        "link_note_to_repo"
+    }
+    fn description(&self) -> &str {
+        "将笔记关联到代码仓库"
+    }
+    fn input_schema(&self) -> Value {
+        definitions::link_note_to_repo_schema()
+    }
+    fn module(&self) -> &str {
+        "code_repo"
+    }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
-        let note_path = args.get("note_path")
+        let note_path = args
+            .get("note_path")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .ok_or_else(|| BrainError::Internal("缺少必需参数 'note_path'".to_string()))?;
-        let repo_name = args.get("repo_name")
+        let repo_name = args
+            .get("repo_name")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .ok_or_else(|| BrainError::Internal("缺少必需参数 'repo_name'".to_string()))?;
@@ -141,13 +181,22 @@ pub struct GetLinkedNotesHandler;
 
 #[async_trait]
 impl ToolHandler for GetLinkedNotesHandler {
-    fn name(&self) -> &str { "get_linked_notes" }
-    fn description(&self) -> &str { "获取代码仓库关联的笔记列表" }
-    fn input_schema(&self) -> Value { definitions::get_linked_notes_schema() }
-    fn module(&self) -> &str { "code_repo" }
+    fn name(&self) -> &str {
+        "get_linked_notes"
+    }
+    fn description(&self) -> &str {
+        "获取代码仓库关联的笔记列表"
+    }
+    fn input_schema(&self) -> Value {
+        definitions::get_linked_notes_schema()
+    }
+    fn module(&self) -> &str {
+        "code_repo"
+    }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
-        let repo_name = args.get("repo_name")
+        let repo_name = args
+            .get("repo_name")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .ok_or_else(|| BrainError::Internal("缺少必需参数 'repo_name'".to_string()))?;
@@ -163,13 +212,22 @@ pub struct OpenInVscodeHandler;
 
 #[async_trait]
 impl ToolHandler for OpenInVscodeHandler {
-    fn name(&self) -> &str { "open_in_vscode" }
-    fn description(&self) -> &str { "在 VSCode 中打开代码仓库" }
-    fn input_schema(&self) -> Value { definitions::open_in_vscode_schema() }
-    fn module(&self) -> &str { "code_repo" }
+    fn name(&self) -> &str {
+        "open_in_vscode"
+    }
+    fn description(&self) -> &str {
+        "在 VSCode 中打开代码仓库"
+    }
+    fn input_schema(&self) -> Value {
+        definitions::open_in_vscode_schema()
+    }
+    fn module(&self) -> &str {
+        "code_repo"
+    }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
-        let name = args.get("name")
+        let name = args
+            .get("name")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .ok_or_else(|| BrainError::Internal("缺少必需参数 'name'".to_string()))?;

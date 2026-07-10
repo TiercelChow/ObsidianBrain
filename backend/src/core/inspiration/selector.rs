@@ -51,7 +51,10 @@ impl ConceptSelector {
             }
 
             // 计算距离
-            let distance = crate::core::inspiration::concept_pool::ConceptPoolBuilder::compute_distance(concept_a, concept_b);
+            let distance =
+                crate::core::inspiration::concept_pool::ConceptPoolBuilder::compute_distance(
+                    concept_a, concept_b,
+                );
             if distance >= self.config.min_distance && distance <= self.config.max_distance {
                 let weight = distance.powf(2.0); // 距离^2 加权
                 candidates.push((i, weight));
@@ -64,8 +67,12 @@ impl ConceptSelector {
                 if i == idx_a {
                     continue;
                 }
-                let distance = crate::core::inspiration::concept_pool::ConceptPoolBuilder::compute_distance(concept_a, concept_b);
-                if distance > 0.1 { // 排除几乎相同的
+                let distance =
+                    crate::core::inspiration::concept_pool::ConceptPoolBuilder::compute_distance(
+                        concept_a, concept_b,
+                    );
+                if distance > 0.1 {
+                    // 排除几乎相同的
                     candidates.push((i, distance));
                 }
             }
@@ -169,7 +176,10 @@ mod tests {
     fn test_select_pair_empty_pool() {
         let config = InspirationConfig::default();
         let selector = ConceptSelector::new(config);
-        let pool = ConceptPool { concepts: vec![], built_at: Utc::now() };
+        let pool = ConceptPool {
+            concepts: vec![],
+            built_at: Utc::now(),
+        };
         let recent = vec![];
 
         assert!(selector.select_pair(&pool, &recent).is_none());

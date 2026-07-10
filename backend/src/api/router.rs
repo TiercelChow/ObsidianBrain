@@ -8,7 +8,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::api::handlers::health::health_check;
 use crate::api::handlers::tool_handler::{call_tool, list_tools};
-use crate::api::handlers::upload::{upload_images, serve_vault_image, serve_thumbnail};
+use crate::api::handlers::upload::{serve_thumbnail, serve_vault_image, upload_images};
 use crate::AppContext;
 
 /// Create the application router with all routes, middleware, and fallbacks.

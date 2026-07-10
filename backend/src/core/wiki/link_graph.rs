@@ -38,7 +38,11 @@ impl LinkGraph {
             }
         }
 
-        Self { pages, outbound, inbound }
+        Self {
+            pages,
+            outbound,
+            inbound,
+        }
     }
 
     /// 找出孤岛页（没有任何入链的页面）
@@ -124,14 +128,22 @@ fn resolve_link(target: &str, all_pages: &HashSet<String>, source_path: &str) ->
     }
 
     // 尝试在 source_path 同目录下解析
-    let source_dir = source_path.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("");
+    let source_dir = source_path
+        .rsplit_once('/')
+        .map(|(dir, _)| dir)
+        .unwrap_or("");
     let relative = format!("{}/{}", source_dir, with_md);
     if all_pages.contains(&relative) {
         return Some(relative);
     }
 
     // 尝试在 Wiki/ 各子目录下查找
-    for dir in &["Wiki/entities", "Wiki/concepts", "Wiki/sources", "Wiki/synthesis"] {
+    for dir in &[
+        "Wiki/entities",
+        "Wiki/concepts",
+        "Wiki/sources",
+        "Wiki/synthesis",
+    ] {
         let full = format!("{}/{}", dir, with_md);
         if all_pages.contains(&full) {
             return Some(full);

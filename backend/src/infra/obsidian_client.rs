@@ -120,15 +120,9 @@ impl std::fmt::Display for Period {
 #[serde(tag = "op", rename_all = "lowercase")]
 pub enum PatchOp {
     #[serde(rename = "replace")]
-    Replace {
-        from: String,
-        to: String,
-    },
+    Replace { from: String, to: String },
     #[serde(rename = "insert")]
-    Insert {
-        at: String,
-        content: String,
-    },
+    Insert { at: String, content: String },
 }
 
 impl ObsidianClient {
@@ -144,9 +138,7 @@ impl ObsidianClient {
             .timeout(Duration::from_secs(10))
             .danger_accept_invalid_certs(true) // self-signed cert
             .build()
-            .map_err(|e| {
-                BrainError::Internal(format!("Obsidian HTTP 客户端创建失败: {e}"))
-            })?;
+            .map_err(|e| BrainError::Internal(format!("Obsidian HTTP 客户端创建失败: {e}")))?;
 
         Ok(Self {
             client,
@@ -172,7 +164,10 @@ impl ObsidianClient {
     /// Read a file from the vault. Returns the raw markdown content.
     pub async fn read_file(&self, path: &str) -> Result<String, BrainError> {
         let resp = self
-            .request(reqwest::Method::GET, &format!("/vault/{}", encode_path(path)))
+            .request(
+                reqwest::Method::GET,
+                &format!("/vault/{}", encode_path(path)),
+            )
             .send()
             .await
             .map_err(|e| self.map_error("读取文件", e))?;
@@ -190,7 +185,10 @@ impl ObsidianClient {
     /// Read a file with parsed frontmatter.
     pub async fn read_note(&self, path: &str) -> Result<NoteResponse, BrainError> {
         let resp = self
-            .request(reqwest::Method::GET, &format!("/vault/{}", encode_path(path)))
+            .request(
+                reqwest::Method::GET,
+                &format!("/vault/{}", encode_path(path)),
+            )
             .header("Accept", "application/vnd.olrapi.note+json")
             .send()
             .await
@@ -209,7 +207,10 @@ impl ObsidianClient {
     /// Write (overwrite) a file in the vault.
     pub async fn write_file(&self, path: &str, content: &str) -> Result<(), BrainError> {
         let resp = self
-            .request(reqwest::Method::PUT, &format!("/vault/{}", encode_path(path)))
+            .request(
+                reqwest::Method::PUT,
+                &format!("/vault/{}", encode_path(path)),
+            )
             .header("Content-Type", "text/markdown")
             .body(content.to_string())
             .send()
@@ -228,7 +229,10 @@ impl ObsidianClient {
         content_type: &str,
     ) -> Result<(), BrainError> {
         let resp = self
-            .request(reqwest::Method::PUT, &format!("/vault/{}", encode_path(path)))
+            .request(
+                reqwest::Method::PUT,
+                &format!("/vault/{}", encode_path(path)),
+            )
             .header("Content-Type", content_type)
             .body(data.to_vec())
             .send()
@@ -240,12 +244,12 @@ impl ObsidianClient {
     }
 
     /// Read binary data from a file in the vault.
-    pub async fn read_binary(
-        &self,
-        path: &str,
-    ) -> Result<(Vec<u8>, String), BrainError> {
+    pub async fn read_binary(&self, path: &str) -> Result<(Vec<u8>, String), BrainError> {
         let resp = self
-            .request(reqwest::Method::GET, &format!("/vault/{}", encode_path(path)))
+            .request(
+                reqwest::Method::GET,
+                &format!("/vault/{}", encode_path(path)),
+            )
             .header("Accept", "application/octet-stream")
             .send()
             .await
@@ -269,7 +273,10 @@ impl ObsidianClient {
     /// Append content to a file in the vault.
     pub async fn append_file(&self, path: &str, content: &str) -> Result<(), BrainError> {
         let resp = self
-            .request(reqwest::Method::POST, &format!("/vault/{}", encode_path(path)))
+            .request(
+                reqwest::Method::POST,
+                &format!("/vault/{}", encode_path(path)),
+            )
             .header("Content-Type", "text/markdown")
             .body(content.to_string())
             .send()
@@ -281,11 +288,7 @@ impl ObsidianClient {
     }
 
     /// Apply patch operations to a file (surgical edits).
-    pub async fn patch_file(
-        &self,
-        path: &str,
-        operations: &[PatchOp],
-    ) -> Result<(), BrainError> {
+    pub async fn patch_file(&self, path: &str, operations: &[PatchOp]) -> Result<(), BrainError> {
         let resp = self
             .request(
                 reqwest::Method::PATCH,
@@ -615,7 +618,10 @@ mod tests {
     #[test]
     fn test_encode_path() {
         assert_eq!(encode_path("folder/note.md"), "folder%2Fnote.md");
-        assert_eq!(encode_path("中文笔记.md"), "%E4%B8%AD%E6%96%87%E7%AC%94%E8%AE%B0.md");
+        assert_eq!(
+            encode_path("中文笔记.md"),
+            "%E4%B8%AD%E6%96%87%E7%AC%94%E8%AE%B0.md"
+        );
     }
 
     #[test]

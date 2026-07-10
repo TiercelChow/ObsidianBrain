@@ -124,7 +124,11 @@ mod tests {
     #[test]
     fn test_detect_rust_project() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("main.rs"), "fn main() {\n    println!(\"hello\");\n}\n").unwrap();
+        fs::write(
+            dir.path().join("main.rs"),
+            "fn main() {\n    println!(\"hello\");\n}\n",
+        )
+        .unwrap();
         fs::write(dir.path().join("lib.rs"), "pub fn test() {}\n").unwrap();
 
         let stats = LanguageDetector::detect(dir.path(), &[], 100);
@@ -152,11 +156,7 @@ mod tests {
         fs::write(node_modules.join("index.js"), "module.exports = {};\n").unwrap();
         fs::write(dir.path().join("main.rs"), "fn main() {}\n").unwrap();
 
-        let stats = LanguageDetector::detect(
-            dir.path(),
-            &["node_modules".to_string()],
-            100,
-        );
+        let stats = LanguageDetector::detect(dir.path(), &["node_modules".to_string()], 100);
         assert!(!stats.contains_key("JavaScript"));
         assert!(stats.contains_key("Rust"));
     }

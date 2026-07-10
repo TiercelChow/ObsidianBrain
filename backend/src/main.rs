@@ -74,7 +74,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("配置加载失败: {e}，使用默认配置");
         AppConfig::default()
     });
-    let host: std::net::IpAddr = config.server.host.parse()
+    let host: std::net::IpAddr = config
+        .server
+        .host
+        .parse()
         .unwrap_or_else(|_| std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
     let addr = SocketAddr::new(host, config.server.port);
     tracing::info!("配置加载完成: {}:{}", addr.ip(), addr.port());
@@ -119,7 +122,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     config.obsidian.url = url.to_string();
                 }
                 if let Some(key) = obs.get("api_key").and_then(|v| v.as_str()) {
-                    config.obsidian.api_key = if key.is_empty() { None } else { Some(key.to_string()) };
+                    config.obsidian.api_key = if key.is_empty() {
+                        None
+                    } else {
+                        Some(key.to_string())
+                    };
                 }
             }
             if let Some(llm) = saved.get("llm") {
@@ -129,13 +136,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(m) = llm.get("model").and_then(|v| v.as_str()) {
                     config.llm.model = m.to_string();
                 }
-                if let Some(k) = llm.get("api_key").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                if let Some(k) = llm
+                    .get("api_key")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
                     config.llm.api_key = Some(k.to_string());
                 }
-                if let Some(k) = llm.get("api_key_env").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                if let Some(k) = llm
+                    .get("api_key_env")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
                     config.llm.api_key_env = Some(k.to_string());
                 }
-                if let Some(u) = llm.get("base_url").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                if let Some(u) = llm
+                    .get("base_url")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
                     config.llm.base_url = Some(u.to_string());
                 }
                 if let Some(t) = llm.get("max_tokens").and_then(|v| v.as_u64()) {
@@ -160,7 +179,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Some(client)
                 } else {
                     components.obsidian = "degraded: 无法连接".to_string();
-                    tracing::warn!("Obsidian API 无法连接: {} (插件是否已启用?)", config.obsidian.url);
+                    tracing::warn!(
+                        "Obsidian API 无法连接: {} (插件是否已启用?)",
+                        config.obsidian.url
+                    );
                     Some(client)
                 }
             }
@@ -204,8 +226,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     provider: "ollama".to_string(),
                     ..Default::default()
                 };
-                Arc::from(crate::infra::llm_client::LlmClientFactory::create(&fallback_config)
-                    .expect("Fallback LLM client creation failed"))
+                Arc::from(
+                    crate::infra::llm_client::LlmClientFactory::create(&fallback_config)
+                        .expect("Fallback LLM client creation failed"),
+                )
             });
 
     let inspiration_service = Arc::new(InspirationService::new(
@@ -230,8 +254,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tracing::warn!("RadarService 初始化失败: {e}，雷达功能将不可用");
             // 创建一个空的 RadarService 作为 fallback
             let fallback_config = crate::models::radar::RadarConfig::default();
-            Arc::new(RadarService::new(db.clone(), obsidian.clone(), fallback_config)
-                .expect("Fallback RadarService creation failed"))
+            Arc::new(
+                RadarService::new(db.clone(), obsidian.clone(), fallback_config)
+                    .expect("Fallback RadarService creation failed"),
+            )
         }
     };
 
@@ -326,17 +352,15 @@ mod test_helpers {
 
             // Create a dummy Obsidian client (will fail on all calls) shared by all
             // services via a single ObsidianProvider.
-            let obsidian = Arc::new(
-                ObsidianClient::new(&config.obsidian).unwrap_or_else(|_| {
-                    // Create a dummy client that will fail on all calls
-                    ObsidianClient::new(&crate::config::ObsidianApiConfig {
-                        enabled: true,
-                        url: "http://127.0.0.1:1".to_string(), // unreachable
-                        api_key: None,
-                    })
-                    .expect("dummy client creation")
-                }),
-            );
+            let obsidian = Arc::new(ObsidianClient::new(&config.obsidian).unwrap_or_else(|_| {
+                // Create a dummy client that will fail on all calls
+                ObsidianClient::new(&crate::config::ObsidianApiConfig {
+                    enabled: true,
+                    url: "http://127.0.0.1:1".to_string(), // unreachable
+                    api_key: None,
+                })
+                .expect("dummy client creation")
+            }));
             let obsidian_provider = new_provider(Some(obsidian));
 
             let memory_service = Arc::new(MemoryService::new(
@@ -345,9 +369,8 @@ mod test_helpers {
                 "TestVault".to_string(),
             ));
 
-            let db = Arc::new(
-                SqliteStore::new(&dir.path().join("test.db")).expect("SQLite creation"),
-            );
+            let db =
+                Arc::new(SqliteStore::new(&dir.path().join("test.db")).expect("SQLite creation"));
             let repo_manager = Arc::new(RepoManager::new(db.clone(), RepoManagerConfig::default()));
             let note_linker = Arc::new(NoteLinker::new(db.clone()));
             let timeline_store = Arc::new(TimelineStore::new(db.clone()));
@@ -359,9 +382,10 @@ mod test_helpers {
 
             // 创建测试用 LLM 和灵感服务
             let llm_config = crate::config::LlmConfig::default();
-            let llm: Arc<dyn crate::infra::llm_client::LlmProvider> =
-                Arc::from(crate::infra::llm_client::LlmClientFactory::create(&llm_config)
-                    .expect("Test LLM client creation failed"));
+            let llm: Arc<dyn crate::infra::llm_client::LlmProvider> = Arc::from(
+                crate::infra::llm_client::LlmClientFactory::create(&llm_config)
+                    .expect("Test LLM client creation failed"),
+            );
             let inspiration_service = Arc::new(InspirationService::new(
                 db.clone(),
                 obsidian_provider.clone(),
@@ -374,7 +398,8 @@ mod test_helpers {
                 ..Default::default()
             };
             let radar_service = Arc::new(
-                RadarService::new(db.clone(), obsidian_provider.clone(), radar_config).expect("Test RadarService creation failed")
+                RadarService::new(db.clone(), obsidian_provider.clone(), radar_config)
+                    .expect("Test RadarService creation failed"),
             );
 
             let ctx = Arc::new(AppContext {

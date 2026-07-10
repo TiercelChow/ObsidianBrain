@@ -7,9 +7,14 @@ pub mod radar;
 pub mod repo;
 pub mod timeline;
 
-pub use inspiration::{ConceptRef, InspirationRecord, InspirationResult, InspirationType, NoteRef, QuestionItem, CounterpointItem};
+pub use inspiration::{
+    ConceptRef, CounterpointItem, InspirationRecord, InspirationResult, InspirationType, NoteRef,
+    QuestionItem,
+};
 pub use memory::MemoryStats;
 pub use note::{CodeBlock, NoteSummary, ParsedDocument, Section};
 pub use radar::{RadarItem, RadarItemView, RadarStatus};
 pub use repo::{CodeRepo, CommitSummary, RepoCard, RepoDetail, RepoStatus, WorkingDirStatus};
-pub use timeline::{DailyEvents, EventType, GetTimelineRequest, TimelineEvent, TimelineResponse, TimelineStatistics};
+pub use timeline::{
+    DailyEvents, EventType, GetTimelineRequest, TimelineEvent, TimelineResponse, TimelineStatistics,
+};

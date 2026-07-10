@@ -1,7 +1,7 @@
 use axum::extract::{Multipart, Path, State};
+use axum::http::header;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
-use axum::http::header;
 use serde_json::{json, Value};
 use std::io::Cursor;
 use std::sync::Arc;
@@ -20,13 +20,12 @@ pub async fn upload_images(
     State(ctx): State<Arc<AppContext>>,
     mut multipart: Multipart,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let obsidian = crate::infra::obsidian_client::get_client(&ctx.obsidian)
-        .map_err(|_| {
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({ "error": "Obsidian API 不可用" })),
-            )
-        })?;
+    let obsidian = crate::infra::obsidian_client::get_client(&ctx.obsidian).map_err(|_| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "Obsidian API 不可用" })),
+        )
+    })?;
 
     let now = chrono::Local::now();
     let prefix = now.format("%Y-%m-%d-%H%M%S").to_string();
@@ -85,7 +84,10 @@ pub async fn upload_images(
 /// Saves to ./data/thumbnails/{filename} as JPEG (smaller size).
 fn generate_thumbnail(data: &[u8], filename: &str, _ext: &str) {
     // Change extension to .jpg for thumbnails (smaller file size)
-    let thumb_name = filename.rsplit_once('.').map(|(stem, _)| format!("{}.jpg", stem)).unwrap_or_else(|| format!("{}.jpg", filename));
+    let thumb_name = filename
+        .rsplit_once('.')
+        .map(|(stem, _)| format!("{}.jpg", stem))
+        .unwrap_or_else(|| format!("{}.jpg", filename));
     let thumb_dir = std::path::Path::new("./data/thumbnails");
     let thumb_path = thumb_dir.join(&thumb_name);
 
@@ -131,11 +133,7 @@ pub async fn serve_vault_image(
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?;
 
-    Ok((
-        [(header::CONTENT_TYPE, content_type)],
-        bytes,
-    )
-        .into_response())
+    Ok(([(header::CONTENT_TYPE, content_type)], bytes).into_response())
 }
 
 /// Serve a thumbnail by path.
@@ -149,18 +147,19 @@ pub async fn serve_thumbnail(
     // path = "Timeline/images/2026-06-13-174140-0.jpg"
     // thumbnail = "./data/thumbnails/2026-06-13-174140-0.jpg"
     let filename = path.rsplit('/').next().unwrap_or(&path);
-    let thumb_name = filename.rsplit_once('.').map(|(stem, _)| format!("{}.jpg", stem)).unwrap_or_else(|| format!("{}.jpg", filename));
+    let thumb_name = filename
+        .rsplit_once('.')
+        .map(|(stem, _)| format!("{}.jpg", stem))
+        .unwrap_or_else(|| format!("{}.jpg", filename));
     let thumb_path = std::path::Path::new("./data/thumbnails").join(&thumb_name);
 
     // Try serving thumbnail first
     if thumb_path.exists() {
         match std::fs::read(&thumb_path) {
             Ok(bytes) => {
-                return Ok((
-                    [(header::CONTENT_TYPE, "image/jpeg".to_string())],
-                    bytes,
-                )
-                    .into_response());
+                return Ok(
+                    ([(header::CONTENT_TYPE, "image/jpeg".to_string())], bytes).into_response()
+                );
             }
             Err(_) => {}
         }
@@ -181,18 +180,10 @@ pub async fn serve_thumbnail(
     // Try serving the just-generated thumbnail
     if thumb_path.exists() {
         if let Ok(bytes) = std::fs::read(&thumb_path) {
-            return Ok((
-                [(header::CONTENT_TYPE, "image/jpeg".to_string())],
-                bytes,
-            )
-                .into_response());
+            return Ok(([(header::CONTENT_TYPE, "image/jpeg".to_string())], bytes).into_response());
         }
     }
 
     // Final fallback: serve original
-    Ok((
-        [(header::CONTENT_TYPE, "image/jpeg".to_string())],
-        data,
-    )
-        .into_response())
+    Ok(([(header::CONTENT_TYPE, "image/jpeg".to_string())], data).into_response())
 }

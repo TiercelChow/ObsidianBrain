@@ -19,10 +19,7 @@ impl VscodeOpener {
 
         // 尝试通过系统命令打开
         #[cfg(target_os = "macos")]
-        let opened = std::process::Command::new("open")
-            .arg(&uri)
-            .spawn()
-            .is_ok();
+        let opened = std::process::Command::new("open").arg(&uri).spawn().is_ok();
 
         #[cfg(target_os = "linux")]
         let opened = std::process::Command::new("xdg-open")

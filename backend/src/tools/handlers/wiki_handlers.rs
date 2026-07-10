@@ -14,8 +14,12 @@ pub struct IngestSourceHandler;
 
 #[async_trait]
 impl ToolHandler for IngestSourceHandler {
-    fn name(&self) -> &str { "ingest_source" }
-    fn description(&self) -> &str { "将原始资料摄入 Wiki：LLM 编译完整文章，合并或新建" }
+    fn name(&self) -> &str {
+        "ingest_source"
+    }
+    fn description(&self) -> &str {
+        "将原始资料摄入 Wiki：LLM 编译完整文章，合并或新建"
+    }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -27,13 +31,19 @@ impl ToolHandler for IngestSourceHandler {
             "required": ["source_path"]
         })
     }
-    fn module(&self) -> &str { "wiki" }
+    fn module(&self) -> &str {
+        "wiki"
+    }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
-        let source_path = args.get("source_path")
+        let source_path = args
+            .get("source_path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| BrainError::Internal("缺少 source_path".to_string()))?;
-        let source_type = args.get("source_type").and_then(|v| v.as_str()).unwrap_or("article");
+        let source_type = args
+            .get("source_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("article");
         let source_url = args.get("source_url").and_then(|v| v.as_str());
 
         let llm: Arc<dyn crate::infra::llm_client::LlmProvider> = ctx.inspiration_service.get_llm();
@@ -55,8 +65,12 @@ pub struct QueryWikiHandler;
 
 #[async_trait]
 impl ToolHandler for QueryWikiHandler {
-    fn name(&self) -> &str { "query_wiki" }
-    fn description(&self) -> &str { "基于已编译的 Wiki 文章回答问题" }
+    fn name(&self) -> &str {
+        "query_wiki"
+    }
+    fn description(&self) -> &str {
+        "基于已编译的 Wiki 文章回答问题"
+    }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -67,13 +81,19 @@ impl ToolHandler for QueryWikiHandler {
             "required": ["question"]
         })
     }
-    fn module(&self) -> &str { "wiki" }
+    fn module(&self) -> &str {
+        "wiki"
+    }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
-        let question = args.get("question")
+        let question = args
+            .get("question")
             .and_then(|v| v.as_str())
             .ok_or_else(|| BrainError::Internal("缺少 question".to_string()))?;
-        let save_answer = args.get("save_answer").and_then(|v| v.as_bool()).unwrap_or(false);
+        let save_answer = args
+            .get("save_answer")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let llm: Arc<dyn crate::infra::llm_client::LlmProvider> = ctx.inspiration_service.get_llm();
         let engine = WikiEngine::new(ctx.obsidian.clone(), llm);
@@ -92,8 +112,12 @@ pub struct LintWikiHandler;
 
 #[async_trait]
 impl ToolHandler for LintWikiHandler {
-    fn name(&self) -> &str { "lint_wiki" }
-    fn description(&self) -> &str { "检查 Wiki 健康度：索引一致性、孤岛页、链接有效性" }
+    fn name(&self) -> &str {
+        "lint_wiki"
+    }
+    fn description(&self) -> &str {
+        "检查 Wiki 健康度：索引一致性、孤岛页、链接有效性"
+    }
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -102,10 +126,15 @@ impl ToolHandler for LintWikiHandler {
             }
         })
     }
-    fn module(&self) -> &str { "wiki" }
+    fn module(&self) -> &str {
+        "wiki"
+    }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
-        let auto_fix = args.get("auto_fix").and_then(|v| v.as_bool()).unwrap_or(false);
+        let auto_fix = args
+            .get("auto_fix")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let llm: Arc<dyn crate::infra::llm_client::LlmProvider> = ctx.inspiration_service.get_llm();
         let engine = WikiEngine::new(ctx.obsidian.clone(), llm);
@@ -125,12 +154,18 @@ pub struct GetWikiStatusHandler;
 
 #[async_trait]
 impl ToolHandler for GetWikiStatusHandler {
-    fn name(&self) -> &str { "get_wiki_status" }
-    fn description(&self) -> &str { "获取 Wiki 当前状态：文章数、主题数、原始资料数" }
+    fn name(&self) -> &str {
+        "get_wiki_status"
+    }
+    fn description(&self) -> &str {
+        "获取 Wiki 当前状态：文章数、主题数、原始资料数"
+    }
     fn input_schema(&self) -> Value {
         json!({ "type": "object", "properties": {} })
     }
-    fn module(&self) -> &str { "wiki" }
+    fn module(&self) -> &str {
+        "wiki"
+    }
 
     async fn handle(&self, _args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
         let llm: Arc<dyn crate::infra::llm_client::LlmProvider> = ctx.inspiration_service.get_llm();

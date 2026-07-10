@@ -5,10 +5,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::BrainError;
-use crate::models::inspiration::{Concept, ConceptPool, ConceptSource, InspirationConfig};
-use crate::infra::sqlite_store::SqliteStore;
-use crate::infra::obsidian_client::ObsidianProvider;
 use crate::infra::llm_client::LlmProvider;
+use crate::infra::obsidian_client::ObsidianProvider;
+use crate::infra::sqlite_store::SqliteStore;
+use crate::models::inspiration::{Concept, ConceptPool, ConceptSource, InspirationConfig};
 
 /// 概念池构建器
 pub struct ConceptPoolBuilder {
@@ -18,8 +18,16 @@ pub struct ConceptPoolBuilder {
 }
 
 impl ConceptPoolBuilder {
-    pub fn new(db: Arc<SqliteStore>, obsidian: ObsidianProvider, config: InspirationConfig) -> Self {
-        Self { db, obsidian, config }
+    pub fn new(
+        db: Arc<SqliteStore>,
+        obsidian: ObsidianProvider,
+        config: InspirationConfig,
+    ) -> Self {
+        Self {
+            db,
+            obsidian,
+            config,
+        }
     }
 
     /// 构建概念池
@@ -71,7 +79,9 @@ impl ConceptPoolBuilder {
                     {
                         // 清理文件名（移除日期前缀等）
                         let clean_name = name
-                            .trim_start_matches(|c: char| c.is_ascii_digit() || c == '-' || c == '_')
+                            .trim_start_matches(|c: char| {
+                                c.is_ascii_digit() || c == '-' || c == '_'
+                            })
                             .to_string();
 
                         if !clean_name.is_empty() && clean_name.len() > 2 {
@@ -88,7 +98,11 @@ impl ConceptPoolBuilder {
         }
 
         // 3. 按权重排序，限制数量
-        concepts.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
+        concepts.sort_by(|a, b| {
+            b.weight
+                .partial_cmp(&a.weight)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         concepts.truncate(self.config.max_concepts);
 
         Ok(ConceptPool {
@@ -111,7 +125,7 @@ impl ConceptPoolBuilder {
                         let value = trimmed[5..].trim();
                         if value.starts_with('[') && value.ends_with(']') {
                             // 数组格式: [tag1, tag2]
-                            let inner = &value[1..value.len()-1];
+                            let inner = &value[1..value.len() - 1];
                             for item in inner.split(',') {
                                 let tag = item.trim().trim_matches('"').trim_matches('\'');
                                 if !tag.is_empty() {
@@ -166,15 +180,19 @@ impl ConceptPoolBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
-    use std::sync::Arc;
     use crate::infra::sqlite_store::SqliteStore;
+    use std::sync::Arc;
+    use tempfile::TempDir;
 
     fn create_builder() -> (TempDir, ConceptPoolBuilder) {
         let dir = TempDir::new().unwrap();
         let db = Arc::new(SqliteStore::new(&dir.path().join("test.db")).unwrap());
         let config = InspirationConfig::default();
-        let builder = ConceptPoolBuilder::new(db, crate::infra::obsidian_client::new_provider(None), config);
+        let builder = ConceptPoolBuilder::new(
+            db,
+            crate::infra::obsidian_client::new_provider(None),
+            config,
+        );
         (dir, builder)
     }
 

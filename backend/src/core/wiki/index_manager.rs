@@ -74,19 +74,22 @@ pub async fn update_index(
 }
 
 /// 列出 Wiki 中某类型的所有页面名（不含路径和 .md）
-pub async fn list_pages(
-    provider: &ObsidianProvider,
-    dir: &str,
-) -> Result<Vec<String>, BrainError> {
+pub async fn list_pages(provider: &ObsidianProvider, dir: &str) -> Result<Vec<String>, BrainError> {
     let client = crate::infra::obsidian_client::get_client(provider)?;
     let files = client.list_all_files().await?;
 
     let pages: Vec<String> = files
         .into_iter()
-        .filter(|f| f.starts_with(&format!("{}/", dir)) && f.ends_with(".md") && !f.ends_with(".gitkeep"))
+        .filter(|f| {
+            f.starts_with(&format!("{}/", dir)) && f.ends_with(".md") && !f.ends_with(".gitkeep")
+        })
         .map(|f| {
             // "Wiki/entities/andrej-karpathy.md" → "andrej-karpathy"
-            f.rsplit('/').next().unwrap_or(&f).trim_end_matches(".md").to_string()
+            f.rsplit('/')
+                .next()
+                .unwrap_or(&f)
+                .trim_end_matches(".md")
+                .to_string()
         })
         .collect();
 
