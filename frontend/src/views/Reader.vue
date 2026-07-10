@@ -60,17 +60,25 @@
         </div>
       </aside>
 
-      <!-- Center: rendered content -->
+      <!-- Center: rendered content (page-turn transition on file switch) -->
       <main ref="contentRef" class="pane pane-center" @scroll="onContentScroll">
-        <div v-if="fileLoading" class="center-state">
-          <el-icon class="is-loading"><Loading /></el-icon><span>加载中…</span>
-        </div>
-        <div v-else-if="error" class="center-state error">⚠️ {{ error }}</div>
-        <div v-else-if="!renderedHtml" class="center-state">
-          <el-icon class="cs-icon"><Document /></el-icon>
-          <p>选择左侧的 Markdown 文件开始阅读</p>
-        </div>
-        <article v-else class="markdown-body" v-html="renderedHtml"></article>
+        <transition :name="transitionDir" mode="out-in" @enter="onArticleEnter">
+          <article
+            v-if="renderedHtml"
+            :key="displayedFile"
+            class="markdown-body"
+            v-html="renderedHtml"
+          ></article>
+          <div v-else key="empty" class="center-state">
+            <el-icon class="cs-icon"><Document /></el-icon>
+            <p>选择左侧的 Markdown 文件开始阅读</p>
+          </div>
+        </transition>
+
+        <!-- top loading bar; old content stays visible underneath while loading -->
+        <div v-if="fileLoading" class="loadbar"><span></span></div>
+        <!-- error banner (old content remains behind) -->
+        <div v-if="error" class="error-banner">⚠️ {{ error }}</div>
       </main>
 
       <!-- Right: TOC -->
@@ -125,10 +133,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  FolderOpened, Search, Star, StarFilled, Delete, Menu, Loading, Document,
+  FolderOpened, Search, Star, StarFilled, Delete, Menu, Document,
 } from '@element-plus/icons-vue'
 import {
   listLocalDir, readLocalFile, getReaderHistory, saveReaderHistory,
@@ -160,6 +168,24 @@ const tocDrawer = ref(false)
 const viewerSvg = ref('')
 const viewerSource = ref('')
 const contentRef = ref<HTMLElement | null>(null)
+// The file currently displayed — swaps only when its content is ready, driving the
+// page-turn transition. (Separate from activeFile, which updates immediately for the
+// tree highlight.)
+const displayedFile = ref('')
+const transitionDir = ref<'page-next' | 'page-prev'>('page-next')
+
+// Markdown paths in tree display order (depth-first) — used to pick turn direction.
+const flatFiles = computed(() => {
+  const out: string[] = []
+  const walk = (entries: DirEntry[]) => {
+    for (const e of entries) {
+      if (e.is_dir) e.children && walk(e.children)
+      else if (e.is_markdown) out.push(e.path)
+    }
+  }
+  walk(tree.value)
+  return out
+})
 
 function handleMermaidClick(svg: SVGElement, source: string) {
   viewerSource.value = source
@@ -239,6 +265,7 @@ async function openPath(p?: string) {
     }
     tree.value = res.result.entries
     renderedHtml.value = ''
+    displayedFile.value = ''
     activeFile.value = ''
     toc.value = []
     // Remember last opened folder; clear stale last-file until a new one is chosen.
@@ -257,6 +284,8 @@ async function openPath(p?: string) {
 // ── select & render file ──────────────────────────────────────────────
 async function onSelectFile(path: string) {
   activeFile.value = path
+  // Already displaying this file — skip to avoid resetting rendered mermaid back to source.
+  if (path === displayedFile.value) return
   fileLoading.value = true
   error.value = ''
   try {
@@ -266,24 +295,31 @@ async function onSelectFile(path: string) {
       ElMessage.error(error.value)
       return
     }
+    // Determine page-turn direction from the file's position in the tree.
+    const oldIdx = flatFiles.value.indexOf(displayedFile.value)
+    const newIdx = flatFiles.value.indexOf(path)
+    transitionDir.value =
+      oldIdx >= 0 && newIdx >= 0 && newIdx < oldIdx ? 'page-prev' : 'page-next'
+    // Render new content, then swap the transition key in the SAME tick so the leaving
+    // <article> stays frozen on the OLD content while the new one slides in.
     renderedHtml.value = renderMarkdown(res.result.content)
-    // Clear loading BEFORE nextTick so the <article class="markdown-body"> is in the
-    // DOM when enhance() runs — otherwise querySelector('.markdown-body') returns null
-    // and mermaid/hljs never execute.
-    fileLoading.value = false
-    await nextTick()
-    if (contentRef.value) {
-      contentRef.value.scrollTop = 0
-      buildToc()
-      const body = contentRef.value.querySelector('.markdown-body') as HTMLElement | null
-      if (body) await enhance(body)
-    }
+    displayedFile.value = path
     localStorage.setItem(LAST_FILE_KEY, path)
+    // enhance() + buildToc() run in the transition's @enter hook (onArticleEnter).
   } catch (e) {
     error.value = (e as Error)?.message || '读取失败'
   } finally {
     fileLoading.value = false
   }
+}
+
+/** Runs when a new <article> enters the page-turn transition: highlight, mermaid, TOC. */
+async function onArticleEnter(el: Element) {
+  // Only the markdown article needs enhancing (the empty-state div also passes through).
+  if (!el.classList.contains('markdown-body')) return
+  if (contentRef.value) contentRef.value.scrollTop = 0
+  buildToc()
+  await enhance(el as HTMLElement)
 }
 
 function buildToc() {
@@ -445,6 +481,43 @@ onMounted(async () => {
 .pane-center {
   flex: 1; min-width: 0; overflow-y: auto;
   padding: 0; /* .markdown-body has its own padding */
+  position: relative; /* anchor for loadbar / error-banner */
+}
+
+/* ── page-turn transition (directional slide + fade) ── */
+.page-next-enter-active,
+.page-next-leave-active,
+.page-prev-enter-active,
+.page-prev-leave-active {
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.28s ease;
+}
+.page-next-enter-from { transform: translateX(36px); opacity: 0; }
+.page-next-leave-to { transform: translateX(-36px); opacity: 0; }
+.page-prev-enter-from { transform: translateX(-36px); opacity: 0; }
+.page-prev-leave-to { transform: translateX(36px); opacity: 0; }
+
+/* ── loading bar + error banner ── */
+.loadbar {
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  overflow: hidden; z-index: 5; pointer-events: none;
+}
+.loadbar span {
+  display: block; height: 100%; width: 40%;
+  background: var(--accent); border-radius: 2px;
+  animation: loadbar-slide 1.1s ease-in-out infinite;
+}
+@keyframes loadbar-slide {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(350%); }
+}
+.error-banner {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  z-index: 6; max-width: calc(100% - 32px);
+  padding: 8px 16px; border-radius: 10px;
+  background: var(--bg-glass-strong);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: #f87171; font-size: 13px;
 }
 
 /* ── Center states ── */
