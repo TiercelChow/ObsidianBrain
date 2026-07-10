@@ -1,0 +1,109 @@
+<template>
+  <div class="file-tree">
+    <div v-if="!entries.length" class="ft-empty">暂无文件</div>
+    <div v-for="entry in entries" :key="entry.path" class="ft-node">
+      <!-- Directory -->
+      <div
+        v-if="entry.is_dir"
+        class="ft-row ft-dir"
+        :style="{ paddingLeft: indent }"
+        @click="toggle(entry)"
+      >
+        <el-icon class="ft-caret">
+          <CaretBottom v-if="isExpanded(entry)" />
+          <CaretRight v-else />
+        </el-icon>
+        <el-icon class="ft-icon"><FolderOpened v-if="isExpanded(entry)" /><Folder v-else /></el-icon>
+        <span class="ft-name">{{ entry.name }}</span>
+      </div>
+      <!-- File -->
+      <div
+        v-else
+        class="ft-row ft-file"
+        :class="{ active: entry.path === activePath, disabled: !entry.is_markdown }"
+        :style="{ paddingLeft: indent }"
+        :title="entry.path"
+        @click="onFileClick(entry)"
+      >
+        <span class="ft-caret-spacer"></span>
+        <el-icon class="ft-icon"><Document /></el-icon>
+        <span class="ft-name">{{ entry.name }}</span>
+      </div>
+      <!-- Children (recursive) -->
+      <div v-if="entry.is_dir && isExpanded(entry) && entry.children?.length" class="ft-children">
+        <FileTree
+          :entries="entry.children"
+          :active-path="activePath"
+          :level="level + 1"
+          @select="$emit('select', $event)"
+        />
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { CaretBottom, CaretRight, Folder, FolderOpened, Document } from '@element-plus/icons-vue'
+import type { DirEntry } from '@/api/reader'
+
+const props = withDefaults(
+  defineProps<{ entries: DirEntry[]; activePath?: string; level?: number }>(),
+  { activePath: '', level: 0 },
+)
+const emit = defineEmits<{ select: [path: string] }>()
+
+// Expand top-level directories by default for a useful initial view.
+const expanded = ref<Set<string>>(new Set())
+if (props.level === 0) {
+  props.entries.filter((e) => e.is_dir).forEach((e) => expanded.value.add(e.path))
+}
+
+const indent = `${10 + props.level * 14}px`
+
+function isExpanded(entry: DirEntry) {
+  return expanded.value.has(entry.path)
+}
+function toggle(entry: DirEntry) {
+  if (isExpanded(entry)) {
+    expanded.value.delete(entry.path)
+  } else {
+    expanded.value.add(entry.path)
+  }
+}
+function onFileClick(entry: DirEntry) {
+  if (entry.is_markdown) emit('select', entry.path)
+}
+</script>
+
+<style scoped>
+.file-tree { user-select: none; }
+.ft-empty { padding: 16px 12px; font-size: 12px; color: var(--text-faint); text-align: center; }
+
+.ft-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 0;
+  margin: 1px 6px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ft-row:hover { background: var(--bg-glass-subtle); color: var(--text-primary); }
+.ft-dir { font-weight: 500; color: var(--text-secondary); }
+
+.ft-file.disabled { color: var(--text-faint); cursor: default; }
+.ft-file.disabled:hover { background: transparent; color: var(--text-faint); }
+.ft-file.active { background: var(--accent-light); color: var(--accent); font-weight: 600; }
+
+.ft-caret { width: 12px; font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
+.ft-caret-spacer { width: 12px; flex-shrink: 0; }
+.ft-icon { width: 15px; font-size: 15px; color: var(--text-muted); flex-shrink: 0; }
+.ft-dir:hover .ft-icon, .ft-file.active .ft-icon { color: var(--accent); }
+.ft-name { overflow: hidden; text-overflow: ellipsis; }
+</style>

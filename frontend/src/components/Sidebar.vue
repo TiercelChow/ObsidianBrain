@@ -58,6 +58,7 @@ import {
   Document,
   Connection,
   Reading,
+  Files,
   Expand,
   Fold,
 } from '@element-plus/icons-vue'
@@ -82,6 +83,7 @@ const navItems = [
   { path: '/explore', label: '知识探索', icon: MagicStick },
   { path: '/ingest', label: '外部摄入', icon: Connection },
   { path: '/manual', label: '使用手册', icon: Reading },
+  { path: '/reader', label: '阅境轩', icon: Files },
   { path: '/code-repo', label: '代码仓', icon: FolderOpened },
   { path: '/timeline', label: '时光机', icon: Calendar },
 ]

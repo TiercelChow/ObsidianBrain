@@ -46,6 +46,12 @@ const router = createRouter({
       meta: { title: '使用手册' },
     },
     {
+      path: '/reader',
+      name: 'Reader',
+      component: () => import('@/views/Reader.vue'),
+      meta: { title: '阅境轩' },
+    },
+    {
       path: '/code-repo',
       name: 'CodeRepo',
       component: () => import('@/views/CodeRepo.vue'),

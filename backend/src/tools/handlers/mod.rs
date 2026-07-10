@@ -3,6 +3,7 @@
 //! This module contains all tool handlers organized by module:
 //! - `search_handlers` — search_notes, get_note, list_recent_notes
 //! - `memory_handlers` — get_memory_stats
+//! - `reader_handlers` — list_local_dir, read_local_file, get/save_reader_history (Markdown Reader)
 //! - `code_repo_handlers` — add_code_repo, list_code_repos, get_repo_detail, link_note_to_repo, get_linked_notes, open_in_vscode
 //! - `timeline_handlers` — get_timeline
 //! - `inspiration_handlers` — get_inspiration
@@ -15,6 +16,7 @@ pub mod inspiration_handlers;
 pub mod knowledge_handlers;
 pub mod memory_handlers;
 pub mod radar_handlers;
+pub mod reader_handlers;
 pub mod search_handlers;
 pub mod timeline_handlers;
 pub mod wiki_handlers;
@@ -22,12 +24,15 @@ pub mod wiki_handlers;
 use std::sync::Arc;
 
 use crate::tools::handlers::code_repo_handlers::*;
-use crate::tools::handlers::config_handlers::{GetConfigHandler, SaveConfigHandler, VerifyLlmHandler};
+use crate::tools::handlers::config_handlers::{
+    GetConfigHandler, SaveConfigHandler, VerifyLlmHandler,
+};
 use crate::tools::handlers::explore_handlers::*;
 use crate::tools::handlers::inspiration_handlers::*;
 use crate::tools::handlers::knowledge_handlers::GetKnowledgeInsightsHandler;
 use crate::tools::handlers::memory_handlers::GetMemoryStatsHandler;
 use crate::tools::handlers::radar_handlers::*;
+use crate::tools::handlers::reader_handlers::*;
 use crate::tools::handlers::search_handlers::*;
 use crate::tools::handlers::timeline_handlers::*;
 use crate::tools::handlers::wiki_handlers::*;
@@ -47,7 +52,9 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
 
     // Memory module
     registry.register(Arc::new(GetMemoryStatsHandler)).await;
-    registry.register(Arc::new(GetKnowledgeInsightsHandler)).await;
+    registry
+        .register(Arc::new(GetKnowledgeInsightsHandler))
+        .await;
 
     // Code Repo module
     registry.register(Arc::new(AddCodeRepoHandler)).await;
@@ -88,4 +95,10 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     registry.register(Arc::new(DiscoverGapsHandler)).await;
     registry.register(Arc::new(GenerateQuestionsHandler)).await;
     registry.register(Arc::new(ConceptCollisionHandler)).await;
+
+    // Reader (filesystem-scoped, powers the Markdown Reader UI)
+    registry.register(Arc::new(ListLocalDirHandler)).await;
+    registry.register(Arc::new(ReadLocalFileHandler)).await;
+    registry.register(Arc::new(GetReaderHistoryHandler)).await;
+    registry.register(Arc::new(SaveReaderHistoryHandler)).await;
 }
