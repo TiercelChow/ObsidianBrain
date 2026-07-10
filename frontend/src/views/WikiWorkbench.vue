@@ -233,7 +233,6 @@ const status = ref<WikiStatus | null>(null)
 const statusLoading = ref(false)
 
 const ingestForm = ref({ sourcePath: '', sourceType: 'article', sourceUrl: '' })
-const ingestStep = ref(0)
 const ingesting = ref(false)
 const ingestResult = ref<IngestResult | null>(null)
 const ingestLogs = ref<{ time: string; icon: string; text: string; type: string }[]>([])

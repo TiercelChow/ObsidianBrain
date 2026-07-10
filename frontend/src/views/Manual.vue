@@ -391,7 +391,7 @@ function scrollTo(id: string) {
 }
 
 function onScroll() {
-  const scrollEl = document.querySelector('.manual-content')
+  const scrollEl = document.querySelector('.manual-content') as HTMLElement | null
   if (!scrollEl) return
   const scrollTop = scrollEl.scrollTop
   for (const s of sections) {
