@@ -114,8 +114,7 @@ impl KnowledgeInsightEngine {
 
         // 3. 构建链接图谱
         let mut inbound: HashMap<String, Vec<String>> = HashMap::new(); // target -> [sources]
-        let mut all_paths: HashSet<String> =
-            note_data.iter().map(|(p, _, _, _)| p.clone()).collect();
+        let all_paths: HashSet<String> = note_data.iter().map(|(p, _, _, _)| p.clone()).collect();
 
         for (source_path, content, _, _) in &note_data {
             let links = extract_links(content);
@@ -233,7 +232,7 @@ fn compute_islands(
         .filter(|(path, _, _, _)| !inbound.contains_key(path))
         .map(|(path, _, _, mtime)| {
             let modified = mtime
-                .map(|t| format_timestamp(t))
+                .map(format_timestamp)
                 .unwrap_or_else(|| "unknown".to_string());
             let days_ago = mtime.map(|t| days_since(t, now)).unwrap_or(0);
             NoteInfo {
@@ -243,7 +242,7 @@ fn compute_islands(
             }
         })
         .collect();
-    islands.sort_by(|a, b| b.days_ago.cmp(&a.days_ago));
+    islands.sort_by_key(|a| std::cmp::Reverse(a.days_ago));
     let count = islands.len();
     islands.truncate(20);
     IslandData {
@@ -262,7 +261,7 @@ fn compute_hubs(inbound: &HashMap<String, Vec<String>>) -> HubData {
             referenced_by: sources.clone(),
         })
         .collect();
-    hubs.sort_by(|a, b| b.refs.cmp(&a.refs));
+    hubs.sort_by_key(|a| std::cmp::Reverse(a.refs));
     hubs.truncate(10);
     HubData { notes: hubs }
 }
@@ -284,7 +283,7 @@ fn compute_dormant(
             }
         })
         .collect();
-    notes.sort_by(|a, b| b.days_ago.cmp(&a.days_ago));
+    notes.sort_by_key(|a| std::cmp::Reverse(a.days_ago));
     notes.truncate(10);
     DormantData { notes }
 }
@@ -326,7 +325,7 @@ fn compute_domains(
             },
         })
         .collect();
-    folders.sort_by(|a, b| b.count.cmp(&a.count));
+    folders.sort_by_key(|a| std::cmp::Reverse(a.count));
     DomainData { folders }
 }
 

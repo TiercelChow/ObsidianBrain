@@ -72,7 +72,7 @@ impl WikiEngine {
         &self,
         source_path: &str,
         source_type: &str,
-        source_url: Option<&str>,
+        _source_url: Option<&str>,
     ) -> Result<IngestResult, BrainError> {
         ensure_wiki_structure(&self.obsidian).await?;
 
@@ -135,12 +135,12 @@ impl WikiEngine {
         };
 
         // 2. 编译文章
-        let (article_content, action_label) = if action == "merge" && merge_target.is_some() {
+        let (article_content, action_label) = match (action.as_str(), merge_target.as_ref()) {
             // 合并模式：读取已有文章，LLM 合并新内容
-            let target = merge_target.as_ref().unwrap();
-            let existing = read_page(&self.obsidian, target).await.unwrap_or_default();
-            let merge_prompt = format!(
-                "你是一个知识库编译器。请将新资料合并到已有文章中。\n\n\
+            ("merge", Some(target)) => {
+                let existing = read_page(&self.obsidian, target).await.unwrap_or_default();
+                let merge_prompt = format!(
+                    "你是一个知识库编译器。请将新资料合并到已有文章中。\n\n\
                 ## 要求\n\
                 1. 保留已有文章的结构和内容\n\
                 2. 将新资料的信息整合到相关章节\n\
@@ -149,18 +149,19 @@ impl WikiEngine {
                 5. 输出完整的合并后文章（Markdown 格式，包含 frontmatter）\n\n\
                 ## 已有文章：\n{}\n\n\
                 ## 新资料（前 5000 字）：\n{}",
-                existing,
-                content.chars().take(5000).collect::<String>()
-            );
-            let merged = self.llm.generate(&merge_prompt).await?;
-            (strip_code_block(&merged), "merged")
-        } else {
-            // 新建模式：LLM 从资料编译完整文章
-            let source_desc = format!("{}, {}", source_type, now);
-            let source_name = source_path.rsplit('/').next().unwrap_or(source_path);
-            let content_preview: String = content.chars().take(8000).collect();
-            let compile_prompt = format!(
-                "你是一个知识库编译器。请阅读以下资料，编写一篇完整的知识文章。\n\n\
+                    existing,
+                    content.chars().take(5000).collect::<String>()
+                );
+                let merged = self.llm.generate(&merge_prompt).await?;
+                (strip_code_block(&merged), "merged")
+            }
+            _ => {
+                // 新建模式：LLM 从资料编译完整文章
+                let source_desc = format!("{}, {}", source_type, now);
+                let source_name = source_path.rsplit('/').next().unwrap_or(source_path);
+                let content_preview: String = content.chars().take(8000).collect();
+                let compile_prompt = format!(
+                    "你是一个知识库编译器。请阅读以下资料，编写一篇完整的知识文章。\n\n\
                 ## 要求\n\
                 1. 不要逐字复制原文，要综合改写和重新组织\n\
                 2. 文章应该是一篇完整的知识论述，不是简单的摘要\n\
@@ -177,9 +178,10 @@ impl WikiEngine {
                 {{综合改写的内容}}\n\
                 ```\n\n\
                 ## 资料（前 8000 字）：\n{content_preview}",
-            );
-            let compiled = self.llm.generate(&compile_prompt).await?;
-            (strip_code_block(&compiled), "created")
+                );
+                let compiled = self.llm.generate(&compile_prompt).await?;
+                (strip_code_block(&compiled), "created")
+            }
         };
 
         write_page(&self.obsidian, &article_path, &article_content).await?;

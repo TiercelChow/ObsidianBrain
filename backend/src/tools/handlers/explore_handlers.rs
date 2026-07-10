@@ -8,11 +8,9 @@ use std::sync::Arc;
 
 use crate::error::BrainError;
 use crate::infra::llm_client::LlmProvider;
-use crate::infra::obsidian_client::{get_client, ObsidianProvider};
+use crate::infra::obsidian_client::get_client;
 use crate::tools::traits::ToolHandler;
 use crate::AppContext;
-
-const CACHE_KEY: &str = "knowledge_insights";
 
 /// 分析 Wiki 知识缺口
 pub struct DiscoverGapsHandler;

@@ -1,13 +1,11 @@
 //! LLM 创意生成器
 
-use async_trait::async_trait;
-use serde_json::json;
 use std::sync::Arc;
 
 use crate::error::BrainError;
 use crate::infra::llm_client::LlmProvider;
 use crate::models::inspiration::{
-    ComboOutput, CounterpointOutput, InspirationConfig, InspirationType, QuestionOutput,
+    ComboOutput, CounterpointOutput, InspirationConfig, QuestionOutput,
 };
 
 /// LLM 创意生成器

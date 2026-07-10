@@ -1,3 +1,6 @@
+// DB functions naturally take many parameters and return complex rusqlite types.
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
 use rusqlite::{params, Connection};
 use std::path::Path;
 use std::sync::{Arc, Mutex};

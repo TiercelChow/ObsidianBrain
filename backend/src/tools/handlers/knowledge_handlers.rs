@@ -44,7 +44,7 @@ impl ToolHandler for GetKnowledgeInsightsHandler {
         }
 
         // Calculate fresh insights
-        let obsidian = crate::infra::obsidian_client::get_client(&ctx.obsidian)?;
+        let _obsidian = crate::infra::obsidian_client::get_client(&ctx.obsidian)?;
 
         let engine = KnowledgeInsightEngine::new(ctx.obsidian.clone());
         let insights = engine.get_insights().await?;

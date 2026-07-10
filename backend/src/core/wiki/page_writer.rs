@@ -54,34 +54,3 @@ pub async fn ensure_wiki_structure(provider: &ObsidianProvider) -> Result<(), Br
 
     Ok(())
 }
-
-/// 默认 Schema 文件内容
-pub const DEFAULT_SCHEMA: &str = r#"# LLM Wiki 维护规则
-
-## 目录结构
-- Raw/<topic>/ — 原始资料（不可变）
-- Wiki/<topic>/ — 编译后的知识文章（按主题一级子目录组织）
-
-## 命名规范
-- 主题目录：kebab-case，如 `machine-learning`
-- 文章文件：kebab-case，如 `rmsnorm-and-layernorm.md`
-
-## Ingest 流程
-1. 读取原始资料
-2. LLM 决定：合并已有文章 or 创建新文章
-3. LLM 编译完整文章（综合改写，非逐字复制）
-4. 级联更新同主题受影响的文章
-5. 更新 index.md（表格格式）
-6. 追加 log.md
-
-## Query 流程
-1. 读取 index.md 找相关文章
-2. 读取文章内容
-3. LLM 综合回答
-
-## Lint 流程
-1. 检查索引一致性（每个文件都在索引中）
-2. 检查内部链接有效性
-3. 检查孤岛页
-4. LLM 生成改进建议
-"#;

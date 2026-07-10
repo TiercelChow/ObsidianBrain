@@ -78,7 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .server
         .host
         .parse()
-        .unwrap_or_else(|_| std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+        .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
     let addr = SocketAddr::new(host, config.server.port);
     tracing::info!("配置加载完成: {}:{}", addr.ip(), addr.port());
 
@@ -219,7 +219,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化 LLM 客户端（用于灵感服务）
     let llm: Arc<dyn crate::infra::llm_client::LlmProvider> =
         crate::infra::llm_client::LlmClientFactory::create(&config.llm)
-            .map(|boxed| Arc::from(boxed))
+            .map(Arc::from)
             .unwrap_or_else(|e| {
                 tracing::warn!("LLM 客户端创建失败: {e}，灵感功能将受限");
                 let fallback_config = crate::config::LlmConfig {

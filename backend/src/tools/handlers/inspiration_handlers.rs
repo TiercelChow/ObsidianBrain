@@ -1,7 +1,7 @@
 //! 灵感工具处理器
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::Arc;
 
 use crate::error::BrainError;

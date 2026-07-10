@@ -3,7 +3,6 @@ use axum::http::header;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use serde_json::{json, Value};
-use std::io::Cursor;
 use std::sync::Arc;
 
 use crate::AppContext;
@@ -155,13 +154,8 @@ pub async fn serve_thumbnail(
 
     // Try serving thumbnail first
     if thumb_path.exists() {
-        match std::fs::read(&thumb_path) {
-            Ok(bytes) => {
-                return Ok(
-                    ([(header::CONTENT_TYPE, "image/jpeg".to_string())], bytes).into_response()
-                );
-            }
-            Err(_) => {}
+        if let Ok(bytes) = std::fs::read(&thumb_path) {
+            return Ok(([(header::CONTENT_TYPE, "image/jpeg".to_string())], bytes).into_response());
         }
     }
 

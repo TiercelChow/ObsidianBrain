@@ -433,6 +433,7 @@ impl MemoManager {
         memos
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn flush_memo(
         &self,
         memos: &mut Vec<Memo>,

@@ -1,9 +1,8 @@
 //! 概念选择器
 
 use rand::Rng;
-use std::collections::HashMap;
 
-use crate::models::inspiration::{Concept, ConceptPool, InspirationConfig};
+use crate::models::inspiration::{ConceptPool, InspirationConfig};
 
 /// 概念选择器
 pub struct ConceptSelector {

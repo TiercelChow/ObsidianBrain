@@ -2,32 +2,20 @@
 
 use chrono::Utc;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use crate::error::BrainError;
-use crate::infra::llm_client::LlmProvider;
 use crate::infra::obsidian_client::ObsidianProvider;
-use crate::infra::sqlite_store::SqliteStore;
 use crate::models::inspiration::{Concept, ConceptPool, ConceptSource, InspirationConfig};
 
 /// 概念池构建器
 pub struct ConceptPoolBuilder {
-    db: Arc<SqliteStore>,
     obsidian: ObsidianProvider,
     config: InspirationConfig,
 }
 
 impl ConceptPoolBuilder {
-    pub fn new(
-        db: Arc<SqliteStore>,
-        obsidian: ObsidianProvider,
-        config: InspirationConfig,
-    ) -> Self {
-        Self {
-            db,
-            obsidian,
-            config,
-        }
+    pub fn new(obsidian: ObsidianProvider, config: InspirationConfig) -> Self {
+        Self { obsidian, config }
     }
 
     /// 构建概念池
@@ -121,11 +109,14 @@ impl ConceptPoolBuilder {
                 let fm = &content[fm_start + 3..fm_start + 3 + fm_end];
                 for line in fm.lines() {
                     let trimmed = line.trim();
-                    if trimmed.starts_with("tags:") {
-                        let value = trimmed[5..].trim();
+                    if let Some(rest) = trimmed.strip_prefix("tags:") {
+                        let value = rest.trim();
                         if value.starts_with('[') && value.ends_with(']') {
                             // 数组格式: [tag1, tag2]
-                            let inner = &value[1..value.len() - 1];
+                            let inner = value
+                                .strip_prefix('[')
+                                .and_then(|v| v.strip_suffix(']'))
+                                .unwrap_or("");
                             for item in inner.split(',') {
                                 let tag = item.trim().trim_matches('"').trim_matches('\'');
                                 if !tag.is_empty() {
@@ -180,19 +171,13 @@ impl ConceptPoolBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infra::sqlite_store::SqliteStore;
-    use std::sync::Arc;
     use tempfile::TempDir;
 
     fn create_builder() -> (TempDir, ConceptPoolBuilder) {
         let dir = TempDir::new().unwrap();
-        let db = Arc::new(SqliteStore::new(&dir.path().join("test.db")).unwrap());
         let config = InspirationConfig::default();
-        let builder = ConceptPoolBuilder::new(
-            db,
-            crate::infra::obsidian_client::new_provider(None),
-            config,
-        );
+        let builder =
+            ConceptPoolBuilder::new(crate::infra::obsidian_client::new_provider(None), config);
         (dir, builder)
     }
 

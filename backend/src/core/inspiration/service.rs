@@ -32,7 +32,7 @@ impl InspirationService {
         llm: Arc<dyn LlmProvider>,
         config: InspirationConfig,
     ) -> Self {
-        let pool_builder = ConceptPoolBuilder::new(db.clone(), obsidian.clone(), config.clone());
+        let pool_builder = ConceptPoolBuilder::new(obsidian.clone(), config.clone());
         let selector = ConceptSelector::new(config.clone());
         let generator = LlmCreativeGenerator::new(llm, config.clone());
 

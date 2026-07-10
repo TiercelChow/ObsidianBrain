@@ -8,8 +8,6 @@ use std::collections::{HashMap, HashSet};
 pub struct LinkGraph {
     /// 所有页面路径
     pub pages: HashSet<String>,
-    /// 页面 → 它链接到的目标列表
-    pub outbound: HashMap<String, Vec<String>>,
     /// 页面 → 链接到它的源列表
     pub inbound: HashMap<String, Vec<String>>,
 }
@@ -18,7 +16,6 @@ impl LinkGraph {
     /// 从页面内容构建链接图谱
     pub fn build(page_contents: &[(String, String)]) -> Self {
         let pages: HashSet<String> = page_contents.iter().map(|(p, _)| p.clone()).collect();
-        let mut outbound: HashMap<String, Vec<String>> = HashMap::new();
         let mut inbound: HashMap<String, Vec<String>> = HashMap::new();
 
         for (source_path, content) in page_contents {
@@ -26,10 +23,6 @@ impl LinkGraph {
             for target in links {
                 let resolved = resolve_link(&target, &pages, source_path);
                 if let Some(resolved_path) = resolved {
-                    outbound
-                        .entry(source_path.clone())
-                        .or_default()
-                        .push(resolved_path.clone());
                     inbound
                         .entry(resolved_path)
                         .or_default()
@@ -38,11 +31,7 @@ impl LinkGraph {
             }
         }
 
-        Self {
-            pages,
-            outbound,
-            inbound,
-        }
+        Self { pages, inbound }
     }
 
     /// 找出孤岛页（没有任何入链的页面）
@@ -64,26 +53,9 @@ impl LinkGraph {
             .iter()
             .map(|(path, refs)| (path.clone(), refs.len()))
             .collect();
-        hubs.sort_by(|a, b| b.1.cmp(&a.1));
+        hubs.sort_by_key(|a| std::cmp::Reverse(a.1));
         hubs.truncate(top_n);
         hubs
-    }
-
-    /// 找出被提及但没有独立页面的概念
-    pub fn find_missing_pages(&self) -> Vec<String> {
-        let mut missing: HashSet<String> = HashSet::new();
-
-        for links in self.outbound.values() {
-            for target in links {
-                if !self.pages.contains(target) {
-                    missing.insert(target.clone());
-                }
-            }
-        }
-
-        let mut result: Vec<String> = missing.into_iter().collect();
-        result.sort();
-        result
     }
 }
 

@@ -4,7 +4,6 @@
 //! 不同于 RAG（每次从零检索），Wiki 是预编译的、持续复利的知识产物。
 
 pub mod engine;
-pub mod index_manager;
 pub mod link_graph;
 pub mod page_writer;
 

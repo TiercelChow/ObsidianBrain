@@ -148,7 +148,7 @@ impl TimelineStore {
             }
         }
         let mut most_active_tags: Vec<(String, usize)> = tag_counts.into_iter().collect();
-        most_active_tags.sort_by(|a, b| b.1.cmp(&a.1));
+        most_active_tags.sort_by_key(|a| std::cmp::Reverse(a.1));
         let most_active_tags: Vec<String> = most_active_tags
             .into_iter()
             .take(10)

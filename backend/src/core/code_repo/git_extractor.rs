@@ -165,12 +165,10 @@ impl GitExtractor {
         })?;
 
         let mut urls = Vec::new();
-        for name in remotes.iter() {
-            if let Some(name) = name {
-                if let Ok(remote) = repo.find_remote(name) {
-                    if let Some(url) = remote.url() {
-                        urls.push(url.to_string());
-                    }
+        for name in remotes.iter().flatten() {
+            if let Ok(remote) = repo.find_remote(name) {
+                if let Some(url) = remote.url() {
+                    urls.push(url.to_string());
                 }
             }
         }

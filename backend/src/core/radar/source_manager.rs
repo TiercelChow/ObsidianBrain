@@ -88,16 +88,6 @@ impl SourceManager {
         &self.sources
     }
 
-    /// 获取已启用的源
-    pub fn enabled_sources(&self) -> Vec<&RadarSource> {
-        self.sources.iter().filter(|s| s.enabled).collect()
-    }
-
-    /// 按名称获取源
-    pub fn get_source(&self, name: &str) -> Option<&RadarSource> {
-        self.sources.iter().find(|s| s.name == name)
-    }
-
     /// 切换源的启用状态
     pub fn toggle_source(&mut self, name: &str, enabled: bool) -> Result<(), BrainError> {
         let source = self
@@ -158,9 +148,6 @@ mod tests {
 
         assert_eq!(manager.count(), 2);
         assert_eq!(manager.enabled_count(), 1);
-        assert!(manager.get_source("hn").is_some());
-        assert!(manager.get_source("rss").is_some());
-        assert!(manager.get_source("unknown").is_none());
 
         manager.toggle_source("rss", true).unwrap();
         assert_eq!(manager.enabled_count(), 2);
