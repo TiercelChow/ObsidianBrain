@@ -59,7 +59,8 @@ const renderer = {
       return `<div class="mermaid" data-raw="${escaped}">${escaped}</div>`
     }
     const cls = language ? `hljs language-${language}` : 'hljs'
-    return `<pre><code class="${cls}">${escapeHtml(text)}</code></pre>`
+    const gutter = text.split('\n').map((_, i) => i + 1).join('\n')
+    return `<div class="code-block"><pre class="code-gutter">${gutter}</pre><pre class="code-content"><code class="${cls}">${escapeHtml(text)}</code></pre></div>`
   },
   heading({ tokens, depth }: Tokens.Heading): string {
     // `this` is the marked Renderer instance at runtime; marked injects `.parser`.
@@ -113,8 +114,14 @@ async function rerenderMermaid(container: HTMLElement) {
  *
  * @param onMermaidClick called when a rendered mermaid diagram is clicked,
  *   receiving the SVG element and the original diagram source.
+ * @param onLinkClick called when a relative (in-vault) link is clicked,
+ *   receiving the raw href (may include a `#anchor`). External links open in
+ *   a new tab; `#anchor` links scroll within the document — neither calls this.
  */
-export function useMarkdownRender(onMermaidClick: (svg: SVGElement, source: string) => void) {
+export function useMarkdownRender(
+  onMermaidClick: (svg: SVGElement, source: string) => void,
+  onLinkClick?: (href: string) => void,
+) {
   const appStore = useAppStore()
   let currentContainer: HTMLElement | null = null
 
@@ -166,6 +173,33 @@ export function useMarkdownRender(onMermaidClick: (svg: SVGElement, source: stri
         }
       })
     }
+
+    // 4. intercept links: external → new tab, #anchor → scroll, relative → onLinkClick
+    container.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {
+      const href = a.getAttribute('href') || ''
+      if (!href) return
+      if (/^(https?:|mailto:|ftp:|tel:)/i.test(href)) {
+        a.target = '_blank'
+        a.rel = 'noopener noreferrer'
+        return
+      }
+      if (href.startsWith('#')) {
+        a.addEventListener('click', (e) => {
+          const id = decodeURIComponent(href.slice(1))
+          const target = document.getElementById(id)
+          if (target) {
+            e.preventDefault()
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }
+        })
+        return
+      }
+      // relative path to another document
+      a.addEventListener('click', (e) => {
+        e.preventDefault()
+        onLinkClick?.(href)
+      })
+    })
   }
 
   return { renderMarkdown, enhance }

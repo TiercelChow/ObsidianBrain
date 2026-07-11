@@ -129,6 +129,16 @@
 
     <!-- Mermaid fullscreen viewer -->
     <MermaidViewer v-if="viewerSvg" :svg-html="viewerSvg" :source="viewerSource" @close="viewerSvg = ''" />
+
+    <!-- Path preview popup (folders / code / out-of-folder md) -->
+    <PathPreviewModal
+      v-if="previewPath"
+      :path="previewPath"
+      :anchor="previewAnchor"
+      :root="rootPath"
+      @close="previewPath = ''"
+      @open-in-reader="onPreviewOpenInReader"
+    />
   </div>
 </template>
 
@@ -145,6 +155,7 @@ import {
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import FileTree from '@/components/reader/FileTree.vue'
 import MermaidViewer from '@/components/reader/MermaidViewer.vue'
+import PathPreviewModal from '@/components/reader/PathPreviewModal.vue'
 
 interface TocItem { id: string; text: string; level: number }
 
@@ -154,6 +165,7 @@ const LAST_FILE_KEY = 'reader.lastFile'
 
 const pathInput = ref('')
 const tree = ref<DirEntry[]>([])
+const rootPath = ref('')          // the currently opened folder (absolute)
 const activeFile = ref('')
 const loading = ref(false)
 const fileLoading = ref(false)
@@ -166,6 +178,8 @@ const history = ref<HistoryItem[]>([])
 const treeDrawer = ref(false)
 const tocDrawer = ref(false)
 const viewerSvg = ref('')
+const previewPath = ref('')        // non-md / out-of-folder link target → popup
+const previewAnchor = ref('')      // line/symbol/heading anchor for the popup target
 const viewerSource = ref('')
 const contentRef = ref<HTMLElement | null>(null)
 // The file currently displayed — swaps only when its content is ready, driving the
@@ -192,7 +206,62 @@ function handleMermaidClick(svg: SVGElement, source: string) {
   viewerSvg.value = svg.outerHTML
 }
 
-const { renderMarkdown, enhance } = useMarkdownRender(handleMermaidClick)
+// Anchor to scroll to after a cross-file link opens a new document.
+const pendingAnchor = ref('')
+
+/** Resolve a relative href against the current file's directory. */
+function resolveRelative(baseDir: string, rel: string): string {
+  const parts = baseDir ? baseDir.split('/') : []
+  for (const seg of rel.replace(/^\.\//, '').split('/')) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') parts.pop()
+    else parts.push(seg)
+  }
+  return parts.join('/')
+}
+
+/** Whether a path is inside the currently opened folder. */
+function isUnderRoot(p: string): boolean {
+  const root = rootPath.value
+  if (!root) return false
+  const r = root.endsWith('/') ? root : root + '/'
+  return p === root || p.startsWith(r)
+}
+
+/** A relative link was clicked — route by target type and folder membership. */
+function handleLinkClick(href: string) {
+  const base = displayedFile.value
+  if (!base) return
+  const baseDir = base.substring(0, base.lastIndexOf('/'))
+  const [pathPartRaw, anchor] = href.split('#')
+  const resolved = resolveRelative(baseDir, decodeURIComponent(pathPartRaw))
+  if (!resolved) return
+
+  // Markdown under the opened folder → jump in the reader (page-turn).
+  if (/\.(md|markdown)$/i.test(resolved) && isUnderRoot(resolved)) {
+    if (anchor) pendingAnchor.value = decodeURIComponent(anchor)
+    if (resolved !== displayedFile.value) {
+      void onSelectFile(resolved) // onArticleEnter scrolls to pendingAnchor after render
+    } else if (pendingAnchor.value) {
+      scrollToHeading(pendingAnchor.value)
+      pendingAnchor.value = ''
+    }
+    return
+  }
+
+  // Everything else (folders, code, out-of-folder md, …) → preview popup.
+  previewAnchor.value = anchor ? decodeURIComponent(anchor) : ''
+  previewPath.value = resolved
+}
+
+/** The preview modal asked to open an md (under the folder) in the main reader. */
+function onPreviewOpenInReader(path: string, anchor?: string) {
+  previewPath.value = ''
+  if (anchor) pendingAnchor.value = anchor
+  void onSelectFile(path)
+}
+
+const { renderMarkdown, enhance } = useMarkdownRender(handleMermaidClick, handleLinkClick)
 
 // ── history (server-stored, shared across all users) ──────────────────
 async function loadHistory() {
@@ -264,6 +333,7 @@ async function openPath(p?: string) {
       return
     }
     tree.value = res.result.entries
+    rootPath.value = res.result.root
     renderedHtml.value = ''
     displayedFile.value = ''
     activeFile.value = ''
@@ -317,9 +387,14 @@ async function onSelectFile(path: string) {
 async function onArticleEnter(el: Element) {
   // Only the markdown article needs enhancing (the empty-state div also passes through).
   if (!el.classList.contains('markdown-body')) return
-  if (contentRef.value) contentRef.value.scrollTop = 0
+  // Don't reset scroll if we're jumping to a cross-file anchor.
+  if (contentRef.value && !pendingAnchor.value) contentRef.value.scrollTop = 0
   buildToc()
   await enhance(el as HTMLElement)
+  if (pendingAnchor.value) {
+    scrollToHeading(pendingAnchor.value)
+    pendingAnchor.value = ''
+  }
 }
 
 function buildToc() {
@@ -634,49 +709,77 @@ onMounted(async () => {
   padding: 0.15em 0.4em;
   border-radius: 5px;
 }
-.markdown-body pre {
-  margin: 0 0 1em; padding: 16px 18px;
+/* code block with line numbers (shared by reader + preview modal) */
+.code-block {
+  display: flex;
+  margin: 0 0 1em;
   background: var(--code-bg);
-  border-radius: 12px;
-  overflow-x: auto;
   border: 1px solid var(--border-faint);
+  border-radius: 12px;
+  overflow: hidden;
 }
-.markdown-body pre code,
-.markdown-body pre code.hljs {
+.code-block .code-gutter,
+.code-block .code-content {
+  margin: 0;
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.code-block .code-gutter {
+  flex-shrink: 0;
+  padding: 16px 12px;
+  text-align: right;
+  color: var(--text-faint);
+  user-select: none;
+  white-space: pre;
+  border-right: 1px solid var(--border-faint);
+  overflow: hidden;
+}
+.code-block .code-content {
+  flex: 1;
+  min-width: 0;
+  padding: 16px 18px;
+  overflow-x: auto;
+  background: transparent;
+  border: none;
+}
+.code-block .code-content code,
+.code-block .code-content code.hljs {
   background: transparent; color: var(--tk-text);
-  padding: 0; font-size: 0.85em; line-height: 1.6;
+  padding: 0; font-size: 13px; line-height: 1.6;
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
 }
-/* hljs token colors — themed via --tk-* variables */
-.markdown-body .hljs-comment,
-.markdown-body .hljs-quote { color: var(--tk-comment); font-style: italic; }
-.markdown-body .hljs-keyword,
-.markdown-body .hljs-selector-tag,
-.markdown-body .hljs-literal,
-.markdown-body .hljs-section,
-.markdown-body .hljs-link,
-.markdown-body .hljs-deletion { color: var(--tk-keyword); }
-.markdown-body .hljs-string,
-.markdown-body .hljs-regexp,
-.markdown-body .hljs-addition,
-.markdown-body .hljs-attribute { color: var(--tk-string); }
-.markdown-body .hljs-number,
-.markdown-body .hljs-symbol,
-.markdown-body .hljs-bullet,
-.markdown-body .hljs-meta { color: var(--tk-number); }
-.markdown-body .hljs-title,
-.markdown-body .hljs-title.function_,
-.markdown-body .hljs-title.class_,
-.markdown-body .hljs-name { color: var(--tk-function); }
-.markdown-body .hljs-built_in,
-.markdown-body .hljs-type { color: var(--tk-builtin); }
-.markdown-body .hljs-variable,
-.markdown-body .hljs-template-variable,
-.markdown-body .hljs-attr,
-.markdown-body .hljs-property,
-.markdown-body .hljs-params { color: var(--tk-variable); }
-.markdown-body .hljs-tag { color: var(--tk-tag); }
-.markdown-body .hljs-emphasis { font-style: italic; }
-.markdown-body .hljs-strong { font-weight: 700; }
+/* hljs token colors — themed via --tk-* variables (global: reader + modal) */
+.hljs-comment,
+.hljs-quote { color: var(--tk-comment); font-style: italic; }
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-section,
+.hljs-link,
+.hljs-deletion { color: var(--tk-keyword); }
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute { color: var(--tk-string); }
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-meta { color: var(--tk-number); }
+.hljs-title,
+.hljs-title.function_,
+.hljs-title.class_,
+.hljs-name { color: var(--tk-function); }
+.hljs-built_in,
+.hljs-type { color: var(--tk-builtin); }
+.hljs-variable,
+.hljs-template-variable,
+.hljs-attr,
+.hljs-property,
+.hljs-params { color: var(--tk-variable); }
+.hljs-tag { color: var(--tk-tag); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }
 
 .markdown-body table {
   width: 100%; border-collapse: collapse; margin: 0 0 1em;

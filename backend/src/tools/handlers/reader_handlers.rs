@@ -340,6 +340,65 @@ impl ToolHandler for SaveReaderHistoryHandler {
     }
 }
 
+/// Stat a local path — returns whether it exists, is a dir/file, name, ext, size.
+/// Used by the reader to decide how to preview a link target (md / folder / code).
+pub struct StatLocalPathHandler;
+
+#[async_trait]
+impl ToolHandler for StatLocalPathHandler {
+    fn name(&self) -> &str {
+        "stat_local_path"
+    }
+    fn description(&self) -> &str {
+        "获取本地路径的类型信息（文件/目录、扩展名、大小），用于预览跳转决策"
+    }
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": { "path": { "type": "string", "description": "本地路径" } },
+            "required": ["path"]
+        })
+    }
+    fn module(&self) -> &str {
+        "reader"
+    }
+
+    async fn handle(&self, args: Value, _ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let path_str = args
+            .get("path")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| BrainError::Internal("缺少必需参数 'path'".to_string()))?;
+        let path = PathBuf::from(path_str);
+        let meta = match tokio::fs::metadata(&path).await {
+            Ok(m) => m,
+            Err(_) => return Ok(json!({ "exists": false })),
+        };
+        let is_dir = meta.is_dir();
+        let is_file = meta.is_file();
+        let name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let size = if is_file { meta.len() } else { 0 };
+        Ok(json!({
+            "exists": true,
+            "is_dir": is_dir,
+            "is_file": is_file,
+            "name": name,
+            "ext": ext,
+            "size": size,
+            "path": path_str,
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,5 +585,23 @@ mod tests {
         let wire = serde_json::to_value(&items).unwrap();
         assert!(wire[0].get("lastUsed").is_some());
         assert!(wire[0].get("last_used").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_stat_local_path_classification() {
+        // The handler is a thin wrapper around tokio::fs::metadata; verify the
+        // file/dir/missing classification it relies on.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let file = root.join("note.md");
+        std::fs::write(&file, "hi").unwrap();
+        std::fs::create_dir(root.join("sub")).unwrap();
+
+        assert!(tokio::fs::metadata(&file).await.unwrap().is_file());
+        assert!(tokio::fs::metadata(root.join("sub"))
+            .await
+            .unwrap()
+            .is_dir());
+        assert!(tokio::fs::metadata(root.join("missing")).await.is_err());
     }
 }

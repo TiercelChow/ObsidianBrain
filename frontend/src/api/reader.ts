@@ -40,6 +40,22 @@ export function readLocalFile(path: string): Promise<ToolEnvelope<ReadLocalFileR
   return callTool('read_local_file', { path }) as unknown as Promise<ToolEnvelope<ReadLocalFileResult>>
 }
 
+/** Result of stat_local_path — describes a link target's type. */
+export interface PathStat {
+  exists: boolean
+  is_dir: boolean
+  is_file: boolean
+  name: string
+  ext: string
+  size: number
+  path: string
+}
+
+/** Stat a local path (file/dir, ext, size) to decide how to preview it. */
+export function statLocalPath(path: string): Promise<ToolEnvelope<PathStat>> {
+  return callTool('stat_local_path', { path }) as unknown as Promise<ToolEnvelope<PathStat>>
+}
+
 /** A reader history entry (server-stored, shared across all users). */
 export interface HistoryItem {
   path: string
