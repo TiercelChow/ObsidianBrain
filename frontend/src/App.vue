@@ -517,7 +517,7 @@ html, body, #app {
 <style scoped>
 .app-shell {
   height: 100vh;
-  width: 100vw;
+  width: 100%;
   position: relative;
   overflow: hidden;
   background: var(--bg-base);
@@ -693,7 +693,7 @@ html, body, #app {
   padding-bottom: 40px; /* extra space at bottom so last content is fully visible */
   overflow-x: hidden;
   width: 100%;
-  max-width: 100vw;
+  max-width: 100%;
 }
 
 @media (max-width: 768px) {

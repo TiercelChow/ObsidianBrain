@@ -378,7 +378,7 @@ onMounted(() => { void load() })
 
 @media (max-width: 768px) {
   .ppm-overlay { padding: 0; }
-  .ppm-panel { width: 100vw; height: 100vh; border-radius: 0; border: none; }
+  .ppm-panel { width: 100%; height: 100vh; border-radius: 0; border: none; }
   .rbtn-label { display: none; }
   .ppm-reader-btn { padding: 0; width: 30px; justify-content: center; }
   .ppm-body { padding: 14px; }

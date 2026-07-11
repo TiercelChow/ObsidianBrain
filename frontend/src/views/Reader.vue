@@ -100,7 +100,7 @@
     </div>
 
     <!-- Mobile drawers -->
-    <el-drawer v-model="treeDrawer" direction="ltr" size="82%" :with-header="false">
+    <el-drawer v-model="treeDrawer" direction="ltr" size="70%" :with-header="false">
       <div class="drawer-inner">
         <div class="pane-title">文件</div>
         <FileTree
@@ -112,7 +112,7 @@
         <div v-else class="pane-hint">打开一个文件夹后在此浏览</div>
       </div>
     </el-drawer>
-    <el-drawer v-model="tocDrawer" direction="rtl" size="82%" :with-header="false">
+    <el-drawer v-model="tocDrawer" direction="rtl" size="70%" :with-header="false">
       <div class="drawer-inner">
         <div class="pane-title">目录</div>
         <a
@@ -609,7 +609,7 @@ onMounted(async () => {
 /* ── TOC ── */
 .toc-item {
   display: block;
-  padding: 5px 14px 5px 12px;
+  padding: 5px 8px;
   font-size: 12.5px; line-height: 1.5;
   color: var(--text-muted);
   cursor: pointer; text-decoration: none;
@@ -621,8 +621,8 @@ onMounted(async () => {
 .toc-item.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-light); font-weight: 600; }
 
 /* ── Drawer inner ── */
-.drawer-inner { padding: 20px 16px; }
-.drawer-inner .pane-title { padding: 0 4px 12px; border-bottom: 1px solid var(--border-faint); margin-bottom: 8px; }
+.drawer-inner { padding: 12px 6px; }
+.drawer-inner .pane-title { padding: 0 2px 8px; border-bottom: 1px solid var(--border-faint); margin-bottom: 4px; }
 
 /* ── Mobile ── */
 @media (max-width: 768px) {
@@ -630,7 +630,8 @@ onMounted(async () => {
   .btn-label { display: none; }
   .mobile-toggles { display: flex; }
   .pane-left, .pane-right { display: none; }
-  .pane-center { width: 100%; }
+  .pane-center { width: 100%; overflow-x: hidden; }
+  .markdown-body { padding: 12px 14px 100px; }
   .history-panel { max-height: 50vh; }
 }
 </style>
@@ -659,6 +660,30 @@ onMounted(async () => {
   --tk-builtin: #79c0ff;
   --tk-variable: #ffa657;
   --tk-tag: #7ee787;
+}
+
+/* Reader drawers are mobile-only and teleported to body; drop the default 20px
+   body padding so .drawer-inner controls the (compact) spacing. */
+.el-drawer__body { padding: 0; }
+
+/* Glass styling for the drawers — matches the app's liquid-glass surfaces. */
+.el-drawer {
+  background: var(--bg-glass-strong);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18), var(--inset-highlight);
+}
+:root[data-theme="dark"] .el-drawer {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), var(--inset-highlight);
+}
+/* Frosted overlay (only the drawer's overlay, not dialogs). */
+.el-overlay:has(.el-drawer) {
+  background-color: rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(6px) saturate(140%);
+  -webkit-backdrop-filter: blur(6px) saturate(140%);
+}
+:root[data-theme="dark"] .el-overlay:has(.el-drawer) {
+  background-color: rgba(0, 0, 0, 0.4);
 }
 
 .markdown-body {
@@ -780,6 +805,12 @@ onMounted(async () => {
 .hljs-tag { color: var(--tk-tag); }
 .hljs-emphasis { font-style: italic; }
 .hljs-strong { font-weight: 700; }
+
+/* On mobile, wrap code instead of horizontal-scroll so nothing is clipped off-screen. */
+@media (max-width: 768px) {
+  .code-block .code-content { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .markdown-body { overflow-wrap: anywhere; }
+}
 
 .markdown-body table {
   width: 100%; border-collapse: collapse; margin: 0 0 1em;

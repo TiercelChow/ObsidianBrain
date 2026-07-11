@@ -84,8 +84,8 @@ function onFileClick(entry: DirEntry) {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px 5px 0;
-  margin: 1px 6px;
+  padding: 4px 6px 4px 0;
+  margin: 1px 2px;
   border-radius: 8px;
   font-size: 13px;
   color: var(--text-secondary);

@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
 use axum::extract::DefaultBodyLimit;
+use axum::http::{header, HeaderValue};
 use axum::routing::{get, post};
 use axum::Router;
+use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::api::handlers::health::health_check;
@@ -43,9 +46,17 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
             path = %frontend_dist.display(),
             "Serving frontend static files"
         );
-        app.fallback_service(tower_http::services::ServeDir::new(frontend_dist).fallback(
-            tower_http::services::ServeFile::new(frontend_dist.join("index.html")),
-        ))
+        // no-cache so the browser always revalidates index.html (and picks up the
+        // new hashed asset chunks after a rebuild) instead of serving a stale copy.
+        let static_service = ServiceBuilder::new()
+            .layer(SetResponseHeaderLayer::if_not_present(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("no-cache"),
+            ))
+            .service(tower_http::services::ServeDir::new(frontend_dist).fallback(
+                tower_http::services::ServeFile::new(frontend_dist.join("index.html")),
+            ));
+        app.fallback_service(static_service)
     } else {
         tracing::warn!(
             path = %frontend_dist.display(),
