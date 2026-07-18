@@ -1,5 +1,12 @@
 <template>
-  <div class="reader-page">
+  <div ref="readerPageRef" class="reader-page" :class="{ 'is-fullscreen': isFullscreen, 'fs-anim': fsAnim, 'fs-ui-hidden': isFullscreen && !showFsUI }">
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">阅境轩</h1>
+        <p class="page-subtitle">浏览本地 Markdown，沉浸阅读</p>
+      </div>
+    </header>
+
     <!-- Top bar: path input + open. History appears on input focus. -->
     <div class="reader-topbar" :class="{ 'history-open': showHistory }">
       <div class="path-input-wrap">
@@ -40,14 +47,25 @@
       <el-button type="primary" :loading="loading" @click="openPath()">
         <el-icon><Search /></el-icon><span class="btn-label">打开</span>
       </el-button>
+      <el-button class="icon-btn" :title="isFullscreen ? '退出全屏 (Esc)' : '全屏阅读'" @click="toggleFullscreen">
+        <el-icon><FullScreen /></el-icon>
+      </el-button>
     </div>
     <div v-if="showHistory" class="history-backdrop" @click="showHistory = false"></div>
 
-    <!-- Mobile pane toggles -->
-    <div class="mobile-toggles">
-      <el-button size="small" @click="treeDrawer = true"><el-icon><FolderOpened /></el-icon><span>文件</span></el-button>
-      <el-button size="small" @click="tocDrawer = true"><el-icon><Menu /></el-icon><span>目录</span></el-button>
-    </div>
+    <!-- Mobile floating buttons (file / TOC) — fade out while scrolling -->
+    <button
+      class="fab fab-left"
+      :class="{ hide: fabHide }"
+      title="文件"
+      @click="treeDrawer = true"
+    ><el-icon :size="24"><FolderOpened /></el-icon></button>
+    <button
+      class="fab fab-right"
+      :class="{ hide: fabHide }"
+      title="目录"
+      @click="tocDrawer = true"
+    ><el-icon :size="24"><Menu /></el-icon></button>
 
     <!-- Body: 3 panes -->
     <div class="reader-body">
@@ -127,6 +145,13 @@
       </div>
     </el-drawer>
 
+    <!-- Floating fullscreen UI (auto-hides) -->
+    <div v-if="isFullscreen" class="fs-ui" :class="{ hidden: !showFsUI }">
+      <button class="fs-fab" title="退出全屏 (Esc)" @click="toggleFullscreen">
+        <el-icon :size="20"><FullScreen /></el-icon>
+      </button>
+    </div>
+
     <!-- Mermaid fullscreen viewer -->
     <MermaidViewer v-if="viewerSvg" :svg-html="viewerSvg" :source="viewerSource" @close="viewerSvg = ''" />
 
@@ -143,19 +168,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  FolderOpened, Search, Star, StarFilled, Delete, Menu, Document,
+  FolderOpened, Search, Star, StarFilled, Delete, Menu, Document, FullScreen,
 } from '@element-plus/icons-vue'
 import {
   listLocalDir, readLocalFile, getReaderHistory, saveReaderHistory,
   type DirEntry, type HistoryItem,
 } from '@/api/reader'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
+import { useAppStore } from '@/stores/app'
 import FileTree from '@/components/reader/FileTree.vue'
 import MermaidViewer from '@/components/reader/MermaidViewer.vue'
 import PathPreviewModal from '@/components/reader/PathPreviewModal.vue'
+
+const appStore = useAppStore()
 
 interface TocItem { id: string; text: string; level: number }
 
@@ -182,6 +210,52 @@ const previewPath = ref('')        // non-md / out-of-folder link target → pop
 const previewAnchor = ref('')      // line/symbol/heading anchor for the popup target
 const viewerSource = ref('')
 const contentRef = ref<HTMLElement | null>(null)
+const readerPageRef = ref<HTMLElement | null>(null)
+const isFullscreen = ref(false)
+const fsAnim = ref(false)
+let fsAnimTimer: ReturnType<typeof setTimeout> | null = null
+// Auto-hide UI in fullscreen for immersive reading.
+const showFsUI = ref(true)
+let fsUiTimer: ReturnType<typeof setTimeout> | null = null
+
+function onFsActivity() {
+  showFsUI.value = true
+  if (fsUiTimer) clearTimeout(fsUiTimer)
+  fsUiTimer = setTimeout(() => { showFsUI.value = false }, 3000)
+}
+
+function toggleFullscreen() {
+  const el = readerPageRef.value
+  if (document.fullscreenElement) {
+    void document.exitFullscreen()
+  } else if (el) {
+    el.requestFullscreen().catch((e) => {
+      console.warn('进入全屏失败:', e)
+      ElMessage.warning('当前浏览器不支持全屏')
+    })
+  }
+}
+function onFullscreenChange() {
+  isFullscreen.value = !!document.fullscreenElement
+  // Replay the pop animation on every toggle (enter & exit).
+  fsAnim.value = false
+  if (fsAnimTimer) clearTimeout(fsAnimTimer)
+  requestAnimationFrame(() => {
+    fsAnim.value = true
+    fsAnimTimer = setTimeout(() => { fsAnim.value = false }, 400)
+  })
+  // Auto-hide UI listeners — only active in fullscreen.
+  if (isFullscreen.value) {
+    document.addEventListener('mousemove', onFsActivity)
+    document.addEventListener('touchstart', onFsActivity)
+    onFsActivity()
+  } else {
+    document.removeEventListener('mousemove', onFsActivity)
+    document.removeEventListener('touchstart', onFsActivity)
+    showFsUI.value = true
+    if (fsUiTimer) { clearTimeout(fsUiTimer); fsUiTimer = null }
+  }
+}
 // The file currently displayed — swaps only when its content is ready, driving the
 // page-turn transition. (Separate from activeFile, which updates immediately for the
 // tree highlight.)
@@ -406,7 +480,20 @@ function buildToc() {
     .map((el) => ({ id: el.id, text: el.textContent || '', level: Number(el.tagName[1]) }))
 }
 
+// Mobile FABs fade out while scrolling, fade back in after a short idle.
+const fabHide = ref(false)
+let fabHideTimer: ReturnType<typeof setTimeout> | null = null
+function updateFabOnScroll() {
+  if (!fabHide.value) fabHide.value = true
+  if (fabHideTimer) clearTimeout(fabHideTimer)
+  fabHideTimer = setTimeout(() => { fabHide.value = false }, 600)
+}
+
 function onContentScroll() {
+  updateFabOnScroll()
+  // Drive the app's mobile header + page-header collapse from the pane-center
+  // scroll (app-main doesn't scroll on the Reader page).
+  if (contentRef.value) appStore.setScrolled(contentRef.value.scrollTop > 20)
   if (!contentRef.value || !toc.value.length) return
   const containerTop = contentRef.value.getBoundingClientRect().top
   let current = ''
@@ -425,6 +512,7 @@ function scrollToHeading(id: string) {
 }
 
 onMounted(async () => {
+  document.addEventListener('fullscreenchange', onFullscreenChange)
   await loadHistory()
   // Restore last opened folder + file (per-browser).
   const lastFolder = localStorage.getItem(LAST_FOLDER_KEY)
@@ -434,6 +522,11 @@ onMounted(async () => {
     if (lastFile) await onSelectFile(lastFile)
   }
 })
+
+onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
+  if (document.fullscreenElement) void document.exitFullscreen()
+})
 </script>
 
 <style scoped>
@@ -441,7 +534,95 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 64px);
-  gap: 16px;
+  gap: 10px;
+}
+/* Tighter page-header spacing — the Reader is a tool page, not a content page. */
+.reader-page .page-header { margin-bottom: 6px; }
+/* Fullscreen reading mode — immersive: hide app chrome (title/input), keep file
+   tree + TOC. The article's H1 sticks to the top with a frosted glass bar. */
+.reader-page:fullscreen {
+  height: 100vh;
+  width: 100%;
+  background:
+    radial-gradient(ellipse at 75% 15%, rgba(196, 181, 253, 0.25), transparent 55%),
+    radial-gradient(ellipse at 15% 85%, rgba(165, 243, 252, 0.2), transparent 55%),
+    radial-gradient(ellipse at 50% 50%, rgba(253, 230, 138, 0.12), transparent 50%),
+    var(--bg-base);
+  padding: 16px 24px;
+  border-radius: 0;
+  overflow: hidden;
+  cursor: default;
+}
+.reader-page:fullscreen.fs-ui-hidden { cursor: none; }
+/* Hide only the page title + input bar; keep file tree + TOC. */
+.reader-page:fullscreen .page-header,
+.reader-page:fullscreen .reader-topbar,
+.reader-page:fullscreen .fab { display: none !important; }
+.reader-page:fullscreen .pane-center {
+  display: block; /* override flex so content flows at natural height and scrolls */
+  background: transparent; border: none;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  box-shadow: none; border-radius: 0;
+}
+.reader-page:fullscreen .markdown-body {
+  max-width: 920px;
+  padding: 32px 48px 160px;
+  font-size: 16px;
+  line-height: var(--leading-relaxed);
+}
+/* Article H1 sticks to the top of the scroll area with a frosted glass bar —
+   content scrolls behind it, visible (blurred) through the glass.
+   :deep() needed because h1 is v-html content (no data-v-xxx attribute). */
+.reader-page:fullscreen .markdown-body :deep(h1:first-of-type) {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  margin: 0 -48px 24px;
+  padding: 16px 48px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 1px 0 var(--border-faint);
+  border-radius: 12px;
+}
+
+/* Floating fullscreen UI — auto-hides after inactivity. */
+.fs-ui {
+  position: fixed; top: 24px; right: 24px; z-index: 100;
+  display: flex; gap: 10px;
+  transition: opacity 0.4s var(--ease-out);
+}
+.fs-ui.hidden { opacity: 0; pointer-events: none; }
+.fs-fab {
+  width: 42px; height: 42px; border-radius: 50%;
+  border: 1px solid var(--border-glass);
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  color: var(--text-secondary);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: transform 100ms ease-out, color 0.2s var(--ease-out);
+}
+.fs-fab:hover { color: var(--text-primary); }
+.fs-fab:active { transform: scale(0.92); }
+/* Backdrop behind the fullscreen element — match the bg so the pop animation's
+   scale gap is seamless instead of flashing black. */
+.reader-page::backdrop {
+  background:
+    radial-gradient(ellipse at 75% 15%, rgba(196, 181, 253, 0.25), transparent 55%),
+    radial-gradient(ellipse at 15% 85%, rgba(165, 243, 252, 0.2), transparent 55%),
+    radial-gradient(ellipse at 50% 50%, rgba(253, 230, 138, 0.12), transparent 50%),
+    var(--bg-base);
+}
+/* Pop animation on enter/exit fullscreen. */
+.reader-page.fs-anim {
+  animation: fs-pop 0.38s var(--ease-spring);
+}
+@keyframes fs-pop {
+  0% { transform: scale(0.94); opacity: 0.45; }
+  100% { transform: scale(1); opacity: 1; }
 }
 
 /* ── Top bar ── */
@@ -457,6 +638,7 @@ onMounted(async () => {
 .path-input { width: 100%; }
 .path-input :deep(.el-input__wrapper) { padding-left: 10px; }
 .btn-label { margin-left: 4px; }
+.icon-btn { flex-shrink: 0; }
 
 /* Anchored to the input wrapper so the list matches the input's width. */
 .history-panel {
@@ -503,7 +685,7 @@ onMounted(async () => {
 .hp-empty { padding: 24px; text-align: center; font-size: 12px; color: var(--text-faint); }
 .hp-item {
   display: flex; align-items: center; gap: 8px;
-  padding: 7px 10px; border-radius: 10px; transition: background 0.12s ease;
+  padding: 7px 10px; border-radius: 10px; transition: background 0.12s var(--ease-out);
 }
 .hp-item:hover { background: var(--bg-glass-subtle); }
 .hp-item.pinned { background: var(--accent-light); }
@@ -521,12 +703,36 @@ onMounted(async () => {
 }
 .hp-path:hover { color: var(--accent); }
 
-.dropdown-enter-active, .dropdown-leave-active { transition: opacity 0.18s ease, transform 0.18s ease; }
+.dropdown-enter-active, .dropdown-leave-active { transition: opacity 0.18s var(--ease-out), transform 0.18s var(--ease-out); }
 .dropdown-enter-from, .dropdown-leave-to { opacity: 0; transform: translateY(-6px); }
 
-/* ── Mobile toggles ── */
-.mobile-toggles { display: none; gap: 8px; flex-shrink: 0; }
-.mobile-toggles .el-button { flex: 1; }
+/* ── Mobile floating buttons (file / TOC) ── */
+.fab {
+  display: none;
+  position: fixed;
+  bottom: 42%;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  color: var(--text-primary);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  z-index: 60;
+  opacity: 1;
+  transform: scale(1);
+  transition: opacity var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-spring);
+}
+.fab:active { transform: scale(0.9); }
+.fab.hide { opacity: 0; transform: scale(0.8); pointer-events: none; }
+.fab-left { left: 14px; }
+.fab-right { right: 14px; }
+
 
 /* ── Body / panes ── */
 .reader-body { flex: 1; display: flex; gap: 16px; min-height: 0; }
@@ -564,7 +770,7 @@ onMounted(async () => {
 .page-next-leave-active,
 .page-prev-enter-active,
 .page-prev-leave-active {
-  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.28s ease;
+  transition: transform 0.28s var(--ease-standard), opacity 0.28s var(--ease-out);
 }
 .page-next-enter-from { transform: translateX(36px); opacity: 0; }
 .page-next-leave-to { transform: translateX(-36px); opacity: 0; }
@@ -604,7 +810,6 @@ onMounted(async () => {
 .center-state.error { color: #f87171; }
 .center-state .cs-icon { font-size: 40px; opacity: 0.4; }
 .center-state .is-loading { animation: spin 1s linear infinite; font-size: 26px; color: var(--accent); }
-@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ── TOC ── */
 .toc-item {
@@ -614,7 +819,7 @@ onMounted(async () => {
   color: var(--text-muted);
   cursor: pointer; text-decoration: none;
   border-left: 2px solid transparent;
-  transition: all 0.12s ease;
+  transition: all 0.12s var(--ease-out);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .toc-item:hover { color: var(--text-secondary); background: var(--bg-glass-subtle); }
@@ -626,13 +831,29 @@ onMounted(async () => {
 
 /* ── Mobile ── */
 @media (max-width: 768px) {
-  .reader-page { height: calc(100vh - 96px); gap: 10px; }
+  /* Extend the reader-page up under the global header (cancel app-main's 56px top
+     padding) and pad its content down so the title/input sit below the header.
+     On scroll the top padding collapses so the document slides under the frosted
+     global header — same effect as Timeline. */
+  .reader-page {
+    height: calc(100vh - 40px);
+    margin-top: -56px;
+    padding-top: 56px;
+    gap: 6px;
+    transition: padding-top var(--duration-slow) var(--ease-standard);
+  }
+  .app-main.mobile-scrolled .reader-page { padding-top: 0; }
   .btn-label { display: none; }
-  .mobile-toggles { display: flex; }
+  .fab { display: flex; }
   .pane-left, .pane-right { display: none; }
-  .pane-center { width: 100%; overflow-x: hidden; }
-  .markdown-body { padding: 12px 14px 100px; }
+  .pane-center { width: 100%; overflow-x: clip; }
+  .markdown-body { padding: 12px 14px 100px; max-width: 100%; }
   .history-panel { max-height: 50vh; }
+  /* Collapse the topbar (input + buttons) on scroll, same as the page-header. */
+  .reader-topbar { max-height: 80px; transition: max-height var(--duration-slow) var(--ease-standard), opacity var(--duration-normal) var(--ease-out), margin var(--duration-slow); }
+  .app-main.mobile-scrolled .reader-topbar {
+    max-height: 0; opacity: 0; margin: 0; overflow: hidden; pointer-events: none;
+  }
 }
 </style>
 
@@ -687,9 +908,9 @@ onMounted(async () => {
 }
 
 .markdown-body {
-  max-width: 760px;
+  max-width: 860px;
   margin: 0 auto;
-  padding: 12px 24px 120px;
+  padding: 12px 20px 120px;
   color: var(--text-secondary);
   font-size: 15px;
   line-height: 1.8;
@@ -727,7 +948,7 @@ onMounted(async () => {
 .markdown-body blockquote p { margin: 0.3em 0; }
 
 .markdown-body code {
-  font-family: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.88em;
   background: var(--code-bg);
   color: var(--code-inline-color);
@@ -746,7 +967,7 @@ onMounted(async () => {
 .code-block .code-gutter,
 .code-block .code-content {
   margin: 0;
-  font-family: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.6;
 }
@@ -765,6 +986,8 @@ onMounted(async () => {
   min-width: 0;
   padding: 16px 18px;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
   background: transparent;
   border: none;
 }
@@ -772,7 +995,7 @@ onMounted(async () => {
 .code-block .code-content code.hljs {
   background: transparent; color: var(--tk-text);
   padding: 0; font-size: 13px; line-height: 1.6;
-  font-family: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 /* hljs token colors — themed via --tk-* variables (global: reader + modal) */
 .hljs-comment,
@@ -806,9 +1029,9 @@ onMounted(async () => {
 .hljs-emphasis { font-style: italic; }
 .hljs-strong { font-weight: 700; }
 
-/* On mobile, wrap code instead of horizontal-scroll so nothing is clipped off-screen. */
+/* On mobile, keep code on a single line (no wrap) — scroll horizontally to view
+   long lines. Only long prose/URLs wrap. */
 @media (max-width: 768px) {
-  .code-block .code-content { white-space: pre-wrap; overflow-wrap: anywhere; }
   .markdown-body { overflow-wrap: anywhere; }
 }
 
@@ -839,10 +1062,10 @@ onMounted(async () => {
   overflow: auto;
 }
 .markdown-body .mermaid svg { max-width: 100%; height: auto; }
-.markdown-body .mermaid-clickable { cursor: zoom-in; transition: box-shadow 0.2s ease, transform 0.2s ease; }
+.markdown-body .mermaid-clickable { cursor: zoom-in; transition: box-shadow var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out); }
 .markdown-body .mermaid-clickable:hover { box-shadow: var(--shadow-lg); transform: translateY(-1px); }
 .markdown-body .mermaid-error {
   color: #f87171; font-size: 13px; justify-content: flex-start;
-  font-family: 'SF Mono', Menlo, monospace;
+  font-family: var(--font-mono);
 }
 </style>

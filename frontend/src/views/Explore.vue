@@ -173,16 +173,25 @@ async function loadAll() {
 
 <style scoped>
 .explore-page { max-width: 100%; min-height: 100%; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-.page-title { font-size: 22px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.3px; }
-.page-subtitle { margin-top: 4px; color: var(--text-muted); font-size: 14px; }
-.header-actions { display: flex; gap: 8px; }
 
-.explore-section { margin-bottom: 28px; }
+.explore-section {
+  margin-bottom: 28px;
+  animation: fade-in var(--duration-normal) var(--ease-out) both;
+}
+.explore-section:nth-child(3) { animation-delay: 0.06s; }
+.explore-section:nth-child(4) { animation-delay: 0.12s; }
 .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .section-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
 
 .empty-hint { text-align: center; color: var(--text-faint); font-size: 13px; padding: 24px 0; }
+
+/* Card hover transitions */
+.gap-card, .question-card, .collision-card {
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.gap-card:hover, .question-card:hover, .collision-card:hover {
+  transform: translateY(-2px);
+}
 
 .gap-list { display: flex; flex-direction: column; gap: 10px; }
 .gap-card { padding: 16px; border-radius: 14px; }

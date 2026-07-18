@@ -10,6 +10,9 @@ export interface HealthStatus {
 export const useAppStore = defineStore('app', () => {
   const sidebarCollapsed = ref(false)
   const healthStatus = ref<HealthStatus | null>(null)
+  // Whether the page is scrolled (drives the mobile global header + page-header
+  // collapse). Set by App.vue (app-main scroll) and the Reader (pane-center scroll).
+  const isScrolled = ref(false)
 
   // Theme: 'light' | 'dark'
   const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null
@@ -27,6 +30,10 @@ export const useAppStore = defineStore('app', () => {
     theme.value = t
   }
 
+  function setScrolled(v: boolean) {
+    isScrolled.value = v
+  }
+
   // Apply theme to <html> element and persist
   watch(theme, (t) => {
     document.documentElement.setAttribute('data-theme', t)
@@ -42,5 +49,5 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  return { sidebarCollapsed, healthStatus, theme, toggleSidebar, toggleTheme, setTheme, fetchHealth }
+  return { sidebarCollapsed, healthStatus, theme, isScrolled, toggleSidebar, toggleTheme, setTheme, setScrolled, fetchHealth }
 })

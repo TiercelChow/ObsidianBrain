@@ -288,18 +288,12 @@ onMounted(() => { loadAll() })
   min-height: 100%;
   max-width: 100%;
 }
-.page-header {
-  display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;
-}
-.page-title { font-size: 22px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.3px; }
-.page-subtitle { margin-top: 4px; color: var(--text-faint); font-size: 14px; }
-.header-actions { display: flex; gap: 8px; }
 
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
 .stat-card {
   display: flex; align-items: center; gap: 14px; padding: 20px;
   border-radius: 18px;
-  animation: fade-in 0.4s ease both; animation-delay: var(--delay, 0s);
+  animation: fade-in var(--duration-normal) var(--ease-out) both; animation-delay: var(--delay, 0s);
 }
 .stat-icon {
   width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
@@ -311,8 +305,8 @@ onMounted(() => { loadAll() })
 .stat-value { font-size: 22px; font-weight: 700; color: var(--text-primary); line-height: 1.2; }
 .stat-label { font-size: 12px; color: var(--text-faint); margin-top: 3px; font-weight: 500; }
 
-.section { margin-bottom: 28px; animation: fade-in 0.5s ease both; animation-delay: var(--delay, 0s); }
-.section-title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px; letter-spacing: -0.2px; }
+.section { margin-bottom: 28px; animation: fade-in var(--duration-normal) var(--ease-out) both; animation-delay: var(--delay, 0s); }
+.section-title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px; letter-spacing: var(--tracking-tight); }
 
 .status-card { padding: 16px 20px; border-radius: 16px; }
 .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
@@ -333,7 +327,6 @@ onMounted(() => { loadAll() })
   width: 14px; height: 14px; border: 2px solid #e4e4e7; border-top-color: #6366f1;
   border-radius: 50%; animation: spin 0.8s linear infinite;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
 
 /* Config */
 .config-card { padding: 24px; border-radius: 18px; }
@@ -362,11 +355,6 @@ onMounted(() => { loadAll() })
   padding-top: 12px; margin-top: 4px;
 }
 .config-hint { font-size: 12px; color: var(--text-faint); }
-
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(20px) scale(0.97); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
 
 /* ── Mobile ── */
 @media (max-width: 768px) {

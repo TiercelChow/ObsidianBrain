@@ -417,9 +417,6 @@ onUnmounted(() => {
 
 <style scoped>
 .manual-page { max-width: 100%; min-height: 100%; }
-.page-header { margin-bottom: 24px; }
-.page-title { font-size: 22px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.3px; }
-.page-subtitle { margin-top: 4px; color: var(--text-muted); font-size: 14px; }
 
 .manual-layout { display: flex; gap: 24px; }
 
@@ -427,9 +424,10 @@ onUnmounted(() => {
 .toc-sidebar { width: 200px; flex-shrink: 0; position: sticky; top: 0; align-self: flex-start; max-height: calc(100vh - 100px); overflow-y: auto; }
 .toc-inner { padding: 16px 12px; border-radius: 14px; }
 .toc-header { font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 10px; padding-left: 8px; }
-.toc-link { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; text-decoration: none; font-size: 13px; color: var(--text-muted); transition: all 0.15s ease; cursor: pointer; }
+.toc-link { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; text-decoration: none; font-size: 13px; color: var(--text-muted); transition: all 0.15s var(--ease-out); cursor: pointer; }
 .toc-link:hover { background: var(--bg-glass-subtle); color: var(--text-secondary); }
 .toc-link.active { background: var(--accent-light); color: var(--accent); font-weight: 600; }
+.toc-link:active { transform: scale(0.97); transition: transform 100ms ease-out; }
 .toc-num { width: 18px; text-align: center; font-weight: 600; }
 .toc-text { flex: 1; }
 

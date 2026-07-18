@@ -90,7 +90,7 @@ function onFileClick(entry: DirEntry) {
   font-size: 13px;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background 0.12s var(--ease-out), color 0.12s var(--ease-out);
   white-space: nowrap;
   overflow: hidden;
 }
@@ -106,4 +106,10 @@ function onFileClick(entry: DirEntry) {
 .ft-icon { width: 15px; font-size: 15px; color: var(--text-muted); flex-shrink: 0; }
 .ft-dir:hover .ft-icon, .ft-file.active .ft-icon { color: var(--accent); }
 .ft-name { overflow: hidden; text-overflow: ellipsis; }
+
+.ft-children { animation: ft-expand var(--duration-fast) var(--ease-out); }
+@keyframes ft-expand {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 </style>

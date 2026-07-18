@@ -294,6 +294,7 @@ onMounted(() => { void load() })
   background: rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(12px) saturate(150%);
   -webkit-backdrop-filter: blur(12px) saturate(150%);
+  animation: fade-in var(--duration-normal) var(--ease-out) both;
 }
 :root[data-theme="dark"] .ppm-overlay {
   background: rgba(0, 0, 0, 0.6);
@@ -311,6 +312,11 @@ onMounted(() => { void load() })
   border-radius: 18px;
   box-shadow: var(--shadow-lg), var(--inset-highlight);
   overflow: hidden;
+  animation: ppm-panel-enter var(--duration-slow) var(--ease-spring);
+}
+@keyframes ppm-panel-enter {
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 .ppm-head {
@@ -330,7 +336,7 @@ onMounted(() => { void load() })
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 .ppm-reader-btn,
 .ppm-close-btn {
@@ -346,7 +352,7 @@ onMounted(() => { void load() })
   color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.15s var(--ease-out);
 }
 .ppm-reader-btn:hover { color: var(--accent); border-color: var(--accent-border); }
 .ppm-close-btn { padding: 0; width: 30px; justify-content: center; }
@@ -369,8 +375,7 @@ onMounted(() => { void load() })
   font-size: 14px;
 }
 .ppm-state.error { color: #f87171; }
-.ppm-state .is-loading { animation: ppm-spin 1s linear infinite; color: var(--accent); }
-@keyframes ppm-spin { to { transform: rotate(360deg); } }
+.ppm-state .is-loading { animation: spin 1s linear infinite; color: var(--accent); }
 
 .ppm-folder { user-select: none; }
 .ppm-md { max-width: 100%; padding: 0; }

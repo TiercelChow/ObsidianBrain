@@ -164,16 +164,13 @@ onMounted(() => { loadArticles() })
 
 <style scoped>
 .ingest-page { max-width: 100%; min-height: 100%; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-.page-title { font-size: 22px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.3px; }
-.page-subtitle { margin-top: 4px; color: var(--text-muted); font-size: 14px; }
-.header-actions { display: flex; gap: 8px; }
 
 .loading-state { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 60px 0; color: var(--text-muted); }
 
 .article-list { display: flex; flex-direction: column; gap: 12px; }
-.article-card { padding: 20px; border-radius: 16px; transition: opacity 0.3s; }
+.article-card { padding: 20px; border-radius: 16px; transition: opacity var(--duration-normal) var(--ease-out), transform 150ms ease-out; }
 .article-card.ingested { opacity: 0.6; }
+.article-card:active { transform: scale(0.98); }
 .article-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .relevance { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; }
 .relevance.high { background: rgba(74, 222, 128, 0.15); color: #4ade80; }

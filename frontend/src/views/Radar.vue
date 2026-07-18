@@ -130,24 +130,16 @@ onMounted(() => { loadRadar() })
   max-width: 100%;
 }
 .radar-page .radar-card {
-  animation: pageFadeIn 0.5s ease both;
+  animation: fade-in var(--duration-normal) var(--ease-out) both;
 }
 .radar-page .radar-card:nth-child(2) { animation-delay: 0.06s; }
 .radar-page .radar-card:nth-child(3) { animation-delay: 0.12s; }
 .radar-page .radar-card:nth-child(4) { animation-delay: 0.18s; }
-@keyframes pageFadeIn {
-  from { opacity: 0; transform: translateY(20px) scale(0.97); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-.page-title { font-size: 22px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.3px; }
-.page-subtitle { margin-top: 4px; color: var(--text-faint); font-size: 14px; }
-.header-actions { display: flex; gap: 8px; }
 
 .radar-list { display: flex; flex-direction: column; gap: 12px; }
 .radar-card {
   padding: 20px; border-radius: 16px;
-  transition: box-shadow 0.2s ease;
+  transition: box-shadow var(--duration-fast) var(--ease-out), transform 150ms ease-out;
 }
 .radar-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
 

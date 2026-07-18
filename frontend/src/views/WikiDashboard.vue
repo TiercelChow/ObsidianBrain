@@ -309,10 +309,6 @@ onMounted(() => { loadAll() })
 
 <style scoped>
 .wiki-dashboard { max-width: 100%; min-height: 100%; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-.page-title { font-size: 22px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.3px; }
-.page-subtitle { margin-top: 4px; color: var(--text-muted); font-size: 14px; }
-.header-actions { display: flex; gap: 8px; }
 
 .loading-state { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 60px 0; color: var(--text-muted); }
 
@@ -352,7 +348,7 @@ onMounted(() => { loadAll() })
 .domain-name { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
 .domain-count { font-size: 11px; color: var(--text-muted); }
 .domain-bar { height: 6px; border-radius: 3px; background: var(--bg-glass-subtle); overflow: hidden; }
-.domain-bar-fill { height: 100%; border-radius: 3px; transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
+.domain-bar-fill { height: 100%; border-radius: 3px; transition: width 0.6s var(--ease-standard); }
 
 .log-timeline { display: flex; flex-direction: column; gap: 0; }
 .log-entry { display: flex; gap: 12px; padding: 8px 0; position: relative; }

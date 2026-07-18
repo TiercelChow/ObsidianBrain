@@ -196,28 +196,20 @@ onMounted(() => { loadRepos() })
   min-height: 100%;
 }
 .code-repo-page .repo-card {
-  animation: pageFadeIn 0.5s ease both;
+  animation: fade-in var(--duration-normal) var(--ease-out) both;
 }
 .code-repo-page .repo-card:nth-child(2) { animation-delay: 0.06s; }
 .code-repo-page .repo-card:nth-child(3) { animation-delay: 0.12s; }
 .code-repo-page .repo-card:nth-child(4) { animation-delay: 0.18s; }
-@keyframes pageFadeIn {
-  from { opacity: 0; transform: translateY(20px) scale(0.97); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-.page-title { font-size: 22px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.3px; }
-.page-subtitle { margin-top: 4px; color: var(--text-faint); font-size: 14px; }
-.header-actions { display: flex; gap: 8px; }
 
 .repo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
-.repo-card { padding: 20px; border-radius: 16px; transition: box-shadow 0.2s ease; display: flex; flex-direction: column; }
+.repo-card { padding: 20px; border-radius: 16px; transition: box-shadow var(--duration-fast) var(--ease-out); display: flex; flex-direction: column; }
 .repo-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
 .repo-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .repo-name { font-size: 16px; font-weight: 600; color: var(--text-primary); }
 .repo-branch { display: flex; align-items: center; gap: 4px; font-size: 13px; color: #6366f1; margin-bottom: 4px; }
 .repo-path {
-  font-size: 12px; color: var(--text-faint); font-family: monospace; margin-bottom: 12px;
+  font-size: 12px; color: var(--text-faint); font-family: var(--font-mono); margin-bottom: 12px;
   word-break: break-all; overflow: hidden; text-overflow: ellipsis;
   display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; max-height: 2.4em;
 }
@@ -229,11 +221,11 @@ onMounted(() => { loadRepos() })
 .commits-section h4 { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px; }
 .commit-list { display: flex; flex-direction: column; gap: 8px; }
 .commit-item { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 10px; font-size: 13px; }
-.commit-hash { font-family: monospace; color: #6366f1; min-width: 60px; font-weight: 500; }
+.commit-hash { font-family: var(--font-mono); color: #6366f1; min-width: 60px; font-weight: 500; }
 .commit-msg { flex: 1; color: var(--text-primary); }
 .commit-author { color: var(--text-faint); font-size: 12px; }
 .no-commits { padding: 20px; text-align: center; }
-.detail-path { font-family: monospace; font-size: 12px; color: #6366f1; word-break: break-all; }
+.detail-path { font-family: var(--font-mono); font-size: 12px; color: #6366f1; word-break: break-all; }
 .language-tags { display: flex; gap: 6px; flex-wrap: wrap; }
 
 /* 弹窗表格样式 - 解决圆角缺口问题 */
@@ -278,6 +270,12 @@ onMounted(() => { loadRepos() })
 .detail-descriptions .el-descriptions__body .el-descriptions__table tr:last-child .el-descriptions__cell:last-child {
   border-bottom-right-radius: 12px !important;
 }
+
+@media (max-width: 768px) {
+  .repo-grid { grid-template-columns: 1fr; gap: 12px; }
+  .repo-card { padding: 14px; border-radius: 14px; }
+  .repo-actions { flex-wrap: wrap; }
+}
 </style>
 
 <style>
@@ -287,4 +285,8 @@ onMounted(() => { loadRepos() })
 .el-dialog__body { padding: 16px 24px 24px !important; }
 .el-descriptions { border-radius: 12px !important; overflow: hidden; }
 .el-descriptions__table { border-radius: 12px !important; }
+
+@media (max-width: 768px) {
+  .el-dialog { width: 90% !important; }
+}
 </style>

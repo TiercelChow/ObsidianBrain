@@ -66,11 +66,11 @@ import {
 const route = useRoute()
 const appStore = useAppStore()
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
-const isMobile = computed(() => window.innerWidth <= 768)
 
-// Auto-close sidebar on navigation when on mobile
+// Auto-close the mobile sidebar overlay on navigation. The match is checked at
+// navigation time (not cached) so resizing between routes stays correct.
 watch(() => route.path, () => {
-  if (isMobile.value && !isCollapsed.value) {
+  if (window.matchMedia('(max-width: 768px)').matches && !isCollapsed.value) {
     appStore.toggleSidebar()
   }
 })
@@ -104,7 +104,7 @@ function isActive(path: string) {
   border-right: 1px solid var(--border-glass);
   box-shadow: inset -1px 0 0 var(--border-faint);
   padding: 0 12px;
-  transition: padding 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: padding var(--duration-slow) var(--ease-spring);
 }
 
 .sidebar.collapsed {
@@ -120,8 +120,8 @@ function isActive(path: string) {
   padding: 0 8px;
   margin-bottom: 8px;
   flex-shrink: 0;
-  transition: padding 0.45s cubic-bezier(0.34, 1.56, 0.64, 1),
-              justify-content 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: padding var(--duration-slow) var(--ease-spring),
+              justify-content var(--duration-slow) var(--ease-spring);
 }
 
 .sidebar.collapsed .logo-section {
@@ -143,7 +143,7 @@ function isActive(path: string) {
   font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
-  letter-spacing: -0.3px;
+  letter-spacing: var(--tracking-tight);
   white-space: nowrap;
 }
 
@@ -167,7 +167,7 @@ function isActive(path: string) {
   font-size: 14px;
   font-weight: 450;
   cursor: pointer;
-  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: all var(--duration-slow) var(--ease-spring);
 }
 
 .sidebar.collapsed .nav-item {
@@ -191,7 +191,7 @@ function isActive(path: string) {
 .nav-icon {
   flex-shrink: 0;
   opacity: 0.6;
-  transition: opacity 0.2s ease, transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-slow) var(--ease-spring);
 }
 
 .sidebar.collapsed .nav-icon {
@@ -226,7 +226,7 @@ function isActive(path: string) {
   color: var(--text-faint);
   font-size: 13px;
   cursor: pointer;
-  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: all var(--duration-slow) var(--ease-spring);
 }
 
 .sidebar.collapsed .collapse-btn {
@@ -242,10 +242,10 @@ function isActive(path: string) {
 
 /* ── Transitions ── */
 .logo-text-enter-active {
-  transition: opacity 0.25s ease 0.15s, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) 0.15s;
+  transition: opacity 0.25s var(--ease-out) 0.15s, transform var(--duration-normal) var(--ease-spring) 0.15s;
 }
 .logo-text-leave-active {
-  transition: opacity 0.12s ease, transform 0.12s ease;
+  transition: opacity 0.12s var(--ease-out), transform 0.12s var(--ease-out);
 }
 .logo-text-enter-from {
   opacity: 0;
@@ -257,10 +257,10 @@ function isActive(path: string) {
 }
 
 .nav-label-enter-active {
-  transition: opacity 0.2s ease 0.1s, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s;
+  transition: opacity var(--duration-fast) var(--ease-out) 0.1s, transform 0.25s var(--ease-spring) 0.1s;
 }
 .nav-label-leave-active {
-  transition: opacity 0.1s ease, transform 0.1s ease;
+  transition: opacity 0.1s var(--ease-out), transform 0.1s var(--ease-out);
 }
 .nav-label-enter-from {
   opacity: 0;

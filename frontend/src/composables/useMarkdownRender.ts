@@ -1,6 +1,8 @@
 import { Marked, type Tokens } from 'marked'
 import mermaid from 'mermaid'
 import hljs from 'highlight.js'
+import markedKatex from 'marked-katex-extension'
+import 'katex/dist/katex.min.css'
 import { watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 
@@ -72,6 +74,8 @@ const renderer = {
 }
 
 const md = new Marked({ gfm: true, breaks: false, renderer })
+// LaTeX math via KaTeX: $...$ inline, $$...$$ block.
+md.use(markedKatex({ throwOnError: false }))
 
 // ── mermaid ────────────────────────────────────────────────────────────
 
@@ -81,8 +85,6 @@ function initMermaid(theme: 'light' | 'dark') {
     securityLevel: 'loose',
     theme: theme === 'dark' ? 'dark' : 'default',
     fontFamily: 'inherit',
-    // Transparent background so diagrams blend with the glass surface they sit on.
-    themeVariables: { background: 'transparent' },
     flowchart: { useMaxWidth: true, htmlLabels: true },
     sequence: { useMaxWidth: true },
     gantt: { useMaxWidth: true },

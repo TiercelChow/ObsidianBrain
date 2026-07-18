@@ -810,7 +810,7 @@ onMounted(() => { loadMemos() })
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.25s var(--ease-standard);
   box-shadow: var(--shadow-sm);
 }
 .glass-btn:hover {
@@ -851,7 +851,7 @@ onMounted(() => { loadMemos() })
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: all var(--duration-fast) var(--ease-out);
 }
 .glass-icon-btn:hover {
   background: var(--bg-glass);
@@ -888,36 +888,13 @@ onMounted(() => { loadMemos() })
   line-height: 1.6;
   resize: vertical;
   outline: none;
-  transition: all 0.25s ease;
+  transition: all 0.25s var(--ease-out);
   box-shadow: inset var(--shadow-sm);
 }
 .glass-textarea::placeholder { color: var(--text-faint); }
 .glass-textarea:focus {
   border-color: rgba(129, 140, 248, 0.4);
   box-shadow: 0 0 0 3px rgba(124, 124, 255, 0.15), inset var(--shadow-sm);
-}
-
-/* ── Header ── */
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 24px;
-}
-.page-title {
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--text-primary);
-  letter-spacing: -0.3px;
-}
-.page-subtitle {
-  margin-top: 4px;
-  color: var(--text-faint);
-  font-size: 14px;
-}
-.header-actions {
-  display: flex;
-  gap: 8px;
 }
 
 /* ── Toolbar ── */
@@ -945,7 +922,7 @@ onMounted(() => { loadMemos() })
   border-radius: 12px;
   flex: 1;
   max-width: 320px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all var(--duration-normal) var(--ease-standard);
 }
 .search-box:focus-within {
   background: var(--bg-glass-strong);
@@ -957,7 +934,7 @@ onMounted(() => { loadMemos() })
 .search-icon {
   color: var(--text-faint);
   flex-shrink: 0;
-  transition: color 0.2s ease;
+  transition: color var(--duration-fast) var(--ease-out);
 }
 .search-box:focus-within .search-icon {
   color: #818cf8;
@@ -973,7 +950,7 @@ onMounted(() => { loadMemos() })
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  transition: all 0.15s var(--ease-out);
   flex-shrink: 0;
 }
 .clear-btn:hover {
@@ -996,7 +973,7 @@ onMounted(() => { loadMemos() })
   font-weight: 500;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.25s var(--ease-standard);
   position: relative;
   user-select: none;
 }
@@ -1027,7 +1004,7 @@ onMounted(() => { loadMemos() })
   box-shadow: var(--shadow-sm), var(--inset-highlight) !important;
   height: 40px !important;
   padding: 0 12px !important;
-  transition: all 0.25s ease !important;
+  transition: all 0.25s var(--ease-out) !important;
 }
 .date-range-picker :deep(.el-range-editor:hover) {
   border-color: var(--border-glass) !important;
@@ -1095,7 +1072,7 @@ onMounted(() => { loadMemos() })
   cursor: pointer;
   font-size: 13px;
   color: var(--text-muted);
-  transition: all 0.2s ease;
+  transition: all var(--duration-fast) var(--ease-out);
   position: relative;
 }
 .day-link:hover {
@@ -1113,7 +1090,7 @@ onMounted(() => { loadMemos() })
   background: var(--bg-glass);
   flex-shrink: 0;
   z-index: 1;
-  transition: all 0.3s ease;
+  transition: all var(--duration-normal) var(--ease-out);
 }
 .day-link.active .day-dot {
   border-color: #818cf8;
@@ -1172,7 +1149,7 @@ onMounted(() => { loadMemos() })
   padding: 3px 12px;
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--duration-fast) var(--ease-out);
 }
 .filter-hint button:hover {
   background: rgba(99, 102, 241, 0.2);
@@ -1197,7 +1174,7 @@ onMounted(() => { loadMemos() })
   font-size: 16px;
   font-weight: 700;
   color: var(--text-primary);
-  letter-spacing: -0.3px;
+  letter-spacing: var(--tracking-tight);
 }
 .day-header-weekday {
   font-size: 12px;
@@ -1235,7 +1212,7 @@ onMounted(() => { loadMemos() })
   border-radius: 50%;
   background: rgba(129, 140, 248, 0.3);
   flex-shrink: 0;
-  transition: all 0.3s ease;
+  transition: all var(--duration-normal) var(--ease-out);
 }
 .memo-card:hover .memo-time-dot {
   background: #818cf8;
@@ -1252,7 +1229,7 @@ onMounted(() => { loadMemos() })
   padding: 16px 20px;
   border-radius: 18px;
   margin-bottom: 6px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all var(--duration-normal) var(--ease-standard);
   transform: translateZ(0);
   will-change: transform;
   -webkit-backface-visibility: hidden;
@@ -1304,7 +1281,7 @@ onMounted(() => { loadMemos() })
   padding: 14px 16px;
   border-radius: 10px;
   font-size: 13px;
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-family: var(--font-mono);
   overflow-x: auto;
   margin: 10px 0;
   line-height: 1.6;
@@ -1325,7 +1302,7 @@ onMounted(() => { loadMemos() })
   padding: 2px 7px;
   border-radius: 5px;
   font-size: 0.9em;
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-family: var(--font-mono);
   color: #c026d3;
 }
 
@@ -1433,7 +1410,7 @@ onMounted(() => { loadMemos() })
   color: #6366f1;
   text-decoration: none;
   border-bottom: 1px solid rgba(99, 102, 241, 0.3);
-  transition: border-color 0.2s ease;
+  transition: border-color var(--duration-fast) var(--ease-out);
 }
 .memo-content :deep(.memo-link:hover) {
   border-bottom-color: #6366f1;
@@ -1558,7 +1535,7 @@ onMounted(() => { loadMemos() })
   object-fit: cover;
   cursor: pointer;
   display: block;
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform var(--duration-normal) var(--ease-standard);
 }
 .memo-image:hover {
   transform: scale(1.05);
@@ -1576,7 +1553,7 @@ onMounted(() => { loadMemos() })
   padding: 3px 12px;
   border-radius: 10px;
   cursor: pointer;
-  transition: all 0.25s ease;
+  transition: all 0.25s var(--ease-out);
   font-weight: 500;
 }
 .memo-tag:hover {
@@ -1613,7 +1590,7 @@ onMounted(() => { loadMemos() })
   flex-direction: column;
   align-items: center;
   padding: 80px 20px;
-  animation: fadeIn 0.5s ease;
+  animation: fade-in 0.5s var(--ease-out);
 }
 .empty-icon {
   font-size: 56px;
@@ -1736,7 +1713,7 @@ onMounted(() => { loadMemos() })
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s ease;
+  transition: background var(--duration-fast) var(--ease-out);
 }
 .image-remove-btn:hover {
   background: rgba(0, 0, 0, 0.7);
@@ -1761,7 +1738,7 @@ onMounted(() => { loadMemos() })
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: all var(--duration-fast) var(--ease-out);
 }
 .image-add-btn:hover {
   border-color: rgba(0, 0, 0, 0.2);
@@ -1771,16 +1748,16 @@ onMounted(() => { loadMemos() })
 
 /* ── Transitions ── */
 .dialog-enter-active {
-  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity var(--duration-slow) var(--ease-standard);
 }
 .dialog-enter-active .dialog-content {
-  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.35s ease;
+  transition: transform 0.4s var(--ease-spring), opacity var(--duration-slow) var(--ease-out);
 }
 .dialog-leave-active {
-  transition: opacity 0.2s ease;
+  transition: opacity var(--duration-fast) var(--ease-out);
 }
 .dialog-leave-active .dialog-content {
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition: transform var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out);
 }
 .dialog-enter-from {
   opacity: 0;
@@ -1797,36 +1774,25 @@ onMounted(() => { loadMemos() })
   opacity: 0;
 }
 
-.hint-enter-active { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
-.hint-leave-active { transition: all 0.25s ease; }
+.hint-enter-active { transition: all 0.4s var(--ease-standard); }
+.hint-leave-active { transition: all 0.25s var(--ease-out); }
 .hint-enter-from, .hint-leave-to { opacity: 0; transform: translateY(-8px); }
 
 /* ── Memo Animations ── */
 .memo-card {
-  animation: memoFadeIn 0.5s cubic-bezier(0.4, 0, 0.2, 1) both;
+  animation: fade-in 0.5s var(--ease-standard) both;
   animation-delay: var(--delay, 0s);
-  transition: opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1),
-              transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-@keyframes memoFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(24px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  transition: opacity 0.5s var(--ease-standard),
+              transform 0.5s var(--ease-standard);
 }
 
 /* TransitionGroup animations for add/remove */
 .memo-anim-enter-active {
-  transition: opacity 0.45s cubic-bezier(0.4, 0, 0.2, 1),
-              transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: opacity var(--duration-slow) var(--ease-standard),
+              transform var(--duration-slow) var(--ease-spring);
 }
 .memo-anim-leave-active {
-  transition: opacity 0.3s ease, transform 0.3s ease;
+  transition: opacity var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out);
 }
 .memo-anim-enter-from {
   opacity: 0;
@@ -1837,7 +1803,7 @@ onMounted(() => { loadMemos() })
   transform: translateX(30px) scale(0.95);
 }
 .memo-anim-move {
-  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.4s var(--ease-standard);
 }
 
 /* ── Keyframes ── */
@@ -1845,17 +1811,9 @@ onMounted(() => { loadMemos() })
   from { opacity: 0; transform: translateY(-16px); }
   to { opacity: 1; transform: translateY(0); }
 }
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
-}
 @keyframes slideRight {
   from { opacity: 0; transform: translateX(-16px); }
   to { opacity: 1; transform: translateX(0); }
-}
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
 }
 @keyframes dotPulse {
   0%, 100% { box-shadow: 0 0 4px rgba(129, 140, 248, 0.3); }
@@ -1897,7 +1855,7 @@ onMounted(() => { loadMemos() })
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: all var(--duration-fast) var(--ease-out);
   z-index: 10;
 }
 .viewer-close:hover {
@@ -1918,7 +1876,7 @@ onMounted(() => { loadMemos() })
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: all var(--duration-fast) var(--ease-out);
   z-index: 10;
   line-height: 1;
 }
@@ -1954,9 +1912,9 @@ onMounted(() => { loadMemos() })
 }
 
 /* Viewer transitions */
-.viewer-enter-active { transition: opacity 0.3s ease; }
-.viewer-enter-active .viewer-image { transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease; }
-.viewer-leave-active { transition: opacity 0.2s ease; }
+.viewer-enter-active { transition: opacity var(--duration-normal) var(--ease-out); }
+.viewer-enter-active .viewer-image { transition: transform var(--duration-slow) var(--ease-spring), opacity var(--duration-normal) var(--ease-out); }
+.viewer-leave-active { transition: opacity var(--duration-fast) var(--ease-out); }
 .viewer-enter-from { opacity: 0; }
 .viewer-enter-from .viewer-image { transform: scale(0.9); opacity: 0; }
 .viewer-leave-to { opacity: 0; }

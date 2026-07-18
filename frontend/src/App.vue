@@ -50,13 +50,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from './stores/app'
 import { Expand, Fold } from '@element-plus/icons-vue'
 import Sidebar from './components/Sidebar.vue'
 
 const route = useRoute()
+// Reset scroll state when navigating between pages.
+watch(() => route.path, () => appStore.setScrolled(false))
 const appStore = useAppStore()
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
 const currentTitle = computed(() => (route.meta?.title as string) || '')
@@ -65,11 +67,12 @@ const currentTitle = computed(() => (route.meta?.title as string) || '')
 const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => windowWidth.value <= 768)
 
-// Scroll detection for mobile header
-const isScrolled = ref(false)
+// Scroll detection for mobile header (shared via store so the Reader's internal
+// pane-center scroll can also drive the global header + page-header collapse).
+const isScrolled = computed(() => appStore.isScrolled)
 function onMainScroll(e: Event) {
   const el = e.target as HTMLElement
-  isScrolled.value = el.scrollTop > 20
+  appStore.setScrolled(el.scrollTop > 20)
 }
 
 function onResize() { windowWidth.value = window.innerWidth }
@@ -96,11 +99,41 @@ html, body, #app {
   overflow: hidden;
   background: var(--bg-base);
   color: var(--text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: var(--leading-normal);
+  font-optical-sizing: auto;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* ── Typography: size-specific tracking (Apple Design §15) ── */
+.page-title, h1, h2, h3 { letter-spacing: var(--tracking-tight); }
+.page-subtitle, .el-tag, .stat-chip .stat-label { letter-spacing: var(--tracking-wide); }
+code, pre, .code-block { font-family: var(--font-mono); }
+
+/* ── Global page-header (shared by all views) ── */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+  flex-shrink: 0;
+}
+.page-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: var(--tracking-tight);
+  margin: 0;
+}
+.page-subtitle {
+  margin: 4px 0 0;
+  color: var(--text-faint);
+  font-size: 14px;
+  letter-spacing: var(--tracking-wide);
+}
+.header-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 5px; }
@@ -151,6 +184,23 @@ html, body, #app {
   --glass-saturate: 180%;
 
   --orb-opacity: 1;
+
+  /* ── Design Tokens (Apple Design) ── */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-ios: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --duration-fast: 0.2s;
+  --duration-normal: 0.3s;
+  --duration-slow: 0.45s;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.02em;
+  --leading-tight: 1.2;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.75;
 }
 
 /* ── Dark Theme — Deep Black ── */
@@ -503,7 +553,7 @@ html, body, #app {
   padding: 0 !important;
   margin: 0 !important;
   pointer-events: none !important;
-  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all var(--duration-slow) var(--ease-standard);
 }
 
 /* ── Global mobile title size ── */
@@ -511,6 +561,71 @@ html, body, #app {
   .page-title {
     font-size: 18px !important;
   }
+}
+
+/* ═══════════════════════════════════════════════════
+   Apple Design — :active feedback, reduced-motion, keyframes
+   ═══════════════════════════════════════════════════ */
+
+/* Press-state: instant scale on pointer-down (Apple Design §1) */
+.el-button:active,
+.nav-item:active,
+.el-tag:active,
+.fab:active,
+.mv-btn:active,
+.collapse-btn:active,
+.mobile-menu-btn:active,
+.ppm-reader-btn:active,
+.ppm-close-btn:active,
+.hp-pin:active,
+.hp-del:active,
+.hp-clear:active,
+.toc-item:active,
+.ft-row:active,
+.glass-btn:active,
+.glass-icon-btn:active {
+  transform: scale(0.96);
+  transition: transform 100ms ease-out;
+}
+
+/* Card press feedback */
+.el-card:active, .stat-card:active, .module-card:active,
+.repo-card:active, .radar-card:active, .insight-card:active {
+  transform: scale(0.98);
+  transition: transform 150ms ease-out;
+}
+
+/* Reduced motion (Apple Design §14) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .ambient-bg { animation: none !important; }
+}
+
+/* Reduced transparency (Apple Design §14) */
+@media (prefers-reduced-transparency: reduce) {
+  .el-card, .stat-card, .module-card, .pane, .sidebar,
+  .el-dialog, .el-drawer, .mobile-global-header,
+  .el-input__wrapper, .el-select__wrapper {
+    background: var(--bg-glass-strong) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
+/* ── Unified keyframes (deduplicated) ── */
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 </style>
 
@@ -571,20 +686,19 @@ html, body, #app {
   overflow-x: hidden;
 }
 
-/* ── Page Transition ── */
+/* ── Page Transition — Apple-style scale + fade (sequential out-in) ── */
 .page-slide-enter-active {
-  transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out);
 }
 .page-slide-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition: opacity var(--duration-fast) ease;
 }
 .page-slide-enter-from {
   opacity: 0;
-  transform: translateY(12px);
+  transform: scale(0.98) translateY(8px);
 }
 .page-slide-leave-to {
   opacity: 0;
-  transform: translateY(-6px);
 }
 
 /* ── Mobile Global Header ── */

@@ -201,11 +201,6 @@ onMounted(() => { loadInsights() })
   min-height: 100%;
 }
 
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
-.page-title { font-size: 22px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.3px; }
-.page-subtitle { margin-top: 4px; color: var(--text-faint); font-size: 14px; }
-.header-actions { display: flex; gap: 8px; }
-
 .insights-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
@@ -215,7 +210,7 @@ onMounted(() => { loadInsights() })
 .insight-card {
   border-radius: 16px;
   padding: 20px;
-  animation: pageFadeIn 0.5s ease both;
+  animation: fade-in var(--duration-normal) var(--ease-out) both;
 }
 .insight-card:nth-child(2) { animation-delay: 0.05s; }
 .insight-card:nth-child(3) { animation-delay: 0.1s; }
@@ -273,10 +268,13 @@ onMounted(() => { loadInsights() })
   padding: 8px 10px;
   border-radius: 10px;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s var(--ease-out), transform 100ms ease-out;
 }
 .note-item:hover {
   background: var(--accent-light);
+}
+.note-item:active {
+  transform: scale(0.96);
 }
 .note-path {
   font-size: 13px;
@@ -334,7 +332,7 @@ onMounted(() => { loadInsights() })
   height: 100%;
   border-radius: 3px;
   background: linear-gradient(90deg, #818cf8, #6366f1);
-  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width 0.6s var(--ease-standard);
 }
 
 .empty-hint {
@@ -352,11 +350,6 @@ onMounted(() => { loadInsights() })
   padding: 60px 0;
   color: var(--text-muted);
   font-size: 14px;
-}
-
-@keyframes pageFadeIn {
-  from { opacity: 0; transform: translateY(16px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @media (max-width: 768px) {
