@@ -6,11 +6,11 @@
         <p class="page-subtitle">系统状态与配置管理</p>
       </div>
       <div class="header-actions">
-        <el-button size="small" @click="appStore.toggleTheme()">
+        <el-button @click="appStore.toggleTheme()">
           <el-icon><component :is="appStore.theme === 'dark' ? Sunny : Moon" /></el-icon>
           {{ appStore.theme === 'dark' ? '浅色' : '深色' }}
         </el-button>
-        <el-button size="small" @click="loadAll" :loading="loading">
+        <el-button @click="loadAll" :loading="loading">
           <el-icon v-if="!loading"><Refresh /></el-icon>
           刷新
         </el-button>
@@ -69,11 +69,11 @@
           <div class="config-fields">
             <div class="config-field">
               <label>Vault 路径</label>
-              <el-input v-model="config.vault.path" size="small" placeholder="/path/to/vault" />
+              <el-input v-model="config.vault.path" placeholder="/path/to/vault" />
             </div>
             <div class="config-field small">
               <label>Vault 名称</label>
-              <el-input v-model="config.vault.name" size="small" placeholder="my-vault" />
+              <el-input v-model="config.vault.name" placeholder="my-vault" />
             </div>
           </div>
         </div>
@@ -91,11 +91,11 @@
             </div>
             <div class="config-field">
               <label>API 地址</label>
-              <el-input v-model="config.obsidian.url" size="small" placeholder="https://127.0.0.1:27124" />
+              <el-input v-model="config.obsidian.url" placeholder="https://127.0.0.1:27124" />
             </div>
             <div class="config-field">
               <label>API Key</label>
-              <el-input v-model="config.obsidian.api_key" size="small" placeholder="API Key" show-password />
+              <el-input v-model="config.obsidian.api_key" placeholder="API Key" show-password />
             </div>
           </div>
         </div>
@@ -109,32 +109,32 @@
           <div class="config-fields">
             <div class="config-field inline">
               <label>提供商</label>
-              <el-select v-model="config.llm.provider" size="small" style="width: 140px">
+              <el-select v-model="config.llm.provider" style="width: 160px">
                 <el-option label="OpenAI 兼容" value="openai" />
                 <el-option label="Ollama (本地)" value="ollama" />
               </el-select>
             </div>
             <div class="config-field">
               <label>模型名称</label>
-              <el-input v-model="config.llm.model" size="small" placeholder="glm-5.2 / gpt-4o-mini / qwen2.5" />
+              <el-input v-model="config.llm.model" placeholder="glm-5.2 / gpt-4o-mini / qwen2.5" />
             </div>
             <div class="config-field">
               <label>API Key</label>
-              <el-input v-model="config.llm.api_key" size="small" placeholder="直接输入 API Key" show-password />
+              <el-input v-model="config.llm.api_key" placeholder="直接输入 API Key" show-password />
               <span class="field-hint">密钥保存后不再显示，留空则使用环境变量</span>
             </div>
             <div class="config-field">
               <label>API Key 环境变量名（可选）</label>
-              <el-input v-model="config.llm.api_key_env" size="small" placeholder="如 ANTHROPIC_AUTH_TOKEN（API Key 为空时使用）" />
+              <el-input v-model="config.llm.api_key_env" placeholder="如 ANTHROPIC_AUTH_TOKEN（API Key 为空时使用）" />
             </div>
             <div class="config-field">
               <label>API Base URL</label>
-              <el-input v-model="config.llm.base_url" size="small" placeholder="如 https://dashscope.aliyuncs.com/compatible-mode/v1" />
+              <el-input v-model="config.llm.base_url" placeholder="如 https://dashscope.aliyuncs.com/compatible-mode/v1" />
               <span class="field-hint">OpenAI 官方留空即可，第三方服务填兼容地址</span>
             </div>
             <div class="config-field inline">
               <label>最大 Token</label>
-              <el-input-number v-model="config.llm.max_tokens" size="small" :min="256" :max="32768" :step="256" />
+              <el-input-number v-model="config.llm.max_tokens" :min="256" :max="32768" :step="256" />
             </div>
             <div class="config-field inline">
               <label>温度</label>
@@ -145,10 +145,10 @@
         </div>
 
         <div class="config-actions">
-          <el-button size="small" @click="verifyLlm" :loading="verifyingLlm">
+          <el-button @click="verifyLlm" :loading="verifyingLlm">
             验证 LLM
           </el-button>
-          <el-button type="primary" size="small" @click="saveSettings" :loading="saving">
+          <el-button type="primary" @click="saveSettings" :loading="saving">
             保存配置
           </el-button>
           <span class="config-hint">配置保存后立即生效（热更新）</span>

@@ -6,7 +6,7 @@
         <p class="page-subtitle">发现知识缺口，生成研究问题，碰撞概念交叉</p>
       </div>
       <div class="header-actions">
-        <el-button size="small" @click="loadAll" :loading="loading">
+        <el-button @click="loadAll" :loading="loading">
           <el-icon v-if="!loading"><Refresh /></el-icon>
           刷新
         </el-button>
@@ -17,7 +17,7 @@
     <section class="explore-section">
       <div class="section-header">
         <h2 class="section-title">🔍 知识缺口</h2>
-        <el-button size="small" @click="loadGaps" :loading="gapsLoading">分析</el-button>
+        <el-button @click="loadGaps" :loading="gapsLoading">分析</el-button>
       </div>
       <div class="gap-list" v-if="gaps.length > 0">
         <div v-for="(gap, i) in gaps" :key="i" class="gap-card">
@@ -37,7 +37,7 @@
     <section class="explore-section">
       <div class="section-header">
         <h2 class="section-title">❓ 研究问题</h2>
-        <el-button size="small" @click="loadQuestions" :loading="questionsLoading">生成</el-button>
+        <el-button @click="loadQuestions" :loading="questionsLoading">生成</el-button>
       </div>
       <div class="question-list" v-if="questions.length > 0">
         <div v-for="(q, i) in questions" :key="i" class="question-card">
@@ -58,7 +58,7 @@
     <section class="explore-section">
       <div class="section-header">
         <h2 class="section-title">⚡ 概念碰撞</h2>
-        <el-button size="small" @click="loadCollision" :loading="collisionLoading">碰撞</el-button>
+        <el-button @click="loadCollision" :loading="collisionLoading">碰撞</el-button>
       </div>
       <div v-if="collision" class="collision-card">
         <div class="collision-concepts">

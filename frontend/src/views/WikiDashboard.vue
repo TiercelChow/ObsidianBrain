@@ -6,7 +6,7 @@
         <p class="page-subtitle">知识库健康度、图谱与活动监控</p>
       </div>
       <div class="header-actions">
-        <el-button size="small" @click="refreshAll" :loading="loading">
+        <el-button @click="refreshAll" :loading="loading">
           <el-icon v-if="!loading"><Refresh /></el-icon>
           刷新
         </el-button>
@@ -40,7 +40,7 @@
             <div class="init-title">Wiki 尚未初始化</div>
             <div class="init-desc">前往「Wiki 工作台」摄入第一篇资料，系统将自动创建 Wiki 目录结构</div>
           </div>
-          <el-button size="small" type="primary" @click="$router.push('/wiki')">前往工作台</el-button>
+          <el-button type="primary" @click="$router.push('/wiki')">前往工作台</el-button>
         </div>
       </div>
 
@@ -52,7 +52,7 @@
             <div class="card-header">
               <span class="card-icon">🏥</span>
               <h3 class="card-title">知识健康度</h3>
-              <el-button v-if="lintResult && lintResult.orphans.length > 0" size="small" text @click="$router.push('/wiki')">
+              <el-button v-if="lintResult && lintResult.orphans.length > 0" text @click="$router.push('/wiki')">
                 修复 →
               </el-button>
             </div>

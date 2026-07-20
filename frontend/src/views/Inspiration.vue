@@ -6,7 +6,7 @@
         <p class="page-subtitle">用你自己的知识制造新想法：概念碰撞、反向提问、对立观点</p>
       </div>
       <div class="header-actions">
-        <el-button @click="loadHistory" :loading="loadingHistory" size="small">
+        <el-button @click="loadHistory" :loading="loadingHistory">
           <el-icon><Refresh /></el-icon> 历史
         </el-button>
       </div>
@@ -72,13 +72,13 @@
           <div class="concept-chip">
             <span class="concept-icon">🅰️</span>
             <span class="concept-term">{{ result.concept_a?.term }}</span>
-            <el-tag size="small" effect="plain">{{ result.concept_a?.source }}</el-tag>
+            <el-tag effect="plain">{{ result.concept_a?.source }}</el-tag>
           </div>
           <div class="concept-connector">✕</div>
           <div class="concept-chip">
             <span class="concept-icon">🅱️</span>
             <span class="concept-term">{{ result.concept_b?.term }}</span>
-            <el-tag size="small" effect="plain">{{ result.concept_b?.source }}</el-tag>
+            <el-tag effect="plain">{{ result.concept_b?.source }}</el-tag>
           </div>
         </div>
 
@@ -120,7 +120,7 @@
               <div class="question-why" v-if="q.why_it_matters">
                 <strong>为什么值得思考：</strong>{{ q.why_it_matters }}
               </div>
-              <el-tag size="small" effect="plain" class="question-type">
+              <el-tag effect="plain" class="question-type">
                 {{ formatQuestionType(q.question_type) }}
               </el-tag>
             </div>

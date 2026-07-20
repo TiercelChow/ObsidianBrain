@@ -6,10 +6,10 @@
         <p class="page-subtitle">注册本地 Git 仓库，自动提取元信息，关联笔记</p>
       </div>
       <div class="header-actions">
-        <el-button @click="loadRepos" :loading="loading" size="small">
+        <el-button @click="loadRepos" :loading="loading">
           <el-icon><Refresh /></el-icon> 刷新
         </el-button>
-        <el-button type="primary" size="small" @click="showAddDialog = true">
+        <el-button type="primary" @click="showAddDialog = true">
           <el-icon><Plus /></el-icon> 注册仓库
         </el-button>
       </div>
@@ -20,7 +20,7 @@
       <div v-for="repo in repos" :key="repo.name" class="repo-card">
         <div class="repo-header">
           <div class="repo-name">{{ repo.name }}</div>
-          <el-tag :type="repo.is_dirty ? 'warning' : 'success'" size="small">
+          <el-tag :type="repo.is_dirty ? 'warning' : 'success'">
             {{ repo.is_dirty ? '有未提交' : '干净' }}
           </el-tag>
         </div>
@@ -35,10 +35,10 @@
           </span>
         </div>
         <div class="repo-actions">
-          <el-button size="small" @click="viewDetail(repo.name)">
+          <el-button @click="viewDetail(repo.name)">
             <el-icon><View /></el-icon> 详情
           </el-button>
-          <el-button size="small" type="primary" @click="openVscode(repo.name)">
+          <el-button type="primary" @click="openVscode(repo.name)">
             <el-icon><Monitor /></el-icon> VSCode
           </el-button>
         </div>
@@ -64,7 +64,7 @@
         </el-descriptions-item>
         <el-descriptions-item label="语言统计" :span="2" v-if="selectedRepo.languages && Object.keys(selectedRepo.languages).length > 0">
           <div class="language-tags">
-            <el-tag v-for="(ratio, lang) in selectedRepo.languages" :key="lang" size="small" effect="plain">
+            <el-tag v-for="(ratio, lang) in selectedRepo.languages" :key="lang" effect="plain">
               {{ lang }} {{ (ratio * 100).toFixed(0) }}%
             </el-tag>
           </div>

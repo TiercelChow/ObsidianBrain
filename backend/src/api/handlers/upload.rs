@@ -32,8 +32,8 @@ pub async fn upload_images(
     let mut idx = 0u32;
 
     // Ensure thumbnail directory exists
-    let thumb_dir = std::path::Path::new("./data/thumbnails");
-    let _ = std::fs::create_dir_all(thumb_dir);
+    let thumb_dir = crate::paths::thumbnails_dir();
+    let _ = std::fs::create_dir_all(&thumb_dir);
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let content_type = field.content_type().unwrap_or("image/png").to_string();
@@ -87,7 +87,7 @@ fn generate_thumbnail(data: &[u8], filename: &str, _ext: &str) {
         .rsplit_once('.')
         .map(|(stem, _)| format!("{}.jpg", stem))
         .unwrap_or_else(|| format!("{}.jpg", filename));
-    let thumb_dir = std::path::Path::new("./data/thumbnails");
+    let thumb_dir = crate::paths::thumbnails_dir();
     let thumb_path = thumb_dir.join(&thumb_name);
 
     // Ensure thumbnail directory exists
@@ -150,7 +150,7 @@ pub async fn serve_thumbnail(
         .rsplit_once('.')
         .map(|(stem, _)| format!("{}.jpg", stem))
         .unwrap_or_else(|| format!("{}.jpg", filename));
-    let thumb_path = std::path::Path::new("./data/thumbnails").join(&thumb_name);
+    let thumb_path = crate::paths::thumbnails_dir().join(&thumb_name);
 
     // Try serving thumbnail first
     if thumb_path.exists() {

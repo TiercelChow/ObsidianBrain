@@ -1,17 +1,15 @@
 use std::sync::Arc;
 
 use axum::extract::DefaultBodyLimit;
-use axum::http::{header, HeaderValue};
 use axum::routing::{get, post};
 use axum::Router;
-use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
-use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::api::handlers::health::health_check;
 use crate::api::handlers::tool_handler::{call_tool, list_tools};
 use crate::api::handlers::upload::{serve_thumbnail, serve_vault_image, upload_images};
+use crate::frontend_assets;
 use crate::AppContext;
 
 /// Create the application router with all routes, middleware, and fallbacks.
@@ -39,29 +37,14 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
         .layer(cors)
         .layer(TraceLayer::new_for_http());
 
-    // Static file fallback: serve frontend build output if the directory exists.
-    let frontend_dist = std::path::Path::new("../frontend/dist");
-    if frontend_dist.exists() {
-        tracing::info!(
-            path = %frontend_dist.display(),
-            "Serving frontend static files"
-        );
-        // no-cache so the browser always revalidates index.html (and picks up the
-        // new hashed asset chunks after a rebuild) instead of serving a stale copy.
-        let static_service = ServiceBuilder::new()
-            .layer(SetResponseHeaderLayer::if_not_present(
-                header::CACHE_CONTROL,
-                HeaderValue::from_static("no-cache"),
-            ))
-            .service(tower_http::services::ServeDir::new(frontend_dist).fallback(
-                tower_http::services::ServeFile::new(frontend_dist.join("index.html")),
-            ));
-        app.fallback_service(static_service)
-    } else {
-        tracing::warn!(
-            path = %frontend_dist.display(),
-            "Frontend dist directory not found; unmatched routes will return 404"
-        );
-        app
-    }
+    // Serve embedded frontend assets as the fallback (SPA routing).
+    tracing::info!("Serving embedded frontend assets");
+    app.fallback(serve_frontend_asset)
+}
+
+/// Fallback handler — serves embedded frontend files (SPA routing).
+async fn serve_frontend_asset(req: axum::extract::Request) -> axum::response::Response {
+    let path = req.uri().path().trim_start_matches('/');
+    let path = if path.is_empty() { "index.html" } else { path };
+    frontend_assets::serve_asset(path)
 }

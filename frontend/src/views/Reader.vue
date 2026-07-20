@@ -548,27 +548,43 @@ onBeforeUnmount(() => {
     radial-gradient(ellipse at 15% 85%, rgba(165, 243, 252, 0.2), transparent 55%),
     radial-gradient(ellipse at 50% 50%, rgba(253, 230, 138, 0.12), transparent 50%),
     var(--bg-base);
-  padding: 16px 24px;
   border-radius: 0;
   overflow: hidden;
   cursor: default;
 }
 .reader-page:fullscreen.fs-ui-hidden { cursor: none; }
-/* Hide only the page title + input bar; keep file tree + TOC. */
+/* Hide only the page title + input bar; keep file tree + TOC + FABs. */
 .reader-page:fullscreen .page-header,
-.reader-page:fullscreen .reader-topbar,
-.reader-page:fullscreen .fab { display: none !important; }
+.reader-page:fullscreen .reader-topbar { display: none !important; }
 .reader-page:fullscreen .pane-center {
-  display: block; /* override flex so content flows at natural height and scrolls */
+  display: block;
   background: transparent; border: none;
   backdrop-filter: none; -webkit-backdrop-filter: none;
   box-shadow: none; border-radius: 0;
 }
-.reader-page:fullscreen .markdown-body {
-  max-width: 920px;
-  padding: 32px 48px 160px;
-  font-size: 16px;
-  line-height: var(--leading-relaxed);
+/* Desktop fullscreen: wider document, more breathing room, H1 sticky. */
+@media (min-width: 769px) {
+  .reader-page:fullscreen {
+    padding: 16px 24px;
+  }
+  .reader-page:fullscreen .markdown-body {
+    max-width: 920px;
+    padding: 32px 48px 160px;
+    font-size: 16px;
+    line-height: var(--leading-relaxed);
+  }
+  .reader-page:fullscreen .markdown-body :deep(h1:first-of-type) {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    margin: 0 -48px 24px;
+    padding: 16px 48px;
+    background: var(--bg-glass);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    box-shadow: 0 1px 0 var(--border-faint);
+    border-radius: 12px;
+  }
 }
 /* Article H1 sticks to the top of the scroll area with a frosted glass bar —
    content scrolls behind it, visible (blurred) through the glass.
@@ -837,8 +853,8 @@ onBeforeUnmount(() => {
      global header — same effect as Timeline. */
   .reader-page {
     height: calc(100vh - 40px);
-    margin-top: -56px;
-    padding-top: 56px;
+    margin-top: -60px;
+    padding-top: 60px;
     gap: 6px;
     transition: padding-top var(--duration-slow) var(--ease-standard);
   }

@@ -6,7 +6,7 @@
         <p class="page-subtitle">从外部源抓取 → LLM 预筛 → 一键摄入 Wiki</p>
       </div>
       <div class="header-actions">
-        <el-button size="small" @click="loadArticles" :loading="loading">
+        <el-button @click="loadArticles" :loading="loading">
           <el-icon v-if="!loading"><Refresh /></el-icon>
           刷新
         </el-button>
@@ -21,7 +21,7 @@
     <div v-else-if="articles.length > 0" class="article-list">
       <div v-for="article in articles" :key="article.id" class="article-card" :class="{ ingested: article.ingested }">
         <div class="article-header">
-          <el-tag size="small" effect="plain">{{ article.source }}</el-tag>
+          <el-tag effect="plain">{{ article.source }}</el-tag>
           <span v-if="article.relevance" class="relevance" :class="relevanceClass(article.relevance)">
             {{ relevanceLabel(article.relevance) }}
           </span>
@@ -35,14 +35,14 @@
         <div class="article-actions">
           <el-button
             v-if="!article.ingested"
-            size="small"
+           
             type="primary"
             @click="ingestArticle(article)"
             :loading="article.ingesting"
           >
             摄入到 Wiki
           </el-button>
-          <el-button v-if="!article.ingested" size="small" @click="skipArticle(article)">跳过</el-button>
+          <el-button v-if="!article.ingested" @click="skipArticle(article)">跳过</el-button>
         </div>
       </div>
     </div>
@@ -52,7 +52,7 @@
     <!-- 批量操作 -->
     <div v-if="highRelevantCount > 0" class="batch-bar">
       <span>{{ highRelevantCount }} 篇高相关文章</span>
-      <el-button size="small" type="primary" @click="batchIngestAll" :loading="batchLoading">
+      <el-button type="primary" @click="batchIngestAll" :loading="batchLoading">
         批量摄入
       </el-button>
     </div>

@@ -1,9 +1,12 @@
 mod api;
 mod config;
 mod core;
+mod daemon;
 mod error;
+mod frontend_assets;
 mod infra;
 mod models;
+mod paths;
 mod tools;
 
 use std::net::SocketAddr;
@@ -53,9 +56,131 @@ pub struct ComponentStatus {
     pub code_repo: String,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Init logging
+// ── CLI ───────────────────────────────────────────────────────────────
+
+#[derive(clap::Parser)]
+#[command(
+    name = "obsidian-brain",
+    version,
+    about = "Local Rust knowledge engine with LLM Tool API for Obsidian"
+)]
+struct Cli {
+    #[command(subcommand)]
+    cmd: Option<Command>,
+
+    /// Override the bind host (used when no subcommand is given).
+    #[arg(long, global = true)]
+    host: Option<String>,
+
+    /// Override the bind port (used when no subcommand is given).
+    #[arg(long, global = true)]
+    port: Option<u16>,
+}
+
+#[derive(clap::Subcommand)]
+enum Command {
+    /// Start the server (background by default).
+    Start {
+        #[arg(long)]
+        host: Option<String>,
+        #[arg(long)]
+        port: Option<u16>,
+        /// Run in the foreground (don't daemonize).
+        #[arg(long)]
+        foreground: bool,
+    },
+    /// Stop the running server.
+    Stop,
+    /// Show server status.
+    Status,
+    /// View or modify configuration.
+    Config {
+        #[command(subcommand)]
+        action: ConfigCmd,
+    },
+    /// Print version information.
+    Version,
+}
+
+#[derive(clap::Subcommand)]
+enum ConfigCmd {
+    /// Show all configuration.
+    Show,
+    /// Get a specific config value.
+    Get { key: String },
+    /// Set a config value (persisted to the database).
+    Set { key: String, value: String },
+}
+
+fn main() {
+    let cli = <Cli as clap::Parser>::parse();
+
+    match cli.cmd {
+        None => {
+            // No subcommand — default to foreground start (dev mode: `cargo run`).
+            init_logging();
+            run_server(cli.host, cli.port);
+        }
+        Some(Command::Start {
+            host,
+            port,
+            foreground,
+        }) => {
+            if foreground {
+                // Run in foreground — init logging to stderr, run server directly.
+                init_logging();
+                run_server(host, port);
+            } else {
+                // Daemonize.
+                if daemon::is_running() {
+                    eprintln!(
+                        "ObsidianBrain is already running (PID: {:?})",
+                        daemon::read_pid()
+                    );
+                    std::process::exit(1);
+                }
+                match daemon::daemonize() {
+                    Ok(0) => {
+                        // We're the child — init logging and run.
+                        init_logging();
+                        run_server(host, port);
+                    }
+                    Ok(child_pid) => {
+                        // We're the parent — child is running.
+                        println!("ObsidianBrain started (PID: {child_pid})");
+                        println!("Log: {}", paths::log_file().display());
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to start daemon: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        Some(Command::Stop) => match daemon::stop() {
+            Ok(()) => println!("ObsidianBrain stopped."),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                println!("ObsidianBrain is not running.");
+            }
+            Err(e) => {
+                eprintln!("Failed to stop: {e}");
+                std::process::exit(1);
+            }
+        },
+        Some(Command::Status) => {
+            show_status();
+        }
+        Some(Command::Config { action }) => {
+            config_command(action);
+        }
+        Some(Command::Version) => {
+            println!("obsidian-brain {}", env!("CARGO_PKG_VERSION"));
+            println!("Data directory: {}", paths::data_dir().display());
+        }
+    }
+}
+
+fn init_logging() {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -63,17 +188,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
+}
 
+fn run_server(host_override: Option<String>, port_override: Option<u16>) {
+    let rt = tokio::runtime::Runtime::new().expect("failed to create Tokio runtime");
+    rt.block_on(async {
+        if let Err(e) = run_server_async(host_override, port_override).await {
+            tracing::error!("Fatal error: {e}");
+            std::process::exit(1);
+        }
+    });
+}
+
+async fn run_server_async(
+    host_override: Option<String>,
+    port_override: Option<u16>,
+) -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("ObsidianBrain 启动中...");
 
-    // Record start time for uptime calculation
     let start_time = chrono::Utc::now();
 
-    // 2. Load config
+    // Load config
     let mut config = AppConfig::load().unwrap_or_else(|e| {
         tracing::warn!("配置加载失败: {e}，使用默认配置");
         AppConfig::default()
     });
+
+    // Apply CLI overrides
+    if let Some(h) = host_override {
+        config.server.host = h;
+    }
+    if let Some(p) = port_override {
+        config.server.port = p;
+    }
+
     let host: std::net::IpAddr = config
         .server
         .host
@@ -82,7 +230,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::new(host, config.server.port);
     tracing::info!("配置加载完成: {}:{}", addr.ip(), addr.port());
 
-    // 3. Initialize SQLite (before Obsidian so we can load saved config)
+    // Initialize SQLite
     let mut components = ComponentStatus {
         server: "ok".to_string(),
         obsidian: "disabled".to_string(),
@@ -98,12 +246,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(e) => {
             tracing::error!("SQLite 初始化失败: {e}");
-            components.sqlite = format!("error: {e}");
             std::process::exit(1);
         }
     };
 
-    // Load saved config from DB (overrides file config)
+    // Load saved config from DB
     if let Ok(Some(saved_json)) = db.get_state("system_config") {
         if let Ok(saved) = serde_json::from_str::<serde_json::Value>(&saved_json) {
             if let Some(vault) = saved.get("vault") {
@@ -168,7 +315,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Obsidian Local REST API
+    // Obsidian
     let obsidian_client = if config.obsidian.enabled {
         match ObsidianClient::new(&config.obsidian) {
             Ok(client) => {
@@ -179,10 +326,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Some(client)
                 } else {
                     components.obsidian = "degraded: 无法连接".to_string();
-                    tracing::warn!(
-                        "Obsidian API 无法连接: {} (插件是否已启用?)",
-                        config.obsidian.url
-                    );
+                    tracing::warn!("Obsidian API 无法连接: {}", config.obsidian.url);
                     Some(client)
                 }
             }
@@ -193,19 +337,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     } else {
-        tracing::warn!("Obsidian API 客户端未启用，搜索功能将不可用");
+        tracing::warn!("Obsidian API 未启用");
         None
     };
     let obsidian = new_provider(obsidian_client);
 
-    // 5. Create core services
+    // Core services
     let memory_service = Arc::new(MemoryService::new(
         obsidian.clone(),
         config.vault.path.clone(),
         config.vault.name.clone(),
     ));
-    tracing::info!("MemoryService 初始化完成");
-
     let repo_manager = Arc::new(RepoManager::new(db.clone(), RepoManagerConfig::default()));
     let note_linker = Arc::new(NoteLinker::new(db.clone()));
     let timeline_store = Arc::new(TimelineStore::new(db.clone()));
@@ -214,21 +356,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         TimelineConfig::default(),
     ));
     let memo_manager = Arc::new(MemoManager::new(db.clone(), obsidian.clone()));
-    tracing::info!("CodeRepo & Timeline 服务初始化完成");
 
-    // 初始化 LLM 客户端（用于灵感服务）
     let llm: Arc<dyn crate::infra::llm_client::LlmProvider> =
         crate::infra::llm_client::LlmClientFactory::create(&config.llm)
             .map(Arc::from)
             .unwrap_or_else(|e| {
                 tracing::warn!("LLM 客户端创建失败: {e}，灵感功能将受限");
-                let fallback_config = crate::config::LlmConfig {
-                    provider: "ollama".to_string(),
-                    ..Default::default()
-                };
                 Arc::from(
-                    crate::infra::llm_client::LlmClientFactory::create(&fallback_config)
-                        .expect("Fallback LLM client creation failed"),
+                    crate::infra::llm_client::LlmClientFactory::create(&crate::config::LlmConfig {
+                        provider: "ollama".to_string(),
+                        ..Default::default()
+                    })
+                    .expect("Fallback LLM creation failed"),
                 )
             });
 
@@ -238,32 +377,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         llm,
         crate::models::inspiration::InspirationConfig::default(),
     ));
-    tracing::info!("InspirationService 初始化完成");
 
-    // 初始化雷达服务
     let radar_config = crate::models::radar::RadarConfig {
         sources_path: std::path::PathBuf::from("config/radar_sources.toml"),
         ..Default::default()
     };
     let radar_service = match RadarService::new(db.clone(), obsidian.clone(), radar_config) {
-        Ok(service) => {
-            tracing::info!("RadarService 初始化完成");
-            Arc::new(service)
-        }
+        Ok(service) => Arc::new(service),
         Err(e) => {
-            tracing::warn!("RadarService 初始化失败: {e}，雷达功能将不可用");
-            // 创建一个空的 RadarService 作为 fallback
-            let fallback_config = crate::models::radar::RadarConfig::default();
+            tracing::warn!("RadarService 初始化失败: {e}");
             Arc::new(
-                RadarService::new(db.clone(), obsidian.clone(), fallback_config)
-                    .expect("Fallback RadarService creation failed"),
+                RadarService::new(
+                    db.clone(),
+                    obsidian.clone(),
+                    crate::models::radar::RadarConfig::default(),
+                )
+                .expect("Fallback RadarService failed"),
             )
         }
     };
 
-    // 6. Build AppContext and register tools
+    // Build context + register tools
     let tool_registry = Arc::new(ToolRegistry::new());
-
     let ctx = Arc::new(AppContext {
         config: Arc::new(config),
         components: Arc::new(std::sync::Mutex::new(components)),
@@ -279,13 +414,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         radar_service,
         start_time,
     });
-
     register_all_tools(&tool_registry, ctx.clone()).await;
     tracing::info!("已注册 {} 个工具", ctx.tool_registry.count().await);
 
-    // 6. Build router and serve
+    // Serve
     let app = api::router::create_router(ctx);
-
     let listener = match TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {
@@ -295,6 +428,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     tracing::info!("服务已启动: http://{}", addr);
 
+    // Write PID (in case we were daemonized, the daemon module already wrote it,
+    // but rewrite to be safe for foreground mode too).
+    let _ = daemon::write_pid();
+
     if let Err(e) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
@@ -303,6 +440,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
+    daemon::remove_pid();
     tracing::info!("ObsidianBrain 已关闭");
     Ok(())
 }
@@ -331,14 +469,128 @@ async fn shutdown_signal() {
     }
 }
 
+// ── CLI subcommand implementations ────────────────────────────────────
+
+fn show_status() {
+    match daemon::read_pid() {
+        Some(pid) if daemon::is_process_running(pid) => {
+            println!("ObsidianBrain is running (PID: {pid})");
+
+            // Try to reach the health endpoint.
+            let rt = tokio::runtime::Runtime::new().expect("runtime");
+            let health = rt.block_on(async {
+                match reqwest::get("http://127.0.0.1:9876/v1/health").await {
+                    Ok(r) => r.json::<serde_json::Value>().await.ok(),
+                    Err(_) => None,
+                }
+            });
+
+            if let Some(h) = &health {
+                if let Some(status) = h.get("status").and_then(|v| v.as_str()) {
+                    println!("  Status: {status}");
+                }
+                if let Some(tools) = h.get("tools_count").and_then(|v| v.as_u64()) {
+                    println!("  Tools: {tools}");
+                }
+                if let Some(uptime) = h.get("uptime_seconds").and_then(|v| v.as_u64()) {
+                    println!("  Uptime: {}s", uptime);
+                }
+                if let Some(vault) = h.get("vault").and_then(|v| v.as_object()) {
+                    if let Some(path) = vault.get("path").and_then(|v| v.as_str()) {
+                        println!("  Vault: {path}");
+                    }
+                }
+            } else {
+                println!("  (health endpoint unreachable — server may still be starting)");
+            }
+        }
+        Some(_) => {
+            println!("ObsidianBrain is not running (stale PID file found).");
+            daemon::remove_pid();
+        }
+        None => {
+            println!("ObsidianBrain is not running.");
+        }
+    }
+    println!("  Data dir: {}", paths::data_dir().display());
+}
+
+fn config_command(action: ConfigCmd) {
+    // Open the DB directly to read/write system_config.
+    let db_path = paths::db_path();
+    let db = match SqliteStore::new(&db_path) {
+        Ok(db) => db,
+        Err(e) => {
+            eprintln!("Failed to open database at {}: {e}", db_path.display());
+            std::process::exit(1);
+        }
+    };
+
+    match action {
+        ConfigCmd::Show => match db.get_state("system_config") {
+            Ok(Some(json)) => {
+                let parsed: serde_json::Value =
+                    serde_json::from_str(&json).unwrap_or(serde_json::Value::String(json));
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&parsed).unwrap_or_default()
+                );
+            }
+            _ => println!("No saved configuration. Using defaults + config/default.toml."),
+        },
+        ConfigCmd::Get { key } => match db.get_state("system_config") {
+            Ok(Some(json)) => {
+                let parsed: serde_json::Value =
+                    serde_json::from_str(&json).unwrap_or(serde_json::Value::Null);
+                let parts: Vec<&str> = key.split('.').collect();
+                let mut current = &parsed;
+                for part in &parts {
+                    current = current.get(part).unwrap_or(&serde_json::Value::Null);
+                }
+                println!("{key} = {}", current);
+            }
+            _ => println!("No saved configuration."),
+        },
+        ConfigCmd::Set { key, value } => {
+            // Read existing config, update the dotted key, write back.
+            let mut config: serde_json::Value = match db.get_state("system_config") {
+                Ok(Some(json)) => serde_json::from_str(&json).unwrap_or(serde_json::json!({})),
+                _ => serde_json::json!({}),
+            };
+
+            // Parse value as JSON if possible, otherwise treat as string.
+            let parsed_value: serde_json::Value =
+                serde_json::from_str(&value).unwrap_or(serde_json::Value::String(value.clone()));
+
+            // Navigate to the nested key and set it.
+            let parts: Vec<&str> = key.split('.').collect();
+            let mut current = &mut config;
+            for (i, part) in parts.iter().enumerate() {
+                if i == parts.len() - 1 {
+                    current[part] = parsed_value.clone();
+                } else {
+                    if !current[part].is_object() {
+                        current[part] = serde_json::json!({});
+                    }
+                    current = &mut current[part];
+                }
+            }
+
+            let json_str = serde_json::to_string(&config).unwrap_or_default();
+            match db.set_state("system_config", &json_str) {
+                Ok(()) => println!("Config updated: {key} = {value}"),
+                Err(e) => eprintln!("Failed to save config: {e}"),
+            }
+        }
+    }
+}
+
 // ── Test helpers ──
 
 #[cfg(test)]
 mod test_helpers {
     use super::*;
 
-    /// Create an AppContext with minimal stubs for unit/integration tests.
-    /// Returns (Arc<AppContext>, TempDir, vault_path) — caller must keep TempDir alive.
     impl AppContext {
         pub fn for_test() -> (Arc<Self>, tempfile::TempDir, std::path::PathBuf) {
             let dir = tempfile::tempdir().expect("tempdir creation");
@@ -350,13 +602,10 @@ mod test_helpers {
             config.vault.name = "TestVault".to_string();
             config.obsidian.enabled = false;
 
-            // Create a dummy Obsidian client (will fail on all calls) shared by all
-            // services via a single ObsidianProvider.
             let obsidian = Arc::new(ObsidianClient::new(&config.obsidian).unwrap_or_else(|_| {
-                // Create a dummy client that will fail on all calls
                 ObsidianClient::new(&crate::config::ObsidianApiConfig {
                     enabled: true,
-                    url: "http://127.0.0.1:1".to_string(), // unreachable
+                    url: "http://127.0.0.1:1".to_string(),
                     api_key: None,
                 })
                 .expect("dummy client creation")
@@ -368,7 +617,6 @@ mod test_helpers {
                 vault_path.clone(),
                 "TestVault".to_string(),
             ));
-
             let db =
                 Arc::new(SqliteStore::new(&dir.path().join("test.db")).expect("SQLite creation"));
             let repo_manager = Arc::new(RepoManager::new(db.clone(), RepoManagerConfig::default()));
@@ -380,7 +628,6 @@ mod test_helpers {
             ));
             let memo_manager = Arc::new(MemoManager::new(db.clone(), obsidian_provider.clone()));
 
-            // 创建测试用 LLM 和灵感服务
             let llm_config = crate::config::LlmConfig::default();
             let llm: Arc<dyn crate::infra::llm_client::LlmProvider> = Arc::from(
                 crate::infra::llm_client::LlmClientFactory::create(&llm_config)

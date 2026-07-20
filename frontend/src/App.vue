@@ -9,7 +9,7 @@
     <!-- Subtle grain texture background -->
     <div class="bg-grain"></div>
 
-    <!-- Mobile global header: hamburger + page title -->
+    <!-- Mobile global header: hamburger + centered page title -->
     <div class="mobile-global-header" v-if="isMobile" :class="{ 'header-scrolled': isScrolled }">
       <button class="mobile-menu-btn" @click="appStore.toggleSidebar()">
         <el-icon :size="20"><component :is="isCollapsed ? Expand : Fold" /></el-icon>
@@ -17,6 +17,7 @@
       <transition name="title-fade">
         <span v-if="isScrolled" class="mobile-page-title">{{ currentTitle }}</span>
       </transition>
+      <div class="mobile-header-spacer"></div>
     </div>
 
     <!-- Mobile sidebar overlay backdrop -->
@@ -91,6 +92,7 @@ onUnmounted(() => window.removeEventListener('resize', onResize))
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html, body, #app {
@@ -284,6 +286,23 @@ code, pre, .code-block { font-family: var(--font-mono); }
 .el-button {
   border-radius: 10px !important;
   font-weight: 500 !important;
+}
+
+/* Mobile: buttons should be bigger and easier to tap. */
+@media (max-width: 768px) {
+  .el-button {
+    min-height: 38px !important;
+    font-size: 14px !important;
+    padding: 8px 16px !important;
+  }
+  .el-button--small {
+    min-height: 36px !important;
+    font-size: 13px !important;
+    padding: 7px 14px !important;
+  }
+  .header-actions .el-button {
+    min-height: 36px !important;
+  }
 }
 
 .el-empty__description p {
@@ -708,10 +727,9 @@ code, pre, .code-block { font-family: var(--font-mono); }
   left: 0;
   right: 0;
   z-index: 1001;
-  height: 52px;
+  height: 56px;
   display: flex;
   align-items: center;
-  gap: 10px;
   padding: 0 12px;
   transition: background 0.3s ease, box-shadow 0.3s ease, backdrop-filter 0.3s ease;
 }
@@ -749,11 +767,19 @@ code, pre, .code-block { font-family: var(--font-mono); }
 }
 
 .mobile-page-title {
-  font-size: 16px;
+  flex: 1;
+  text-align: center;
+  font-size: 17px;
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: -0.2px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mobile-header-spacer {
+  width: 36px; /* match menu-btn width so title is visually centered */
+  flex-shrink: 0;
 }
 
 /* Title fade animation */
@@ -803,7 +829,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
 
 .app-main.mobile-full {
   padding: 16px 12px;
-  padding-top: 56px; /* space for global header (52px + 4px gap) */
+  padding-top: 60px; /* space for global header (56px + 4px gap) */
   padding-bottom: 40px; /* extra space at bottom so last content is fully visible */
   overflow-x: hidden;
   width: 100%;

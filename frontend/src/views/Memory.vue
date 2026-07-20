@@ -6,7 +6,7 @@
         <p class="page-subtitle">洞察你的知识体系：孤岛、枢纽、尘封与新生</p>
       </div>
       <div class="header-actions">
-        <el-button size="small" @click="loadInsights(true)" :loading="loading">
+        <el-button @click="loadInsights(true)" :loading="loading">
           <el-icon v-if="!loading"><Refresh /></el-icon>
           重新统计
         </el-button>

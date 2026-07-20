@@ -322,10 +322,10 @@ fn default_top_k() -> usize {
     5
 }
 fn default_db_path() -> PathBuf {
-    PathBuf::from("./data/brain.db")
+    crate::paths::db_path()
 }
 fn default_index_path() -> PathBuf {
-    PathBuf::from("./data/tantivy_index")
+    crate::paths::index_path()
 }
 fn default_log_level() -> String {
     "info".to_string()

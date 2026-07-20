@@ -217,6 +217,64 @@
         border-radius: 10px !important; background: var(--bg-glass-subtle) !important; color: var(--text-secondary) !important;
       }
       .glass-picker .el-popper__arrow { display: none !important; }
+
+      /* Mobile: constrain calendar popup width, remove blank space */
+      @media (max-width: 768px) {
+        .glass-picker {
+          max-width: calc(100vw - 16px) !important;
+          width: auto !important;
+          left: 8px !important;
+          right: 8px !important;
+          border-radius: 16px !important;
+        }
+        .glass-picker .el-date-picker {
+          width: auto !important;
+          min-width: 0 !important;
+        }
+        .glass-picker .el-picker-panel__body {
+          min-width: 0 !important;
+          width: auto !important;
+        }
+        .glass-picker .el-picker-panel__content {
+          width: auto !important;
+          padding: 8px !important;
+        }
+        .glass-picker .el-date-range-picker {
+          flex-direction: column !important;
+          width: 100% !important;
+        }
+        .glass-picker .el-date-range-picker__content {
+          width: 100% !important;
+          padding: 4px !important;
+          border-right: none !important;
+        }
+        .glass-picker .el-date-range-picker__content:last-child {
+          border-bottom: none !important;
+        }
+        .glass-picker .el-date-range-picker__header,
+        .glass-picker .el-date-picker__header {
+          margin: 2px 4px !important;
+          font-size: 13px !important;
+        }
+        .glass-picker .el-date-table {
+          font-size: 12px !important;
+        }
+        .glass-picker .el-date-table td .el-date-table-cell {
+          width: 32px !important;
+          height: 32px !important;
+        }
+        .glass-picker .el-date-table th {
+          font-size: 11px !important;
+          padding: 4px 0 !important;
+        }
+        .glass-picker .el-picker-panel__footer {
+          padding: 4px 8px !important;
+        }
+        .glass-picker .el-picker-panel__footer button {
+          font-size: 12px !important;
+          padding: 4px 12px !important;
+        }
+      }
     </style>
   </body>
 </html>

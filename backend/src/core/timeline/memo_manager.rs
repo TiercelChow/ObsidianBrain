@@ -273,23 +273,44 @@ impl MemoManager {
             }
         }
 
-        // Delete memos in synced date range that no longer exist in Obsidian
+        // Delete memos in synced date range that no longer exist in Obsidian.
+        // Keep IDs from both the parsed sync IDs AND any existing DB memos that
+        // match by timestamp (so we don't delete-then-reinsert memos created via
+        // the app that have UUID ids — we update them in place instead).
+        let mut all_keep_ids: std::collections::HashSet<String> =
+            all_sync_ids.iter().cloned().collect();
+        for memo in &all_memos {
+            let ts_rfc3339 = memo.timestamp.to_rfc3339();
+            if let Ok(Some(existing_id)) = self.db.find_memo_id_by_timestamp(&ts_rfc3339) {
+                all_keep_ids.insert(existing_id);
+            }
+        }
+        let all_keep_vec: Vec<String> = all_keep_ids.into_iter().collect();
+
         let deleted = self
             .db
-            .delete_memos_not_by_ids(&all_dates_in_range, &all_sync_ids)?;
+            .delete_memos_not_by_ids(&all_dates_in_range, &all_keep_vec)?;
         if deleted > 0 {
             tracing::info!(deleted = deleted, "已删除 Obsidian 中不存在的小记");
         }
 
-        // Upsert all memos from Obsidian
+        // Upsert all memos from Obsidian. For each memo, if an existing DB memo
+        // has the same timestamp (created via the app with a UUID id), update
+        // that row in place — preserving the original id and created_at.
         for memo in &all_memos {
             let ts = memo.timestamp.to_rfc3339();
             let images_json =
                 serde_json::to_string(&memo.images).unwrap_or_else(|_| "[]".to_string());
             let tags_json = serde_json::to_string(&memo.tags).unwrap_or_else(|_| "[]".to_string());
 
+            // Try to find an existing memo with the same timestamp (UUID id from create_memo).
+            let effective_id = match self.db.find_memo_id_by_timestamp(&ts) {
+                Ok(Some(existing_id)) => existing_id, // Update in place, preserve id + created_at
+                _ => memo.id.clone(),                 // New memo, use sync: id
+            };
+
             self.db.upsert_memo(
-                &memo.id,
+                &effective_id,
                 &ts,
                 &memo.date,
                 &memo.content,
@@ -392,8 +413,9 @@ impl MemoManager {
                 }
             }
 
-            // #tag
-            if trimmed.starts_with('#') && !trimmed.starts_with("# ") {
+            // #tag (but not ## headings or # title)
+            if trimmed.starts_with('#') && !trimmed.starts_with("# ") && !trimmed.starts_with("##")
+            {
                 for word in trimmed.split_whitespace() {
                     if let Some(tag) = word.strip_prefix('#') {
                         let tag = tag.trim();
@@ -405,8 +427,8 @@ impl MemoManager {
                 continue;
             }
 
-            // Skip # title line
-            if trimmed.starts_with("# ") {
+            // Skip # title and ## heading lines
+            if trimmed.starts_with("# ") || trimmed.starts_with("## ") {
                 continue;
             }
 
@@ -449,7 +471,9 @@ impl MemoManager {
         }
 
         let id = format!("sync:{}:{}:{}", file_path, date, time);
-        let timestamp_str = format!("{}T{}+08:00", date, time);
+        // Use local timezone for the timestamp (matches create_memo's Local::now()).
+        let offset_str = Local::now().format("%:z").to_string();
+        let timestamp_str = format!("{}T{}{}", date, time, offset_str);
         let timestamp = chrono::DateTime::parse_from_rfc3339(&timestamp_str)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());

@@ -6,7 +6,7 @@
         <p class="page-subtitle">LLM 增量维护的持久知识库</p>
       </div>
       <div class="header-actions">
-        <el-button size="small" @click="loadStatus" :loading="statusLoading">
+        <el-button @click="loadStatus" :loading="statusLoading">
           <el-icon v-if="!statusLoading"><Refresh /></el-icon>
           刷新
         </el-button>

@@ -7,11 +7,11 @@
         <p class="page-subtitle">记录碎片化想法，回顾思考历程</p>
       </div>
       <div class="header-actions">
-        <el-button size="small" @click="doSync" :loading="syncing">
+        <el-button @click="doSync" :loading="syncing">
           <el-icon v-if="!syncing"><Refresh /></el-icon>
           同步
         </el-button>
-        <el-button size="small" type="primary" @click="showCreateDialog = true">
+        <el-button type="primary" @click="showCreateDialog = true">
           <el-icon><Plus /></el-icon>
           写小记
         </el-button>
@@ -48,7 +48,9 @@
           </div>
 
           <div class="date-range-picker">
+            <!-- Desktop: daterange picker (two panels) -->
             <el-date-picker
+              v-if="!isMobile"
               v-model="customDateRange"
               type="daterange"
               range-separator="→"
@@ -59,6 +61,30 @@
               @change="onCustomDateChange"
               :clearable="true"
             />
+            <!-- Mobile: two single-date pickers (one panel each) -->
+            <template v-else>
+              <el-date-picker
+                v-model="mobileStartDate"
+                type="date"
+                placeholder="起始"
+                size="default"
+                popper-class="glass-picker"
+                @change="onMobileDateChange"
+                :clearable="true"
+                class="mobile-date-input"
+              />
+              <span class="mobile-date-sep">→</span>
+              <el-date-picker
+                v-model="mobileEndDate"
+                type="date"
+                placeholder="结束"
+                size="default"
+                popper-class="glass-picker"
+                @change="onMobileDateChange"
+                :clearable="true"
+                class="mobile-date-input"
+              />
+            </template>
             <button
               v-if="hasActiveFilter"
               class="glass-icon-btn clear-filter"
@@ -343,6 +369,13 @@ const memos = ref<Memo[]>([])
 const searchQuery = ref('')
 const activePreset = ref('')
 const customDateRange = ref<[Date, Date] | null>(null)
+const mobileStartDate = ref<Date | null>(null)
+const mobileEndDate = ref<Date | null>(null)
+
+// Mobile detection
+const windowWidth = ref(window.innerWidth)
+const isMobile = computed(() => windowWidth.value <= 768)
+function onResize() { windowWidth.value = window.innerWidth }
 const selectedDate = ref('')
 const hasMore = ref(true)
 const showCreateDialog = ref(false)
@@ -394,8 +427,12 @@ function onViewerKeydown(e: KeyboardEvent) {
   if (e.key === 'ArrowRight') viewerNext()
 }
 
+onMounted(() => {
+  window.addEventListener('resize', onResize)
+})
 onUnmounted(() => {
   document.removeEventListener('keydown', onViewerKeydown)
+  window.removeEventListener('resize', onResize)
 })
 
 function triggerFileInput() {
@@ -587,8 +624,21 @@ function onCustomDateChange(_val: [Date, Date] | null) {
   activePreset.value = ''
   loadMemos()
 }
+function onMobileDateChange() {
+  activePreset.value = ''
+  if (mobileStartDate.value && mobileEndDate.value) {
+    customDateRange.value = [mobileStartDate.value, mobileEndDate.value]
+  } else {
+    customDateRange.value = null
+  }
+  loadMemos()
+}
 function clearFilter() {
-  activePreset.value = ''; customDateRange.value = null; loadMemos()
+  activePreset.value = ''
+  customDateRange.value = null
+  mobileStartDate.value = null
+  mobileEndDate.value = null
+  loadMemos()
 }
 
 // ── Create ──
@@ -995,6 +1045,15 @@ onMounted(() => { loadMemos() })
   align-items: center;
   gap: 6px;
 }
+.mobile-date-sep {
+  color: var(--text-faint);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.mobile-date-input {
+  flex: 1;
+  min-width: 0;
+}
 .date-range-picker :deep(.el-range-editor) {
   border-radius: 14px !important;
   border: 1px solid var(--border-subtle) !important;
@@ -1234,7 +1293,8 @@ onMounted(() => { loadMemos() })
   will-change: transform;
   -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
-  contain: layout style paint;
+  min-width: 0;
+  overflow: hidden;
 }
 .memo-card-body:hover {
   transform: translateY(-1px);
@@ -1255,6 +1315,8 @@ onMounted(() => { loadMemos() })
   color: var(--text-secondary);
   line-height: 1.75;
   word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 .memo-content :deep(mark) {
   background: rgba(253, 224, 71, 0.4);
@@ -1283,9 +1345,13 @@ onMounted(() => { loadMemos() })
   font-size: 13px;
   font-family: var(--font-mono);
   overflow-x: auto;
+  width: 100%;
+  box-sizing: border-box;
   margin: 10px 0;
   line-height: 1.6;
   border: 1px solid rgba(0, 0, 0, 0.1);
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
 }
 .memo-content :deep(.memo-code code) {
   background: none;
@@ -1296,6 +1362,14 @@ onMounted(() => { loadMemos() })
 .memo-content :deep(.memo-code code.hljs) {
   background: none;
   padding: 0;
+}
+.memo-content :deep(blockquote) {
+  border-left: 3px solid var(--accent-border);
+  padding: 4px 12px;
+  margin: 8px 0;
+  color: var(--text-tertiary);
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 .memo-content :deep(.memo-inline-code) {
   background: rgba(24, 24, 27, 0.06);
@@ -1482,6 +1556,7 @@ onMounted(() => { loadMemos() })
 .memo-card-text {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 .memo-images-wrap {
   flex-shrink: 0;
@@ -1924,12 +1999,19 @@ onMounted(() => { loadMemos() })
   .time-nav { display: none; }
   .timeline-page {
   min-height: 100%; overflow-x: hidden; width: 100%; }
+  .main-content { overflow-x: hidden; }
+  .memo-scroll { min-width: 0; overflow-x: hidden; }
   .toolbar-row { flex-wrap: wrap; }
   .search-box { max-width: 100%; min-width: 0; }
   .filter-right { flex-wrap: wrap; margin-left: 0; width: 100%; }
   .memo-card-main.has-images { flex-direction: column; }
   .memo-images-wrap { width: 100%; max-width: 280px; height: auto; aspect-ratio: 1; }
-  .memo-images-1 .memo-image { max-height: 200px; }
+  /* Single image: no forced square — container fits the image naturally. */
+  .memo-images-wrap:has(.memo-images-1) {
+    aspect-ratio: auto;
+    height: auto;
+  }
+  .memo-images-1 .memo-image { max-height: 280px; width: 100%; height: auto; object-fit: cover; }
   .memo-card-body { padding: 14px 16px; border-radius: 14px; }
   .preset-chips { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .chip-track { flex-wrap: nowrap; }
@@ -1983,8 +2065,18 @@ onMounted(() => { loadMemos() })
     width: auto !important;
     border-radius: 16px !important;
   }
+  /* Stack the two calendar panels vertically on mobile */
+  .glass-picker .el-date-range-picker {
+    flex-direction: column !important;
+    width: 100% !important;
+  }
   .glass-picker .el-date-range-picker__content {
+    width: 100% !important;
     padding: 4px !important;
+    border-right: none !important;
+  }
+  .glass-picker .el-date-range-picker__content:last-child {
+    border-bottom: none !important;
   }
   .glass-picker .el-date-range-picker__header,
   .glass-picker .el-date-picker__header {

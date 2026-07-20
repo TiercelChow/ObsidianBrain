@@ -6,7 +6,7 @@
         <p class="page-subtitle">让外部信息来找你：基于个人知识图谱的个性化推荐</p>
       </div>
       <div class="header-actions">
-        <el-button @click="loadRadar" :loading="loading" size="small">
+        <el-button @click="loadRadar" :loading="loading">
           <el-icon><Refresh /></el-icon> 刷新
         </el-button>
       </div>
@@ -20,8 +20,8 @@
         class="radar-card"
       >
         <div class="radar-header">
-          <el-tag size="small" effect="plain">{{ item.source }}</el-tag>
-          <el-tag :type="statusType(item.status)" size="small" effect="plain">{{ statusLabel(item.status) }}</el-tag>
+          <el-tag effect="plain">{{ item.source }}</el-tag>
+          <el-tag :type="statusType(item.status)" effect="plain">{{ statusLabel(item.status) }}</el-tag>
         </div>
         <h3 class="radar-title">
           <a :href="item.url" target="_blank" rel="noopener">{{ item.title }}</a>
@@ -34,10 +34,10 @@
           </span>
         </div>
         <div class="radar-actions">
-          <el-button size="small" type="primary" @click="saveToVault(item.id)" :loading="item._saving">
+          <el-button type="primary" @click="saveToVault(item.id)" :loading="item._saving">
             <el-icon><Download /></el-icon> 保存到 Vault
           </el-button>
-          <el-button size="small" @click="dismissItem(item.id)">忽略</el-button>
+          <el-button @click="dismissItem(item.id)">忽略</el-button>
         </div>
       </div>
     </div>
