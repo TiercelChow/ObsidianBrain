@@ -2,7 +2,7 @@
   <div class="mermaid-viewer" @click.self="close">
     <!-- Toolbar -->
     <div class="mv-toolbar">
-      <span class="mv-title">Mermaid 图</span>
+      <span class="mv-title">{{ title }}</span>
       <span class="mv-zoom-label">{{ zoomPct }}%</span>
       <div class="mv-actions">
         <button class="mv-btn" title="缩小" @click="zoomBy(0.8)">
@@ -30,13 +30,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 import { Plus, Minus, Refresh, Close } from '@element-plus/icons-vue'
 import panzoom, { type PanZoom } from 'panzoom'
 
-defineProps<{ svgHtml: string; source: string }>()
+const props = defineProps<{ svgHtml: string; source: string; title?: string }>()
 const emit = defineEmits<{ close: [] }>()
 
+const title = computed(() => props.title || 'Mermaid 图')
 const stageRef = ref<HTMLDivElement | null>(null)
 const canvasRef = ref<HTMLDivElement | null>(null)
 const zoomPct = ref(100)
@@ -56,32 +57,38 @@ function zoomBy(factor: number) {
 
 /** Size the SVG to fit the stage (explicit px from its viewBox) and (re)init panzoom. */
 function fitAndInit() {
-  const svg = canvasRef.value?.querySelector('svg') as SVGElement | null
-  if (!svg) return
-  // mermaid sets width="100%" (useMaxWidth), which collapses in an auto-sized
-  // flex container — compute explicit px from the viewBox aspect ratio instead.
-  const vb = (svg as SVGSVGElement).viewBox?.baseVal
-  if (stageRef.value && vb && vb.width > 0 && vb.height > 0) {
-    const scale =
-      Math.min(stageRef.value.clientWidth / vb.width, stageRef.value.clientHeight / vb.height) * 0.92
-    const w = vb.width * scale
-    const h = vb.height * scale
-    svg.setAttribute('width', `${w}`)
-    svg.setAttribute('height', `${h}`)
-    svg.style.width = `${w}px`
-    svg.style.height = `${h}px`
-    svg.style.maxWidth = 'none'
-    svg.style.maxHeight = 'none'
+  const target = (canvasRef.value?.querySelector('svg') || canvasRef.value?.querySelector('img')) as HTMLElement | null
+  if (!target) return
+  if (target.tagName === 'svg') {
+    const svg = target as unknown as SVGSVGElement
+    const vb = svg.viewBox?.baseVal
+    if (stageRef.value && vb && vb.width > 0 && vb.height > 0) {
+      const scale =
+        Math.min(stageRef.value.clientWidth / vb.width, stageRef.value.clientHeight / vb.height) * 0.92
+      const w = vb.width * scale
+      const h = vb.height * scale
+      svg.setAttribute('width', `${w}`)
+      svg.setAttribute('height', `${h}`)
+      svg.style.width = `${w}px`
+      svg.style.height = `${h}px`
+      svg.style.maxWidth = 'none'
+      svg.style.maxHeight = 'none'
+    } else {
+      svg.style.maxWidth = '92vw'
+      svg.style.maxHeight = '78vh'
+      svg.style.width = 'auto'
+      svg.style.height = 'auto'
+    }
   } else {
-    svg.style.maxWidth = '92vw'
-    svg.style.maxHeight = '78vh'
-    svg.style.width = 'auto'
-    svg.style.height = 'auto'
+    target.style.maxWidth = '92vw'
+    target.style.maxHeight = '78vh'
+    target.style.width = 'auto'
+    target.style.height = 'auto'
   }
-  svg.style.transform = ''
-  svg.style.transformOrigin = ''
+  target.style.transform = ''
+  target.style.transformOrigin = ''
   if (pz) pz.dispose()
-  pz = panzoom(svg, {
+  pz = panzoom(target, {
     maxZoom: 8,
     minZoom: 0.1,
     zoomDoubleClickSpeed: 1.8,

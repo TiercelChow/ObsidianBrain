@@ -254,6 +254,8 @@ const HISTORY_KEY: &str = "reader_history";
 #[serde(rename_all = "camelCase")]
 struct HistoryItem {
     path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
     pinned: bool,
     last_used: i64,
 }

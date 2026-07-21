@@ -59,99 +59,103 @@
     <!-- Configuration -->
     <section class="section">
       <h2 class="section-title">系统配置</h2>
-      <div class="config-card" v-if="config">
-        <!-- Vault -->
-        <div class="config-group">
-          <h3 class="config-group-title">
-            <el-icon><FolderOpened /></el-icon>
-            Obsidian Vault
-          </h3>
-          <div class="config-fields">
-            <div class="config-field">
-              <label>Vault 路径</label>
-              <el-input v-model="config.vault.path" placeholder="/path/to/vault" />
+      <div class="config-grid" v-if="config">
+        <!-- Obsidian 配置卡片 -->
+        <div class="config-card">
+          <div class="config-group">
+            <h3 class="config-group-title">
+              <el-icon><FolderOpened /></el-icon>
+              Obsidian Vault
+            </h3>
+            <div class="config-fields">
+              <div class="config-field">
+                <label>Vault 路径</label>
+                <el-input v-model="config.vault.path" placeholder="/path/to/vault" />
+              </div>
+              <div class="config-field small">
+                <label>Vault 名称</label>
+                <el-input v-model="config.vault.name" placeholder="my-vault" />
+              </div>
             </div>
-            <div class="config-field small">
-              <label>Vault 名称</label>
-              <el-input v-model="config.vault.name" placeholder="my-vault" />
+          </div>
+
+          <div class="config-group">
+            <h3 class="config-group-title">
+              <el-icon><Connection /></el-icon>
+              Obsidian REST API
+            </h3>
+            <div class="config-fields">
+              <div class="config-field inline">
+                <label>启用</label>
+                <el-switch v-model="config.obsidian.enabled" />
+              </div>
+              <div class="config-field">
+                <label>API 地址</label>
+                <el-input v-model="config.obsidian.url" placeholder="https://127.0.0.1:27124" />
+              </div>
+              <div class="config-field">
+                <label>API Key</label>
+                <el-input v-model="config.obsidian.api_key" placeholder="API Key" show-password />
+              </div>
             </div>
+          </div>
+
+          <div class="config-actions">
+            <el-button type="primary" @click="saveSettings" :loading="saving">
+              保存配置
+            </el-button>
           </div>
         </div>
 
-        <!-- Obsidian API -->
-        <div class="config-group">
-          <h3 class="config-group-title">
-            <el-icon><Connection /></el-icon>
-            Obsidian REST API
-          </h3>
-          <div class="config-fields">
-            <div class="config-field inline">
-              <label>启用</label>
-              <el-switch v-model="config.obsidian.enabled" />
-            </div>
-            <div class="config-field">
-              <label>API 地址</label>
-              <el-input v-model="config.obsidian.url" placeholder="https://127.0.0.1:27124" />
-            </div>
-            <div class="config-field">
-              <label>API Key</label>
-              <el-input v-model="config.obsidian.api_key" placeholder="API Key" show-password />
-            </div>
-          </div>
-        </div>
-
-        <!-- LLM -->
-        <div class="config-group">
-          <h3 class="config-group-title">
-            <el-icon><MagicStick /></el-icon>
-            LLM 配置
-          </h3>
-          <div class="config-fields">
-            <div class="config-field inline">
-              <label>提供商</label>
-              <el-select v-model="config.llm.provider" style="width: 160px">
-                <el-option label="OpenAI 兼容" value="openai" />
-                <el-option label="Ollama (本地)" value="ollama" />
-              </el-select>
-            </div>
-            <div class="config-field">
-              <label>模型名称</label>
-              <el-input v-model="config.llm.model" placeholder="glm-5.2 / gpt-4o-mini / qwen2.5" />
-            </div>
-            <div class="config-field">
-              <label>API Key</label>
-              <el-input v-model="config.llm.api_key" placeholder="直接输入 API Key" show-password />
-              <span class="field-hint">密钥保存后不再显示，留空则使用环境变量</span>
-            </div>
-            <div class="config-field">
-              <label>API Key 环境变量名（可选）</label>
-              <el-input v-model="config.llm.api_key_env" placeholder="如 ANTHROPIC_AUTH_TOKEN（API Key 为空时使用）" />
-            </div>
-            <div class="config-field">
-              <label>API Base URL</label>
-              <el-input v-model="config.llm.base_url" placeholder="如 https://dashscope.aliyuncs.com/compatible-mode/v1" />
-              <span class="field-hint">OpenAI 官方留空即可，第三方服务填兼容地址</span>
-            </div>
-            <div class="config-field inline">
-              <label>最大 Token</label>
-              <el-input-number v-model="config.llm.max_tokens" :min="256" :max="32768" :step="256" />
-            </div>
-            <div class="config-field inline">
-              <label>温度</label>
-              <el-slider v-model="config.llm.temperature" :min="0" :max="2" :step="0.1" style="width: 160px" />
-              <span class="slider-value">{{ config.llm.temperature }}</span>
+        <!-- LLM 配置卡片 -->
+        <div class="config-card">
+          <div class="config-group">
+            <h3 class="config-group-title">
+              <el-icon><MagicStick /></el-icon>
+              LLM 配置
+            </h3>
+            <div class="config-fields">
+              <div class="config-field inline">
+                <label>提供商</label>
+                <el-select v-model="config.llm.provider" style="width: 160px">
+                  <el-option label="OpenAI 兼容" value="openai" />
+                  <el-option label="Ollama (本地)" value="ollama" />
+                </el-select>
+              </div>
+              <div class="config-field">
+                <label>模型名称</label>
+                <el-input v-model="config.llm.model" placeholder="glm-5.2 / gpt-4o-mini / qwen2.5" />
+              </div>
+              <div class="config-field">
+                <label>API Key</label>
+                <el-input v-model="config.llm.api_key" placeholder="直接输入 API Key" show-password />
+                <span class="field-hint">密钥保存后不再显示，留空则使用环境变量</span>
+              </div>
+              <div class="config-field">
+                <label>API Base URL</label>
+                <el-input v-model="config.llm.base_url" placeholder="如 https://dashscope.aliyuncs.com/compatible-mode/v1" />
+                <span class="field-hint">OpenAI 官方留空即可，第三方服务填兼容地址</span>
+              </div>
+              <div class="config-field inline">
+                <label>最大 Token</label>
+                <el-input-number v-model="config.llm.max_tokens" :min="256" :max="32768" :step="256" />
+              </div>
+              <div class="config-field inline">
+                <label>温度</label>
+                <el-slider v-model="config.llm.temperature" :min="0" :max="2" :step="0.1" style="width: 160px" />
+                <span class="slider-value">{{ config.llm.temperature }}</span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="config-actions">
-          <el-button @click="verifyLlm" :loading="verifyingLlm">
-            验证 LLM
-          </el-button>
-          <el-button type="primary" @click="saveSettings" :loading="saving">
-            保存配置
-          </el-button>
-          <span class="config-hint">配置保存后立即生效（热更新）</span>
+          <div class="config-actions">
+            <el-button @click="verifyLlm" :loading="verifyingLlm">
+              验证 LLM
+            </el-button>
+            <el-button type="primary" @click="saveSettings" :loading="saving">
+              保存配置
+            </el-button>
+          </div>
         </div>
       </div>
     </section>
@@ -329,13 +333,20 @@ onMounted(() => { loadAll() })
 }
 
 /* Config */
-.config-card { padding: 24px; border-radius: 18px; }
+.config-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: stretch;
+}
+.config-card { padding: 24px; border-radius: 18px; display: flex; flex-direction: column; }
 .config-group {
   margin-bottom: 24px;
   padding-bottom: 20px;
   border-bottom: 1px solid rgba(0,0,0,0.04);
 }
-.config-group:last-of-type { margin-bottom: 16px; border-bottom: none; padding-bottom: 0; }
+.config-group:nth-last-child(2) { margin-bottom: 16px; border-bottom: none; padding-bottom: 0; }
+.config-actions { margin-top: auto; }
 .config-group-title {
   display: flex; align-items: center; gap: 8px;
   font-size: 14px; font-weight: 600; color: var(--text-primary);
@@ -351,10 +362,9 @@ onMounted(() => { loadAll() })
 .config-field.small { max-width: 200px; }
 .slider-value { font-size: 13px; color: var(--text-primary); font-weight: 600; min-width: 28px; text-align: center; }
 .config-actions {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; justify-content: flex-end; gap: 12px;
   padding-top: 12px; margin-top: 4px;
 }
-.config-hint { font-size: 12px; color: var(--text-faint); }
 
 /* ── Mobile ── */
 @media (max-width: 768px) {
@@ -371,6 +381,7 @@ onMounted(() => { loadAll() })
   .status-grid { grid-template-columns: 1fr; gap: 6px; }
   .status-item { padding: 6px 10px; }
   .config-card { padding: 16px; border-radius: 14px; }
+  .config-grid { grid-template-columns: 1fr; }
   .config-group { margin-bottom: 16px; padding-bottom: 14px; }
   .config-field.small { max-width: 100%; }
 }

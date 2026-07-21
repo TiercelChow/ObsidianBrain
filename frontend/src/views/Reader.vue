@@ -7,51 +7,81 @@
       </div>
     </header>
 
-    <!-- Top bar: path input + open. History appears on input focus. -->
-    <div class="reader-topbar" :class="{ 'history-open': showHistory }">
-      <div class="path-input-wrap">
-        <el-input
-          v-model="pathInput"
-          class="path-input"
-          placeholder="输入本地文件夹路径，如 /Users/.../docs"
-          clearable
-          @focus="showHistory = true"
-          @keyup.enter="openPath()"
-          @keydown.escape="showHistory = false"
-        >
-          <template #prefix><el-icon><FolderOpened /></el-icon></template>
-        </el-input>
+    <!-- Compact trigger bar -->
+    <div class="reader-topbar">
+      <button class="path-trigger" @click="openHistoryOverlay">
+        <el-icon><FolderOpened /></el-icon>
+        <span v-if="currentFolderName" class="pt-name">{{ currentFolderName }}</span>
+        <span v-if="rootPath" class="pt-path">{{ rootPath }}</span>
+        <span v-if="!rootPath" class="pt-hint">输入本地文件夹路径</span>
+      </button>
+      <el-button class="icon-btn" :title="isFullscreen ? '退出全屏 (Esc)' : '全屏阅读'" @click="toggleFullscreen">
+        <el-icon><FullScreen /></el-icon>
+      </el-button>
+    </div>
 
-        <transition name="dropdown">
-          <div v-if="showHistory" class="history-panel">
-            <div class="hp-head">
-              <span>历史记录</span>
-              <button v-if="history.length" class="hp-clear" @click="clearHistory">清空</button>
+    <!-- Floating path overlay (command-palette style) -->
+    <transition name="overlay-fade">
+      <div v-if="showHistory" class="path-overlay" @click.self="showHistory = false">
+        <transition name="overlay-pop" appear>
+          <div v-if="showHistory" class="path-card">
+            <div class="path-input-wrap">
+              <el-input
+                ref="pathInputRef"
+                v-model="pathInput"
+                class="path-input"
+                placeholder="输入本地文件夹路径，如 /Users/.../docs"
+                clearable
+                size="large"
+                @keyup.enter="openPath()"
+                @keydown.escape="showHistory = false"
+              >
+                <template #prefix><el-icon><FolderOpened /></el-icon></template>
+              </el-input>
             </div>
-            <div class="hp-list">
-              <div v-if="!history.length" class="hp-empty">暂无历史记录</div>
-              <div v-else-if="!filteredHistory.length" class="hp-empty">无匹配记录</div>
-              <div v-for="h in filteredHistory" :key="h.path" class="hp-item" :class="{ pinned: h.pinned }">
-                <button class="hp-pin" :title="h.pinned ? '取消置顶' : '置顶'" @click="togglePin(h.path)">
-                  <el-icon><StarFilled v-if="h.pinned" /><Star v-else /></el-icon>
-                </button>
-                <span class="hp-path" :title="h.path" @click="useHistory(h.path)">{{ h.path }}</span>
-                <button class="hp-del" title="删除" @click="removeHistory(h.path)">
-                  <el-icon><Delete /></el-icon>
-                </button>
+
+            <div class="history-panel">
+              <div class="hp-head">
+                <span>历史记录</span>
+                <button v-if="history.length" class="hp-clear" @click="clearHistory">清空</button>
+              </div>
+              <div class="hp-list">
+                <div v-if="!history.length" class="hp-empty">暂无历史记录</div>
+                <div v-else-if="!filteredHistory.length" class="hp-empty">无匹配记录</div>
+                <div v-for="h in filteredHistory" :key="h.path" class="hp-row" :class="{ pinned: h.pinned }">
+                  <div class="hp-item">
+                    <button class="hp-pin" :title="h.pinned ? '取消置顶' : '置顶'" @click="togglePin(h.path)">
+                      <el-icon><StarFilled v-if="h.pinned" /><Star v-else /></el-icon>
+                    </button>
+                    <div class="hp-info" @click="useHistory(h.path)">
+                      <span v-if="h.name" class="hp-name">{{ h.name }}</span>
+                      <span class="hp-path" :title="h.path">{{ h.path }}</span>
+                    </div>
+                    <button class="hp-edit" title="命名" @click.stop="startRename(h)">
+                      <el-icon><EditPen /></el-icon>
+                    </button>
+                    <button class="hp-del" title="删除" @click="removeHistory(h.path)">
+                      <el-icon><Delete /></el-icon>
+                    </button>
+                  </div>
+                  <div v-if="renamingPath === h.path" class="hp-rename">
+                    <input
+                      v-model="renameValue"
+                      class="hp-rename-input"
+                      placeholder="输入名称（留空清除名称）"
+                      @keyup.enter="confirmRename(h)"
+                      @keydown.escape="cancelRename"
+                    />
+                    <button class="hp-rename-ok" @click="confirmRename(h)">确定</button>
+                    <button class="hp-rename-cancel" @click="cancelRename">取消</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </transition>
       </div>
-      <el-button type="primary" :loading="loading" @click="openPath()">
-        <el-icon><Search /></el-icon><span class="btn-label">打开</span>
-      </el-button>
-      <el-button class="icon-btn" :title="isFullscreen ? '退出全屏 (Esc)' : '全屏阅读'" @click="toggleFullscreen">
-        <el-icon><FullScreen /></el-icon>
-      </el-button>
-    </div>
-    <div v-if="showHistory" class="history-backdrop" @click="showHistory = false"></div>
+    </transition>
 
     <!-- Mobile floating buttons (file / TOC) — fade out while scrolling -->
     <button
@@ -153,7 +183,7 @@
     </div>
 
     <!-- Mermaid fullscreen viewer -->
-    <MermaidViewer v-if="viewerSvg" :svg-html="viewerSvg" :source="viewerSource" @close="viewerSvg = ''" />
+    <MermaidViewer v-if="viewerSvg" :svg-html="viewerSvg" :source="viewerSource" :title="viewerTitle" @close="viewerSvg = ''" />
 
     <!-- Path preview popup (folders / code / out-of-folder md) -->
     <PathPreviewModal
@@ -168,10 +198,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  FolderOpened, Search, Star, StarFilled, Delete, Menu, Document, FullScreen,
+  FolderOpened, Star, StarFilled, Delete, Menu, Document, FullScreen, EditPen,
 } from '@element-plus/icons-vue'
 import {
   listLocalDir, readLocalFile, getReaderHistory, saveReaderHistory,
@@ -202,10 +232,19 @@ const error = ref('')
 const toc = ref<TocItem[]>([])
 const activeHeading = ref('')
 const showHistory = ref(false)
+const renamingPath = ref('')
+const renameValue = ref('')
+const pathInputRef = ref<{ focus: () => void } | null>(null)
+
+// Auto-focus the input when the overlay opens.
+watch(showHistory, (v) => {
+  if (v) nextTick(() => pathInputRef.value?.focus())
+})
 const history = ref<HistoryItem[]>([])
 const treeDrawer = ref(false)
 const tocDrawer = ref(false)
 const viewerSvg = ref('')
+const viewerTitle = ref('Mermaid 图')
 const previewPath = ref('')        // non-md / out-of-folder link target → popup
 const previewAnchor = ref('')      // line/symbol/heading anchor for the popup target
 const viewerSource = ref('')
@@ -263,6 +302,12 @@ const displayedFile = ref('')
 const transitionDir = ref<'page-next' | 'page-prev'>('page-next')
 
 // Markdown paths in tree display order (depth-first) — used to pick turn direction.
+// Show the history name for the currently open folder (if any).
+const currentFolderName = computed(() => {
+  if (!rootPath.value) return ''
+  return history.value.find((h) => h.path === rootPath.value)?.name || ''
+})
+
 const flatFiles = computed(() => {
   const out: string[] = []
   const walk = (entries: DirEntry[]) => {
@@ -277,7 +322,13 @@ const flatFiles = computed(() => {
 
 function handleMermaidClick(svg: SVGElement, source: string) {
   viewerSource.value = source
+  viewerTitle.value = 'Mermaid 图'
   viewerSvg.value = svg.outerHTML
+}
+function handleImageClick(src: string, alt: string) {
+  viewerSource.value = alt
+  viewerTitle.value = alt || '图片'
+  viewerSvg.value = `<img src="${src}" alt="${alt}" />`
 }
 
 // Anchor to scroll to after a cross-file link opens a new document.
@@ -335,7 +386,7 @@ function onPreviewOpenInReader(path: string, anchor?: string) {
   void onSelectFile(path)
 }
 
-const { renderMarkdown, enhance } = useMarkdownRender(handleMermaidClick, handleLinkClick)
+const { renderMarkdown, enhance } = useMarkdownRender(handleMermaidClick, handleLinkClick, handleImageClick)
 
 // ── history (server-stored, shared across all users) ──────────────────
 async function loadHistory() {
@@ -375,9 +426,25 @@ function removeHistory(path: string) {
   history.value = history.value.filter((h) => h.path !== path)
   void saveHistory()
 }
+function startRename(h: HistoryItem) {
+  renamingPath.value = h.path
+  renameValue.value = h.name || ''
+}
+function confirmRename(h: HistoryItem) {
+  h.name = renameValue.value.trim() || undefined
+  renamingPath.value = ''
+  void saveHistory()
+}
+function cancelRename() {
+  renamingPath.value = ''
+}
 function clearHistory() {
   history.value = []
   void saveHistory()
+}
+function openHistoryOverlay() {
+  pathInput.value = ''
+  showHistory.value = true
 }
 function useHistory(path: string) {
   pathInput.value = path
@@ -643,48 +710,59 @@ onBeforeUnmount(() => {
 
 /* ── Top bar ── */
 .reader-topbar {
-  position: relative;
   display: flex;
   gap: 10px;
   align-items: center;
   flex-shrink: 0;
-  z-index: 50;
 }
-.path-input-wrap { position: relative; flex: 1; min-width: 0; }
-.path-input { width: 100%; }
-.path-input :deep(.el-input__wrapper) { padding-left: 10px; }
-.btn-label { margin-left: 4px; }
+.path-trigger {
+  flex: 1; display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-radius: 14px;
+  border: 1px solid var(--border-glass);
+  background: var(--bg-glass);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  color: var(--text-muted); font-size: 14px;
+  cursor: pointer; text-align: left;
+  transition: all 0.2s var(--ease-out);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.path-trigger:hover { background: var(--bg-hover); color: var(--text-secondary); border-color: var(--accent-border); }
+.pt-name { font-weight: 600; color: var(--text-primary); flex-shrink: 0; }
+.pt-path { color: var(--text-faint); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
+.pt-hint { color: var(--text-faint); }
+.path-trigger:hover { background: var(--bg-hover); color: var(--text-secondary); border-color: var(--accent-border); }
 .icon-btn { flex-shrink: 0; }
 
-/* Anchored to the input wrapper so the list matches the input's width. */
-.history-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  right: 0;
-  max-height: 360px;
-  display: flex;
-  flex-direction: column;
-  z-index: 2;
-  background: var(--bg-glass-strong);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid var(--border-glass);
-  border-radius: 16px;
-  box-shadow: var(--shadow-lg), var(--inset-highlight);
-  overflow: hidden;
-}
-/* Backdrop blurs the whole page while the input + history list stay sharp on top. */
-.history-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  background: rgba(0, 0, 0, 0.08);
+/* ── Floating path overlay (command-palette style) ── */
+.path-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 15vh;
+  background: rgba(0, 0, 0, 0.15);
   backdrop-filter: blur(12px) saturate(150%);
   -webkit-backdrop-filter: blur(12px) saturate(150%);
 }
-:root[data-theme="dark"] .history-backdrop {
-  background: rgba(0, 0, 0, 0.3);
+:root[data-theme="dark"] .path-overlay { background: rgba(0, 0, 0, 0.35); }
+.path-card {
+  width: 720px; max-width: calc(100vw - 32px);
+  display: flex; flex-direction: column;
+  background: var(--bg-glass-strong);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid var(--border-glass);
+  border-radius: 20px;
+  box-shadow: var(--shadow-lg), var(--inset-highlight);
+  overflow: hidden;
+}
+.path-input-wrap { padding: 16px 20px; border-bottom: 1px solid var(--border-faint); }
+.path-input { width: 100%; }
+.path-input :deep(.el-input__wrapper) { padding-left: 12px; }
+
+.history-panel {
+  max-height: 400px;
+  display: flex; flex-direction: column;
+  overflow: hidden;
 }
 
 .hp-head {
@@ -699,28 +777,63 @@ onBeforeUnmount(() => {
 .hp-clear:hover { color: #f87171; background: rgba(248, 113, 113, 0.1); }
 .hp-list { overflow-y: auto; padding: 6px; }
 .hp-empty { padding: 24px; text-align: center; font-size: 12px; color: var(--text-faint); }
+.hp-row { border-radius: 10px; transition: background 0.12s var(--ease-out); }
+.hp-row:hover { background: var(--bg-glass-subtle); }
+.hp-row.pinned { background: var(--accent-light); }
 .hp-item {
   display: flex; align-items: center; gap: 8px;
-  padding: 7px 10px; border-radius: 10px; transition: background 0.12s var(--ease-out);
+  padding: 7px 10px;
 }
-.hp-item:hover { background: var(--bg-glass-subtle); }
-.hp-item.pinned { background: var(--accent-light); }
-.hp-pin, .hp-del {
+.hp-pin, .hp-del, .hp-edit {
   flex-shrink: 0; width: 26px; height: 26px; border-radius: 8px;
   border: none; background: transparent; color: var(--text-muted);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
 }
 .hp-pin:hover { color: var(--accent); background: var(--bg-glass-subtle); }
 .hp-item.pinned .hp-pin { color: var(--accent); }
+.hp-edit:hover { color: var(--accent); background: var(--bg-glass-subtle); }
 .hp-del:hover { color: #f87171; background: rgba(248, 113, 113, 0.1); }
-.hp-path {
-  flex: 1; font-size: 12.5px; color: var(--text-secondary); cursor: pointer;
+.hp-info {
+  flex: 1; min-width: 0; cursor: pointer; display: flex; flex-direction: column; gap: 1px;
+}
+.hp-info:hover .hp-name { color: var(--accent); }
+.hp-info:hover .hp-path { color: var(--accent); }
+.hp-name {
+  font-size: 13px; font-weight: 500; color: var(--text-primary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.hp-path:hover { color: var(--accent); }
+.hp-path {
+  font-size: 11.5px; color: var(--text-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hp-rename {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 10px 10px 44px;
+}
+.hp-rename-input {
+  flex: 1; height: 32px; padding: 0 12px; border-radius: 8px;
+  border: 1px solid var(--accent-border);
+  background: var(--bg-glass-subtle);
+  color: var(--text-primary); font-size: 13px;
+  outline: none;
+}
+.hp-rename-input:focus { border-color: var(--accent); }
+.hp-rename-ok, .hp-rename-cancel {
+  flex-shrink: 0; padding: 5px 12px; border-radius: 8px; border: none;
+  font-size: 12px; cursor: pointer; transition: all 0.15s var(--ease-out);
+}
+.hp-rename-ok { background: var(--accent); color: #fff; }
+.hp-rename-ok:hover { opacity: 0.85; }
+.hp-rename-cancel { background: var(--bg-glass-subtle); color: var(--text-muted); }
+.hp-rename-cancel:hover { color: var(--text-secondary); }
 
-.dropdown-enter-active, .dropdown-leave-active { transition: opacity 0.18s var(--ease-out), transform 0.18s var(--ease-out); }
-.dropdown-enter-from, .dropdown-leave-to { opacity: 0; transform: translateY(-6px); }
+/* Overlay transitions */
+.overlay-fade-enter-active, .overlay-fade-leave-active { transition: opacity 0.25s var(--ease-out); }
+.overlay-fade-enter-from, .overlay-fade-leave-to { opacity: 0; }
+.overlay-pop-enter-active { transition: opacity 0.3s var(--ease-spring), transform 0.3s var(--ease-spring); }
+.overlay-pop-leave-active { transition: opacity 0.15s var(--ease-out), transform 0.15s var(--ease-out); }
+.overlay-pop-enter-from { opacity: 0; transform: scale(0.96) translateY(-12px); }
+.overlay-pop-leave-to { opacity: 0; transform: scale(0.98) translateY(-8px); }
 
 /* ── Mobile floating buttons (file / TOC) ── */
 .fab {
@@ -859,14 +972,15 @@ onBeforeUnmount(() => {
     transition: padding-top var(--duration-slow) var(--ease-standard);
   }
   .app-main.mobile-scrolled .reader-page { padding-top: 0; }
-  .btn-label { display: none; }
   .fab { display: flex; }
   .pane-left, .pane-right { display: none; }
   .pane-center { width: 100%; overflow-x: clip; }
   .markdown-body { padding: 12px 14px 100px; max-width: 100%; }
   .history-panel { max-height: 50vh; }
-  /* Collapse the topbar (input + buttons) on scroll, same as the page-header. */
-  .reader-topbar { max-height: 80px; transition: max-height var(--duration-slow) var(--ease-standard), opacity var(--duration-normal) var(--ease-out), margin var(--duration-slow); }
+  .path-card { width: calc(100vw - 24px); }
+  .path-overlay { padding-top: 10vh; }
+  /* Collapse the topbar trigger on scroll, same as the page-header. */
+  .reader-topbar { max-height: 60px; transition: max-height var(--duration-slow) var(--ease-standard), opacity var(--duration-normal) var(--ease-out), margin var(--duration-slow); }
   .app-main.mobile-scrolled .reader-topbar {
     max-height: 0; opacity: 0; margin: 0; overflow: hidden; pointer-events: none;
   }

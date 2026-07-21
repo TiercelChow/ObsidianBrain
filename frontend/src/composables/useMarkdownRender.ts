@@ -123,6 +123,7 @@ async function rerenderMermaid(container: HTMLElement) {
 export function useMarkdownRender(
   onMermaidClick: (svg: SVGElement, source: string) => void,
   onLinkClick?: (href: string) => void,
+  onImageClick?: (src: string, alt: string) => void,
 ) {
   const appStore = useAppStore()
   let currentContainer: HTMLElement | null = null
@@ -202,6 +203,16 @@ export function useMarkdownRender(
         onLinkClick?.(href)
       })
     })
+
+    // 5. images — click to zoom
+    if (onImageClick) {
+      container.querySelectorAll<HTMLImageElement>('img').forEach((img) => {
+        img.style.cursor = 'zoom-in'
+        img.addEventListener('click', () => {
+          onImageClick(img.src, img.alt || '')
+        })
+      })
+    }
   }
 
   return { renderMarkdown, enhance }

@@ -59,6 +59,7 @@ export function statLocalPath(path: string): Promise<ToolEnvelope<PathStat>> {
 /** A reader history entry (server-stored, shared across all users). */
 export interface HistoryItem {
   path: string
+  name?: string
   pinned: boolean
   lastUsed: number
 }
