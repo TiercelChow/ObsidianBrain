@@ -7,8 +7,8 @@
       </div>
       <div class="header-actions">
         <el-button @click="appStore.toggleTheme()">
-          <el-icon><component :is="appStore.theme === 'dark' ? Sunny : Moon" /></el-icon>
-          {{ appStore.theme === 'dark' ? '浅色' : '深色' }}
+          <el-icon><component :is="themeIcon" /></el-icon>
+          {{ themeLabel }}
         </el-button>
         <el-button @click="loadAll" :loading="loading">
           <el-icon v-if="!loading"><Refresh /></el-icon>
@@ -168,11 +168,22 @@ import { getHealth, getMemoryStats, getMemoStats, getConfig, saveConfig, listCod
 import { useAppStore } from '@/stores/app'
 import {
   Refresh, Notebook, FolderOpened, Calendar,
-  MagicStick, DataLine, Connection, Sunny, Moon,
+  MagicStick, DataLine, Connection, Sunny, Moon, Sunrise,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 const appStore = useAppStore()
+
+const themeIcon = computed(() => {
+  if (appStore.theme === 'dark') return Sunny
+  if (appStore.theme === 'eye-care') return Sunrise
+  return Moon
+})
+const themeLabel = computed(() => {
+  if (appStore.theme === 'dark') return '浅色'
+  if (appStore.theme === 'eye-care') return '护眼'
+  return '深色'
+})
 
 interface HealthData {
   status: string

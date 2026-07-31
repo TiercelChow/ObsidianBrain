@@ -75,11 +75,12 @@ const renderer = {
 
 const md = new Marked({ gfm: true, breaks: false, renderer })
 // LaTeX math via KaTeX: $...$ inline, $$...$$ block.
+// \[...\] and \(...\) are pre-processed to $$/$$ in renderMarkdown().
 md.use(markedKatex({ throwOnError: false }))
 
 // ── mermaid ────────────────────────────────────────────────────────────
 
-function initMermaid(theme: 'light' | 'dark') {
+function initMermaid(theme: 'light' | 'dark' | 'eye-care') {
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: 'loose',

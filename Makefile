@@ -3,12 +3,9 @@
 # Build everything — frontend first (rust-embed needs the dist at compile time).
 build: frontend backend
 
-# Build the Vue frontend and copy dist into backend/ for rust-embed.
+# Build the Vue frontend (output to dist_new, read by rust-embed at compile time).
 frontend:
-	cd frontend && npm run build
-	rm -rf backend/frontend/dist
-	mkdir -p backend/frontend/dist
-	cp -r frontend/dist/* backend/frontend/dist/
+	cd frontend && npx vite build --outDir dist_new --emptyOutDir
 
 # Build the Rust backend in release mode.
 backend:
@@ -27,5 +24,5 @@ uninstall:
 
 # Clean build artifacts.
 clean:
-	rm -rf frontend/dist backend/frontend/dist
+	rm -rf frontend/dist frontend/dist_new
 	cd backend && cargo clean

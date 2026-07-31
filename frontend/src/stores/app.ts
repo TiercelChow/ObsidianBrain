@@ -14,19 +14,19 @@ export const useAppStore = defineStore('app', () => {
   // collapse). Set by App.vue (app-main scroll) and the Reader (pane-center scroll).
   const isScrolled = ref(false)
 
-  // Theme: 'light' | 'dark'
-  const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null
-  const theme = ref<'light' | 'dark'>(savedTheme || 'light')
+  // Theme: 'light' | 'dark' | 'eye-care'
+  const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | 'eye-care' | null
+  const theme = ref<'light' | 'dark' | 'eye-care'>(savedTheme || 'light')
 
   function toggleSidebar() {
     sidebarCollapsed.value = !sidebarCollapsed.value
   }
 
   function toggleTheme() {
-    theme.value = theme.value === 'light' ? 'dark' : 'light'
+    theme.value = theme.value === 'light' ? 'dark' : theme.value === 'dark' ? 'eye-care' : 'light'
   }
 
-  function setTheme(t: 'light' | 'dark') {
+  function setTheme(t: 'light' | 'dark' | 'eye-care') {
     theme.value = t
   }
 

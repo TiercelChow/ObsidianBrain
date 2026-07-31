@@ -214,21 +214,7 @@ async fn run_server_async(
         AppConfig::default()
     });
 
-    // Apply CLI overrides
-    if let Some(h) = host_override {
-        config.server.host = h;
-    }
-    if let Some(p) = port_override {
-        config.server.port = p;
-    }
-
-    let host: std::net::IpAddr = config
-        .server
-        .host
-        .parse()
-        .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
-    let addr = SocketAddr::new(host, config.server.port);
-    tracing::info!("配置加载完成: {}:{}", addr.ip(), addr.port());
+    // CLI overrides applied later (after DB config) for highest priority.
 
     // Initialize SQLite
     let mut components = ComponentStatus {
@@ -253,6 +239,19 @@ async fn run_server_async(
     // Load saved config from DB
     if let Ok(Some(saved_json)) = db.get_state("system_config") {
         if let Ok(saved) = serde_json::from_str::<serde_json::Value>(&saved_json) {
+            // Server config (host/port) — can be set via `obsidian-brain config set server.host`
+            if let Some(srv) = saved.get("server") {
+                if let Some(h) = srv
+                    .get("host")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    config.server.host = h.to_string();
+                }
+                if let Some(p) = srv.get("port").and_then(|v| v.as_u64()) {
+                    config.server.port = p as u16;
+                }
+            }
             if let Some(vault) = saved.get("vault") {
                 if let Some(path) = vault.get("path").and_then(|v| v.as_str()) {
                     config.vault.path = std::path::PathBuf::from(path);
@@ -314,6 +313,22 @@ async fn run_server_async(
             tracing::info!("已从数据库加载保存的配置");
         }
     }
+
+    // Apply CLI overrides last (highest priority — beats DB config).
+    if let Some(h) = host_override {
+        config.server.host = h;
+    }
+    if let Some(p) = port_override {
+        config.server.port = p;
+    }
+
+    let host: std::net::IpAddr = config
+        .server
+        .host
+        .parse()
+        .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+    let addr = SocketAddr::new(host, config.server.port);
+    tracing::info!("配置加载完成: {}:{}", addr.ip(), addr.port());
 
     // Obsidian
     let obsidian_client = if config.obsidian.enabled {

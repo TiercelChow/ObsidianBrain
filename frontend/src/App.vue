@@ -241,6 +241,42 @@ code, pre, .code-block { font-family: var(--font-mono); }
   --orb-opacity: 0.35;
 }
 
+/* ── Eye-Care Theme — Soft Green ── */
+:root[data-theme="eye-care"] {
+  --bg-base: #c5d5b8;
+  --bg-glass: rgba(180, 215, 165, 0.55);
+  --bg-glass-strong: rgba(165, 205, 150, 0.72);
+  --bg-glass-subtle: rgba(150, 195, 135, 0.38);
+  --bg-hover: rgba(135, 185, 120, 0.5);
+  --border-glass: rgba(100, 155, 85, 0.55);
+  --border-subtle: rgba(85, 140, 70, 0.42);
+  --border-faint: rgba(30, 60, 20, 0.12);
+
+  --text-primary: #152618;
+  --text-secondary: #1e3320;
+  --text-tertiary: #355030;
+  --text-muted: #4e6e45;
+  --text-faint: #708e60;
+
+  --accent: #2e7d4a;
+  --accent-light: rgba(46, 125, 74, 0.18);
+  --accent-border: rgba(46, 125, 74, 0.5);
+
+  --code-bg: rgba(20, 50, 15, 0.12);
+  --code-inline-color: #1b6e2e;
+  --code-block-bg: #152612;
+  --code-block-text: #9dd495;
+
+  --shadow-sm: 0 1px 2px rgba(30, 60, 20, 0.08);
+  --shadow-md: 0 2px 8px rgba(30, 60, 20, 0.1), 0 1px 2px rgba(30, 60, 20, 0.06);
+  --shadow-lg: 0 8px 32px rgba(30, 60, 20, 0.12);
+  --inset-highlight: inset 0 1px 1px rgba(255, 255, 245, 0.6);
+  --glass-blur: 20px;
+  --glass-saturate: 180%;
+
+  --orb-opacity: 1;
+}
+
 /* ── Glass Card 全局覆盖 ── */
 .el-card,
 .stat-card, .module-card, .status-card, .tool-card,
@@ -476,6 +512,28 @@ code, pre, .code-block { font-family: var(--font-mono); }
 :root[data-theme="dark"] .el-descriptions__cell {
   border-color: var(--border-faint) !important;
 }
+/* Eye-care: el-descriptions */
+:root[data-theme="eye-care"] .el-descriptions {
+  background: transparent !important;
+}
+:root[data-theme="eye-care"] .el-descriptions__body {
+  background-color: transparent !important;
+}
+:root[data-theme="eye-care"] .el-descriptions__label,
+:root[data-theme="eye-care"] .el-descriptions__label.el-descriptions__cell.is-bordered-label {
+  background: var(--bg-glass-subtle) !important;
+  color: var(--text-muted) !important;
+}
+:root[data-theme="eye-care"] .el-descriptions__content {
+  background: transparent !important;
+  color: var(--text-secondary) !important;
+}
+:root[data-theme="eye-care"] .el-descriptions__cell {
+  border-color: var(--border-faint) !important;
+}
+:root[data-theme="eye-care"] .el-descriptions__table {
+  border-color: var(--border-faint) !important;
+}
 
 /* Dark: el-switch */
 :root[data-theme="dark"] .el-switch__core {
@@ -510,6 +568,25 @@ code, pre, .code-block { font-family: var(--font-mono); }
 /* Dark: el-input-number */
 :root[data-theme="dark"] .el-input-number {
   background: var(--bg-glass-subtle) !important;
+}
+/* Eye-care: el-input-number */
+:root[data-theme="eye-care"] .el-input-number {
+  background: var(--bg-glass-subtle) !important;
+}
+:root[data-theme="eye-care"] .el-input-number .el-input__wrapper {
+  background: var(--bg-glass-subtle) !important;
+  box-shadow: 0 0 0 1px var(--border-glass) inset !important;
+}
+:root[data-theme="eye-care"] .el-input-number__decrease,
+:root[data-theme="eye-care"] .el-input-number__increase {
+  background: var(--bg-glass-subtle) !important;
+  color: var(--text-muted) !important;
+  border-color: var(--border-glass) !important;
+}
+:root[data-theme="eye-care"] .el-input-number__decrease:hover,
+:root[data-theme="eye-care"] .el-input-number__increase:hover {
+  color: var(--accent) !important;
+  background: var(--bg-hover) !important;
 }
 
 /* Dark: calendar popper */
@@ -546,6 +623,62 @@ code, pre, .code-block { font-family: var(--font-mono); }
 /* Dark: el-overlay (dialog backdrop) */
 :root[data-theme="dark"] .el-overlay {
   background-color: rgba(0, 0, 0, 0.7) !important;
+}
+
+/* Eye-care: el-dialog + el-overlay */
+:root[data-theme="eye-care"] {
+  --el-bg-color: #a8c9a0;
+  --el-bg-color-overlay: #b5d4ac;
+  --el-bg-color-page: #a8c9a0;
+  --el-text-color-primary: #152618;
+  --el-text-color-regular: #243818;
+  --el-text-color-secondary: #355030;
+  --el-text-color-placeholder: #5a7048;
+  --el-border-color: rgba(100, 155, 85, 0.5);
+  --el-border-color-light: rgba(85, 140, 70, 0.4);
+  --el-border-color-lighter: rgba(70, 120, 55, 0.3);
+  --el-fill-color: rgba(150, 195, 135, 0.3);
+  --el-fill-color-light: rgba(135, 185, 120, 0.25);
+  --el-fill-color-lighter: rgba(120, 175, 105, 0.15);
+  --el-fill-color-blank: transparent;
+  --el-color-primary: #2e7d4a;
+  --el-mask-color: rgba(30, 60, 20, 0.5);
+  --el-overlay-color: rgba(30, 60, 20, 0.5);
+  --el-disabled-bg-color: rgba(120, 165, 105, 0.3);
+  --el-disabled-text-color: #708e60;
+  --el-disabled-border-color: rgba(85, 140, 70, 0.4);
+}
+:root[data-theme="eye-care"] .el-dialog {
+  background: var(--bg-glass-strong) !important;
+  border: 1px solid var(--border-glass) !important;
+}
+:root[data-theme="eye-care"] .el-dialog__header {
+  border-bottom: 1px solid var(--border-faint) !important;
+}
+:root[data-theme="eye-care"] .el-dialog__title {
+  color: var(--text-primary) !important;
+}
+:root[data-theme="eye-care"] .el-dialog__body {
+  color: var(--text-secondary) !important;
+}
+:root[data-theme="eye-care"] .el-overlay {
+  background-color: rgba(30, 60, 20, 0.5) !important;
+  backdrop-filter: blur(4px) !important;
+  -webkit-backdrop-filter: blur(4px) !important;
+}
+:root[data-theme="eye-care"] .el-popper {
+  background: var(--bg-glass-strong) !important;
+  border: 1px solid var(--border-glass) !important;
+}
+:root[data-theme="eye-care"] .el-select-dropdown__item {
+  color: var(--text-secondary) !important;
+}
+:root[data-theme="eye-care"] .el-select-dropdown__item.hover,
+:root[data-theme="eye-care"] .el-select-dropdown__item:hover {
+  background: var(--bg-hover) !important;
+}
+:root[data-theme="eye-care"] .el-select-dropdown__item.selected {
+  color: var(--accent) !important;
 }
 
 /* Dark: el-popper (dropdown lists) */

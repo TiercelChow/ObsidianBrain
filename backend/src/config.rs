@@ -264,7 +264,7 @@ impl Default for ObsidianApiConfig {
 // ── Default value functions ──
 
 fn default_host() -> String {
-    "127.0.0.1".to_string()
+    "0.0.0.0".to_string()
 }
 fn default_port() -> u16 {
     9876

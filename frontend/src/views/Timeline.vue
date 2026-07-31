@@ -310,8 +310,9 @@
           class="viewer-nav viewer-prev"
           @click="viewerPrev"
         ><el-icon :size="22"><ArrowLeft /></el-icon></button>
-        <div class="viewer-image-wrap">
+        <div class="viewer-image-wrap" ref="viewerStageRef">
           <img
+            ref="viewerImgRef"
             :src="vaultImageUrl(imageViewer.images[imageViewer.index])"
             class="viewer-image"
             @click.stop
@@ -319,6 +320,11 @@
           <div v-if="imageViewer.images.length > 1" class="viewer-counter">
             {{ imageViewer.index + 1 }} / {{ imageViewer.images.length }}
           </div>
+        </div>
+        <div class="viewer-controls">
+          <button class="viewer-zoom-btn" title="缩小" @click.stop="viewerZoom(0.8)"><el-icon :size="18"><Minus /></el-icon></button>
+          <button class="viewer-zoom-btn" title="放大" @click.stop="viewerZoom(1.25)"><el-icon :size="18"><Plus /></el-icon></button>
+          <button class="viewer-zoom-btn" title="重置" @click.stop="viewerReset"><el-icon :size="18"><Refresh /></el-icon></button>
         </div>
         <button
           v-if="imageViewer.images.length > 1"
@@ -333,9 +339,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus, Search, PriceTag, Loading, Picture, Refresh, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import { Plus, Minus, Search, PriceTag, Loading, Picture, Refresh, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/github-dark.css'
+import panzoom, { type PanZoom } from 'panzoom'
 import { createMemo, browseTimeline, searchMemos, uploadImages, syncMemos } from '@/api'
 
 // ── Types ──
@@ -404,22 +411,61 @@ const imageViewer = ref({
   images: [] as string[],
   index: 0,
 })
+const viewerStageRef = ref<HTMLDivElement | null>(null)
+const viewerImgRef = ref<HTMLImageElement | null>(null)
+let viewerPz: PanZoom | null = null
 
+function initViewerPz() {
+  if (!viewerImgRef.value) return
+  viewerPz?.dispose()
+  const img = viewerImgRef.value
+  img.style.transform = ''
+  img.style.transformOrigin = ''
+  viewerPz = panzoom(img, {
+    maxZoom: 8,
+    minZoom: 0.1,
+    zoomDoubleClickSpeed: 1.8,
+    bounds: false,
+  })
+}
+function viewerZoom(factor: number) {
+  if (!viewerPz || !viewerStageRef.value) return
+  const r = viewerStageRef.value.getBoundingClientRect()
+  viewerPz.smoothZoom(r.width / 2 + r.left, r.height / 2 + r.top, factor)
+}
+function viewerReset() {
+  if (!viewerPz || !viewerImgRef.value) return
+  viewerPz.dispose()
+  const img = viewerImgRef.value
+  img.style.transform = ''
+  img.style.transformOrigin = ''
+  viewerPz = panzoom(img, {
+    maxZoom: 8,
+    minZoom: 0.1,
+    zoomDoubleClickSpeed: 1.8,
+    bounds: false,
+  })
+}
 function openImageViewer(images: string[], index: number) {
   imageViewer.value = { show: true, images, index }
   document.addEventListener('keydown', onViewerKeydown)
+  setTimeout(initViewerPz, 100)
 }
 function closeImageViewer() {
   imageViewer.value.show = false
   document.removeEventListener('keydown', onViewerKeydown)
+  viewerPz?.dispose()
+  viewerPz = null
 }
 function viewerPrev() {
   const v = imageViewer.value
   v.index = (v.index - 1 + v.images.length) % v.images.length
+  setTimeout(initViewerPz, 100)
 }
 function viewerNext() {
   const v = imageViewer.value
   v.index = (v.index + 1) % v.images.length
+  setTimeout(initViewerPz, 100)
 }
 function onViewerKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') closeImageViewer()
@@ -1751,7 +1797,7 @@ onMounted(() => { loadMemos() })
 }
 .char-count { font-size: 12px; color: var(--text-faint); }
 .dialog-btns { display: flex; gap: 10px; }
-.image-btn { gap: 4px; }
+.image-btn { gap: 4px; height: 42px; padding: 0 14px; font-size: 13px; }
 
 /* ── Image Upload UI ── */
 .image-preview-grid {
@@ -1974,7 +2020,32 @@ onMounted(() => { loadMemos() })
   object-fit: contain;
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  cursor: grab;
+  touch-action: pan-x pan-y;
 }
+.viewer-image:active { cursor: grabbing; }
+.viewer-controls {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  z-index: 10;
+}
+.viewer-zoom-btn {
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s ease;
+}
+.viewer-zoom-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
+.viewer-zoom-btn:active { transform: scale(0.92); }
 .viewer-counter {
   color: rgba(255, 255, 255, 0.7);
   font-size: 14px;

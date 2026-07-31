@@ -610,14 +610,31 @@ onBeforeUnmount(() => {
 .reader-page:fullscreen {
   height: 100vh;
   width: 100%;
-  background:
-    radial-gradient(ellipse at 75% 15%, rgba(196, 181, 253, 0.25), transparent 55%),
-    radial-gradient(ellipse at 15% 85%, rgba(165, 243, 252, 0.2), transparent 55%),
-    radial-gradient(ellipse at 50% 50%, rgba(253, 230, 138, 0.12), transparent 50%),
-    var(--bg-base);
+  background: var(--bg-base);
   border-radius: 0;
   overflow: hidden;
   cursor: default;
+}
+.reader-page:fullscreen::before {
+  content: '';
+  position: absolute;
+  inset: -10%;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse at 75% 15%, rgba(196, 181, 253, 0.25), transparent 55%),
+    radial-gradient(ellipse at 15% 85%, rgba(165, 243, 252, 0.2), transparent 55%),
+    radial-gradient(ellipse at 50% 50%, rgba(253, 230, 138, 0.12), transparent 50%);
+  opacity: var(--orb-opacity, 1);
+}
+:root[data-theme="eye-care"] .reader-page:fullscreen::before {
+  background:
+    radial-gradient(ellipse at 75% 15%, rgba(120, 180, 100, 0.25), transparent 55%),
+    radial-gradient(ellipse at 15% 85%, rgba(160, 200, 140, 0.2), transparent 55%),
+    radial-gradient(ellipse at 50% 50%, rgba(200, 220, 170, 0.12), transparent 50%);
+}
+:root[data-theme="dark"] .reader-page:fullscreen::before {
+  opacity: 0.35;
 }
 .reader-page:fullscreen.fs-ui-hidden { cursor: none; }
 /* Hide only the page title + input bar; keep file tree + TOC + FABs. */
@@ -1011,6 +1028,17 @@ onBeforeUnmount(() => {
   --tk-builtin: #79c0ff;
   --tk-variable: #ffa657;
   --tk-tag: #7ee787;
+}
+:root[data-theme="eye-care"] {
+  --tk-text: #152618;
+  --tk-keyword: #1b5e20;
+  --tk-string: #33691e;
+  --tk-number: #0d47a1;
+  --tk-comment: #558b2f;
+  --tk-function: #6a1b9a;
+  --tk-builtin: #0d47a1;
+  --tk-variable: #bf360c;
+  --tk-tag: #2e7d32;
 }
 
 /* Reader drawers are mobile-only and teleported to body; drop the default 20px

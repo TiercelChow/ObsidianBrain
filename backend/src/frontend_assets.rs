@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 use rust_embed::Embed;
 
 #[derive(Embed)]
-#[folder = "frontend/dist/"]
+#[folder = "../frontend/dist_new/"]
 struct FrontendAssets;
 
 /// Serve a file from the embedded frontend assets.

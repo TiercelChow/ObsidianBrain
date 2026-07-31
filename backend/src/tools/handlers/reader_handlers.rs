@@ -19,7 +19,7 @@ use crate::AppContext;
 const MAX_FILE_SIZE: u64 = 5 * 1024 * 1024;
 
 /// Maximum recursion depth allowed (defense against pathological deep trees).
-const MAX_DEPTH_CAP: usize = 6;
+const MAX_DEPTH_CAP: usize = 15;
 
 /// Directories skipped when building the file tree (build artifacts / VCS / deps).
 const SKIP_DIRS: &[&str] = &[
@@ -154,7 +154,7 @@ impl ToolHandler for ListLocalDirHandler {
             "type": "object",
             "properties": {
                 "path": { "type": "string", "description": "本地绝对路径" },
-                "depth": { "type": "integer", "default": 3, "minimum": 0, "maximum": 6 }
+                "depth": { "type": "integer", "default": 10, "minimum": 0, "maximum": 15 }
             },
             "required": ["path"]
         })
@@ -173,7 +173,7 @@ impl ToolHandler for ListLocalDirHandler {
             .get("depth")
             .and_then(|v| v.as_u64())
             .map(|v| v as usize)
-            .unwrap_or(3)
+            .unwrap_or(10)
             .min(MAX_DEPTH_CAP);
 
         let path = PathBuf::from(path_str);
@@ -563,11 +563,13 @@ mod tests {
         let items = vec![
             HistoryItem {
                 path: "/pinned/path".into(),
+                name: None,
                 pinned: true,
                 last_used: 100,
             },
             HistoryItem {
                 path: "/other/path".into(),
+                name: Some("other".into()),
                 pinned: false,
                 last_used: 200,
             },

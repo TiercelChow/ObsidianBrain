@@ -10,6 +10,9 @@ frontend/dist/
 
 # Embedded frontend (copied by Makefile for rust-embed)
 backend/frontend/
+# Frontend build output (used by rust-embed)
+frontend/dist/
+frontend/dist_new/
 
 # Data (runtime — ~/.obsidian-brain/ is outside the repo, but local data/ too)
 data/

@@ -66,9 +66,13 @@ pub async fn upload_images(
                 )
             })?;
 
-        // Generate thumbnail (skip for SVG)
+        // Generate thumbnail in background (non-blocking) — skip for SVG
         if ext != "svg" {
-            generate_thumbnail(&data, &filename, ext);
+            let data_owned = data.to_vec();
+            let filename_owned = filename.clone();
+            tokio::task::spawn_blocking(move || {
+                generate_thumbnail(&data_owned, &filename_owned, ext);
+            });
         }
 
         tracing::info!(path = %vault_path, size = data.len(), "图片上传成功");
@@ -98,10 +102,12 @@ fn generate_thumbnail(data: &[u8], filename: &str, _ext: &str) {
 
     match image::load_from_memory(data) {
         Ok(img) => {
+            // Triangle is ~5x faster than Lanczos3 with negligible quality
+            // difference at thumbnail size (400px).
             let thumbnail = img.resize(
                 THUMBNAIL_MAX_SIZE,
                 THUMBNAIL_MAX_SIZE,
-                image::imageops::FilterType::Lanczos3,
+                image::imageops::FilterType::Triangle,
             );
             match thumbnail.save_with_format(&thumb_path, image::ImageFormat::Jpeg) {
                 Ok(_) => {
