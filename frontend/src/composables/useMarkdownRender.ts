@@ -75,7 +75,7 @@ const renderer = {
 
 const md = new Marked({ gfm: true, breaks: false, renderer })
 // LaTeX math via KaTeX: $...$ inline, $$...$$ block.
-// \[...\] and \(...\) are pre-processed to $$/$$ in renderMarkdown().
+// \[...\], \(...\), and bare [math] are pre-processed to $$/$$ in renderMarkdown().
 md.use(markedKatex({ throwOnError: false }))
 
 // ── mermaid ────────────────────────────────────────────────────────────
@@ -141,7 +141,50 @@ export function useMarkdownRender(
 
   function renderMarkdown(src: string): string {
     usedIds.clear()
-    return md.parse(stripFrontmatter(src)) as string
+    let text = stripFrontmatter(src)
+
+    // Protect fenced code blocks (including mermaid) from math preprocessing.
+    // marked's tokenizer hasn't run yet, so we manually extract ```...``` blocks.
+    const codeBlocks: string[] = []
+    text = text.replace(/```[\s\S]*?```/g, (block) => {
+      codeBlocks.push(block)
+      return `\x00CB${codeBlocks.length - 1}\x00`
+    })
+
+    // Convert LaTeX delimiters to $...$ / $$...$$ (the only ones marked-katex-extension v5 supports).
+    // \[...\] → $$...$$ (display), \(...\) → $...$ (inline)
+    // Note: marked-katex-extension v5 does NOT support newlines inside $$...$$,
+    // so we collapse multi-line formulas to single line (joining with space).
+    const mathBlocks: string[] = []
+    text = text.replace(/\\\[([\s\S]+?)\\\]/g, (_, inner) => {
+      const collapsed = inner.trim().replace(/\n\s*/g, ' ')
+      mathBlocks.push(`$$${collapsed}$$`)
+      return `\x00MATH${mathBlocks.length - 1}\x00`
+    })
+    text = text.replace(/\\\(([\s\S]+?)\\\)/g, (_, inner) => {
+      const collapsed = inner.trim().replace(/\n\s*/g, ' ')
+      mathBlocks.push(`$${collapsed}$`)
+      return `\x00MATH${mathBlocks.length - 1}\x00`
+    })
+
+    // Convert bare [math] → $$...$$, but only when it looks like a formula
+    // and is NOT a Markdown link ([text](url)) or image (![alt](url)).
+    text = text.replace(/(?<![!\]])\[([^\[\]\n]+)\](?!\()/g, (match, inner) => {
+      const trimmed = inner.trim()
+      // Heuristic: math if it contains =, _, ^, {}, \, or letter+operator patterns
+      if (/[=_^{}\\]/.test(trimmed) || /[a-zA-Z]\s*[+\-*/=]/.test(trimmed)) {
+        return `$$${trimmed}$$`
+      }
+      return match
+    })
+
+    // Restore math blocks (already in $...$ / $$...$$ format).
+    text = text.replace(/\x00MATH(\d+)\x00/g, (_, i) => mathBlocks[parseInt(i, 10)])
+
+    // Restore code blocks.
+    text = text.replace(/\x00CB(\d+)\x00/g, (_, i) => codeBlocks[parseInt(i, 10)])
+
+    return md.parse(text) as string
   }
 
   async function enhance(container: HTMLElement) {
