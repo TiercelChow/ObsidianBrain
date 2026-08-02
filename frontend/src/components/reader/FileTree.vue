@@ -43,7 +43,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { CaretBottom, CaretRight, Folder, FolderOpened, Document } from '@element-plus/icons-vue'
 import type { DirEntry } from '@/api/reader'
 
@@ -58,6 +58,20 @@ const expanded = ref<Set<string>>(new Set())
 if (props.level === 0) {
   props.entries.filter((e) => e.is_dir).forEach((e) => expanded.value.add(e.path))
 }
+
+// Auto-expand all ancestor directories of the active file so it's visible.
+function expandPathToActive(entries: DirEntry[], active: string) {
+  for (const e of entries) {
+    if (e.is_dir && e.children?.length) {
+      // If the active path is this dir itself or starts with it, expand.
+      if (active === e.path || active.startsWith(e.path + '/')) {
+        expanded.value.add(e.path)
+        expandPathToActive(e.children, active)
+      }
+    }
+  }
+}
+watch(() => props.activePath, (p) => { if (p) expandPathToActive(props.entries, p) }, { immediate: true })
 
 const indent = `${10 + props.level * 14}px`
 

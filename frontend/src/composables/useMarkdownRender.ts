@@ -56,8 +56,24 @@ const renderer = {
   code({ text, lang }: Tokens.Code): string {
     const language = (lang || '').trim().split(/\s+/)[0].toLowerCase()
     if (language === 'mermaid') {
-      const escaped = escapeHtml(text)
-      // text content lets mermaid.run read it; data-raw preserves source for re-render.
+      // Convert LaTeX subscripts/superscripts to Unicode characters, but ONLY
+      // inside quoted node labels ("...") — not in mermaid keywords/syntax.
+      // mermaid renders to SVG, so HTML <sub>/<sup> tags don't work;
+      // Unicode subscript/superscript chars work in SVG text elements.
+      const subMap: Record<string, string> = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉','a':'ₐ','e':'ₑ','o':'ₒ','x':'ₓ','h':'ₕ','k':'ₖ','l':'ₗ','m':'ₘ','n':'ₙ','p':'ₚ','s':'ₛ','t':'ₜ','i':'ᵢ','j':'ⱼ','r':'ᵣ','u':'ᵤ','v':'ᵥ' }
+      const supMap: Record<string, string> = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','a':'ᵃ','b':'ᵇ','c':'ᶜ','d':'ᵈ','e':'ᵉ','f':'ᶠ','g':'ᵍ','h':'ʰ','i':'ⁱ','j':'ʲ','k':'ᵏ','l':'ˡ','m':'ᵐ','n':'ⁿ','o':'ᵒ','p':'ᵖ','r':'ʳ','s':'ˢ','t':'ᵗ','u':'ᵘ','v':'ᵛ','w':'ʷ','x':'ˣ','y':'ʸ','z':'ᶻ','+':'⁺','-':'⁻','=':'⁼','(':'⁽',')':'⁾' }
+      const toSub = (s: string) => s.split('').map(c => subMap[c.toLowerCase()] || c).join('')
+      const toSup = (s: string) => s.split('').map(c => supMap[c.toLowerCase()] || c).join('')
+      // Only convert inside quoted labels: "h_t" → "hₜ"
+      const processed = text.replace(/"([^"]*)"/g, (_match: string, inner: string) => {
+        const converted = inner
+          .replace(/_\{([^}]+)\}/g, (_: string, g: string) => toSub(g))
+          .replace(/_([a-zA-Z0-9])/g, (_: string, c: string) => toSub(c))
+          .replace(/\^\{([^}]+)\}/g, (_: string, g: string) => toSup(g))
+          .replace(/\^([a-zA-Z0-9])/g, (_: string, c: string) => toSup(c))
+        return `"${converted}"`
+      })
+      const escaped = escapeHtml(processed)
       return `<div class="mermaid" data-raw="${escaped}">${escaped}</div>`
     }
     const cls = language ? `hljs language-${language}` : 'hljs'
@@ -143,43 +159,28 @@ export function useMarkdownRender(
     usedIds.clear()
     let text = stripFrontmatter(src)
 
-    // Protect fenced code blocks (including mermaid) from math preprocessing.
-    // marked's tokenizer hasn't run yet, so we manually extract ```...``` blocks.
+    // Protect fenced code blocks and inline code from math preprocessing.
     const codeBlocks: string[] = []
     text = text.replace(/```[\s\S]*?```/g, (block) => {
       codeBlocks.push(block)
       return `\x00CB${codeBlocks.length - 1}\x00`
     })
+    text = text.replace(/`[^`\n]+`/g, (block) => {
+      codeBlocks.push(block)
+      return `\x00CB${codeBlocks.length - 1}\x00`
+    })
 
-    // Convert LaTeX delimiters to $...$ / $$...$$ (the only ones marked-katex-extension v5 supports).
-    // \[...\] → $$...$$ (display), \(...\) → $...$ (inline)
-    // Note: marked-katex-extension v5 does NOT support newlines inside $$...$$,
-    // so we collapse multi-line formulas to single line (joining with space).
-    const mathBlocks: string[] = []
+    // Convert LaTeX delimiters to $...$ / $$...$$ (marked-katex-extension v5 only supports these).
+    // \[...\] → $$...$$ (display, collapse multi-line to single line)
+    // \(...\) → $...$ (inline, with spaces to satisfy KaTeX's whitespace requirement)
     text = text.replace(/\\\[([\s\S]+?)\\\]/g, (_, inner) => {
       const collapsed = inner.trim().replace(/\n\s*/g, ' ')
-      mathBlocks.push(`$$${collapsed}$$`)
-      return `\x00MATH${mathBlocks.length - 1}\x00`
+      return `\n\n$$${collapsed}$$\n\n`
     })
     text = text.replace(/\\\(([\s\S]+?)\\\)/g, (_, inner) => {
       const collapsed = inner.trim().replace(/\n\s*/g, ' ')
-      mathBlocks.push(`$${collapsed}$`)
-      return `\x00MATH${mathBlocks.length - 1}\x00`
+      return ` $${collapsed}$ `
     })
-
-    // Convert bare [math] → $$...$$, but only when it looks like a formula
-    // and is NOT a Markdown link ([text](url)) or image (![alt](url)).
-    text = text.replace(/(?<![!\]])\[([^\[\]\n]+)\](?!\()/g, (match, inner) => {
-      const trimmed = inner.trim()
-      // Heuristic: math if it contains =, _, ^, {}, \, or letter+operator patterns
-      if (/[=_^{}\\]/.test(trimmed) || /[a-zA-Z]\s*[+\-*/=]/.test(trimmed)) {
-        return `$$${trimmed}$$`
-      }
-      return match
-    })
-
-    // Restore math blocks (already in $...$ / $$...$$ format).
-    text = text.replace(/\x00MATH(\d+)\x00/g, (_, i) => mathBlocks[parseInt(i, 10)])
 
     // Restore code blocks.
     text = text.replace(/\x00CB(\d+)\x00/g, (_, i) => codeBlocks[parseInt(i, 10)])

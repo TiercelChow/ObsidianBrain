@@ -572,6 +572,19 @@ function onContentScroll() {
     else break
   }
   activeHeading.value = current
+  // Auto-scroll TOC panel to keep the active heading centered.
+  scrollTocToActive()
+}
+
+/** Scroll the TOC sidebar so the active heading is centered (unless at top/bottom). */
+function scrollTocToActive() {
+  const tocEl = document.querySelector('.pane-right .pane-scroll') as HTMLElement | null
+  if (!tocEl || !activeHeading.value) return
+  const activeEl = tocEl.querySelector(`.toc-item.active`) as HTMLElement | null
+  if (!activeEl) return
+  const target = activeEl.offsetTop - tocEl.clientHeight / 2 + activeEl.clientHeight / 2
+  const maxScroll = tocEl.scrollHeight - tocEl.clientHeight
+  tocEl.scrollTop = Math.max(0, Math.min(target, maxScroll))
 }
 
 function scrollToHeading(id: string) {
@@ -1083,8 +1096,12 @@ onBeforeUnmount(() => {
   margin: 1.6em 0 0.7em;
   scroll-margin-top: 16px;
 }
-.markdown-body h1 { font-size: 1.9em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border-faint); }
-.markdown-body h2 { font-size: 1.5em; padding-bottom: 0.25em; border-bottom: 1px solid var(--border-faint); }
+.markdown-body h1 {
+  font-size: 1.9em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border-faint);
+}
+.markdown-body h2 {
+  font-size: 1.5em; padding-bottom: 0.25em; border-bottom: 1px solid var(--border-faint);
+}
 .markdown-body h3 { font-size: 1.25em; }
 .markdown-body h4 { font-size: 1.05em; }
 
@@ -1194,14 +1211,20 @@ onBeforeUnmount(() => {
 }
 
 .markdown-body table {
-  width: 100%; border-collapse: collapse; margin: 0 0 1em;
-  font-size: 0.93em; display: block; overflow-x: auto;
+  width: fit-content; max-width: 100%; border-collapse: separate; border-spacing: 0;
+  margin: 1em auto; font-size: 0.93em; overflow-x: auto;
+  border: 1px solid var(--border-faint); border-radius: 12px; overflow: hidden;
 }
 .markdown-body th, .markdown-body td {
-  padding: 8px 12px; border: 1px solid var(--border-faint);
+  padding: 10px 16px; border: none;
   text-align: left;
 }
-.markdown-body th { background: var(--bg-glass-subtle); color: var(--text-primary); font-weight: 600; }
+.markdown-body th {
+  background: var(--accent-light); color: var(--accent); font-weight: 600;
+  font-size: 0.95em; letter-spacing: 0.02em;
+}
+.markdown-body th + th, .markdown-body td + td { border-left: 1px solid var(--border-faint); }
+.markdown-body tbody tr + tr td { border-top: 1px solid var(--border-faint); }
 .markdown-body tr:nth-child(even) td { background: var(--bg-glass-subtle); }
 
 .markdown-body img { max-width: 100%; border-radius: 10px; margin: 0.5em 0; }
