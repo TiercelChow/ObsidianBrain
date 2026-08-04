@@ -2108,25 +2108,6 @@ onMounted(() => { loadMemos() })
 </style>
 
 <style>
-/* ── ElMessage 适配 ── */
-.el-message {
-  border-radius: 16px !important;
-  border: 1px solid var(--border-glass) !important;
-  background: var(--bg-glass-strong) !important;
-  backdrop-filter: blur(32px) saturate(200%) !important;
-  -webkit-backdrop-filter: blur(32px) saturate(200%) !important;
-  box-shadow:
-    var(--shadow-lg),
-    var(--shadow-sm),
-    inset 0 1px 0 rgba(255, 255, 255, 0.03) !important;
-  padding: 14px 22px !important;
-}
-.el-message .el-message__content {
-  font-size: 14px !important;
-  font-weight: 500 !important;
-  color: var(--text-primary) !important;
-}
-
 /* ── Calendar Popup Responsive ── */
 @media (max-width: 768px) {
   .glass-picker {

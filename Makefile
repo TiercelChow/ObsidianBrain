@@ -1,4 +1,4 @@
-.PHONY: build frontend backend clean install uninstall
+.PHONY: build frontend backend clean install uninstall build-windows
 
 # Build everything — frontend first (rust-embed needs the dist at compile time).
 build: frontend backend
@@ -21,6 +21,11 @@ install: build
 uninstall:
 	rm -f /usr/local/bin/obsidian-brain
 	@echo "Uninstalled."
+
+# Cross-compile for Windows x86_64 (requires: rustup target add x86_64-pc-windows-gnu; brew install mingw-w64).
+build-windows: frontend
+	cd backend && cargo build --release --target x86_64-pc-windows-gnu
+	@echo "Windows binary: backend/target/x86_64-pc-windows-gnu/release/obsidian-brain.exe"
 
 # Clean build artifacts.
 clean:

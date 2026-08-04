@@ -1,8 +1,11 @@
-//! Daemon management — start/stop/status via PID file and Unix signals (macOS).
+//! Daemon management — start/stop/status via PID file.
+//!
+//! Platform-specific implementations:
+//! - Unix (macOS/Linux): fork/setsid/SIGTERM via libc
+//! - Windows: spawn detached child + taskkill
 
 use std::fs;
 use std::io;
-use std::os::fd::AsRawFd;
 
 use crate::paths;
 
@@ -23,13 +26,6 @@ pub fn remove_pid() {
     let _ = fs::remove_file(paths::pid_file());
 }
 
-/// Check if a process with the given PID is running (`kill(pid, 0)`).
-pub fn is_process_running(pid: i32) -> bool {
-    // SAFETY: kill(pid, 0) is safe — it doesn't send a signal, just checks existence.
-    let result = unsafe { libc::kill(pid, 0) };
-    result == 0
-}
-
 /// Check if the daemon is running (PID file exists and process is alive).
 pub fn is_running() -> bool {
     match read_pid() {
@@ -38,82 +34,152 @@ pub fn is_running() -> bool {
     }
 }
 
-/// Fork a child process, detach from the terminal (setsid), redirect
-/// stdin/stdout/stderr to the log file, and write the PID file.
-///
-/// Returns `Ok(child_pid)` in the parent, or runs the server in the child.
-pub fn daemonize() -> io::Result<i32> {
-    // Open the log file for the child's stdout/stderr.
-    let log_path = paths::log_file();
-    let _log_file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)?;
+// ── Unix implementation ────────────────────────────────────────────────
 
-    // Fork.
-    let pid = unsafe { libc::fork() };
-    if pid < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    if pid > 0 {
-        // Parent — child PID is `pid`.
-        return Ok(pid);
+#[cfg(unix)]
+mod platform {
+    use super::*;
+    use std::os::fd::AsRawFd;
+
+    pub fn is_process_running(pid: i32) -> bool {
+        let result = unsafe { libc::kill(pid, 0) };
+        result == 0
     }
 
-    // Child — create a new session (detach from terminal).
-    unsafe { libc::setsid() };
+    pub fn daemonize() -> io::Result<i32> {
+        let log_path = paths::log_file();
+        let _log_file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?;
 
-    // Redirect stdin (from /dev/null), stdout and stderr (to log file).
-    let dev_null = fs::OpenOptions::new().read(true).open("/dev/null")?;
-    let log_file2 = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)?;
-
-    unsafe {
-        libc::dup2(dev_null.as_raw_fd(), 0);
-        libc::dup2(log_file2.as_raw_fd(), 1);
-        libc::dup2(log_file2.as_raw_fd(), 2);
-    }
-
-    // Write PID file.
-    let _ = write_pid();
-
-    Ok(0) // We're the child — caller checks for 0 to continue.
-}
-
-/// Send SIGTERM to the running daemon.
-pub fn stop() -> io::Result<()> {
-    let pid =
-        read_pid().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "PID file not found"))?;
-
-    if !is_process_running(pid) {
-        remove_pid();
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "Process not running",
-        ));
-    }
-
-    // Send SIGTERM.
-    let result = unsafe { libc::kill(pid, libc::SIGTERM) };
-    if result != 0 {
-        return Err(io::Error::last_os_error());
-    }
-
-    // Wait for the process to exit (poll up to 5 seconds).
-    for _ in 0..50 {
-        if !is_process_running(pid) {
-            break;
+        let pid = unsafe { libc::fork() };
+        if pid < 0 {
+            return Err(io::Error::last_os_error());
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        if pid > 0 {
+            return Ok(pid);
+        }
+
+        unsafe { libc::setsid() };
+
+        let dev_null = fs::OpenOptions::new().read(true).open("/dev/null")?;
+        let log_file2 = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?;
+
+        unsafe {
+            libc::dup2(dev_null.as_raw_fd(), 0);
+            libc::dup2(log_file2.as_raw_fd(), 1);
+            libc::dup2(log_file2.as_raw_fd(), 2);
+        }
+
+        let _ = write_pid();
+        Ok(0)
     }
 
-    // Force kill if still running.
-    if is_process_running(pid) {
-        unsafe { libc::kill(pid, libc::SIGKILL) };
-    }
+    pub fn stop() -> io::Result<()> {
+        let pid = read_pid()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "PID file not found"))?;
 
-    remove_pid();
-    Ok(())
+        if !is_process_running(pid) {
+            remove_pid();
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Process not running",
+            ));
+        }
+
+        let result = unsafe { libc::kill(pid, libc::SIGTERM) };
+        if result != 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        for _ in 0..50 {
+            if !is_process_running(pid) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        if is_process_running(pid) {
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+
+        remove_pid();
+        Ok(())
+    }
 }
+
+// ── Windows implementation ─────────────────────────────────────────────
+
+#[cfg(windows)]
+mod platform {
+    use super::*;
+
+    pub fn is_process_running(pid: i32) -> bool {
+        // On Windows, use tasklist to check if a PID exists.
+        let output = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output();
+        match output {
+            Ok(o) => String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()),
+            Err(_) => false,
+        }
+    }
+
+    pub fn daemonize() -> io::Result<i32> {
+        // Windows: spawn a detached child process running `start --foreground`.
+        let exe = std::env::current_exe()?;
+        let log_path = paths::log_file();
+        let log_file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?;
+
+        let child = std::process::Command::new(&exe)
+            .arg("start")
+            .arg("--foreground")
+            .stdout(std::process::Stdio::from(log_file.try_clone()?))
+            .stderr(std::process::Stdio::from(log_file))
+            .stdin(std::process::Stdio::null())
+            .spawn()?;
+
+        let pid = child.id() as i32;
+
+        // Write PID file with the child's PID.
+        fs::write(paths::pid_file(), pid.to_string())?;
+
+        Ok(pid)
+    }
+
+    pub fn stop() -> io::Result<()> {
+        let pid = read_pid()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "PID file not found"))?;
+
+        if !is_process_running(pid) {
+            remove_pid();
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Process not running",
+            ));
+        }
+
+        // taskkill /PID {pid} /T /F — kill the process tree.
+        let status = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .status()?;
+
+        if !status.success() {
+            return Err(io::Error::new(io::ErrorKind::Other, "taskkill failed"));
+        }
+
+        remove_pid();
+        Ok(())
+    }
+}
+
+// ── Public API (delegates to platform module) ──────────────────────────
+
+pub use platform::*;

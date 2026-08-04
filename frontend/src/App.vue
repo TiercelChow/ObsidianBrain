@@ -442,6 +442,22 @@ code, pre, .code-block { font-family: var(--font-mono); }
   color: var(--text-secondary) !important;
 }
 
+/* el-message glass styling (global — must be in App.vue, not per-view, so it loads on all routes) */
+.el-message {
+  border-radius: 16px !important;
+  border: 1px solid var(--border-glass) !important;
+  background: var(--bg-glass-strong) !important;
+  backdrop-filter: blur(32px) saturate(200%) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(200%) !important;
+  box-shadow: var(--shadow-lg), var(--shadow-sm), var(--inset-highlight) !important;
+  padding: 14px 22px !important;
+}
+.el-message .el-message__content {
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  color: var(--text-primary) !important;
+}
+
 /* Dark: el-message */
 :root[data-theme="dark"] .el-message {
   background: var(--bg-glass-strong) !important;

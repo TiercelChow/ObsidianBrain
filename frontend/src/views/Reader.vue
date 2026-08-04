@@ -101,9 +101,14 @@
     <div class="reader-body">
       <!-- Left: file tree -->
       <aside class="pane pane-left">
-        <div class="pane-title">文件</div>
+        <div class="pane-title-bar">
+          <span class="pane-title-text">文件</span>
+          <button v-if="tree.length" class="pane-title-btn" title="刷新目录" @click="refreshTree">
+            <el-icon :size="14"><Refresh /></el-icon>
+          </button>
+        </div>
         <div class="pane-scroll">
-          <FileTree v-if="tree.length" :entries="tree" :active-path="activeFile" @select="onSelectFile" />
+          <FileTree v-if="tree.length" :entries="tree" :active-path="activeFile" @select="onSelectFile" @refresh="refreshTree" />
           <div v-else class="pane-hint">打开一个文件夹后在此浏览</div>
         </div>
       </aside>
@@ -182,6 +187,13 @@
       </button>
     </div>
 
+    <!-- In-page toast (works inside fullscreen) -->
+    <transition name="toast-slide">
+      <div v-if="refreshFlash !== 'none'" class="reader-toast" :class="refreshFlash">
+        {{ refreshFlash === 'success' ? '目录已刷新' : '刷新失败' }}
+      </div>
+    </transition>
+
     <!-- Mermaid fullscreen viewer -->
     <MermaidViewer v-if="viewerSvg" :svg-html="viewerSvg" :source="viewerSource" :title="viewerTitle" @close="viewerSvg = ''" />
 
@@ -201,7 +213,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  FolderOpened, Star, StarFilled, Delete, Menu, Document, FullScreen, EditPen,
+  FolderOpened, Star, StarFilled, Delete, Menu, Document, FullScreen, EditPen, Refresh,
 } from '@element-plus/icons-vue'
 import {
   listLocalDir, readLocalFile, getReaderHistory, saveReaderHistory,
@@ -460,6 +472,38 @@ const filteredHistory = computed(() => {
 })
 
 // ── open folder ───────────────────────────────────────────────────────
+// Refresh feedback — works inside fullscreen (ElMessage is hidden in fullscreen).
+const refreshFlash = ref<'none' | 'success' | 'error'>('none')
+let refreshFlashTimer: ReturnType<typeof setTimeout> | null = null
+function showRefreshFeedback(type: 'success' | 'error') {
+  if (isFullscreen.value) {
+    // ElMessage is invisible in fullscreen mode — use in-page toast instead.
+    refreshFlash.value = type
+    if (refreshFlashTimer) clearTimeout(refreshFlashTimer)
+    refreshFlashTimer = setTimeout(() => { refreshFlash.value = 'none' }, 2000)
+  } else {
+    // Non-fullscreen: use ElMessage (same style as Timeline sync).
+    if (type === 'success') ElMessage.success('目录已刷新')
+    else ElMessage.error('刷新失败')
+  }
+}
+
+async function refreshTree() {
+  if (!rootPath.value) return
+  try {
+    const res = await listLocalDir(rootPath.value)
+    if (res.status === 'success' && res.result) {
+      tree.value = res.result.entries
+      showRefreshFeedback('success')
+    } else {
+      showRefreshFeedback('error')
+    }
+  } catch (e) {
+    console.error('刷新目录失败:', e)
+    showRefreshFeedback('error')
+  }
+}
+
 async function openPath(p?: string) {
   const path = (p ?? pathInput.value).trim()
   if (!path) return
@@ -891,6 +935,8 @@ onBeforeUnmount(() => {
 .fab.hide { opacity: 0; transform: scale(0.8); pointer-events: none; }
 .fab-left { left: 14px; }
 .fab-right { right: 14px; }
+.fab-center { left: 50%; transform: translateX(-50%); }
+.fab-center:active { transform: translateX(-50%) scale(0.9); }
 
 
 /* ── Body / panes ── */
@@ -913,6 +959,40 @@ onBeforeUnmount(() => {
   color: var(--text-muted); text-transform: uppercase;
   border-bottom: 1px solid var(--border-faint);
 }
+.pane-title-bar {
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px 8px 16px;
+  border-bottom: 1px solid var(--border-faint);
+}
+.pane-title-text {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.5px;
+  color: var(--text-muted); text-transform: uppercase;
+}
+.pane-title-btn {
+  width: 24px; height: 24px; border-radius: 7px; border: none;
+  background: transparent; color: var(--text-muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s var(--ease-out);
+}
+.pane-title-btn:hover { background: var(--bg-glass-subtle); color: var(--accent); }
+.pane-title-btn:active { transform: scale(0.92); }
+.reader-toast {
+  position: fixed; top: 80px; left: 50%; transform: translateX(-50%);
+  z-index: 9999;
+  padding: 10px 24px; border-radius: 12px;
+  font-size: 14px; font-weight: 500;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+}
+.reader-toast.success { background: rgba(74, 222, 128, 0.25); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
+.reader-toast.error { background: rgba(248, 113, 113, 0.25); color: #f87171; border: 1px solid rgba(248, 113, 113, 0.3); }
+.toast-slide-enter-active { transition: opacity 0.3s var(--ease-out), transform 0.3s var(--ease-spring); }
+.toast-slide-leave-active { transition: opacity 0.3s var(--ease-out), transform 0.3s var(--ease-out); }
+.toast-slide-enter-from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
+.toast-slide-leave-to { opacity: 0; transform: translateX(-50%) translateY(-8px); }
 .pane-scroll { flex: 1; overflow-y: auto; padding: 8px 0; }
 .pane-hint { padding: 24px 16px; font-size: 12px; color: var(--text-faint); text-align: center; line-height: 1.6; }
 

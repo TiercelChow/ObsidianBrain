@@ -20,7 +20,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 config = "0.14"
 rusqlite = { version = "0.31", features = ["bundled"] }
 notify = "6"
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 tantivy = "0.22"
 jieba-rs = "0.7"
 async-trait = "0.1"
@@ -39,8 +39,10 @@ toml = "0.8"
 
 clap = { version = "4", features = ["derive"] }
 rust-embed = "8"
-libc = "0.2"
 mime_guess = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
