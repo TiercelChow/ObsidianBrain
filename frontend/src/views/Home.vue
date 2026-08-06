@@ -6,9 +6,8 @@
         <p class="page-subtitle">系统状态与配置管理</p>
       </div>
       <div class="header-actions">
-        <el-button @click="appStore.toggleTheme()">
+        <el-button @click="appStore.toggleTheme()" :title="themeLabel">
           <el-icon><component :is="themeIcon" /></el-icon>
-          {{ themeLabel }}
         </el-button>
         <el-button @click="loadAll" :loading="loading">
           <el-icon v-if="!loading"><Refresh /></el-icon>
@@ -168,16 +167,16 @@ import { getHealth, getMemoryStats, getMemoStats, getConfig, saveConfig, listCod
 import { useAppStore } from '@/stores/app'
 import {
   Refresh, Notebook, FolderOpened, Calendar,
-  MagicStick, DataLine, Connection, Sunny, Moon, Sunrise,
+  MagicStick, DataLine, Connection, Sunny, Moon, View,
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 const appStore = useAppStore()
 
 const themeIcon = computed(() => {
-  if (appStore.theme === 'dark') return Sunny
-  if (appStore.theme === 'eye-care') return Sunrise
-  return Moon
+  if (appStore.theme === 'dark') return Moon
+  if (appStore.theme === 'eye-care') return View
+  return Sunny
 })
 const themeLabel = computed(() => {
   if (appStore.theme === 'dark') return '浅色'

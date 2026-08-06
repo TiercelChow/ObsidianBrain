@@ -31,7 +31,7 @@ export interface ToolEnvelope<T> {
 }
 
 /** List a local directory as a recursive file tree (filesystem-scoped, not vault). */
-export function listLocalDir(path: string, depth = 3): Promise<ToolEnvelope<ListLocalDirResult>> {
+export function listLocalDir(path: string, depth = 10): Promise<ToolEnvelope<ListLocalDirResult>> {
   return callTool('list_local_dir', { path, depth }) as unknown as Promise<ToolEnvelope<ListLocalDirResult>>
 }
 
