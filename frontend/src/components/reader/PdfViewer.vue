@@ -290,11 +290,17 @@ onBeforeUnmount(() => {
   inset: 0;
   overflow: hidden;
   line-height: 1;
+  /* Text is transparent so the layer is invisible — it exists only for
+     selection/search. `color` is inherited by pdf.js's dynamically-created
+     spans (which have no data-v attr, so scoped span selectors can't reach
+     them). opacity 0.25 softens the selection highlight, not the glyphs. */
+  color: transparent;
   opacity: 0.25;
-  /* text layer must not invert with the canvas filter — counter-filter */
 }
-.pdf-theme-dark .pdf-text-layer { filter: invert(1) hue-rotate(180deg); opacity: 1; }
-.pdf-theme-eye-care .pdf-text-layer { filter: sepia(0.4) brightness(0.96) saturate(0.85); opacity: 1; }
+/* dark theme: counter the parent .pdf-pages invert filter so the selection
+   highlight keeps its true color (invert is self-inverse → double-invert
+   cancels). Glyphs are transparent, so this has no visible effect on text. */
+.pdf-theme-dark .pdf-text-layer { filter: invert(1) hue-rotate(180deg); }
 .pdf-text-layer ::selection { background: var(--accent); color: transparent; }
 
 .pdf-state {
