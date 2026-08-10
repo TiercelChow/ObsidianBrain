@@ -267,7 +267,7 @@ onBeforeUnmount(() => {
 /* Theme color via CSS filter on the canvas pages — no re-render needed. */
 .pdf-theme-light .pdf-pages { filter: none; }
 .pdf-theme-dark .pdf-pages { filter: invert(1) hue-rotate(180deg); }
-.pdf-theme-eye-care .pdf-pages { filter: sepia(0.5) hue-rotate(60deg) brightness(0.9) saturate(0.4); }
+.pdf-theme-eye-care .pdf-pages { filter: sepia(1) hue-rotate(60deg) brightness(0.7) saturate(0.9); }
 
 .pdf-pages {
   display: flex;
