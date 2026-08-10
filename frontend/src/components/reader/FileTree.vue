@@ -20,13 +20,17 @@
       <div
         v-else
         class="ft-row ft-file"
-        :class="{ active: entry.path === activePath, disabled: !entry.is_markdown }"
+        :class="{ active: entry.path === activePath, disabled: !entry.is_markdown && !entry.is_pdf }"
         :style="{ paddingLeft: indent }"
         :title="entry.path"
         @click="onFileClick(entry)"
       >
         <span class="ft-caret-spacer"></span>
-        <el-icon class="ft-icon"><Document /></el-icon>
+        <el-icon class="ft-icon">
+          <Document v-if="entry.is_markdown" />
+          <Files v-else-if="entry.is_pdf" />
+          <Document v-else />
+        </el-icon>
         <span class="ft-name">{{ entry.name }}</span>
       </div>
       <!-- Children (recursive) -->
@@ -44,7 +48,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { CaretBottom, CaretRight, Folder, FolderOpened, Document } from '@element-plus/icons-vue'
+import { CaretBottom, CaretRight, Folder, FolderOpened, Document, Files } from '@element-plus/icons-vue'
 import type { DirEntry } from '@/api/reader'
 
 const props = withDefaults(
@@ -86,7 +90,7 @@ function toggle(entry: DirEntry) {
   }
 }
 function onFileClick(entry: DirEntry) {
-  if (entry.is_markdown) emit('select', entry.path)
+  if (entry.is_markdown || entry.is_pdf) emit('select', entry.path)
 }
 </script>
 
