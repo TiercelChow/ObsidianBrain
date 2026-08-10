@@ -116,15 +116,22 @@
       <!-- Center: rendered content (page-turn transition on file switch) -->
       <main ref="contentRef" class="pane pane-center" @scroll="onContentScroll">
         <transition :name="transitionDir" mode="out-in" @enter="onArticleEnter">
+          <PdfViewer
+            v-if="fileKind === 'pdf' && renderedHtml === ''"
+            ref="pdfViewerRef"
+            :key="displayedFile"
+            :src="displayedFile"
+            @outline="onPdfOutline"
+          />
           <article
-            v-if="renderedHtml"
+            v-else-if="renderedHtml"
             :key="displayedFile"
             class="markdown-body"
             v-html="renderedHtml"
           ></article>
           <div v-else key="empty" class="center-state">
             <el-icon class="cs-icon"><Document /></el-icon>
-            <p>选择左侧的 Markdown 文件开始阅读</p>
+            <p>选择左侧的文件开始阅读</p>
           </div>
         </transition>
 
@@ -146,7 +153,7 @@
             :class="{ active: activeHeading === t.id }"
             :style="{ paddingLeft: 8 + (t.level - 1) * 12 + 'px' }"
             :title="t.text"
-            @click="scrollToHeading(t.id)"
+            @click="onTocClick(t)"
           >{{ t.text }}</a>
         </div>
       </aside>
@@ -174,7 +181,7 @@
           class="toc-item"
           :class="{ active: activeHeading === t.id }"
           :style="{ paddingLeft: 8 + (t.level - 1) * 12 + 'px' }"
-          @click="scrollToHeading(t.id); tocDrawer = false"
+          @click="onTocClick(t); tocDrawer = false"
         >{{ t.text }}</a>
         <div v-if="!toc.length" class="pane-hint">无目录</div>
       </div>
@@ -224,10 +231,11 @@ import { useAppStore } from '@/stores/app'
 import FileTree from '@/components/reader/FileTree.vue'
 import MermaidViewer from '@/components/reader/MermaidViewer.vue'
 import PathPreviewModal from '@/components/reader/PathPreviewModal.vue'
+import PdfViewer from '@/components/reader/PdfViewer.vue'
 
 const appStore = useAppStore()
 
-interface TocItem { id: string; text: string; level: number }
+interface TocItem { id: string; text: string; level: number; page?: number }
 
 // Per-browser "last session" (folder + file to reopen). History itself is server-stored.
 const LAST_FOLDER_KEY = 'reader.lastFolder'
@@ -311,6 +319,8 @@ function onFullscreenChange() {
 // page-turn transition. (Separate from activeFile, which updates immediately for the
 // tree highlight.)
 const displayedFile = ref('')
+const fileKind = ref<'md' | 'pdf'>('md')
+const pdfViewerRef = ref<{ scrollToPage: (n: number) => void; setZoom: (m: 'fit' | number) => void } | null>(null)
 const transitionDir = ref<'page-next' | 'page-prev'>('page-next')
 
 // Markdown paths in tree display order (depth-first) — used to pick turn direction.
@@ -325,7 +335,7 @@ const flatFiles = computed(() => {
   const walk = (entries: DirEntry[]) => {
     for (const e of entries) {
       if (e.is_dir) e.children && walk(e.children)
-      else if (e.is_markdown) out.push(e.path)
+      else if (e.is_markdown || e.is_pdf) out.push(e.path)
     }
   }
   walk(tree.value)
@@ -374,8 +384,8 @@ function handleLinkClick(href: string) {
   const resolved = resolveRelative(baseDir, decodeURIComponent(pathPartRaw))
   if (!resolved) return
 
-  // Markdown under the opened folder → jump in the reader (page-turn).
-  if (/\.(md|markdown)$/i.test(resolved) && isUnderRoot(resolved)) {
+  // Markdown / PDF under the opened folder → jump in the reader (page-turn).
+  if (/\.(md|markdown|pdf)$/i.test(resolved) && isUnderRoot(resolved)) {
     if (anchor) pendingAnchor.value = decodeURIComponent(anchor)
     if (resolved !== displayedFile.value) {
       void onSelectFile(resolved) // onArticleEnter scrolls to pendingAnchor after render
@@ -543,24 +553,38 @@ async function onSelectFile(path: string) {
   if (path === displayedFile.value) return
   fileLoading.value = true
   error.value = ''
+
+  const isPdf = /\.pdf$/i.test(path)
+  // Determine page-turn direction from the file's position in the tree.
+  const oldIdx = flatFiles.value.indexOf(displayedFile.value)
+  const newIdx = flatFiles.value.indexOf(path)
+  transitionDir.value =
+    oldIdx >= 0 && newIdx >= 0 && newIdx < oldIdx ? 'page-prev' : 'page-next'
+
   try {
-    const res = await readLocalFile(path)
-    if (res.status === 'error' || !res.result) {
-      error.value = res.error?.message || '读取失败'
-      ElMessage.error(error.value)
-      return
+    if (isPdf) {
+      // PDF: don't read/render text — just hand the path to PdfViewer. The outline
+      // arrives via onPdfOutline after pdf.js loads the document.
+      fileKind.value = 'pdf'
+      renderedHtml.value = '' // ensure PdfViewer branch shows
+      displayedFile.value = path
+      toc.value = [] // outline arrives via onPdfOutline after load
+      localStorage.setItem(LAST_FILE_KEY, path)
+    } else {
+      const res = await readLocalFile(path)
+      if (res.status === 'error' || !res.result) {
+        error.value = res.error?.message || '读取失败'
+        ElMessage.error(error.value)
+        return
+      }
+      // Render new content, then swap the transition key in the SAME tick so the leaving
+      // <article> stays frozen on the OLD content while the new one slides in.
+      fileKind.value = 'md'
+      renderedHtml.value = renderMarkdown(res.result.content)
+      displayedFile.value = path
+      localStorage.setItem(LAST_FILE_KEY, path)
+      // enhance() + buildToc() run in the transition's @enter hook (onArticleEnter).
     }
-    // Determine page-turn direction from the file's position in the tree.
-    const oldIdx = flatFiles.value.indexOf(displayedFile.value)
-    const newIdx = flatFiles.value.indexOf(path)
-    transitionDir.value =
-      oldIdx >= 0 && newIdx >= 0 && newIdx < oldIdx ? 'page-prev' : 'page-next'
-    // Render new content, then swap the transition key in the SAME tick so the leaving
-    // <article> stays frozen on the OLD content while the new one slides in.
-    renderedHtml.value = renderMarkdown(res.result.content)
-    displayedFile.value = path
-    localStorage.setItem(LAST_FILE_KEY, path)
-    // enhance() + buildToc() run in the transition's @enter hook (onArticleEnter).
   } catch (e) {
     error.value = (e as Error)?.message || '读取失败'
   } finally {
@@ -570,8 +594,8 @@ async function onSelectFile(path: string) {
 
 /** Runs when a new <article> enters the page-turn transition: highlight, mermaid, TOC. */
 async function onArticleEnter(el: Element) {
-  // Only the markdown article needs enhancing (the empty-state div also passes through).
-  if (!el.classList.contains('markdown-body')) return
+  // Only the markdown <article> needs enhancing; PdfViewer handles itself.
+  if (el.tagName !== 'ARTICLE') return
   // Don't reset scroll if we're jumping to a cross-file anchor.
   if (contentRef.value && !pendingAnchor.value) contentRef.value.scrollTop = 0
   buildToc()
@@ -579,6 +603,25 @@ async function onArticleEnter(el: Element) {
   if (pendingAnchor.value) {
     scrollToHeading(pendingAnchor.value)
     pendingAnchor.value = ''
+  }
+}
+
+/** PdfViewer emits its outline after load; populate the TOC. */
+function onPdfOutline(items: { text: string; level: number; page: number }[]) {
+  toc.value = items.map((it, i) => ({
+    id: `pdf-outline-${i}`,
+    text: it.text,
+    level: it.level,
+    page: it.page,
+  }))
+}
+
+/** TOC click: jump to a PDF page (if pdf) or a markdown heading (if md). */
+function onTocClick(t: TocItem) {
+  if (t.page !== undefined && fileKind.value === 'pdf') {
+    pdfViewerRef.value?.scrollToPage(t.page)
+  } else {
+    scrollToHeading(t.id)
   }
 }
 
