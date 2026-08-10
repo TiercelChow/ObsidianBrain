@@ -13,6 +13,7 @@ backend/frontend/
 # Frontend build output (used by rust-embed)
 frontend/dist/
 frontend/dist_new/
+frontend/dist.stale-root-owned/
 
 # Data (runtime — ~/.obsidian-brain/ is outside the repo, but local data/ too)
 data/
