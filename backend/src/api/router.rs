@@ -7,6 +7,7 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use crate::api::handlers::health::health_check;
+use crate::api::handlers::reader_file::serve_reader_file;
 use crate::api::handlers::tool_handler::{call_tool, list_tools};
 use crate::api::handlers::upload::{serve_thumbnail, serve_vault_image, upload_images};
 use crate::frontend_assets;
@@ -29,6 +30,7 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024)) // 50MB for image uploads
         .route("/vault/images/*path", get(serve_vault_image))
         .route("/vault/thumbnails/*path", get(serve_thumbnail))
+        .route("/reader/raw", get(serve_reader_file))
         .with_state(ctx);
 
     // Compose the main router with middleware.
