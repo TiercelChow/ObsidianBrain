@@ -98,9 +98,12 @@ function setupObserver() {
 }
 
 async function load() {
+  // Destroy the prior document so switching props.src doesn't leak the
+  // previous pdf.js worker + memory. onBeforeUnmount handles unmount.
+  if (pdfDoc) { void pdfDoc.destroy(); pdfDoc = null }
+  renderedPages = new Set<number>()
   loading.value = true
   error.value = ''
-  renderedPages = new Set<number>()
   pageMetas.value = []
   try {
     const task = pdfjsLib.getDocument(localFileUrl(props.src))
