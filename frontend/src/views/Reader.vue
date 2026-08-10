@@ -533,6 +533,10 @@ async function openPath(p?: string) {
     displayedFile.value = ''
     activeFile.value = ''
     toc.value = []
+    // Reset file kind: opening a folder clears the current document. Without this,
+    // a stale fileKind==='pdf' + cleared renderedHtml/displayedFile would mount
+    // PdfViewer with an empty src (→ 400 /v1/reader/raw?path=).
+    fileKind.value = 'md'
     // Remember last opened folder; clear stale last-file until a new one is chosen.
     localStorage.setItem(LAST_FOLDER_KEY, path)
     localStorage.removeItem(LAST_FILE_KEY)
