@@ -1,20 +1,25 @@
 //! Reader binary file endpoint: `GET /v1/reader/raw?path=<abs>`.
 //!
 //! Serves arbitrary local files as raw bytes with correct Content-Type and
-//! HTTP Range support (pdf.js uses range requests to stream large PDFs).
-//! Path must be absolute, contain no `..`, and be a file. 100 MB cap.
+//! HTTP Range support. pdf.js uses range requests to stream large PDFs, so
+//! Range requests are served via `File::seek` + `read_exact` (only the
+//! requested bytes are read — never the whole file). Full-file (no-Range)
+//! requests are streamed via `ReaderStream` so memory use stays bounded
+//! regardless of file size. Path must be absolute, contain no `..`, and be
+//! a file. No fixed size cap (streaming makes one unnecessary).
 
+use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
+use std::io::SeekFrom;
 use std::path::{Component, PathBuf};
 use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio_util::io::ReaderStream;
 
 use crate::AppContext;
-
-/// Max file size served by the reader binary endpoint (100 MB).
-const MAX_FILE_SIZE: u64 = 100 * 1024 * 1024;
 
 #[derive(Deserialize)]
 pub struct ReaderRawQuery {
@@ -68,6 +73,18 @@ fn parse_range(range: &str, total: u64) -> Option<(u64, u64)> {
     Some((start, end.min(total - 1)))
 }
 
+/// Read the inclusive byte range `[start, end]` from an open file via seek.
+/// Reads only the requested bytes — the rest of the file is never loaded. Safe
+/// against the file shrinking between the length check and the read:
+/// `read_exact` returns `UnexpectedEof` (an error) rather than panicking.
+async fn read_range(file: &mut tokio::fs::File, start: u64, end: u64) -> std::io::Result<Vec<u8>> {
+    file.seek(SeekFrom::Start(start)).await?;
+    let len = (end - start + 1) as usize;
+    let mut buf = vec![0u8; len];
+    file.read_exact(&mut buf).await?;
+    Ok(buf)
+}
+
 /// `GET /v1/reader/raw?path=<abs>` — serve a local file as raw bytes with Range.
 pub async fn serve_reader_file(
     State(_ctx): State<Arc<AppContext>>,
@@ -75,44 +92,37 @@ pub async fn serve_reader_file(
     headers: HeaderMap,
 ) -> Result<Response, (StatusCode, String)> {
     let path = validate_path(&q.path)?;
-    let meta = tokio::fs::metadata(&path).await.map_err(|e| {
+    let mut file = tokio::fs::File::open(&path).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("打开文件失败: {e}"),
+        )
+    })?;
+    // Length from the open handle (fstat) — closer to the read than a separate
+    // metadata call. Used only for Range parsing + headers; read_range reads
+    // directly from the handle, so a stale length can't panic (read_exact errors).
+    let total = file.metadata().await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("读取元数据失败: {e}"),
         )
     })?;
-    if meta.len() > MAX_FILE_SIZE {
-        return Err((
-            StatusCode::PAYLOAD_TOO_LARGE,
-            format!(
-                "文件过大 ({:.1} MB)，上限 {} MB",
-                meta.len() as f64 / 1_048_576.0,
-                MAX_FILE_SIZE / 1_048_576
-            ),
-        ));
-    }
+    let total = total.len();
     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
     let ct = content_type_for(ext);
 
-    // Read full file into memory, then slice for Range. Acceptable for a
-    // local single-user tool with a 100 MB cap; a future optimization can
-    // use File::seek for true streaming.
-    let bytes = tokio::fs::read(&path).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("读取文件失败: {e}"),
-        )
-    })?;
-
-    // Use the actual bytes length (not metadata len) for Range parsing and headers:
-    // the file may have shrunk between the metadata syscall and the read, and slicing
-    // against the stale metadata length would panic out of bounds. parse_range clamps
-    // end to total-1, so this keeps the slice in bounds by construction.
-    let total = bytes.len() as u64;
-
     if let Some(range_hdr) = headers.get(header::RANGE).and_then(|v| v.to_str().ok()) {
         if let Some((start, end)) = parse_range(range_hdr, total) {
-            let slice = bytes[start as usize..=end as usize].to_vec();
+            // Seek + read only the requested range — no full-file load. This is
+            // the path pdf.js hits for every chunk, so large PDFs stream without
+            // bounding memory. (A malformed/unsatisfiable Range falls through to
+            // the full-file stream below, per RFC 7233 §4.2.)
+            let buf = read_range(&mut file, start, end).await.map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("读取范围失败: {e}"),
+                )
+            })?;
             return Ok((
                 StatusCode::PARTIAL_CONTENT,
                 [
@@ -124,12 +134,15 @@ pub async fn serve_reader_file(
                     (header::CONTENT_LENGTH, (end - start + 1).to_string()),
                     (header::ACCEPT_RANGES, "bytes".to_string()),
                 ],
-                slice,
+                buf,
             )
                 .into_response());
         }
     }
 
+    // No Range (or malformed Range ignored per RFC): stream the whole file so
+    // memory stays bounded for large files (no Vec holding the entire content).
+    let stream = ReaderStream::new(file);
     Ok((
         StatusCode::OK,
         [
@@ -137,7 +150,7 @@ pub async fn serve_reader_file(
             (header::CONTENT_LENGTH, total.to_string()),
             (header::ACCEPT_RANGES, "bytes".to_string()),
         ],
-        bytes,
+        Body::from_stream(stream),
     )
         .into_response())
 }
@@ -145,6 +158,8 @@ pub async fn serve_reader_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::Router;
+    use tower::ServiceExt;
 
     fn write_tmp(name: &str, content: &[u8]) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
@@ -211,5 +226,168 @@ mod tests {
     fn test_parse_range_rejects_malformed() {
         assert_eq!(parse_range("items=0-100", 1000), None);
         assert_eq!(parse_range("bytes=abc", 1000), None);
+    }
+
+    #[tokio::test]
+    async fn test_read_range_returns_exact_slice() {
+        let (_d, p) = write_tmp("file.bin", &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        let mut file = tokio::fs::File::open(&p).await.unwrap();
+        // bytes 2..=5 → [2, 3, 4, 5]
+        let buf = read_range(&mut file, 2, 5).await.unwrap();
+        assert_eq!(buf, vec![2, 3, 4, 5]);
+    }
+
+    #[tokio::test]
+    async fn test_read_range_full_file() {
+        let (_d, p) = write_tmp("file.bin", b"hello");
+        let mut file = tokio::fs::File::open(&p).await.unwrap();
+        let buf = read_range(&mut file, 0, 4).await.unwrap();
+        assert_eq!(buf, b"hello");
+    }
+
+    #[tokio::test]
+    async fn test_read_range_start_zero() {
+        let (_d, p) = write_tmp("file.bin", b"abcdef");
+        let mut file = tokio::fs::File::open(&p).await.unwrap();
+        // bytes 0..=2 → [a, b, c] (pdf.js probes from byte 0)
+        let buf = read_range(&mut file, 0, 2).await.unwrap();
+        assert_eq!(buf, b"abc");
+    }
+
+    #[tokio::test]
+    async fn test_read_range_beyond_eof_errors_not_panics() {
+        // TOCTOU guard: if the file shrank so the requested end is past EOF,
+        // read_exact must return an error, not panic.
+        let (_d, p) = write_tmp("file.bin", b"abc");
+        let mut file = tokio::fs::File::open(&p).await.unwrap();
+        // Request 0..=10 on a 3-byte file.
+        let res = read_range(&mut file, 0, 10).await;
+        assert!(res.is_err(), "expected UnexpectedEof error, got {res:?}");
+    }
+
+    // ── Handler-level e2e (closes Minor #4: 206 / 200 / 413 integration) ──
+
+    /// Minimal AppContext wired into the real router — same pattern as
+    /// tool_handler tests. The context's own tempdir is dropped here (db file
+    /// unlinked-but-open on Unix); each test's `(_d, p)` keeps ITS file alive.
+    fn make_app() -> Router {
+        let (ctx, _dir, _vault) = crate::AppContext::for_test();
+        crate::api::router::create_router(ctx)
+    }
+
+    /// Build `/v1/reader/raw?path=<encoded>` for a temp file path.
+    fn raw_uri(path: &std::path::Path) -> String {
+        let lossy = path.to_string_lossy();
+        let encoded = urlencoding::encode(&lossy);
+        format!("/v1/reader/raw?path={encoded}")
+    }
+
+    #[tokio::test]
+    async fn test_serve_reader_file_range_returns_206() {
+        // pdf.js probes bytes 0-3 (the %PDF magic) on its first Range request.
+        let content = b"%PDF-1.4 lorem ipsum content!";
+        let (_d, p) = write_tmp("file.pdf", content);
+        let app = make_app();
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("GET")
+                    .uri(raw_uri(&p))
+                    .header(header::RANGE, "bytes=0-3")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        let h = response.headers();
+        assert_eq!(h.get(header::ACCEPT_RANGES).unwrap(), "bytes");
+        assert_eq!(h.get(header::CONTENT_TYPE).unwrap(), "application/pdf");
+        assert_eq!(
+            h.get(header::CONTENT_RANGE).unwrap(),
+            &format!("bytes 0-3/{}", content.len())
+        );
+        assert_eq!(h.get(header::CONTENT_LENGTH).unwrap(), "4");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(&body[..], b"%PDF");
+    }
+
+    #[tokio::test]
+    async fn test_serve_reader_file_no_range_returns_200_streamed() {
+        let content = b"%PDF-1.4 hello world";
+        let (_d, p) = write_tmp("file.pdf", content);
+        let app = make_app();
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("GET")
+                    .uri(raw_uri(&p))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let h = response.headers();
+        assert_eq!(h.get(header::ACCEPT_RANGES).unwrap(), "bytes");
+        assert_eq!(h.get(header::CONTENT_TYPE).unwrap(), "application/pdf");
+        assert_eq!(
+            h.get(header::CONTENT_LENGTH).unwrap(),
+            &content.len().to_string()
+        );
+        // Body::from_stream path — verify the streamed bytes match the file.
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(body.as_ref(), content);
+    }
+
+    #[tokio::test]
+    async fn test_serve_reader_file_large_file_not_413() {
+        // Regression for the reported 413: a 111 MB PDF exceeded the old
+        // 100 MB cap (which existed only because the handler read the whole
+        // file into memory). The streaming rewrite removed the cap entirely.
+        // Create a 116 MB sparse file (instant, ~zero disk) and assert a
+        // Range probe returns 206, not 413.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("huge.pdf");
+        {
+            let f = std::fs::File::create(&p).unwrap();
+            f.set_len(116_000_000).unwrap(); // 116 MB, > old 100 MB cap
+        }
+        let app = make_app();
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("GET")
+                    .uri(raw_uri(&p))
+                    .header(header::RANGE, "bytes=0-99")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(
+            response.status(),
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "large file must not be 413'd — the cap was removed"
+        );
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            response.headers().get(header::CONTENT_RANGE).unwrap(),
+            "bytes 0-99/116000000"
+        );
+        assert_eq!(
+            response.headers().get(header::CONTENT_LENGTH).unwrap(),
+            "100"
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(body.len(), 100);
+        // `dir` (holding huge.pdf) dropped here, after the request consumed it.
+        drop(dir);
     }
 }

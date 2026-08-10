@@ -68,9 +68,9 @@ PDF 是固定版式格式，markdown 是可回流格式。经方案选择，采�
 
 - 仿照 `serve_vault_image` 模式，但作用于**任意本地路径**（reader 的作用域即本地文件系统，与 `list_local_dir` / `read_local_file` 一致）。
 - 返回原始字节 + 按 ext 设 `Content-Type`（`.pdf` → `application/pdf`）。
-- **支持 HTTP Range 请求**：返回 `206 Partial Content` + `Content-Range`。pdf.js 用 range 请求高效加载大 PDF，不必整包下载。
+- **支持 HTTP Range 请求**：返回 `206 Partial Content` + `Content-Range`。pdf.js 用 range 请求高效加载大 PDF，不必整包下载。Range 请求经 `File::seek` + `read_exact` 只读取所请求字节（绝不整包入内存）；无 Range 的全量请求经 `ReaderStream` 流式返回，内存占用与文件大小无关。
 - 路径安全：必须是绝对路径、拒绝 `..` 穿越、必须是文件。
-- size 上限放宽到 ~100 MB（PDF 普遍大于 5 MB 的 `MAX_FILE_SIZE`）。
+- 无 size 上限：流式读写使固定上限不再必要（早期版本因整包读入内存设 100 MB 上限，已随流式改造移除——见 §11）。
 - 新文件：`backend/src/api/handlers/reader_file.rs`；在 `router.rs` 注册 `GET /reader/raw`，置于 `api_routes` 中。
 - 端点本身无 auth、不限路径范围（任意本地绝对路径，by design，与 `read_local_file` / `list_local_dir` 一致）。实际绑定地址与 CORS 由服务端配置（`backend/config/default.toml`）和全局 CORS 层控制——见 §11 安全注意事项。
 
@@ -149,7 +149,6 @@ TOC 点击   → 解析 dest → 滚到对应页
 | 文件不存在 / 不可访问 | 端点 404 → 前端 error banner |
 | PDF 损坏 / 加密 | pdf.js 抛错 → "PDF 解析失败" banner |
 | 路径含 `..` / 非绝对路径 | 端点 400 |
-| 文件超 size 上限 | 端点 413 |
 
 复用现有 `loadbar`（加载条）+ `error-banner`（错误条）UI。
 
@@ -161,8 +160,8 @@ TOC 点击   → 解析 dest → 滚到对应页
 
 - **路径校验**：拒 `..` 穿越、要求绝对路径、文件必须存在、必须是文件（非目录）。
 - **content-type 映射**：`.pdf` → `application/pdf`。
-- **Range 请求**：带 `Range` header → 返回 206 + `Content-Range` + 正确字节切片；不带 → 200 全量。
-- **size 上限**：超限 → 413。
+- **Range 请求**：带 `Range` header → 返回 206 + `Content-Range` + 正确字节切片（`read_range` 经 seek 只读所请求字节）；不带 → 200 流式（`ReaderStream`，内存与文件大小无关）。
+- **大文件不 413**：>100 MB 文件经 Range 探测返回 206（回归测试：稀疏 116 MB 文件不触发 413）。
 - 用小 PDF fixture（或构造最小合法 PDF 字节）。
 
 ### 前端
@@ -214,7 +213,7 @@ TOC 点击   → 解析 dest → 滚到对应页
 - `backend/config/default.toml:10` 默认 `host = "0.0.0.0"`（LAN 可访问）。
 - `backend/src/api/router.rs:19-22` 全局 `CorsLayer::allow_origin(Any)`。
 
-`GET /v1/reader/raw` 是 CORS "simple request"（GET + 无自定义 header，不触发 preflight），`allow_origin(Any)` 允许浏览器暴露响应体。因此用户访问的恶意网站可跨域 `fetch('http://localhost:9876/v1/reader/raw?path=/Users/x/.ssh/id_rsa')` 读取任意本地文件（SSH 私钥、`.env` 等）。`read_local_file` 具有相同路径范围（既有暴露面），但本端点拓宽了它（GET / 无 preflight / 100 MB / 原始字节）。
+`GET /v1/reader/raw` 是 CORS "simple request"（GET + 无自定义 header，不触发 preflight），`allow_origin(Any)` 允许浏览器暴露响应体。因此用户访问的恶意网站可跨域 `fetch('http://localhost:9876/v1/reader/raw?path=/Users/x/.ssh/id_rsa')` 读取任意本地文件（SSH 私钥、`.env` 等）。`read_local_file` 具有相同路径范围（既有暴露面），但本端点拓宽了它（GET / 无 preflight / 原始字节 / **无 size 上限**——流式改造移除了早期 100 MB 上限，跨域读取体量不再受端点约束）。
 
 ### 建议
 
