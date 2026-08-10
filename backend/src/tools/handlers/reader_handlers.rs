@@ -46,6 +46,7 @@ struct DirEntry {
     path: String,
     is_dir: bool,
     is_markdown: bool,
+    is_pdf: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     children: Option<Vec<DirEntry>>,
 }
@@ -53,6 +54,10 @@ struct DirEntry {
 fn is_markdown_ext(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.ends_with(".md") || lower.ends_with(".markdown")
+}
+
+fn is_pdf_ext(name: &str) -> bool {
+    name.to_ascii_lowercase().ends_with(".pdf")
 }
 
 /// Whether an entry should be skipped: hidden entries (leading `.`) or known
@@ -81,6 +86,7 @@ fn build_tree(path: &Path, depth: usize, max_depth: usize) -> Vec<DirEntry> {
             let file_type = e.file_type().ok()?;
             let is_dir = file_type.is_dir();
             let is_markdown = !is_dir && is_markdown_ext(&name);
+            let is_pdf = !is_dir && is_pdf_ext(&name);
             let entry_path = e.path();
             let children = if is_dir && depth < max_depth {
                 Some(build_tree(&entry_path, depth + 1, max_depth))
@@ -92,6 +98,7 @@ fn build_tree(path: &Path, depth: usize, max_depth: usize) -> Vec<DirEntry> {
                 path: entry_path.to_string_lossy().to_string(),
                 is_dir,
                 is_markdown,
+                is_pdf,
                 children,
             })
         })
@@ -428,6 +435,9 @@ mod tests {
         tokio::fs::write(root.join(".git").join("x.md"), "hidden")
             .await
             .unwrap();
+        tokio::fs::write(root.join("doc.pdf"), b"%PDF-1.4 fake")
+            .await
+            .unwrap();
     }
 
     #[test]
@@ -441,10 +451,15 @@ mod tests {
         std::fs::write(root.join("sub").join("b.md"), "# B").unwrap();
         std::fs::write(root.join("sub").join("note.txt"), "txt").unwrap();
         std::fs::write(root.join(".git").join("x.md"), "hidden").unwrap();
+        std::fs::write(root.join("doc.pdf"), b"%PDF-1.4 fake").unwrap();
 
         let entries = build_tree(root, 0, 3);
-        // Top-level: "sub" (dir) and "a.md" (file). ".git" skipped.
-        assert_eq!(entries.len(), 2, "should list sub and a.md, skip .git");
+        // Top-level: "sub" (dir), "a.md", "doc.pdf". ".git" skipped.
+        assert_eq!(
+            entries.len(),
+            3,
+            "should list sub, a.md, doc.pdf; skip .git"
+        );
         // Directories sort before files.
         assert!(entries[0].is_dir, "first entry should be the directory");
         assert_eq!(entries[0].name, "sub");
@@ -462,6 +477,16 @@ mod tests {
         assert!(sub_children
             .iter()
             .any(|c| c.name == "note.txt" && !c.is_markdown));
+
+        // 顶层现在有 3 个条目：sub (dir)、a.md、doc.pdf
+        assert_eq!(entries.len(), 3, "should list sub, a.md, doc.pdf");
+        let pdf = entries
+            .iter()
+            .find(|e| e.name == "doc.pdf")
+            .expect("doc.pdf present");
+        assert!(pdf.is_pdf, "doc.pdf should be marked is_pdf");
+        assert!(!pdf.is_markdown);
+        assert!(!pdf.is_dir);
     }
 
     #[test]
@@ -543,7 +568,7 @@ mod tests {
         let entries = build_tree(root, 0, 3);
         let json = serde_json::to_value(&entries).unwrap();
         assert!(json.is_array());
-        assert_eq!(json.as_array().unwrap().len(), 2);
+        assert_eq!(json.as_array().unwrap().len(), 3);
         // Each entry has the expected fields.
         let first = &json[0];
         assert!(first["is_dir"].is_boolean());

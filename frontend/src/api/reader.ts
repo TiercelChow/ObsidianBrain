@@ -6,6 +6,7 @@ export interface DirEntry {
   path: string
   is_dir: boolean
   is_markdown: boolean
+  is_pdf: boolean
   children?: DirEntry[]
 }
 
@@ -78,4 +79,9 @@ export function saveReaderHistory(
   return callTool('save_reader_history', { history }) as unknown as Promise<
     ToolEnvelope<{ ok: boolean; count: number }>
   >
+}
+
+/** Build the binary file URL for the reader endpoint (used by pdf.js). */
+export function localFileUrl(path: string): string {
+  return `/v1/reader/raw?path=${encodeURIComponent(path)}`
 }

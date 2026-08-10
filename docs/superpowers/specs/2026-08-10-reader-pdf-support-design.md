@@ -72,7 +72,7 @@ PDF 是固定版式格式，markdown 是可回流格式。经方案选择，采�
 - 路径安全：必须是绝对路径、拒绝 `..` 穿越、必须是文件。
 - size 上限放宽到 ~100 MB（PDF 普遍大于 5 MB 的 `MAX_FILE_SIZE`）。
 - 新文件：`backend/src/api/handlers/reader_file.rs`；在 `router.rs` 注册 `GET /reader/raw`，置于 `api_routes` 中。
-- 仅 `127.0.0.1`，无 auth——与现有 vault image 端点一致。
+- 端点本身无 auth、不限路径范围（任意本地绝对路径，by design，与 `read_local_file` / `list_local_dir` 一致）。实际绑定地址与 CORS 由服务端配置（`backend/config/default.toml`）和全局 CORS 层控制——见 §11 安全注意事项。
 
 ### 4.2 文件树标记 PDF
 
@@ -198,3 +198,28 @@ TOC 点击   → 解析 dest → 滚到对应页
 **纳入**：本地任意文件夹下的 `.pdf`；pdf.js 逐页渲染；主题滤镜调色；PDF outline 作 TOC；fit-width + 缩放；全屏；历史；翻页过渡；markdown 内 .pdf 链接跳转。
 
 **不纳入**：PDF 全文搜索；PDF 内超链接拦截；PDF 注释/表单；深色模式图片反反色；PDF→markdown 转换。
+
+---
+
+## 11. 安全注意事项
+
+### 端点路径范围
+
+`GET /v1/reader/raw` 按设计接受任意本地绝对路径（仅校验绝对路径、拒绝 `..` 穿越、必须是文件），与 `read_local_file` / `list_local_dir` 的路径范围一致。这是 reader 作用域即本地文件系统的固有设计（§4.1）。
+
+### 风险：默认绑定 `0.0.0.0` + 全局 CORS `allow_origin(Any)`
+
+以下两项为**既有配置**（早于本特性，影响所有端点）：
+
+- `backend/config/default.toml:10` 默认 `host = "0.0.0.0"`（LAN 可访问）。
+- `backend/src/api/router.rs:19-22` 全局 `CorsLayer::allow_origin(Any)`。
+
+`GET /v1/reader/raw` 是 CORS "simple request"（GET + 无自定义 header，不触发 preflight），`allow_origin(Any)` 允许浏览器暴露响应体。因此用户访问的恶意网站可跨域 `fetch('http://localhost:9876/v1/reader/raw?path=/Users/x/.ssh/id_rsa')` 读取任意本地文件（SSH 私钥、`.env` 等）。`read_local_file` 具有相同路径范围（既有暴露面），但本端点拓宽了它（GET / 无 preflight / 100 MB / 原始字节）。
+
+### 建议
+
+不需要 LAN 访问的用户应在 `backend/config/default.toml` 中设置 `host = "127.0.0.1"`（该配置文件已注释此选项）。
+
+### 决策（2026-08-10 final review）
+
+全局 CORS/绑定加固（对本地文件端点将 CORS 限制为同源，和/或将默认绑定改为 127.0.0.1）**推迟至独立的安全加固任务**——它影响所有端点和所有现有用户，超出 PDF 阅读特性的范围。任意路径设计保留不变（§4.1）。
