@@ -91,7 +91,6 @@ pub async fn serve_reader_file(
             ),
         ));
     }
-    let total = meta.len();
     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
     let ct = content_type_for(ext);
 
@@ -104,6 +103,12 @@ pub async fn serve_reader_file(
             format!("读取文件失败: {e}"),
         )
     })?;
+
+    // Use the actual bytes length (not metadata len) for Range parsing and headers:
+    // the file may have shrunk between the metadata syscall and the read, and slicing
+    // against the stale metadata length would panic out of bounds. parse_range clamps
+    // end to total-1, so this keeps the slice in bounds by construction.
+    let total = bytes.len() as u64;
 
     if let Some(range_hdr) = headers.get(header::RANGE).and_then(|v| v.to_str().ok()) {
         if let Some((start, end)) = parse_range(range_hdr, total) {
