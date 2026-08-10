@@ -222,9 +222,14 @@ async function rerenderAll() {
   pageMetas.value = pageMetas.value.map((p) => ({ ...p, width: vp.width, height: vp.height }))
   renderedPages = new Set<number>()
   await nextTickAsync()
-  // Re-render currently visible pages.
-  const visible = scrollRef.value?.querySelectorAll<HTMLElement>('.pdf-page-wrap') ?? []
-  for (const w of Array.from(visible)) {
+  // Only re-render pages currently in the viewport; the IntersectionObserver
+  // handles the rest on scroll (renderedPages was reset so they're eligible).
+  const wraps = Array.from(scrollRef.value?.querySelectorAll<HTMLElement>('.pdf-page-wrap') ?? [])
+  const inView = wraps.filter((w) => {
+    const r = w.getBoundingClientRect()
+    return r.bottom > 0 && r.top < window.innerHeight
+  })
+  for (const w of inView) {
     const num = Number(w.dataset.pageNum)
     void renderPage(num)
   }
