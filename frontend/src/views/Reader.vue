@@ -3,7 +3,7 @@
     <header class="page-header">
       <div>
         <h1 class="page-title">阅境轩</h1>
-        <p class="page-subtitle">浏览本地 Markdown，沉浸阅读</p>
+        <p class="page-subtitle">浏览本地 Markdown 与 PDF，沉浸阅读</p>
       </div>
     </header>
 
@@ -115,7 +115,12 @@
 
       <!-- Center: rendered content (page-turn transition on file switch) -->
       <main ref="contentRef" class="pane pane-center" @scroll="onContentScroll">
-        <transition :name="transitionDir" mode="out-in" @enter="onArticleEnter">
+        <transition
+          :name="transitionDir"
+          mode="out-in"
+          @enter="onArticleEnter"
+          @after-leave="onContentAfterLeave"
+        >
           <PdfViewer
             v-if="fileKind === 'pdf' && renderedHtml === ''"
             ref="pdfViewerRef"
@@ -217,7 +222,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import {
+  computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch,
+} from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   FolderOpened, Star, StarFilled, Delete, Menu, Document, FullScreen, EditPen, Refresh,
@@ -229,9 +236,11 @@ import {
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { useAppStore } from '@/stores/app'
 import FileTree from '@/components/reader/FileTree.vue'
-import MermaidViewer from '@/components/reader/MermaidViewer.vue'
-import PathPreviewModal from '@/components/reader/PathPreviewModal.vue'
-import PdfViewer from '@/components/reader/PdfViewer.vue'
+
+// Heavy, optional readers stay out of the Markdown-first route chunk.
+const MermaidViewer = defineAsyncComponent(() => import('@/components/reader/MermaidViewer.vue'))
+const PathPreviewModal = defineAsyncComponent(() => import('@/components/reader/PathPreviewModal.vue'))
+const PdfViewer = defineAsyncComponent(() => import('@/components/reader/PdfViewer.vue'))
 
 const appStore = useAppStore()
 
@@ -408,7 +417,11 @@ function onPreviewOpenInReader(path: string, anchor?: string) {
   void onSelectFile(path)
 }
 
-const { renderMarkdown, enhance } = useMarkdownRender(handleMermaidClick, handleLinkClick, handleImageClick)
+const {
+  renderMarkdown,
+  enhance,
+  cleanup: cleanupMarkdown,
+} = useMarkdownRender(handleMermaidClick, handleLinkClick, handleImageClick)
 
 // ── history (server-stored, shared across all users) ──────────────────
 async function loadHistory() {
@@ -517,6 +530,7 @@ async function refreshTree() {
 async function openPath(p?: string) {
   const path = (p ?? pathInput.value).trim()
   if (!path) return
+  cancelPendingFileSelection()
   pathInput.value = path
   loading.value = true
   error.value = ''
@@ -551,10 +565,24 @@ async function openPath(p?: string) {
 }
 
 // ── select & render file ──────────────────────────────────────────────
+let fileRequest: AbortController | null = null
+let selectionVersion = 0
+
+function cancelPendingFileSelection() {
+  selectionVersion += 1
+  fileRequest?.abort()
+  fileRequest = null
+  fileLoading.value = false
+}
+
 async function onSelectFile(path: string) {
   activeFile.value = path
   // Already displaying this file — skip to avoid resetting rendered mermaid back to source.
   if (path === displayedFile.value) return
+  fileRequest?.abort()
+  const request = new AbortController()
+  fileRequest = request
+  const version = ++selectionVersion
   fileLoading.value = true
   error.value = ''
 
@@ -575,7 +603,8 @@ async function onSelectFile(path: string) {
       toc.value = [] // outline arrives via onPdfOutline after load
       localStorage.setItem(LAST_FILE_KEY, path)
     } else {
-      const res = await readLocalFile(path)
+      const res = await readLocalFile(path, request.signal)
+      if (version !== selectionVersion || request.signal.aborted) return
       if (res.status === 'error' || !res.result) {
         error.value = res.error?.message || '读取失败'
         ElMessage.error(error.value)
@@ -590,9 +619,13 @@ async function onSelectFile(path: string) {
       // enhance() + buildToc() run in the transition's @enter hook (onArticleEnter).
     }
   } catch (e) {
+    if (version !== selectionVersion || request.signal.aborted) return
     error.value = (e as Error)?.message || '读取失败'
   } finally {
-    fileLoading.value = false
+    if (version === selectionVersion) {
+      fileRequest = null
+      fileLoading.value = false
+    }
   }
 }
 
@@ -608,6 +641,10 @@ async function onArticleEnter(el: Element) {
     scrollToHeading(pendingAnchor.value)
     pendingAnchor.value = ''
   }
+}
+
+function onContentAfterLeave(el: Element) {
+  if (el.tagName === 'ARTICLE') cleanupMarkdown(el as HTMLElement)
 }
 
 /** PdfViewer emits its outline after load; populate the TOC. */
@@ -647,12 +684,19 @@ function updateFabOnScroll() {
   fabHideTimer = setTimeout(() => { fabHide.value = false }, 600)
 }
 
+let contentScrollFrame: number | null = null
 function onContentScroll() {
+  if (contentScrollFrame !== null) return
+  contentScrollFrame = window.requestAnimationFrame(processContentScroll)
+}
+
+function processContentScroll() {
+  contentScrollFrame = null
   updateFabOnScroll()
   // Drive the app's mobile header + page-header collapse from the pane-center
   // scroll (app-main doesn't scroll on the Reader page).
   if (contentRef.value) appStore.setScrolled(contentRef.value.scrollTop > 20)
-  if (!contentRef.value || !toc.value.length) return
+  if (!contentRef.value || fileKind.value === 'pdf' || !toc.value.length) return
   const containerTop = contentRef.value.getBoundingClientRect().top
   let current = ''
   for (const t of toc.value) {
@@ -662,9 +706,11 @@ function onContentScroll() {
     if (top <= 90) current = t.id
     else break
   }
-  activeHeading.value = current
-  // Auto-scroll TOC panel to keep the active heading centered.
-  scrollTocToActive()
+  if (current !== activeHeading.value) {
+    activeHeading.value = current
+    // Auto-scroll TOC panel to keep the active heading centered.
+    scrollTocToActive()
+  }
 }
 
 /** Scroll the TOC sidebar so the active heading is centered (unless at top/bottom). */
@@ -695,7 +741,16 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  cancelPendingFileSelection()
+  cleanupMarkdown()
   document.removeEventListener('fullscreenchange', onFullscreenChange)
+  document.removeEventListener('mousemove', onFsActivity)
+  document.removeEventListener('touchstart', onFsActivity)
+  if (fsAnimTimer) clearTimeout(fsAnimTimer)
+  if (fsUiTimer) clearTimeout(fsUiTimer)
+  if (refreshFlashTimer) clearTimeout(refreshFlashTimer)
+  if (fabHideTimer) clearTimeout(fabHideTimer)
+  if (contentScrollFrame !== null) cancelAnimationFrame(contentScrollFrame)
   if (document.fullscreenElement) void document.exitFullscreen()
 })
 </script>

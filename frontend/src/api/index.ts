@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { type AxiosRequestConfig } from 'axios'
 
 const api = axios.create({
   baseURL: '/v1',
@@ -9,7 +9,7 @@ const api = axios.create({
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    console.error('API 错误:', error.response?.data || error.message)
+    if (!axios.isCancel(error)) console.error('API 错误:', error.response?.data || error.message)
     return Promise.reject(error)
   }
 )
@@ -26,8 +26,12 @@ export function listTools() {
   return api.get('/tools')
 }
 
-export function callTool(tool: string, args: Record<string, unknown> = {}) {
-  return api.post('/tools/call', { tool, arguments: args })
+export function callTool(
+  tool: string,
+  args: Record<string, unknown> = {},
+  config?: AxiosRequestConfig,
+) {
+  return api.post('/tools/call', { tool, arguments: args }, config)
 }
 
 // ── Convenience: wrapped tool calls ──

@@ -37,8 +37,11 @@ export function listLocalDir(path: string, depth = 10): Promise<ToolEnvelope<Lis
 }
 
 /** Read a local file's text content (5MB cap). */
-export function readLocalFile(path: string): Promise<ToolEnvelope<ReadLocalFileResult>> {
-  return callTool('read_local_file', { path }) as unknown as Promise<ToolEnvelope<ReadLocalFileResult>>
+export function readLocalFile(
+  path: string,
+  signal?: AbortSignal,
+): Promise<ToolEnvelope<ReadLocalFileResult>> {
+  return callTool('read_local_file', { path }, { signal }) as unknown as Promise<ToolEnvelope<ReadLocalFileResult>>
 }
 
 /** Result of stat_local_path — describes a link target's type. */

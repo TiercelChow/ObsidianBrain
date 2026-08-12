@@ -1,9 +1,7 @@
 import { Marked, type Tokens } from 'marked'
-import mermaid from 'mermaid'
-import hljs from 'highlight.js'
 import markedKatex from 'marked-katex-extension'
 import 'katex/dist/katex.min.css'
-import { watch } from 'vue'
+import { onScopeDispose, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 
 // ── helpers ────────────────────────────────────────────────────────────
@@ -94,9 +92,18 @@ const md = new Marked({ gfm: true, breaks: false, renderer })
 // \[...\], \(...\), and bare [math] are pre-processed to $$/$$ in renderMarkdown().
 md.use(markedKatex({ throwOnError: false }))
 
-// ── mermaid ────────────────────────────────────────────────────────────
+// ── lazy enhancement dependencies ─────────────────────────────────────
 
-function initMermaid(theme: 'light' | 'dark' | 'eye-care') {
+type AppTheme = 'light' | 'dark' | 'eye-care'
+type MermaidApi = typeof import('mermaid')['default']
+type HighlightApi = typeof import('highlight.js/lib/common')['default']
+
+let mermaidPromise: Promise<MermaidApi> | null = null
+let highlightPromise: Promise<HighlightApi> | null = null
+
+async function getMermaid(theme: AppTheme): Promise<MermaidApi> {
+  mermaidPromise ??= import('mermaid').then((module) => module.default)
+  const mermaid = await mermaidPromise
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: 'loose',
@@ -107,11 +114,17 @@ function initMermaid(theme: 'light' | 'dark' | 'eye-care') {
     gantt: { useMaxWidth: true },
     journey: { useMaxWidth: true },
   })
+  return mermaid
+}
+
+async function getHighlighter(): Promise<HighlightApi> {
+  highlightPromise ??= import('highlight.js/lib/common').then((module) => module.default)
+  return highlightPromise
 }
 
 /** Re-render every mermaid block in a container (used on theme change). */
-async function rerenderMermaid(container: HTMLElement) {
-  const els = Array.from(container.querySelectorAll<HTMLElement>('.mermaid'))
+async function rerenderMermaid(container: HTMLElement, theme: AppTheme) {
+  const els = Array.from(container.querySelectorAll<HTMLElement>('.mermaid[data-processed]'))
   if (!els.length) return
   for (const el of els) {
     const raw = el.getAttribute('data-raw') || ''
@@ -119,6 +132,8 @@ async function rerenderMermaid(container: HTMLElement) {
     el.textContent = raw // clears old SVG; mermaid reads textContent
   }
   try {
+    const mermaid = await getMermaid(theme)
+    if (!container.isConnected) return
     await mermaid.run({ nodes: els, suppressErrors: true })
   } catch (e) {
     console.error('mermaid 重新渲染失败:', e)
@@ -144,16 +159,29 @@ export function useMarkdownRender(
 ) {
   const appStore = useAppStore()
   let currentContainer: HTMLElement | null = null
+  let enhancementObserver: IntersectionObserver | null = null
+  let enhancementGeneration = 0
+  let mermaidQueue = Promise.resolve()
 
-  initMermaid(appStore.theme)
+  function cleanup(container?: HTMLElement) {
+    if (container && currentContainer !== container) return
+    enhancementGeneration += 1
+    enhancementObserver?.disconnect()
+    enhancementObserver = null
+    if (currentContainer) currentContainer.removeEventListener('click', onContainerClick)
+    currentContainer = null
+  }
 
   watch(
     () => appStore.theme,
     (t) => {
-      initMermaid(t)
-      if (currentContainer) void rerenderMermaid(currentContainer)
+      const container = currentContainer
+      if (!container) return
+      mermaidQueue = mermaidQueue.then(() => rerenderMermaid(container, t))
     },
   )
+
+  onScopeDispose(cleanup)
 
   function renderMarkdown(src: string): string {
     usedIds.clear()
@@ -188,77 +216,116 @@ export function useMarkdownRender(
     return md.parse(text) as string
   }
 
-  async function enhance(container: HTMLElement) {
-    currentContainer = container
+  function onContainerClick(event: Event) {
+    const container = currentContainer
+    const target = event.target instanceof Element ? event.target : null
+    if (!container || !target || !container.contains(target)) return
 
-    // 1. syntax highlighting
-    container.querySelectorAll<HTMLElement>('pre code').forEach((el) => {
-      try {
-        hljs.highlightElement(el)
-      } catch (e) {
-        console.warn('hljs 高亮失败:', e)
-      }
-    })
-
-    // 2. mermaid diagrams
-    const mermaidEls = Array.from(container.querySelectorAll<HTMLElement>('.mermaid:not([data-processed])'))
-    if (mermaidEls.length) {
-      try {
-        await mermaid.run({ nodes: mermaidEls, suppressErrors: true })
-      } catch (e) {
-        console.error('mermaid 渲染失败:', e)
-      }
-      // 3. bind click → open viewer
-      mermaidEls.forEach((el) => {
-        const svg = el.querySelector('svg')
-        if (svg) {
-          el.classList.add('mermaid-clickable')
-          el.addEventListener('click', () => {
-            onMermaidClick(svg as SVGElement, el.getAttribute('data-raw') || '')
-          })
-        } else {
-          el.classList.add('mermaid-error')
-        }
-      })
+    const mermaidEl = target.closest<HTMLElement>('.mermaid-clickable')
+    if (mermaidEl && container.contains(mermaidEl)) {
+      const svg = mermaidEl.querySelector('svg')
+      if (svg) onMermaidClick(svg, mermaidEl.getAttribute('data-raw') || '')
+      return
     }
 
-    // 4. intercept links: external → new tab, #anchor → scroll, relative → onLinkClick
-    container.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {
-      const href = a.getAttribute('href') || ''
-      if (!href) return
-      if (/^(https?:|mailto:|ftp:|tel:)/i.test(href)) {
-        a.target = '_blank'
-        a.rel = 'noopener noreferrer'
-        return
-      }
+    const anchor = target.closest<HTMLAnchorElement>('a[href]')
+    if (anchor && container.contains(anchor)) {
+      const href = anchor.getAttribute('href') || ''
+      if (!href || /^(https?:|mailto:|ftp:|tel:)/i.test(href)) return
+      event.preventDefault()
       if (href.startsWith('#')) {
-        a.addEventListener('click', (e) => {
-          const id = decodeURIComponent(href.slice(1))
-          const target = document.getElementById(id)
-          if (target) {
-            e.preventDefault()
-            target.scrollIntoView({ behavior: 'smooth', block: 'start' })
-          }
-        })
-        return
-      }
-      // relative path to another document
-      a.addEventListener('click', (e) => {
-        e.preventDefault()
+        const id = decodeURIComponent(href.slice(1))
+        document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      } else {
         onLinkClick?.(href)
-      })
-    })
+      }
+      return
+    }
 
-    // 5. images — click to zoom
-    if (onImageClick) {
-      container.querySelectorAll<HTMLImageElement>('img').forEach((img) => {
-        img.style.cursor = 'zoom-in'
-        img.addEventListener('click', () => {
-          onImageClick(img.src, img.alt || '')
-        })
-      })
+    const image = target.closest<HTMLImageElement>('img')
+    if (image && container.contains(image) && onImageClick) {
+      onImageClick(image.src, image.alt || '')
     }
   }
 
-  return { renderMarkdown, enhance }
+  async function highlightCode(el: HTMLElement, generation: number) {
+    try {
+      const hljs = await getHighlighter()
+      if (generation !== enhancementGeneration || !el.isConnected) return
+      hljs.highlightElement(el)
+    } catch (e) {
+      console.warn('hljs 高亮失败:', e)
+    }
+  }
+
+  async function renderMermaid(el: HTMLElement, generation: number) {
+    try {
+      const mermaid = await getMermaid(appStore.theme)
+      if (generation !== enhancementGeneration || !el.isConnected) return
+      await mermaid.run({ nodes: [el], suppressErrors: true })
+      if (generation !== enhancementGeneration || !el.isConnected) return
+      if (el.querySelector('svg')) el.classList.add('mermaid-clickable')
+      else el.classList.add('mermaid-error')
+    } catch (e) {
+      if (generation === enhancementGeneration) console.error('mermaid 渲染失败:', e)
+    }
+  }
+
+  function observeEnhancements(container: HTMLElement, generation: number) {
+    const codeEls = Array.from(container.querySelectorAll<HTMLElement>('pre code'))
+    const mermaidEls = Array.from(container.querySelectorAll<HTMLElement>('.mermaid:not([data-processed])'))
+    const targets = [...codeEls, ...mermaidEls]
+    if (!targets.length) return
+
+    if (typeof IntersectionObserver === 'undefined') {
+      codeEls.forEach((el) => { void highlightCode(el, generation) })
+      mermaidEls.forEach((el) => {
+        mermaidQueue = mermaidQueue.then(() => renderMermaid(el, generation))
+      })
+      return
+    }
+
+    enhancementObserver = new IntersectionObserver(
+      (entries, observer) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue
+          observer.unobserve(entry.target)
+          const el = entry.target as HTMLElement
+          if (el.classList.contains('mermaid')) {
+            mermaidQueue = mermaidQueue.then(() => renderMermaid(el, generation))
+          } else {
+            void highlightCode(el, generation)
+          }
+        }
+      },
+      { root: container.parentElement, rootMargin: '700px 0px' },
+    )
+    targets.forEach((el) => enhancementObserver?.observe(el))
+  }
+
+  async function enhance(container: HTMLElement) {
+    cleanup()
+    currentContainer = container
+    const generation = enhancementGeneration
+    container.addEventListener('click', onContainerClick)
+
+    // External link attributes are static; all click handling is delegated to
+    // one container listener instead of one closure per link/image/diagram.
+    container.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {
+      const href = a.getAttribute('href') || ''
+      if (/^(https?:|mailto:|ftp:|tel:)/i.test(href)) {
+        a.target = '_blank'
+        a.rel = 'noopener noreferrer'
+      }
+    })
+    if (onImageClick) {
+      container.querySelectorAll<HTMLImageElement>('img').forEach((img) => {
+        img.style.cursor = 'zoom-in'
+      })
+    }
+
+    observeEnhancements(container, generation)
+  }
+
+  return { renderMarkdown, enhance, cleanup }
 }

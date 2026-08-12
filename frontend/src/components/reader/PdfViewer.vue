@@ -20,12 +20,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { useAppStore } from '@/stores/app'
 import { localFileUrl } from '@/api/reader'
+import {
+  MAX_CANVAS_PIXELS,
+  computeRenderDpr,
+  isWithinRenderWindow,
+} from './pdfRenderPolicy'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -37,6 +42,20 @@ const appStore = useAppStore()
 const theme = ref(appStore.theme)
 
 interface PageMeta { num: number; width: number; height: number }
+interface PageWork {
+  generation: number
+  status: 'queued' | 'rendering' | 'rendered'
+  page?: pdfjsLib.PDFPageProxy
+  renderTask?: pdfjsLib.RenderTask
+  textLayer?: pdfjsLib.TextLayer
+  textTimer?: number
+  textRendering?: boolean
+  textRendered?: boolean
+}
+
+const RENDER_MARGIN_PX = 700
+const MAX_CONCURRENT_RENDERS = 2
+const RANGE_CHUNK_SIZE = 256 * 1024
 
 const scrollRef = ref<HTMLElement | null>(null)
 const loading = ref(true)
@@ -45,13 +64,29 @@ const pageMetas = ref<PageMeta[]>([])
 const canvasRefs: Record<number, HTMLCanvasElement | null> = {}
 const textRefs: Record<number, HTMLDivElement | null> = {}
 let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null
+let loadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null
 let baseScale = 1 // fit-width scale derived from container width
-let renderedPages = new Set<number>()
-let observer: IntersectionObserver | null = null
+let renderObserver: IntersectionObserver | null = null
+let visibleObserver: IntersectionObserver | null = null
+let resizeObserver: ResizeObserver | null = null
+let resizeTimer: number | null = null
+let loadGeneration = 0
+let activeRenders = 0
+let renderQueue: number[] = []
+let unmounted = false
+const nearbyPages = new Set<number>()
+const visiblePages = new Set<number>()
+const pageWork = new Map<number, PageWork>()
 const zoomMode = ref<'fit' | number>('fit') // 'fit' = fit-width; number = explicit scale factor
 
 function setCanvasRef(num: number, el: HTMLCanvasElement | null) {
   canvasRefs[num] = el
+  if (el && pageWork.get(num)?.status !== 'rendered') {
+    // A new canvas defaults to 300x150. Reset immediately so a very long PDF
+    // never has a large one-frame allocation before IntersectionObserver runs.
+    el.width = 1
+    el.height = 1
+  }
 }
 function setTextRef(num: number, el: HTMLDivElement | null) {
   textRefs[num] = el
@@ -64,90 +99,241 @@ function currentScale(): number {
 
 /** Compute fit-width scale so the PDF page fills the container width. */
 function computeFitScale(page: pdfjsLib.PDFPageProxy): number {
-  const containerWidth = scrollRef.value?.clientWidth ?? 800
+  const containerWidth = Math.max(240, (scrollRef.value?.clientWidth ?? 800) - 40)
   const viewport0 = page.getViewport({ scale: 1 })
   return containerWidth / viewport0.width
 }
 
-/** Render a single page to its canvas (idempotent — skips if already rendered). */
-async function renderPage(num: number) {
-  if (!pdfDoc || renderedPages.has(num)) return
+function isCancellationError(value: unknown): boolean {
+  const name = value instanceof Error ? value.name : ''
+  return name === 'RenderingCancelledException' || name === 'AbortException'
+}
+
+function releaseCanvas(num: number) {
   const canvas = canvasRefs[num]
-  if (!canvas) return
-  try {
-    const page = await pdfDoc.getPage(num)
-    const viewport = page.getViewport({ scale: currentScale() })
-    const dpr = window.devicePixelRatio || 1
-    canvas.width = Math.floor(viewport.width * dpr)
-    canvas.height = Math.floor(viewport.height * dpr)
-    canvas.style.width = `${viewport.width}px`
-    canvas.style.height = `${viewport.height}px`
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined
-    await page.render({ canvasContext: ctx, viewport, transform }).promise
-    renderedPages.add(num)
-    // Best-effort text layer for selection/search; failure is non-fatal.
-    try {
-      const textContent = await page.getTextContent()
-      const textDiv = textRefs[num]
-      if (textDiv) {
-        textDiv.innerHTML = ''
-        textDiv.style.width = `${viewport.width}px`
-        textDiv.style.height = `${viewport.height}px`
-        // pdf.js v4 TextLayer class
-        const textLayer = new pdfjsLib.TextLayer({
-          textContentSource: textContent,
-          container: textDiv,
-          viewport,
-        })
-        void textLayer.render()
-      }
-    } catch (e) {
-      console.warn(`文字层渲染失败 (第 ${num} 页):`, e)
-    }
-  } catch (e) {
-    console.warn(`渲染第 ${num} 页失败:`, e)
+  if (canvas) {
+    // Resetting width/height is the reliable way to return the GPU/bitmap
+    // backing store; clearRect alone keeps the large allocation alive.
+    canvas.width = 1
+    canvas.height = 1
+    canvas.style.width = ''
+    canvas.style.height = ''
+    canvas.classList.remove('is-rendered')
+  }
+  textRefs[num]?.replaceChildren()
+}
+
+function releasePage(num: number) {
+  const work = pageWork.get(num)
+  if (work) {
+    if (work.textTimer !== undefined) window.clearTimeout(work.textTimer)
+    work.renderTask?.cancel()
+    work.textLayer?.cancel()
+    work.page?.cleanup()
+    pageWork.delete(num)
+  }
+  releaseCanvas(num)
+}
+
+function releaseAllPages() {
+  for (const num of [...pageWork.keys()]) releasePage(num)
+  renderQueue = []
+  nearbyPages.clear()
+  visiblePages.clear()
+}
+
+function queuePage(num: number, priority = false) {
+  if (!pdfDoc || pageWork.has(num) || !nearbyPages.has(num)) return
+  pageWork.set(num, {
+    generation: loadGeneration,
+    status: 'queued',
+  })
+  if (priority) renderQueue.unshift(num)
+  else renderQueue.push(num)
+  drainRenderQueue()
+}
+
+function drainRenderQueue() {
+  while (activeRenders < MAX_CONCURRENT_RENDERS && renderQueue.length) {
+    const num = renderQueue.shift()
+    if (num === undefined) return
+    const work = pageWork.get(num)
+    if (!work || work.status !== 'queued' || !nearbyPages.has(num)) continue
+    work.status = 'rendering'
+    activeRenders += 1
+    void renderPage(num, work)
   }
 }
 
-/** Set up lazy rendering: observe each page wrapper, render when near viewport. */
-function setupObserver() {
-  if (!scrollRef.value) return
-  observer?.disconnect()
-  observer = new IntersectionObserver(
+/** Render one canvas. Text selection is added later while the page is visible. */
+async function renderPage(num: number, work: PageWork) {
+  const doc = pdfDoc
+  const canvas = canvasRefs[num]
+  if (!doc || !canvas) {
+    pageWork.delete(num)
+    activeRenders -= 1
+    drainRenderQueue()
+    return
+  }
+
+  let page: pdfjsLib.PDFPageProxy | undefined
+  try {
+    page = await doc.getPage(num)
+    if (pageWork.get(num) !== work || work.generation !== loadGeneration) return
+    work.page = page
+    const viewport = page.getViewport({ scale: currentScale() })
+    const dpr = computeRenderDpr(viewport.width, viewport.height, window.devicePixelRatio || 1)
+    canvas.width = Math.max(1, Math.floor(viewport.width * dpr))
+    canvas.height = Math.max(1, Math.floor(viewport.height * dpr))
+    canvas.style.width = `${viewport.width}px`
+    canvas.style.height = `${viewport.height}px`
+    const ctx = canvas.getContext('2d', { alpha: false })
+    if (!ctx) throw new Error('无法创建 PDF canvas 上下文')
+    const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined
+    work.renderTask = page.render({ canvasContext: ctx, viewport, transform })
+    await work.renderTask.promise
+    if (pageWork.get(num) !== work || work.generation !== loadGeneration) return
+    work.renderTask = undefined
+    work.status = 'rendered'
+    canvas.classList.add('is-rendered')
+    if (visiblePages.has(num)) scheduleTextLayer(num, work)
+  } catch (e) {
+    if (!isCancellationError(e) && pageWork.get(num) === work) {
+      console.warn(`渲染第 ${num} 页失败:`, e)
+    }
+    if (pageWork.get(num) === work) {
+      pageWork.delete(num)
+      releaseCanvas(num)
+    }
+  } finally {
+    if (page && pageWork.get(num) !== work) page.cleanup()
+    activeRenders = Math.max(0, activeRenders - 1)
+    drainRenderQueue()
+  }
+}
+
+function scheduleTextLayer(num: number, work: PageWork) {
+  if (
+    work.status !== 'rendered'
+    || work.textRendered
+    || work.textRendering
+    || work.textTimer !== undefined
+  ) return
+
+  // Canvas first: deferring text extraction keeps time-to-first-page low.
+  work.textTimer = window.setTimeout(() => {
+    work.textTimer = undefined
+    if (visiblePages.has(num) && pageWork.get(num) === work) {
+      void renderTextLayer(num, work)
+    }
+  }, 80)
+}
+
+async function renderTextLayer(num: number, work: PageWork) {
+  const page = work.page
+  const textDiv = textRefs[num]
+  if (!page || !textDiv || work.textRendering || work.textRendered) return
+  work.textRendering = true
+  try {
+    const viewport = page.getViewport({ scale: currentScale() })
+    const textContent = await page.getTextContent()
+    if (pageWork.get(num) !== work || !nearbyPages.has(num)) return
+    textDiv.replaceChildren()
+    textDiv.style.width = `${viewport.width}px`
+    textDiv.style.height = `${viewport.height}px`
+    const textLayer = new pdfjsLib.TextLayer({
+      textContentSource: textContent,
+      container: textDiv,
+      viewport,
+    })
+    work.textLayer = textLayer
+    await textLayer.render()
+    if (pageWork.get(num) === work) work.textRendered = true
+  } catch (e) {
+    if (!isCancellationError(e)) console.warn(`文字层渲染失败 (第 ${num} 页):`, e)
+  } finally {
+    if (pageWork.get(num) === work) work.textRendering = false
+  }
+}
+
+function scrollRoot(): HTMLElement | null {
+  return scrollRef.value?.parentElement ?? null
+}
+
+/** Observe a small page window and recycle canvases after they leave it. */
+function setupObservers() {
+  const container = scrollRef.value
+  const root = scrollRoot()
+  if (!container || !root) return
+  renderObserver?.disconnect()
+  visibleObserver?.disconnect()
+  renderObserver = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
+        const num = Number((entry.target as HTMLElement).dataset.pageNum)
         if (entry.isIntersecting) {
-          const num = Number((entry.target as HTMLElement).dataset.pageNum)
-          void renderPage(num)
+          nearbyPages.add(num)
+          queuePage(num)
+        } else {
+          nearbyPages.delete(num)
+          visiblePages.delete(num)
+          releasePage(num)
         }
       }
     },
-    { root: null, rootMargin: '800px 0px' },
+    { root, rootMargin: `${RENDER_MARGIN_PX}px 0px` },
   )
-  const wraps = scrollRef.value.querySelectorAll<HTMLElement>('.pdf-page-wrap')
-  wraps.forEach((w) => observer?.observe(w))
+  visibleObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        const num = Number((entry.target as HTMLElement).dataset.pageNum)
+        if (entry.isIntersecting) {
+          visiblePages.add(num)
+          const work = pageWork.get(num)
+          if (work) scheduleTextLayer(num, work)
+        } else {
+          visiblePages.delete(num)
+        }
+      }
+    },
+    { root },
+  )
+  const wraps = container.querySelectorAll<HTMLElement>('.pdf-page-wrap')
+  wraps.forEach((wrap) => {
+    renderObserver?.observe(wrap)
+    visibleObserver?.observe(wrap)
+  })
 }
 
 async function load() {
-  // Destroy the prior document so switching props.src doesn't leak the
-  // previous pdf.js worker + memory. onBeforeUnmount handles unmount.
-  if (pdfDoc) { void pdfDoc.destroy(); pdfDoc = null }
-  renderedPages = new Set<number>()
+  const generation = ++loadGeneration
+  await destroyCurrentDocument()
+  if (unmounted || generation !== loadGeneration || !props.src) return
   loading.value = true
   error.value = ''
   pageMetas.value = []
   try {
-    const task = pdfjsLib.getDocument(localFileUrl(props.src))
-    pdfDoc = await task.promise
+    const task = pdfjsLib.getDocument({
+      url: localFileUrl(props.src),
+      rangeChunkSize: RANGE_CHUNK_SIZE,
+      disableStream: true,
+      disableAutoFetch: true,
+      canvasMaxAreaInBytes: MAX_CANVAS_PIXELS * 4,
+    })
+    loadingTask = task
+    const doc = await task.promise
+    if (generation !== loadGeneration || unmounted) {
+      await task.destroy()
+      return
+    }
+    pdfDoc = doc
     // Use page 1 to derive the fit-width scale; record every page's placeholder
     // size at that scale so the scroll area has correct height before render.
-    const page1 = await pdfDoc.getPage(1)
+    const page1 = await doc.getPage(1)
     baseScale = computeFitScale(page1)
     const vp1 = page1.getViewport({ scale: baseScale })
     const metas: PageMeta[] = []
-    for (let i = 1; i <= pdfDoc.numPages; i++) {
+    for (let i = 1; i <= doc.numPages; i++) {
       // Assume uniform page size (common case); page 1 dimensions for all.
       // Non-uniform PDFs will have slightly mismatched placeholders — acceptable
       // for v1; lazy render corrects the actual canvas size on render.
@@ -155,24 +341,35 @@ async function load() {
     }
     pageMetas.value = metas
     loading.value = false
-    // Wait for placeholders to mount, then observe + render visible pages.
-    await nextTickAsync()
-    setupObserver()
-    // Render the first page immediately so the user sees content at once.
-    await renderPage(1)
-    // Extract PDF outline (bookmarks/TOC) and emit for the parent (Task 7 TOC).
-    const rawOutline = await pdfDoc.getOutline()
-    const outline = await buildOutline(rawOutline, 1)
-    emit('outline', outline)
+    await nextTick()
+    if (generation !== loadGeneration) return
+    setupObservers()
+    nearbyPages.add(1)
+    queuePage(1, true)
+    void emitOutline(doc, generation)
   } catch (e) {
+    if (generation !== loadGeneration || isCancellationError(e)) return
+    const failedTask = loadingTask
+    loadingTask = null
+    pdfDoc = null
+    try {
+      await failedTask?.destroy()
+    } catch (destroyError) {
+      if (!isCancellationError(destroyError)) console.warn('释放失败的 PDF 加载任务:', destroyError)
+    }
     error.value = (e as Error)?.message || 'PDF 解析失败'
     loading.value = false
   }
 }
 
-/** Minimal nextTick promise (avoid importing vue's nextTick name clash). */
-function nextTickAsync(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()))
+async function emitOutline(doc: pdfjsLib.PDFDocumentProxy, generation: number) {
+  try {
+    const rawOutline = await doc.getOutline()
+    const outline = await buildOutline(rawOutline, 1, doc)
+    if (generation === loadGeneration) emit('outline', outline)
+  } catch (e) {
+    if (generation === loadGeneration) console.warn('读取 PDF 目录失败:', e)
+  }
 }
 
 // pdfjs-dist v4 does not export OutlineNode/ExplicitDest as named types
@@ -180,6 +377,7 @@ function nextTickAsync(): Promise<void> {
 async function buildOutline(
   raw: any[] | null,
   level: number,
+  doc: pdfjsLib.PDFDocumentProxy,
 ): Promise<{ text: string; level: number; page: number }[]> {
   if (!raw || !raw.length) return []
   const out: { text: string; level: number; page: number }[] = []
@@ -189,15 +387,15 @@ async function buildOutline(
       // dest may be a named dest (string) or an explicit dest array.
       // Resolve named dests to the explicit array form via getDestination.
       let dest: any = node.dest
-      if (typeof dest === 'string' && pdfDoc) {
-        dest = await pdfDoc.getDestination(dest)
+      if (typeof dest === 'string') {
+        dest = await doc.getDestination(dest)
       }
       // Explicit dest array: dest[0] is the page RefProxy ({num, gen}).
       // pdf.js v4 getPageIndex validates the arg is a RefProxy (isRefProxy),
       // so we must pass dest[0], not the whole dest array.
       const ref = Array.isArray(dest) ? dest[0] : null
-      if (ref && pdfDoc) {
-        const idx = await pdfDoc.getPageIndex(ref)
+      if (ref) {
+        const idx = await doc.getPageIndex(ref)
         if (typeof idx === 'number') page = idx + 1
       }
     } catch {
@@ -205,33 +403,37 @@ async function buildOutline(
     }
     out.push({ text: node.title, level, page })
     if (node.items?.length) {
-      out.push(...await buildOutline(node.items, level + 1))
+      out.push(...await buildOutline(node.items, level + 1, doc))
     }
   }
   return out
 }
 
-/** Re-render all already-observed pages at the current scale (zoom change). */
+/** Recompute placeholders and render only the nearby page window at new scale. */
 async function rerenderAll() {
-  if (!pdfDoc) return
+  const doc = pdfDoc
+  if (!doc) return
+  const generation = loadGeneration
   // Recompute placeholder sizes for the new scale.
-  const page1 = await pdfDoc.getPage(1)
+  const page1 = await doc.getPage(1)
   const s = zoomMode.value === 'fit' ? computeFitScale(page1) : zoomMode.value
   baseScale = s
   const vp = page1.getViewport({ scale: s })
   pageMetas.value = pageMetas.value.map((p) => ({ ...p, width: vp.width, height: vp.height }))
-  renderedPages = new Set<number>()
-  await nextTickAsync()
-  // Only re-render pages currently in the viewport; the IntersectionObserver
-  // handles the rest on scroll (renderedPages was reset so they're eligible).
+  releaseAllPages()
+  await nextTick()
+  if (generation !== loadGeneration) return
+  setupObservers()
+  const rootRect = scrollRoot()?.getBoundingClientRect()
+  if (!rootRect) return
   const wraps = Array.from(scrollRef.value?.querySelectorAll<HTMLElement>('.pdf-page-wrap') ?? [])
-  const inView = wraps.filter((w) => {
-    const r = w.getBoundingClientRect()
-    return r.bottom > 0 && r.top < window.innerHeight
-  })
-  for (const w of inView) {
+  for (const w of wraps) {
+    const rect = w.getBoundingClientRect()
+    if (!isWithinRenderWindow(rect, rootRect, RENDER_MARGIN_PX)) continue
     const num = Number(w.dataset.pageNum)
-    void renderPage(num)
+    nearbyPages.add(num)
+    if (isWithinRenderWindow(rect, rootRect, 0)) visiblePages.add(num)
+    queuePage(num)
   }
 }
 
@@ -247,14 +449,55 @@ function scrollToPage(num: number) {
 
 defineExpose({ scrollToPage, setZoom })
 
+async function destroyCurrentDocument() {
+  renderObserver?.disconnect()
+  visibleObserver?.disconnect()
+  renderObserver = null
+  visibleObserver = null
+  releaseAllPages()
+  const task = loadingTask
+  const doc = pdfDoc
+  loadingTask = null
+  pdfDoc = null
+  try {
+    if (task) await task.destroy()
+    else if (doc) await doc.destroy()
+  } catch (e) {
+    if (!isCancellationError(e)) console.warn('释放 PDF 资源失败:', e)
+  }
+  pdfjsLib.TextLayer.cleanup()
+}
+
+function setupResizeObserver() {
+  const root = scrollRoot()
+  if (!root) return
+  resizeObserver?.disconnect()
+  let previousWidth = root.clientWidth
+  resizeObserver = new ResizeObserver(() => {
+    if (zoomMode.value !== 'fit' || Math.abs(root.clientWidth - previousWidth) < 2) return
+    previousWidth = root.clientWidth
+    if (resizeTimer !== null) window.clearTimeout(resizeTimer)
+    resizeTimer = window.setTimeout(() => {
+      resizeTimer = null
+      void rerenderAll()
+    }, 160)
+  })
+  resizeObserver.observe(root)
+}
+
 watch(() => props.src, () => { void load() })
 watch(() => appStore.theme, (t) => { theme.value = t })
 
-onMounted(() => { void load() })
+onMounted(() => {
+  setupResizeObserver()
+  void load()
+})
 onBeforeUnmount(() => {
-  observer?.disconnect()
-  void pdfDoc?.destroy()
-  pdfDoc = null
+  unmounted = true
+  loadGeneration += 1
+  resizeObserver?.disconnect()
+  if (resizeTimer !== null) window.clearTimeout(resizeTimer)
+  void destroyCurrentDocument()
 })
 </script>
 
@@ -264,10 +507,11 @@ onBeforeUnmount(() => {
      (FAB hide, mobile header collapse) and page-turn transitions are reused. */
   padding: 12px 20px 120px;
 }
-/* Theme color via CSS filter on the canvas pages — no re-render needed. */
-.pdf-theme-light .pdf-pages { filter: none; }
-.pdf-theme-dark .pdf-pages { filter: invert(1) hue-rotate(180deg); }
-.pdf-theme-eye-care .pdf-pages { filter: sepia(0.7) hue-rotate(28deg) brightness(0.8) saturate(2.8); }
+/* Filter each live page instead of the document-sized parent. Filtering the
+   full .pdf-pages stack can allocate an enormous compositor surface. */
+.pdf-theme-light .pdf-canvas.is-rendered { filter: none; }
+.pdf-theme-dark .pdf-canvas.is-rendered { filter: invert(1) hue-rotate(180deg); }
+.pdf-theme-eye-care .pdf-canvas.is-rendered { filter: sepia(0.7) hue-rotate(28deg) brightness(0.8) saturate(2.8); }
 
 .pdf-pages {
   display: flex;
@@ -277,13 +521,14 @@ onBeforeUnmount(() => {
 }
 .pdf-page-wrap {
   position: relative;
+  contain: layout paint style;
   background: var(--bg-glass-subtle);
   border: 1px solid var(--border-faint);
   border-radius: 8px;
   overflow: hidden;
   box-shadow: var(--shadow-md);
 }
-.pdf-canvas { display: block; }
+.pdf-canvas { display: block; width: 100%; height: 100%; }
 
 .pdf-text-layer {
   position: absolute;
@@ -297,10 +542,6 @@ onBeforeUnmount(() => {
   color: transparent;
   opacity: 0.25;
 }
-/* dark theme: counter the parent .pdf-pages invert filter so the selection
-   highlight keeps its true color (invert is self-inverse → double-invert
-   cancels). Glyphs are transparent, so this has no visible effect on text. */
-.pdf-theme-dark .pdf-text-layer { filter: invert(1) hue-rotate(180deg); }
 .pdf-text-layer ::selection { background: var(--accent); color: transparent; }
 
 .pdf-state {

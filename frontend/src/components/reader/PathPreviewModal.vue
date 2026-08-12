@@ -51,7 +51,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, computed } from 'vue'
 import { Document, Close, Loading, FullScreen } from '@element-plus/icons-vue'
-import hljs from 'highlight.js'
+import hljs from 'highlight.js/lib/common'
 import {
   statLocalPath, listLocalDir, readLocalFile,
   type DirEntry, type PathStat,
