@@ -1,5 +1,13 @@
 <template>
-  <div class="app-shell">
+  <div
+    ref="appShellRef"
+    class="app-shell"
+    :class="{ 'sidebar-dragging': isSidebarDragging }"
+    @pointerdown="onSidebarPointerDown"
+    @pointermove="onSidebarPointerMove"
+    @pointerup="onSidebarPointerUp"
+    @pointercancel="onSidebarPointerCancel"
+  >
     <!-- Ambient gradient orbs for liquid glass effect -->
     <div class="ambient-bg">
       <div class="orb orb-1"></div>
@@ -11,7 +19,13 @@
 
     <!-- Mobile global header: hamburger + centered page title -->
     <div class="mobile-global-header" v-if="isMobile" :class="{ 'header-scrolled': isScrolled }">
-      <button class="mobile-menu-btn" @click="appStore.toggleSidebar()">
+      <button
+        class="mobile-menu-btn"
+        type="button"
+        aria-label="打开导航"
+        :aria-expanded="!isCollapsed"
+        @click="openMobileSidebar"
+      >
         <el-icon :size="20"><component :is="isCollapsed ? Expand : Fold" /></el-icon>
       </button>
       <transition name="title-fade">
@@ -21,11 +35,14 @@
     </div>
 
     <!-- Mobile sidebar overlay backdrop -->
-    <div
-      v-if="isMobile && !isCollapsed"
-      class="mobile-overlay"
-      @click="appStore.toggleSidebar()"
-    ></div>
+    <transition name="scrim-fade">
+      <div
+        v-if="mobileSidebarVisible"
+        class="mobile-overlay"
+        aria-hidden="true"
+        @click="closeMobileSidebar"
+      ></div>
+    </transition>
 
     <el-container class="app-container">
       <el-aside
@@ -40,11 +57,13 @@
         :class="{ 'mobile-full': isMobile, 'mobile-scrolled': isMobile && isScrolled }"
         @scroll="onMainScroll"
       >
-        <router-view v-slot="{ Component, route }">
-          <transition name="page-slide" mode="out-in">
-            <component :is="Component" :key="route.path" />
-          </transition>
-        </router-view>
+        <div class="route-stage">
+          <router-view v-slot="{ Component, route }">
+            <transition name="page-slide">
+              <component :is="Component" :key="route.path" />
+            </transition>
+          </router-view>
+        </div>
       </el-main>
     </el-container>
   </div>
@@ -63,10 +82,134 @@ watch(() => route.path, () => appStore.setScrolled(false))
 const appStore = useAppStore()
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
 const currentTitle = computed(() => (route.meta?.title as string) || '')
+const appShellRef = ref<HTMLElement | null>(null)
 
 // Mobile detection
 const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => windowWidth.value <= 768)
+
+// Mobile navigation follows the pointer 1:1. On release, position and recent
+// velocity are projected forward before snapping to the nearest resting state.
+const DRAWER_WIDTH = 260
+const EDGE_ACTIVATION_WIDTH = 24
+const GESTURE_THRESHOLD = 8
+const isSidebarDragging = ref(false)
+const mobileSidebarVisible = computed(() => isMobile.value && (!isCollapsed.value || isSidebarDragging.value))
+let pointerId: number | null = null
+let pointerStartX = 0
+let pointerStartY = 0
+let pointerBaseX = -DRAWER_WIDTH
+let pointerAxis: 'pending' | 'horizontal' | 'vertical' = 'pending'
+let drawerX = -DRAWER_WIDTH
+let samples: Array<{ x: number; time: number }> = []
+
+function rubberband(overshoot: number, dimension: number, constant = 0.55) {
+  return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot))
+}
+
+function projectVelocity(velocity: number, decelerationRate = 0.995) {
+  return (velocity / 1000) * decelerationRate / (1 - decelerationRate)
+}
+
+function applyMobileSidebarPosition(x: number) {
+  drawerX = x
+  const progress = Math.max(0, Math.min(1, (x + DRAWER_WIDTH) / DRAWER_WIDTH))
+  const shell = appShellRef.value
+  shell?.style.setProperty('--mobile-sidebar-x', `${x}px`)
+  shell?.style.setProperty('--mobile-sidebar-progress', String(progress))
+  shell?.style.setProperty('--mobile-content-scale', String(1 - progress * 0.015))
+  shell?.style.setProperty('--mobile-content-shift', `${progress * 8}px`)
+}
+
+function syncMobileSidebarPosition() {
+  applyMobileSidebarPosition(isCollapsed.value ? -DRAWER_WIDTH : 0)
+}
+
+function openMobileSidebar() {
+  appStore.setSidebarCollapsed(false)
+  requestAnimationFrame(syncMobileSidebarPosition)
+}
+
+function closeMobileSidebar() {
+  appStore.setSidebarCollapsed(true)
+  requestAnimationFrame(syncMobileSidebarPosition)
+}
+
+function onSidebarPointerDown(event: PointerEvent) {
+  if (!isMobile.value || (event.pointerType === 'mouse' && event.button !== 0)) return
+  const drawerOpen = !isCollapsed.value
+  if (!drawerOpen && event.clientX > EDGE_ACTIVATION_WIDTH) return
+
+  pointerId = event.pointerId
+  pointerStartX = event.clientX
+  pointerStartY = event.clientY
+  pointerBaseX = drawerOpen ? 0 : -DRAWER_WIDTH
+  drawerX = pointerBaseX
+  pointerAxis = 'pending'
+  samples = [{ x: event.clientX, time: performance.now() }]
+  isSidebarDragging.value = true
+  applyMobileSidebarPosition(pointerBaseX)
+}
+
+function onSidebarPointerMove(event: PointerEvent) {
+  if (event.pointerId !== pointerId) return
+  const dx = event.clientX - pointerStartX
+  const dy = event.clientY - pointerStartY
+
+  if (pointerAxis === 'pending') {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < GESTURE_THRESHOLD) return
+    pointerAxis = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical'
+    if (pointerAxis === 'vertical') {
+      cancelSidebarGesture()
+      return
+    }
+    appShellRef.value?.setPointerCapture(event.pointerId)
+  }
+
+  event.preventDefault()
+  let nextX = pointerBaseX + dx
+  if (nextX > 0) nextX = rubberband(nextX, DRAWER_WIDTH)
+  if (nextX < -DRAWER_WIDTH) nextX = -DRAWER_WIDTH + rubberband(nextX + DRAWER_WIDTH, DRAWER_WIDTH)
+  applyMobileSidebarPosition(nextX)
+
+  const now = performance.now()
+  samples.push({ x: event.clientX, time: now })
+  samples = samples.filter((sample) => now - sample.time <= 100)
+}
+
+function finishSidebarGesture(commit: boolean) {
+  if (pointerId !== null && appShellRef.value?.hasPointerCapture(pointerId)) {
+    appShellRef.value.releasePointerCapture(pointerId)
+  }
+  pointerId = null
+  isSidebarDragging.value = false
+
+  if (!commit || pointerAxis !== 'horizontal') {
+    syncMobileSidebarPosition()
+    return
+  }
+
+  const first = samples[0]
+  const last = samples[samples.length - 1]
+  const elapsed = first && last ? Math.max(1, last.time - first.time) : 1
+  const velocity = first && last ? ((last.x - first.x) / elapsed) * 1000 : 0
+  const projected = drawerX + projectVelocity(velocity)
+  const shouldOpen = projected > -DRAWER_WIDTH / 2
+  appStore.setSidebarCollapsed(!shouldOpen)
+  requestAnimationFrame(syncMobileSidebarPosition)
+}
+
+function cancelSidebarGesture() {
+  finishSidebarGesture(false)
+}
+
+function onSidebarPointerUp(event: PointerEvent) {
+  if (event.pointerId === pointerId) finishSidebarGesture(true)
+}
+
+function onSidebarPointerCancel(event: PointerEvent) {
+  if (event.pointerId === pointerId) cancelSidebarGesture()
+}
 
 // Scroll detection for mobile header (shared via store so the Reader's internal
 // pane-center scroll can also drive the global header + page-header collapse).
@@ -76,12 +219,22 @@ function onMainScroll(e: Event) {
   appStore.setScrolled(el.scrollTop > 20)
 }
 
-function onResize() { windowWidth.value = window.innerWidth }
+function onResize() {
+  windowWidth.value = window.innerWidth
+  if (isMobile.value) syncMobileSidebarPosition()
+}
+watch(isCollapsed, () => {
+  if (isMobile.value && !isSidebarDragging.value) requestAnimationFrame(syncMobileSidebarPosition)
+})
 onMounted(() => {
   window.addEventListener('resize', onResize)
-  if (isMobile.value && !isCollapsed.value) appStore.toggleSidebar()
+  if (isMobile.value && !isCollapsed.value) appStore.setSidebarCollapsed(true)
+  requestAnimationFrame(syncMobileSidebarPosition)
 })
-onUnmounted(() => window.removeEventListener('resize', onResize))
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
+  if (pointerId !== null) cancelSidebarGesture()
+})
 </script>
 
 <style>
@@ -190,7 +343,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
   /* ── Design Tokens (Apple Design) ── */
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-ios: cubic-bezier(0.25, 0.46, 0.45, 0.94);
   --duration-fast: 0.2s;
   --duration-normal: 0.3s;
@@ -306,7 +459,8 @@ code, pre, .code-block { font-family: var(--font-mono); }
 /* ── Element Plus overrides ── */
 .el-card {
   border-radius: 20px !important;
-  transition: box-shadow 0.25s ease, transform 0.25s ease !important;
+  transition: box-shadow var(--motion-fast) var(--ease-emphasized),
+              transform var(--motion-fast) var(--ease-emphasized) !important;
 }
 .el-card:hover {
   box-shadow:
@@ -322,6 +476,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
 .el-button {
   border-radius: 10px !important;
   font-weight: 500 !important;
+  transform: translateZ(0);
 }
 
 /* Mobile: buttons should be bigger and easier to tap. */
@@ -721,7 +876,10 @@ code, pre, .code-block { font-family: var(--font-mono); }
   padding: 0 !important;
   margin: 0 !important;
   pointer-events: none !important;
-  transition: all var(--duration-slow) var(--ease-standard);
+  transition: max-height var(--motion-slow) var(--ease-spring-gentle),
+              opacity var(--motion-fast) var(--ease-emphasized),
+              padding var(--motion-slow) var(--ease-spring-gentle),
+              margin var(--motion-slow) var(--ease-spring-gentle);
 }
 
 /* ── Global mobile title size ── */
@@ -731,64 +889,10 @@ code, pre, .code-block { font-family: var(--font-mono); }
   }
 }
 
-/* ═══════════════════════════════════════════════════
-   Apple Design — :active feedback, reduced-motion, keyframes
-   ═══════════════════════════════════════════════════ */
-
-/* Press-state: instant scale on pointer-down (Apple Design §1) */
-.el-button:active,
-.nav-item:active,
-.el-tag:active,
-.fab:active,
-.mv-btn:active,
-.collapse-btn:active,
-.mobile-menu-btn:active,
-.ppm-reader-btn:active,
-.ppm-close-btn:active,
-.hp-pin:active,
-.hp-del:active,
-.hp-clear:active,
-.toc-item:active,
-.ft-row:active,
-.glass-btn:active,
-.glass-icon-btn:active {
-  transform: scale(0.96);
-  transition: transform 100ms ease-out;
-}
-
-/* Card press feedback */
-.el-card:active, .stat-card:active, .module-card:active,
-.repo-card:active, .radar-card:active, .insight-card:active {
-  transform: scale(0.98);
-  transition: transform 150ms ease-out;
-}
-
-/* Reduced motion (Apple Design §14) */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-  .ambient-bg { animation: none !important; }
-}
-
-/* Reduced transparency (Apple Design §14) */
-@media (prefers-reduced-transparency: reduce) {
-  .el-card, .stat-card, .module-card, .pane, .sidebar,
-  .el-dialog, .el-drawer, .mobile-global-header,
-  .el-input__wrapper, .el-select__wrapper {
-    background: var(--bg-glass-strong) !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-  }
-}
-
 /* ── Unified keyframes (deduplicated) ── */
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  from { opacity: 0; transform: translateY(8px) scale(0.992); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 @keyframes slide-up {
@@ -804,6 +908,10 @@ code, pre, .code-block { font-family: var(--font-mono); }
   position: relative;
   overflow: hidden;
   background: var(--bg-base);
+  --mobile-sidebar-x: -260px;
+  --mobile-sidebar-progress: 0;
+  --mobile-content-scale: 1;
+  --mobile-content-shift: 0px;
 }
 
 /* Ambient gradient mesh */
@@ -841,10 +949,9 @@ code, pre, .code-block { font-family: var(--font-mono); }
 }
 
 .app-aside {
-  transition: width 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: width var(--motion-slow) var(--ease-spring-gentle);
   overflow: hidden;
   background: transparent;
-  will-change: width;
 }
 
 .app-main {
@@ -854,19 +961,32 @@ code, pre, .code-block { font-family: var(--font-mono); }
   overflow-x: hidden;
 }
 
-/* ── Page Transition — Apple-style scale + fade (sequential out-in) ── */
+.route-stage {
+  position: relative;
+  min-height: 100%;
+}
+
+.route-stage > * { width: 100%; }
+
+/* ── Page Transition — stable cross-fade, without locking navigation ── */
 .page-slide-enter-active {
-  transition: opacity var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out);
+  transition: opacity var(--motion-page) var(--ease-emphasized),
+              transform var(--motion-page) var(--ease-emphasized);
 }
 .page-slide-leave-active {
-  transition: opacity var(--duration-fast) ease;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast) var(--ease-emphasized),
+              transform var(--motion-fast) var(--ease-emphasized);
 }
 .page-slide-enter-from {
   opacity: 0;
-  transform: scale(0.98) translateY(8px);
+  transform: translateY(var(--motion-distance-sm)) scale(0.992);
 }
 .page-slide-leave-to {
   opacity: 0;
+  transform: translateY(-4px) scale(0.996);
 }
 
 /* ── Mobile Global Header ── */
@@ -880,7 +1000,8 @@ code, pre, .code-block { font-family: var(--font-mono); }
   display: flex;
   align-items: center;
   padding: 0 12px;
-  transition: background 0.3s ease, box-shadow 0.3s ease, backdrop-filter 0.3s ease;
+  transition: background-color var(--motion-normal) var(--ease-emphasized),
+              box-shadow var(--motion-normal) var(--ease-emphasized);
 }
 .mobile-global-header.header-scrolled {
   background: var(--bg-glass-strong);
@@ -903,7 +1024,11 @@ code, pre, .code-block { font-family: var(--font-mono); }
   align-items: center;
   justify-content: center;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
-  transition: all 0.2s ease;
+  transition: transform var(--motion-instant) var(--ease-emphasized),
+              color var(--motion-fast) var(--ease-emphasized),
+              background-color var(--motion-fast) var(--ease-emphasized),
+              border-color var(--motion-fast) var(--ease-emphasized),
+              box-shadow var(--motion-fast) var(--ease-emphasized);
   flex-shrink: 0;
 }
 .mobile-global-header.header-scrolled .mobile-menu-btn {
@@ -933,7 +1058,8 @@ code, pre, .code-block { font-family: var(--font-mono); }
 
 /* Title fade animation */
 .title-fade-enter-active {
-  transition: opacity 0.35s ease, transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: opacity var(--motion-normal) var(--ease-emphasized),
+              transform var(--motion-normal) var(--ease-spring-gentle);
 }
 .title-fade-leave-active {
   transition: opacity 0.15s ease, transform 0.15s ease;
@@ -952,19 +1078,20 @@ code, pre, .code-block { font-family: var(--font-mono); }
   inset: 0;
   z-index: 999;
   background: rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  animation: fadeIn 0.2s ease;
+  opacity: var(--mobile-sidebar-progress);
+  touch-action: none;
 }
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
+
+.scrim-fade-enter-active,
+.scrim-fade-leave-active { transition: opacity var(--motion-fast) var(--ease-emphasized); }
+.scrim-fade-enter-from,
+.scrim-fade-leave-to { opacity: 0; }
 
 /* Mobile aside: fixed overlay sliding from left */
 .app-aside {
-  transition: width 0.45s cubic-bezier(0.34, 1.56, 0.64, 1),
-              transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: width var(--motion-slow) var(--ease-spring-gentle),
+              transform var(--motion-normal) var(--ease-spring-gentle),
+              box-shadow var(--motion-normal) var(--ease-emphasized);
 }
 .app-aside.mobile-open {
   position: fixed;
@@ -983,13 +1110,31 @@ code, pre, .code-block { font-family: var(--font-mono); }
   overflow-x: hidden;
   width: 100%;
   max-width: 100%;
+  transform-origin: right center;
+  transform: translateX(var(--mobile-content-shift)) scale(var(--mobile-content-scale));
+  transition: transform var(--motion-normal) var(--ease-spring-gentle);
 }
 
 @media (max-width: 768px) {
-  .app-aside:not(.mobile-open) {
+  .app-aside {
     position: fixed;
-    left: -280px;
+    top: 0;
+    left: 0;
+    bottom: 0;
     z-index: 1000;
+    transform: translate3d(var(--mobile-sidebar-x), 0, 0);
+    will-change: transform;
+    touch-action: pan-y;
+  }
+
+  .app-shell { touch-action: pan-y; }
+
+  .app-aside.mobile-open { transform: translate3d(var(--mobile-sidebar-x), 0, 0); }
+
+  .sidebar-dragging .app-aside,
+  .sidebar-dragging .app-main.mobile-full,
+  .sidebar-dragging .mobile-overlay {
+    transition: none !important;
   }
 }
 </style>

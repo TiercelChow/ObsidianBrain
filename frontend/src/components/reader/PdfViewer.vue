@@ -528,7 +528,14 @@ onBeforeUnmount(() => {
   overflow: hidden;
   box-shadow: var(--shadow-md);
 }
-.pdf-canvas { display: block; width: 100%; height: 100%; }
+.pdf-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-emphasized);
+}
+.pdf-canvas.is-rendered { opacity: 1; }
 
 .pdf-text-layer {
   position: absolute;

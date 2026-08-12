@@ -3,12 +3,13 @@ import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
+import './styles/motion.css'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
 
 // Apply saved theme BEFORE app mount to prevent flash of wrong theme
-const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null
+const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | 'eye-care' | null
 document.documentElement.setAttribute('data-theme', savedTheme || 'light')
 
 const app = createApp(App)

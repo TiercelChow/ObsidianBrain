@@ -85,6 +85,26 @@ const renderer = {
     const id = uniqueSlug(stripHtml(inner))
     return `<h${depth} id="${id}">${inner}</h${depth}>\n`
   },
+  table(token: Tokens.Table): string {
+    // A table cannot reliably scroll itself. Keep the semantic table intact and
+    // place it inside a dedicated region so wide columns remain reachable.
+    // The enhancement pass below also applies this wrapper to raw HTML tables.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parser = (this as any).parser
+    const renderCell = (cell: Tokens.TableCell) => {
+      const tag = cell.header ? 'th' : 'td'
+      const align = cell.align && ['left', 'center', 'right'].includes(cell.align)
+        ? ` style="text-align:${cell.align}"`
+        : ''
+      return `<${tag}${align}>${parser.parseInline(cell.tokens)}</${tag}>`
+    }
+    const renderRow = (cells: Tokens.TableCell[]) => `<tr>${cells.map(renderCell).join('')}</tr>`
+    const head = renderRow(token.header)
+    const body = token.rows.length
+      ? `<tbody>${token.rows.map(renderRow).join('')}</tbody>`
+      : ''
+    return `<div class="table-scroll" role="region" aria-label="表格"><table><thead>${head}</thead>${body}</table></div>\n`
+  },
 }
 
 const md = new Marked({ gfm: true, breaks: false, renderer })
@@ -160,6 +180,7 @@ export function useMarkdownRender(
   const appStore = useAppStore()
   let currentContainer: HTMLElement | null = null
   let enhancementObserver: IntersectionObserver | null = null
+  let tableResizeObserver: ResizeObserver | null = null
   let enhancementGeneration = 0
   let mermaidQueue = Promise.resolve()
 
@@ -168,6 +189,8 @@ export function useMarkdownRender(
     enhancementGeneration += 1
     enhancementObserver?.disconnect()
     enhancementObserver = null
+    tableResizeObserver?.disconnect()
+    tableResizeObserver = null
     if (currentContainer) currentContainer.removeEventListener('click', onContainerClick)
     currentContainer = null
   }
@@ -308,6 +331,43 @@ export function useMarkdownRender(
     currentContainer = container
     const generation = enhancementGeneration
     container.addEventListener('click', onContainerClick)
+
+    // GFM tables already use the renderer wrapper. Raw HTML tables need the
+    // same containment so an explicit width cannot escape the reading pane.
+    container.querySelectorAll<HTMLTableElement>('table').forEach((table) => {
+      if (table.parentElement?.classList.contains('table-scroll')) return
+      const wrapper = document.createElement('div')
+      wrapper.className = 'table-scroll'
+      table.before(wrapper)
+      wrapper.append(table)
+    })
+
+    const updateTableOverflow = () => {
+      if (generation !== enhancementGeneration || !container.isConnected) return
+      container.querySelectorAll<HTMLElement>('.table-scroll').forEach((wrapper) => {
+        const overflowing = wrapper.scrollWidth > wrapper.clientWidth + 1
+        wrapper.classList.toggle('is-overflowing', overflowing)
+        if (overflowing) {
+          wrapper.tabIndex = 0
+          wrapper.setAttribute('role', 'region')
+          wrapper.setAttribute('aria-label', '可横向滚动的表格')
+        } else {
+          wrapper.removeAttribute('tabindex')
+          wrapper.removeAttribute('role')
+          wrapper.removeAttribute('aria-label')
+        }
+      })
+    }
+
+    // Only overflowed tables join the keyboard tab order. Recalculate after
+    // layout and whenever sidebars, the preview modal, or the viewport resize.
+    requestAnimationFrame(updateTableOverflow)
+    if (typeof ResizeObserver !== 'undefined') {
+      tableResizeObserver = new ResizeObserver(updateTableOverflow)
+      container.querySelectorAll<HTMLElement>('.table-scroll').forEach((wrapper) => {
+        tableResizeObserver?.observe(wrapper)
+      })
+    }
 
     // External link attributes are static; all click handling is delegated to
     // one container listener instead of one closure per link/image/diagram.

@@ -251,7 +251,7 @@ function loadHistory() {
 .mode-selector { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
 .mode-option {
   padding: 20px; border: 2px solid rgba(255, 255, 255, 0.6); border-radius: 16px;
-  text-align: center; cursor: pointer; transition: all var(--duration-fast) var(--ease-out);
+  text-align: center; cursor: pointer; transition: var(--transition-interactive);
 }
 .mode-option:hover { border-color: #e4e4e7; }
 .mode-option.active { border-color: #6366f1; background: rgba(99, 102, 241, 0.06); }

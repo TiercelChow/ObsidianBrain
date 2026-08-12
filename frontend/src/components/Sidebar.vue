@@ -16,12 +16,20 @@
 
     <!-- Navigation -->
     <nav class="nav-list">
+      <span
+        v-if="activeIndicator.visible"
+        class="nav-active-indicator"
+        aria-hidden="true"
+        :style="activeIndicatorStyle"
+      ></span>
       <router-link
         v-for="item in navItems"
         :key="item.path"
         :to="item.path"
         class="nav-item"
         :class="{ active: isActive(item.path) }"
+        :aria-current="isActive(item.path) ? 'page' : undefined"
+        :data-nav-path="item.path"
       >
         <el-icon :size="18" class="nav-icon"><component :is="item.icon" /></el-icon>
         <transition name="nav-label">
@@ -32,7 +40,7 @@
 
     <!-- Collapse Toggle -->
     <div class="sidebar-footer">
-      <button class="collapse-btn" @click="appStore.toggleSidebar()">
+      <button class="collapse-btn" type="button" :aria-label="isCollapsed ? '展开导航' : '收起导航'" @click="appStore.toggleSidebar()">
         <el-icon :size="16">
           <component :is="isCollapsed ? Expand : Fold" />
         </el-icon>
@@ -45,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import {
@@ -66,14 +74,40 @@ import {
 const route = useRoute()
 const appStore = useAppStore()
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
+const activeIndicator = reactive({ top: 0, height: 0, visible: false })
+const activeIndicatorStyle = computed(() => ({
+  height: `${activeIndicator.height}px`,
+  transform: `translate3d(0, ${activeIndicator.top}px, 0)`,
+}))
+
+function updateActiveIndicator() {
+  nextTick(() => {
+    const active = document.querySelector('.nav-list .nav-item.active') as HTMLElement | null
+    const list = active?.parentElement
+    if (!active || !list) {
+      activeIndicator.visible = false
+      return
+    }
+    activeIndicator.top = active.offsetTop
+    activeIndicator.height = active.offsetHeight
+    activeIndicator.visible = true
+  })
+}
 
 // Auto-close the mobile sidebar overlay on navigation. The match is checked at
 // navigation time (not cached) so resizing between routes stays correct.
 watch(() => route.path, () => {
   if (window.matchMedia('(max-width: 768px)').matches && !isCollapsed.value) {
-    appStore.toggleSidebar()
+    appStore.setSidebarCollapsed(true)
   }
+  updateActiveIndicator()
 })
+watch(isCollapsed, updateActiveIndicator)
+onMounted(() => {
+  updateActiveIndicator()
+  window.addEventListener('resize', updateActiveIndicator)
+})
+onUnmounted(() => window.removeEventListener('resize', updateActiveIndicator))
 
 const navItems = [
   { path: '/', label: '首页', icon: House },
@@ -154,6 +188,22 @@ function isActive(path: string) {
   flex-direction: column;
   gap: 2px;
   overflow-y: auto;
+  position: relative;
+}
+
+.nav-active-indicator {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  z-index: 0;
+  border-radius: 12px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-sm), var(--inset-highlight);
+  pointer-events: none;
+  transition: transform var(--motion-slow) var(--ease-spring-gentle),
+              height var(--motion-normal) var(--ease-spring-gentle),
+              opacity var(--motion-fast) var(--ease-emphasized);
 }
 
 .nav-item {
@@ -167,7 +217,12 @@ function isActive(path: string) {
   font-size: 14px;
   font-weight: 450;
   cursor: pointer;
-  transition: all var(--duration-slow) var(--ease-spring);
+  position: relative;
+  z-index: 1;
+  transition: padding var(--motion-slow) var(--ease-spring-gentle),
+              gap var(--motion-slow) var(--ease-spring-gentle),
+              color var(--motion-fast) var(--ease-emphasized),
+              transform var(--motion-instant) var(--ease-emphasized);
 }
 
 .sidebar.collapsed .nav-item {
@@ -182,10 +237,9 @@ function isActive(path: string) {
 }
 
 .nav-item.active {
-  background: var(--bg-glass);
+  background: transparent;
   color: var(--text-primary);
   font-weight: 500;
-  box-shadow: var(--shadow-sm);
 }
 
 .nav-icon {
@@ -226,7 +280,11 @@ function isActive(path: string) {
   color: var(--text-faint);
   font-size: 13px;
   cursor: pointer;
-  transition: all var(--duration-slow) var(--ease-spring);
+  transition: padding var(--motion-slow) var(--ease-spring-gentle),
+              gap var(--motion-slow) var(--ease-spring-gentle),
+              color var(--motion-fast) var(--ease-emphasized),
+              background-color var(--motion-fast) var(--ease-emphasized),
+              transform var(--motion-instant) var(--ease-emphasized);
 }
 
 .sidebar.collapsed .collapse-btn {

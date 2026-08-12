@@ -1,0 +1,207 @@
+/* ObsidianBrain "知流 Motion" — shared motion, depth and accessibility rules. */
+:root {
+  --motion-instant: 100ms;
+  --motion-fast: 180ms;
+  --motion-normal: 260ms;
+  --motion-slow: 360ms;
+  --motion-page: 280ms;
+  --motion-distance-sm: 8px;
+  --motion-distance-md: 16px;
+  --ease-emphasized: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring-gentle: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring-playful: cubic-bezier(0.34, 1.35, 0.64, 1);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent);
+  --transition-interactive:
+    transform var(--motion-instant) var(--ease-emphasized),
+    opacity var(--motion-fast) var(--ease-emphasized),
+    color var(--motion-fast) var(--ease-emphasized),
+    background-color var(--motion-fast) var(--ease-emphasized),
+    border-color var(--motion-fast) var(--ease-emphasized),
+    box-shadow var(--motion-fast) var(--ease-emphasized);
+}
+
+/* Feedback starts on pointer-down; keyboard users receive an equally clear ring. */
+button,
+a,
+[role="button"],
+.el-button,
+.el-tag,
+.el-switch,
+.el-checkbox,
+.el-radio {
+  touch-action: manipulation;
+}
+
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+input:not(.el-input__inner):focus-visible,
+textarea:not(.el-textarea__inner):focus-visible,
+select:focus-visible,
+.el-button:focus-visible,
+.el-drawer:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring) !important;
+}
+
+.el-button,
+.glass-btn,
+.glass-icon-btn,
+.collapse-btn,
+.mobile-menu-btn,
+.path-trigger,
+.pane-title-btn,
+.fab,
+.chip,
+.toc-item,
+.ft-row,
+.nav-item {
+  transition-property: transform, opacity, color, background-color, border-color, box-shadow;
+  transition-duration: var(--motion-fast);
+  transition-timing-function: var(--ease-emphasized);
+}
+
+.el-button:active,
+.glass-btn:active,
+.glass-icon-btn:active,
+.collapse-btn:active,
+.mobile-menu-btn:active,
+.path-trigger:active,
+.pane-title-btn:active,
+.fab:active,
+.chip:active,
+.toc-item:active,
+.ft-row:active,
+.nav-item:active {
+  transform: scale(0.965);
+  transition-duration: var(--motion-instant);
+}
+
+.el-card:active,
+.stat-card:active,
+.module-card:active,
+.repo-card:active,
+.radar-card:active,
+.insight-card:active,
+.memo-card-body:active {
+  transform: scale(0.985);
+  transition-duration: 140ms;
+}
+
+/* Material layers arrive as objects, but large blur radii never animate per-frame. */
+.el-overlay,
+.dialog-overlay,
+.path-overlay,
+.image-viewer-overlay {
+  transition: opacity var(--motion-fast) var(--ease-emphasized);
+}
+
+.el-dialog,
+.el-drawer {
+  transform-origin: center top;
+  transition-property: transform, opacity, box-shadow !important;
+  transition-duration: var(--motion-normal) !important;
+  transition-timing-function: var(--ease-spring-gentle) !important;
+}
+
+.el-message {
+  transform-origin: center top;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .el-button:not(.is-disabled):hover,
+  .glass-btn:not(:disabled):hover {
+    transform: translateY(-1px);
+  }
+}
+
+/* Motion and transparency are independent accessibility preferences. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-instant: 80ms;
+    --motion-fast: 120ms;
+    --motion-normal: 160ms;
+    --motion-slow: 180ms;
+    --motion-page: 140ms;
+    --duration-fast: 120ms;
+    --duration-normal: 160ms;
+    --duration-slow: 180ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+
+  .ambient-bg,
+  .empty-icon,
+  .day-dot,
+  .loading-dots span,
+  .memo-card,
+  .fs-ui {
+    animation: none !important;
+  }
+
+  .page-slide-enter-from,
+  .page-slide-leave-to,
+  .page-next-enter-from,
+  .page-next-leave-to,
+  .page-prev-enter-from,
+  .page-prev-leave-to,
+  .overlay-pop-enter-from,
+  .overlay-pop-leave-to,
+  .dialog-enter-from .dialog-content,
+  .dialog-leave-to .dialog-content {
+    transform: none !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .sidebar,
+  .mobile-global-header,
+  .el-card,
+  .el-dialog,
+  .el-drawer,
+  .glass-surface,
+  .glass-surface-heavy,
+  .pane,
+  .path-card,
+  .el-message,
+  .reader-page:fullscreen .markdown-body h1:first-of-type {
+    background: var(--bg-glass-strong) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .sidebar,
+  .mobile-global-header,
+  .el-card,
+  .el-dialog,
+  .el-drawer,
+  .glass-surface,
+  .pane,
+  .path-card,
+  .reader-page:fullscreen .markdown-body h1:first-of-type {
+    background: var(--bg-base) !important;
+    border-color: var(--text-muted) !important;
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  [role="button"]:focus-visible,
+  input:not(.el-input__inner):focus-visible,
+  textarea:not(.el-textarea__inner):focus-visible {
+    outline: 2px solid var(--accent) !important;
+    outline-offset: 2px;
+  }
+}
+
+/* Keep sustained decorative work off small and coarse-pointer devices. */
+@media (max-width: 768px), (pointer: coarse) {
+  .ambient-bg {
+    animation: none !important;
+  }
+}

@@ -22,6 +22,10 @@ export const useAppStore = defineStore('app', () => {
     sidebarCollapsed.value = !sidebarCollapsed.value
   }
 
+  function setSidebarCollapsed(collapsed: boolean) {
+    sidebarCollapsed.value = collapsed
+  }
+
   function toggleTheme() {
     theme.value = theme.value === 'light' ? 'dark' : theme.value === 'dark' ? 'eye-care' : 'light'
   }
@@ -49,5 +53,16 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  return { sidebarCollapsed, healthStatus, theme, isScrolled, toggleSidebar, toggleTheme, setTheme, setScrolled, fetchHealth }
+  return {
+    sidebarCollapsed,
+    healthStatus,
+    theme,
+    isScrolled,
+    toggleSidebar,
+    setSidebarCollapsed,
+    toggleTheme,
+    setTheme,
+    setScrolled,
+    fetchHealth,
+  }
 })

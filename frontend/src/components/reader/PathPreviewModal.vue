@@ -356,7 +356,7 @@ onMounted(() => { void load() })
   color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s var(--ease-out);
+  transition: var(--transition-interactive);
 }
 .ppm-reader-btn:hover { color: var(--accent); border-color: var(--accent-border); }
 .ppm-close-btn { padding: 0; width: 30px; justify-content: center; }

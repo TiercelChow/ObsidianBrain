@@ -1,5 +1,13 @@
 <template>
-  <div ref="readerPageRef" class="reader-page" :class="{ 'is-fullscreen': isFullscreen, 'fs-anim': fsAnim, 'fs-ui-hidden': isFullscreen && !showFsUI }">
+  <div
+    ref="readerPageRef"
+    class="reader-page"
+    :class="{
+      'is-fullscreen': isFullscreen,
+      'is-fs-transitioning': isFsTransitioning,
+      'fs-ui-hidden': isFullscreen && !showFsUI,
+    }"
+  >
     <header class="page-header">
       <div>
         <h1 class="page-title">阅境轩</h1>
@@ -98,7 +106,7 @@
     ><el-icon :size="24"><Menu /></el-icon></button>
 
     <!-- Body: 3 panes -->
-    <div class="reader-body">
+    <div ref="readerBodyRef" class="reader-body">
       <!-- Left: file tree -->
       <aside class="pane pane-left">
         <div class="pane-title-bar">
@@ -117,7 +125,6 @@
       <main ref="contentRef" class="pane pane-center" @scroll="onContentScroll">
         <transition
           :name="transitionDir"
-          mode="out-in"
           @enter="onArticleEnter"
           @after-leave="onContentAfterLeave"
         >
@@ -164,8 +171,8 @@
       </aside>
     </div>
 
-    <!-- Mobile drawers -->
-    <el-drawer v-model="treeDrawer" direction="ltr" size="70%" :with-header="false">
+    <!-- Mobile drawers: direct-manipulation panels that can be interrupted mid-swipe. -->
+    <MotionDrawer v-model="treeDrawer" direction="left" aria-label="文件列表">
       <div class="drawer-inner">
         <div class="pane-title">文件</div>
         <FileTree
@@ -176,8 +183,8 @@
         />
         <div v-else class="pane-hint">打开一个文件夹后在此浏览</div>
       </div>
-    </el-drawer>
-    <el-drawer v-model="tocDrawer" direction="rtl" size="70%" :with-header="false">
+    </MotionDrawer>
+    <MotionDrawer v-model="tocDrawer" direction="right" aria-label="文章目录">
       <div class="drawer-inner">
         <div class="pane-title">目录</div>
         <a
@@ -190,7 +197,7 @@
         >{{ t.text }}</a>
         <div v-if="!toc.length" class="pane-hint">无目录</div>
       </div>
-    </el-drawer>
+    </MotionDrawer>
 
     <!-- Floating fullscreen UI (auto-hides) -->
     <div v-if="isFullscreen" class="fs-ui" :class="{ hidden: !showFsUI }">
@@ -236,6 +243,7 @@ import {
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { useAppStore } from '@/stores/app'
 import FileTree from '@/components/reader/FileTree.vue'
+import MotionDrawer from '@/components/motion/MotionDrawer.vue'
 
 // Heavy, optional readers stay out of the Markdown-first route chunk.
 const MermaidViewer = defineAsyncComponent(() => import('@/components/reader/MermaidViewer.vue'))
@@ -279,9 +287,14 @@ const previewAnchor = ref('')      // line/symbol/heading anchor for the popup t
 const viewerSource = ref('')
 const contentRef = ref<HTMLElement | null>(null)
 const readerPageRef = ref<HTMLElement | null>(null)
+const readerBodyRef = ref<HTMLElement | null>(null)
 const isFullscreen = ref(false)
-const fsAnim = ref(false)
-let fsAnimTimer: ReturnType<typeof setTimeout> | null = null
+const isFsTransitioning = ref(false)
+interface RectSnapshot { left: number; top: number; width: number; height: number }
+let pendingFullscreenRect: RectSnapshot | null = null
+let settledFullscreenRect: RectSnapshot | null = null
+let fullscreenAnimation: Animation | null = null
+let fullscreenAnimationGeneration = 0
 // Auto-hide UI in fullscreen for immersive reading.
 const showFsUI = ref(true)
 let fsUiTimer: ReturnType<typeof setTimeout> | null = null
@@ -292,28 +305,106 @@ function onFsActivity() {
   fsUiTimer = setTimeout(() => { showFsUI.value = false }, 3000)
 }
 
-function toggleFullscreen() {
+function snapshotReaderBody(): RectSnapshot | null {
+  const rect = readerBodyRef.value?.getBoundingClientRect()
+  if (!rect || rect.width <= 0 || rect.height <= 0) return null
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+}
+
+function cancelFullscreenAnimation() {
+  fullscreenAnimationGeneration += 1
+  fullscreenAnimation?.cancel()
+  fullscreenAnimation = null
+  isFsTransitioning.value = false
+  readerPageRef.value?.classList.remove('is-fs-transitioning')
+}
+
+function animateFullscreenLayout(from: RectSnapshot | null, entering: boolean) {
+  const body = readerBodyRef.value
+  const page = readerPageRef.value
+  if (!body || !page) return
+
+  cancelFullscreenAnimation()
+  const generation = fullscreenAnimationGeneration
+  const to = snapshotReaderBody()
+  if (!to) return
+  if (entering) settledFullscreenRect = to
+
+  // Temporarily flatten expensive glass materials while the large reading
+  // surface moves. They materialise again once the compositor-only motion ends.
+  isFsTransitioning.value = true
+  page.classList.add('is-fs-transitioning')
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  let keyframes: Keyframe[]
+  let duration: number
+  if (reduceMotion) {
+    keyframes = [{ opacity: 0.86 }, { opacity: 1 }]
+    duration = 140
+  } else if (from) {
+    const dx = from.left - to.left
+    const dy = from.top - to.top
+    const scaleX = from.width / to.width
+    const scaleY = from.height / to.height
+    keyframes = [
+      { transform: `translate3d(${dx}px, ${dy}px, 0) scale(${scaleX}, ${scaleY})` },
+      { transform: 'translate3d(0, 0, 0) scale(1, 1)' },
+    ]
+    duration = entering ? 340 : 300
+  } else {
+    keyframes = [
+      { transform: `translate3d(0, ${entering ? 10 : -8}px, 0) scale(0.992)` },
+      { transform: 'translate3d(0, 0, 0) scale(1)' },
+    ]
+    duration = 260
+  }
+
+  const animation = body.animate(keyframes, {
+    duration,
+    easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    fill: 'none',
+  })
+  fullscreenAnimation = animation
+  void animation.finished.catch(() => undefined).then(() => {
+    if (generation !== fullscreenAnimationGeneration) return
+    fullscreenAnimation = null
+    isFsTransitioning.value = false
+    page.classList.remove('is-fs-transitioning')
+    if (entering) settledFullscreenRect = snapshotReaderBody()
+  })
+}
+
+async function toggleFullscreen() {
   const el = readerPageRef.value
-  if (document.fullscreenElement) {
-    void document.exitFullscreen()
-  } else if (el) {
-    el.requestFullscreen().catch((e) => {
-      console.warn('进入全屏失败:', e)
-      ElMessage.warning('当前浏览器不支持全屏')
-    })
+  if (!el) return
+
+  // Capture the live presentation rect, so a rapid reverse starts from what is
+  // currently on screen instead of snapping to the previous logical target.
+  pendingFullscreenRect = snapshotReaderBody()
+  cancelFullscreenAnimation()
+  try {
+    if (document.fullscreenElement === el) await document.exitFullscreen()
+    else await el.requestFullscreen()
+  } catch (e) {
+    pendingFullscreenRect = null
+    console.warn('切换全屏失败:', e)
+    ElMessage.warning('当前浏览器不支持全屏')
   }
 }
 function onFullscreenChange() {
-  isFullscreen.value = !!document.fullscreenElement
-  // Replay the pop animation on every toggle (enter & exit).
-  fsAnim.value = false
-  if (fsAnimTimer) clearTimeout(fsAnimTimer)
-  requestAnimationFrame(() => {
-    fsAnim.value = true
-    fsAnimTimer = setTimeout(() => { fsAnim.value = false }, 400)
-  })
+  const wasFullscreen = isFullscreen.value
+  const entered = document.fullscreenElement === readerPageRef.value
+  const liveRect = fullscreenAnimation ? snapshotReaderBody() : null
+  const from = pendingFullscreenRect
+    ?? liveRect
+    ?? (wasFullscreen ? settledFullscreenRect : null)
+  pendingFullscreenRect = null
+  isFullscreen.value = entered
+  animateFullscreenLayout(from, entered)
+  if (!entered) settledFullscreenRect = null
+
   // Auto-hide UI listeners — only active in fullscreen.
-  if (isFullscreen.value) {
+  if (entered) {
     document.addEventListener('mousemove', onFsActivity)
     document.addEventListener('touchstart', onFsActivity)
     onFsActivity()
@@ -725,7 +816,8 @@ function scrollTocToActive() {
 }
 
 function scrollToHeading(id: string) {
-  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  document.getElementById(id)?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
 }
 
 onMounted(async () => {
@@ -746,7 +838,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('fullscreenchange', onFullscreenChange)
   document.removeEventListener('mousemove', onFsActivity)
   document.removeEventListener('touchstart', onFsActivity)
-  if (fsAnimTimer) clearTimeout(fsAnimTimer)
+  cancelFullscreenAnimation()
   if (fsUiTimer) clearTimeout(fsUiTimer)
   if (refreshFlashTimer) clearTimeout(refreshFlashTimer)
   if (fabHideTimer) clearTimeout(fabHideTimer)
@@ -767,6 +859,8 @@ onBeforeUnmount(() => {
 /* Fullscreen reading mode — immersive: hide app chrome (title/input), keep file
    tree + TOC. The article's H1 sticks to the top with a frosted glass bar. */
 .reader-page:fullscreen {
+  position: relative;
+  isolation: isolate;
   height: 100vh;
   width: 100%;
   background: var(--bg-base);
@@ -796,6 +890,7 @@ onBeforeUnmount(() => {
   opacity: 0.35;
 }
 .reader-page:fullscreen.fs-ui-hidden { cursor: none; }
+.reader-page:fullscreen .reader-body { position: relative; z-index: 1; }
 /* Hide only the page title + input bar; keep file tree + TOC + FABs. */
 .reader-page:fullscreen .page-header,
 .reader-page:fullscreen .reader-topbar { display: none !important; }
@@ -805,44 +900,94 @@ onBeforeUnmount(() => {
   backdrop-filter: none; -webkit-backdrop-filter: none;
   box-shadow: none; border-radius: 0;
 }
-/* Desktop fullscreen: wider document, more breathing room, H1 sticky. */
+.reader-page:fullscreen .markdown-body {
+  --fullscreen-document-gutter: 14px;
+}
+/* The glass uses the same outer width as .markdown-body. Its layered, static
+   highlights imply refraction without adding a perpetual paint animation. */
+.reader-page:fullscreen .markdown-body :deep(h1:first-of-type) {
+  --title-glass-fill: color-mix(in srgb, var(--bg-glass-strong) 68%, transparent);
+  --title-glass-edge: color-mix(in srgb, var(--border-glass) 74%, white 26%);
+  --title-glass-glint: rgba(255, 255, 255, 0.5);
+  --title-glass-shadow: rgba(28, 31, 45, 0.12);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  width: calc(100% + (var(--fullscreen-document-gutter) * 2));
+  max-width: none;
+  margin: 0 calc(var(--fullscreen-document-gutter) * -1) 24px;
+  padding: 14px var(--fullscreen-document-gutter);
+  overflow: hidden;
+  isolation: isolate;
+  color: var(--text-primary);
+  font-weight: 680;
+  letter-spacing: -0.025em;
+  background:
+    radial-gradient(120% 180% at 8% -90%, var(--title-glass-glint), transparent 58%),
+    linear-gradient(112deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 38% 72%, rgba(255, 255, 255, 0.12)),
+    var(--title-glass-fill);
+  border: 1px solid var(--title-glass-edge);
+  border-radius: 18px;
+  backdrop-filter: blur(24px) saturate(175%) contrast(1.04) brightness(1.02);
+  -webkit-backdrop-filter: blur(24px) saturate(175%) contrast(1.04) brightness(1.02);
+  box-shadow:
+    inset 0 1px 0 var(--title-glass-glint),
+    inset 0 -1px 0 color-mix(in srgb, var(--accent) 10%, transparent),
+    0 10px 32px var(--title-glass-shadow),
+    0 1px 2px rgba(0, 0, 0, 0.04);
+  text-shadow: 0 1px 0 color-mix(in srgb, var(--bg-base) 46%, transparent);
+}
+:root[data-theme="dark"] .reader-page:fullscreen .markdown-body :deep(h1:first-of-type) {
+  --title-glass-fill: color-mix(in srgb, var(--bg-glass-strong) 78%, transparent);
+  --title-glass-edge: rgba(255, 255, 255, 0.13);
+  --title-glass-glint: rgba(255, 255, 255, 0.17);
+  --title-glass-shadow: rgba(0, 0, 0, 0.38);
+  background:
+    radial-gradient(120% 180% at 8% -90%, rgba(255, 255, 255, 0.16), transparent 58%),
+    linear-gradient(112deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent 42% 74%, rgba(255, 255, 255, 0.045)),
+    var(--title-glass-fill);
+  backdrop-filter: blur(26px) saturate(150%) contrast(1.08) brightness(0.86);
+  -webkit-backdrop-filter: blur(26px) saturate(150%) contrast(1.08) brightness(0.86);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+:root[data-theme="eye-care"] .reader-page:fullscreen .markdown-body :deep(h1:first-of-type) {
+  --title-glass-fill: color-mix(in srgb, var(--bg-glass-strong) 76%, transparent);
+  --title-glass-edge: rgba(230, 255, 222, 0.44);
+  --title-glass-glint: rgba(245, 255, 240, 0.4);
+  --title-glass-shadow: rgba(40, 78, 34, 0.14);
+}
+/* Desktop fullscreen: wider document, more breathing room. */
 @media (min-width: 769px) {
   .reader-page:fullscreen {
     padding: 16px 24px;
   }
   .reader-page:fullscreen .markdown-body {
+    --fullscreen-document-gutter: 48px;
     max-width: 920px;
     padding: 32px 48px 160px;
     font-size: 16px;
     line-height: var(--leading-relaxed);
   }
   .reader-page:fullscreen .markdown-body :deep(h1:first-of-type) {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    margin: 0 -48px 24px;
-    padding: 16px 48px;
-    background: var(--bg-glass);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    box-shadow: 0 1px 0 var(--border-faint);
-    border-radius: 12px;
+    padding-block: 16px;
   }
 }
-/* Article H1 sticks to the top of the scroll area with a frosted glass bar —
-   content scrolls behind it, visible (blurred) through the glass.
-   :deep() needed because h1 is v-html content (no data-v-xxx attribute). */
-.reader-page:fullscreen .markdown-body :deep(h1:first-of-type) {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  margin: 0 -48px 24px;
-  padding: 16px 48px;
-  background: var(--bg-glass);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  box-shadow: 0 1px 0 var(--border-faint);
-  border-radius: 12px;
+
+/* FLIP transition: only the reader body moves. Blur is flattened during motion
+   so PDF canvases and long Markdown pages remain on the compositor fast path. */
+.reader-page.is-fs-transitioning .reader-body {
+  transform-origin: 0 0;
+  will-change: transform, opacity;
+}
+.reader-page.is-fs-transitioning .pane,
+.reader-page.is-fs-transitioning .markdown-body :deep(h1:first-of-type) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.reader-page.is-fs-transitioning .pane { background: var(--bg-glass-strong); }
+.reader-page.is-fs-transitioning .markdown-body :deep(h1:first-of-type) {
+  background: var(--title-glass-fill);
+  box-shadow: inset 0 1px 0 var(--title-glass-glint), 0 6px 20px var(--title-glass-shadow);
 }
 
 /* Floating fullscreen UI — auto-hides after inactivity. */
@@ -850,6 +995,7 @@ onBeforeUnmount(() => {
   position: fixed; top: 24px; right: 24px; z-index: 100;
   display: flex; gap: 10px;
   transition: opacity 0.4s var(--ease-out);
+  animation: fs-ui-materialize var(--motion-fast) var(--ease-emphasized) backwards;
 }
 .fs-ui.hidden { opacity: 0; pointer-events: none; }
 .fs-fab {
@@ -866,8 +1012,12 @@ onBeforeUnmount(() => {
 }
 .fs-fab:hover { color: var(--text-primary); }
 .fs-fab:active { transform: scale(0.92); }
-/* Backdrop behind the fullscreen element — match the bg so the pop animation's
-   scale gap is seamless instead of flashing black. */
+@keyframes fs-ui-materialize {
+  from { opacity: 0; transform: translateY(-6px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* Match the native fullscreen backdrop to the reading surface, preventing a
+   black flash while the browser hands the element to/from the top layer. */
 .reader-page::backdrop {
   background:
     radial-gradient(ellipse at 75% 15%, rgba(196, 181, 253, 0.25), transparent 55%),
@@ -875,15 +1025,6 @@ onBeforeUnmount(() => {
     radial-gradient(ellipse at 50% 50%, rgba(253, 230, 138, 0.12), transparent 50%),
     var(--bg-base);
 }
-/* Pop animation on enter/exit fullscreen. */
-.reader-page.fs-anim {
-  animation: fs-pop 0.38s var(--ease-spring);
-}
-@keyframes fs-pop {
-  0% { transform: scale(0.94); opacity: 0.45; }
-  100% { transform: scale(1); opacity: 1; }
-}
-
 /* ── Top bar ── */
 .reader-topbar {
   display: flex;
@@ -900,7 +1041,11 @@ onBeforeUnmount(() => {
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   color: var(--text-muted); font-size: 14px;
   cursor: pointer; text-align: left;
-  transition: all 0.2s var(--ease-out);
+  transition: color var(--motion-fast) var(--ease-emphasized),
+              background-color var(--motion-fast) var(--ease-emphasized),
+              border-color var(--motion-fast) var(--ease-emphasized),
+              transform var(--motion-instant) var(--ease-emphasized),
+              box-shadow var(--motion-fast) var(--ease-emphasized);
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 .path-trigger:hover { background: var(--bg-hover); color: var(--text-secondary); border-color: var(--accent-border); }
@@ -934,6 +1079,10 @@ onBeforeUnmount(() => {
 .path-input-wrap { padding: 16px 20px; border-bottom: 1px solid var(--border-faint); }
 .path-input { width: 100%; }
 .path-input :deep(.el-input__wrapper) { padding-left: 12px; }
+.path-input :deep(.el-input__inner:focus-visible) {
+  outline: none;
+  box-shadow: none !important;
+}
 
 .history-panel {
   max-height: 400px;
@@ -996,7 +1145,11 @@ onBeforeUnmount(() => {
 .hp-rename-input:focus { border-color: var(--accent); }
 .hp-rename-ok, .hp-rename-cancel {
   flex-shrink: 0; padding: 5px 12px; border-radius: 8px; border: none;
-  font-size: 12px; cursor: pointer; transition: all 0.15s var(--ease-out);
+  font-size: 12px; cursor: pointer;
+  transition: transform var(--motion-instant) var(--ease-emphasized),
+              opacity var(--motion-fast) var(--ease-emphasized),
+              color var(--motion-fast) var(--ease-emphasized),
+              background-color var(--motion-fast) var(--ease-emphasized);
 }
 .hp-rename-ok { background: var(--accent); color: #fff; }
 .hp-rename-ok:hover { opacity: 0.85; }
@@ -1006,7 +1159,7 @@ onBeforeUnmount(() => {
 /* Overlay transitions */
 .overlay-fade-enter-active, .overlay-fade-leave-active { transition: opacity 0.25s var(--ease-out); }
 .overlay-fade-enter-from, .overlay-fade-leave-to { opacity: 0; }
-.overlay-pop-enter-active { transition: opacity 0.3s var(--ease-spring), transform 0.3s var(--ease-spring); }
+.overlay-pop-enter-active { transition: opacity var(--motion-normal) var(--ease-emphasized), transform var(--motion-normal) var(--ease-spring-gentle); }
 .overlay-pop-leave-active { transition: opacity 0.15s var(--ease-out), transform 0.15s var(--ease-out); }
 .overlay-pop-enter-from { opacity: 0; transform: scale(0.96) translateY(-12px); }
 .overlay-pop-leave-to { opacity: 0; transform: scale(0.98) translateY(-8px); }
@@ -1075,7 +1228,9 @@ onBeforeUnmount(() => {
   width: 24px; height: 24px; border-radius: 7px; border: none;
   background: transparent; color: var(--text-muted); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  transition: all 0.15s var(--ease-out);
+  transition: transform var(--motion-instant) var(--ease-emphasized),
+              color var(--motion-fast) var(--ease-emphasized),
+              background-color var(--motion-fast) var(--ease-emphasized);
 }
 .pane-title-btn:hover { background: var(--bg-glass-subtle); color: var(--accent); }
 .pane-title-btn:active { transform: scale(0.92); }
@@ -1111,12 +1266,20 @@ onBeforeUnmount(() => {
 .page-next-leave-active,
 .page-prev-enter-active,
 .page-prev-leave-active {
-  transition: transform 0.28s var(--ease-standard), opacity 0.28s var(--ease-out);
+  transition: transform var(--motion-page) var(--ease-emphasized),
+              opacity var(--motion-page) var(--ease-emphasized);
 }
-.page-next-enter-from { transform: translateX(36px); opacity: 0; }
-.page-next-leave-to { transform: translateX(-36px); opacity: 0; }
-.page-prev-enter-from { transform: translateX(-36px); opacity: 0; }
-.page-prev-leave-to { transform: translateX(36px); opacity: 0; }
+.page-next-leave-active,
+.page-prev-leave-active {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  pointer-events: none;
+}
+.page-next-enter-from { transform: translateX(16px); opacity: 0; }
+.page-next-leave-to { transform: translateX(-16px); opacity: 0; }
+.page-prev-enter-from { transform: translateX(-16px); opacity: 0; }
+.page-prev-leave-to { transform: translateX(16px); opacity: 0; }
 
 /* ── loading bar + error banner ── */
 .loadbar {
@@ -1160,7 +1323,10 @@ onBeforeUnmount(() => {
   color: var(--text-muted);
   cursor: pointer; text-decoration: none;
   border-left: 2px solid transparent;
-  transition: all 0.12s var(--ease-out);
+  transition: color var(--motion-fast) var(--ease-emphasized),
+              background-color var(--motion-fast) var(--ease-emphasized),
+              border-color var(--motion-fast) var(--ease-emphasized),
+              transform var(--motion-instant) var(--ease-emphasized);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .toc-item:hover { color: var(--text-secondary); background: var(--bg-glass-subtle); }
@@ -1261,14 +1427,18 @@ onBeforeUnmount(() => {
 }
 
 .markdown-body {
+  width: 100%;
+  min-width: 0;
   max-width: 860px;
   margin: 0 auto;
   padding: 12px 20px 120px;
   color: var(--text-secondary);
   font-size: 15px;
   line-height: 1.8;
-  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
+.markdown-body > * { max-width: 100%; }
 .markdown-body > *:first-child { margin-top: 0; }
 
 .markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6 {
@@ -1287,8 +1457,13 @@ onBeforeUnmount(() => {
 .markdown-body h3 { font-size: 1.25em; }
 .markdown-body h4 { font-size: 1.05em; }
 
-.markdown-body p { margin: 0 0 1em; }
-.markdown-body a { color: var(--accent); text-decoration: none; }
+.markdown-body p { margin: 0 0 1em; min-width: 0; }
+.markdown-body a {
+  color: var(--accent);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 .markdown-body a:hover { text-decoration: underline; }
 
 .markdown-body ul, .markdown-body ol { padding-left: 1.6em; margin: 0 0 1em; }
@@ -1301,6 +1476,8 @@ onBeforeUnmount(() => {
   background: var(--bg-glass-subtle);
   border-radius: 0 8px 8px 0;
   color: var(--text-tertiary);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .markdown-body blockquote p { margin: 0.3em 0; }
 
@@ -1312,9 +1489,17 @@ onBeforeUnmount(() => {
   padding: 0.15em 0.4em;
   border-radius: 5px;
 }
+.markdown-body :not(pre) > code {
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 /* code block with line numbers (shared by reader + preview modal) */
 .code-block {
   display: flex;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   margin: 0 0 1em;
   background: var(--code-bg);
   border: 1px solid var(--border-faint);
@@ -1353,6 +1538,29 @@ onBeforeUnmount(() => {
   background: transparent; color: var(--tk-text);
   padding: 0; font-size: 13px; line-height: 1.6;
   font-family: var(--font-mono);
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+/* Raw HTML <pre> blocks do not pass through the fenced-code renderer. */
+.markdown-body pre:not(.code-gutter):not(.code-content) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: auto;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: var(--code-bg);
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  -webkit-overflow-scrolling: touch;
+}
+.markdown-body pre code {
+  white-space: inherit;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 /* hljs token colors — themed via --tk-* variables (global: reader + modal) */
 .hljs-comment,
@@ -1392,14 +1600,39 @@ onBeforeUnmount(() => {
   .markdown-body { overflow-wrap: anywhere; }
 }
 
+.markdown-body .table-scroll {
+  width: 100%;
+  max-width: 100%;
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--border-faint);
+  border-radius: 12px;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+}
+.markdown-body .table-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .markdown-body table {
-  width: fit-content; max-width: 100%; border-collapse: separate; border-spacing: 0;
-  margin: 1em auto; font-size: 0.93em; overflow-x: auto;
-  border: 1px solid var(--border-faint); border-radius: 12px; overflow: hidden;
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 0;
+  font-size: 0.93em;
 }
 .markdown-body th, .markdown-body td {
   padding: 10px 16px; border: none;
   text-align: left;
+  min-width: 8rem;
+  max-width: 28rem;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  vertical-align: top;
 }
 .markdown-body th {
   background: var(--accent-light); color: var(--accent); font-weight: 600;
@@ -1409,22 +1642,72 @@ onBeforeUnmount(() => {
 .markdown-body tbody tr + tr td { border-top: 1px solid var(--border-faint); }
 .markdown-body tr:nth-child(even) td { background: var(--bg-glass-subtle); }
 
-.markdown-body img { max-width: 100%; border-radius: 10px; margin: 0.5em 0; }
+.markdown-body img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+  margin: 0.5em 0;
+}
+.markdown-body video,
+.markdown-body iframe,
+.markdown-body canvas,
+.markdown-body object,
+.markdown-body embed,
+.markdown-body svg {
+  max-width: 100%;
+}
+.markdown-body video,
+.markdown-body audio { width: 100%; }
+.markdown-body iframe { border: 0; }
+.markdown-body figure,
+.markdown-body details { max-width: 100%; min-width: 0; }
 .markdown-body hr { border: none; border-top: 1px solid var(--border-faint); margin: 2em 0; }
+
+/* Display math is intentionally kept on one line and scrolled locally. */
+.markdown-body .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25em 0;
+  -webkit-overflow-scrolling: touch;
+}
+.markdown-body .katex-display > .katex { min-width: max-content; }
+.markdown-body :not(.katex-display) > .katex {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  vertical-align: middle;
+}
 
 /* task lists */
 .markdown-body input[type="checkbox"] { margin-right: 0.4em; transform: translateY(1px); }
 
 /* ── mermaid ── */
 .markdown-body .mermaid {
-  display: flex; justify-content: center;
+  display: flex; justify-content: safe center;
+  width: 100%; max-width: 100%; min-width: 0;
   margin: 1.2em 0; padding: 20px;
   background: var(--bg-glass-subtle);
   border: 1px solid var(--border-faint);
   border-radius: 12px;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
 }
-.markdown-body .mermaid svg { max-width: 100%; height: auto; }
+.markdown-body .mermaid svg { display: block; max-width: 100%; height: auto; flex: 0 0 auto; }
+
+@media (max-width: 768px) {
+  .markdown-body th,
+  .markdown-body td {
+    min-width: min(8rem, 42vw);
+    padding: 8px 12px;
+  }
+  .markdown-body ul,
+  .markdown-body ol { padding-left: 1.35em; }
+}
 .markdown-body .mermaid-clickable { cursor: zoom-in; transition: box-shadow var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out); }
 .markdown-body .mermaid-clickable:hover { box-shadow: var(--shadow-lg); transform: translateY(-1px); }
 .markdown-body .mermaid-error {

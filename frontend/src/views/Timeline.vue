@@ -218,10 +218,9 @@
       </div>
     </div>
 
-    <!-- Create Dialog -->
-    <Transition name="dialog">
-      <div v-if="showCreateDialog" class="dialog-overlay" @click.self="showCreateDialog = false">
-        <div class="dialog-content glass-surface-heavy">
+    <!-- Create Dialog: centered on desktop, velocity-aware bottom sheet on mobile. -->
+    <MotionModal v-model="showCreateDialog" aria-label="写小记">
+      <div class="dialog-content glass-surface-heavy">
           <div class="dialog-header">
             <h3>写小记</h3>
             <button class="glass-icon-btn" @click="showCreateDialog = false">✕</button>
@@ -297,9 +296,8 @@
               </button>
             </div>
           </div>
-        </div>
       </div>
-    </Transition>
+    </MotionModal>
 
     <!-- Image Viewer Modal -->
     <Transition name="viewer">
@@ -344,6 +342,7 @@ import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/github-dark.css'
 import panzoom, { type PanZoom } from 'panzoom'
 import { createMemo, browseTimeline, searchMemos, uploadImages, syncMemos } from '@/api'
+import MotionModal from '@/components/motion/MotionModal.vue'
 
 // ── Types ──
 interface Memo {
@@ -479,6 +478,9 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('keydown', onViewerKeydown)
   window.removeEventListener('resize', onResize)
+  if (searchTimer) clearTimeout(searchTimer)
+  pendingImages.value.forEach((image) => URL.revokeObjectURL(image.preview))
+  viewerPz?.dispose()
 })
 
 function triggerFileInput() {
@@ -906,7 +908,11 @@ onMounted(() => { loadMemos() })
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.25s var(--ease-standard);
+  transition: transform var(--motion-instant) var(--ease-emphasized),
+              color var(--motion-fast) var(--ease-emphasized),
+              background-color var(--motion-fast) var(--ease-emphasized),
+              border-color var(--motion-fast) var(--ease-emphasized),
+              box-shadow var(--motion-fast) var(--ease-emphasized);
   box-shadow: var(--shadow-sm);
 }
 .glass-btn:hover {
@@ -947,7 +953,10 @@ onMounted(() => { loadMemos() })
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--duration-fast) var(--ease-out);
+  transition: transform var(--motion-instant) var(--ease-emphasized),
+              color var(--motion-fast) var(--ease-emphasized),
+              background-color var(--motion-fast) var(--ease-emphasized),
+              border-color var(--motion-fast) var(--ease-emphasized);
 }
 .glass-icon-btn:hover {
   background: var(--bg-glass);
@@ -984,7 +993,9 @@ onMounted(() => { loadMemos() })
   line-height: 1.6;
   resize: vertical;
   outline: none;
-  transition: all 0.25s var(--ease-out);
+  transition: border-color var(--motion-fast) var(--ease-emphasized),
+              box-shadow var(--motion-fast) var(--ease-emphasized),
+              background-color var(--motion-fast) var(--ease-emphasized);
   box-shadow: inset var(--shadow-sm);
 }
 .glass-textarea::placeholder { color: var(--text-faint); }
@@ -1018,7 +1029,10 @@ onMounted(() => { loadMemos() })
   border-radius: 12px;
   flex: 1;
   max-width: 320px;
-  transition: all var(--duration-normal) var(--ease-standard);
+  transition: background-color var(--motion-fast) var(--ease-emphasized),
+              border-color var(--motion-fast) var(--ease-emphasized),
+              box-shadow var(--motion-fast) var(--ease-emphasized),
+              transform var(--motion-normal) var(--ease-spring-gentle);
 }
 .search-box:focus-within {
   background: var(--bg-glass-strong);
@@ -1046,7 +1060,7 @@ onMounted(() => { loadMemos() })
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s var(--ease-out);
+  transition: var(--transition-interactive);
   flex-shrink: 0;
 }
 .clear-btn:hover {
@@ -1069,7 +1083,10 @@ onMounted(() => { loadMemos() })
   font-weight: 500;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.25s var(--ease-standard);
+  transition: transform var(--motion-instant) var(--ease-emphasized),
+              color var(--motion-fast) var(--ease-emphasized),
+              background-color var(--motion-fast) var(--ease-emphasized),
+              box-shadow var(--motion-fast) var(--ease-emphasized);
   position: relative;
   user-select: none;
 }
@@ -1109,7 +1126,9 @@ onMounted(() => { loadMemos() })
   box-shadow: var(--shadow-sm), var(--inset-highlight) !important;
   height: 40px !important;
   padding: 0 12px !important;
-  transition: all 0.25s var(--ease-out) !important;
+  transition: background-color var(--motion-fast) var(--ease-emphasized),
+              border-color var(--motion-fast) var(--ease-emphasized),
+              box-shadow var(--motion-fast) var(--ease-emphasized) !important;
 }
 .date-range-picker :deep(.el-range-editor:hover) {
   border-color: var(--border-glass) !important;
@@ -1177,7 +1196,9 @@ onMounted(() => { loadMemos() })
   cursor: pointer;
   font-size: 13px;
   color: var(--text-muted);
-  transition: all var(--duration-fast) var(--ease-out);
+  transition: transform var(--motion-instant) var(--ease-emphasized),
+              color var(--motion-fast) var(--ease-emphasized),
+              background-color var(--motion-fast) var(--ease-emphasized);
   position: relative;
 }
 .day-link:hover {
@@ -1195,13 +1216,16 @@ onMounted(() => { loadMemos() })
   background: var(--bg-glass);
   flex-shrink: 0;
   z-index: 1;
-  transition: all var(--duration-normal) var(--ease-out);
+  transition: transform var(--motion-normal) var(--ease-spring-gentle),
+              background-color var(--motion-fast) var(--ease-emphasized),
+              border-color var(--motion-fast) var(--ease-emphasized),
+              box-shadow var(--motion-fast) var(--ease-emphasized);
 }
 .day-link.active .day-dot {
   border-color: #818cf8;
   background: #818cf8;
   box-shadow: 0 0 8px rgba(129, 140, 248, 0.5);
-  animation: dotPulse 2s ease-in-out infinite;
+  transform: scale(1.2);
 }
 .day-line {
   position: absolute;
@@ -1254,7 +1278,7 @@ onMounted(() => { loadMemos() })
   padding: 3px 12px;
   border-radius: 8px;
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
+  transition: var(--transition-interactive);
 }
 .filter-hint button:hover {
   background: rgba(99, 102, 241, 0.2);
@@ -1317,7 +1341,9 @@ onMounted(() => { loadMemos() })
   border-radius: 50%;
   background: rgba(129, 140, 248, 0.3);
   flex-shrink: 0;
-  transition: all var(--duration-normal) var(--ease-out);
+  transition: transform var(--motion-normal) var(--ease-spring-gentle),
+              background-color var(--motion-fast) var(--ease-emphasized),
+              box-shadow var(--motion-fast) var(--ease-emphasized);
 }
 .memo-card:hover .memo-time-dot {
   background: #818cf8;
@@ -1334,9 +1360,11 @@ onMounted(() => { loadMemos() })
   padding: 16px 20px;
   border-radius: 18px;
   margin-bottom: 6px;
-  transition: all var(--duration-normal) var(--ease-standard);
+  transition: transform var(--motion-fast) var(--ease-emphasized),
+              box-shadow var(--motion-fast) var(--ease-emphasized),
+              background-color var(--motion-fast) var(--ease-emphasized),
+              border-color var(--motion-fast) var(--ease-emphasized);
   transform: translateZ(0);
-  will-change: transform;
   -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
   min-width: 0;
@@ -1674,7 +1702,7 @@ onMounted(() => { loadMemos() })
   padding: 3px 12px;
   border-radius: 10px;
   cursor: pointer;
-  transition: all 0.25s var(--ease-out);
+  transition: var(--transition-interactive);
   font-weight: 500;
 }
 .memo-tag:hover {
@@ -1716,7 +1744,7 @@ onMounted(() => { loadMemos() })
 .empty-icon {
   font-size: 56px;
   margin-bottom: 20px;
-  animation: gentleBounce 3s ease-in-out infinite;
+  transform: translateY(0);
 }
 .empty-title { font-size: 16px; color: var(--text-tertiary); font-weight: 600; }
 .empty-hint { font-size: 13px; color: var(--text-faint); margin-top: 8px; }
@@ -1741,22 +1769,13 @@ onMounted(() => { loadMemos() })
 .loading-dots span:nth-child(3) { animation-delay: 0.3s; }
 
 /* ── Dialog ── */
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.15);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
 .dialog-content {
   width: 540px;
   max-width: 90vw;
   border-radius: 24px;
   padding: 28px;
+  max-height: calc(100dvh - 48px);
+  overflow: auto;
 }
 .dialog-header {
   display: flex;
@@ -1859,7 +1878,7 @@ onMounted(() => { loadMemos() })
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--duration-fast) var(--ease-out);
+  transition: var(--transition-interactive);
 }
 .image-add-btn:hover {
   border-color: rgba(0, 0, 0, 0.2);
@@ -1868,43 +1887,16 @@ onMounted(() => { loadMemos() })
 }
 
 /* ── Transitions ── */
-.dialog-enter-active {
-  transition: opacity var(--duration-slow) var(--ease-standard);
-}
-.dialog-enter-active .dialog-content {
-  transition: transform 0.4s var(--ease-spring), opacity var(--duration-slow) var(--ease-out);
-}
-.dialog-leave-active {
-  transition: opacity var(--duration-fast) var(--ease-out);
-}
-.dialog-leave-active .dialog-content {
-  transition: transform var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out);
-}
-.dialog-enter-from {
-  opacity: 0;
-}
-.dialog-enter-from .dialog-content {
-  transform: scale(0.9) translateY(20px);
-  opacity: 0;
-}
-.dialog-leave-to {
-  opacity: 0;
-}
-.dialog-leave-to .dialog-content {
-  transform: scale(0.95);
-  opacity: 0;
-}
-
-.hint-enter-active { transition: all 0.4s var(--ease-standard); }
-.hint-leave-active { transition: all 0.25s var(--ease-out); }
+.hint-enter-active { transition: opacity var(--motion-normal) var(--ease-emphasized), transform var(--motion-normal) var(--ease-spring-gentle); }
+.hint-leave-active { transition: opacity var(--motion-fast) var(--ease-emphasized), transform var(--motion-fast) var(--ease-emphasized); }
 .hint-enter-from, .hint-leave-to { opacity: 0; transform: translateY(-8px); }
 
 /* ── Memo Animations ── */
 .memo-card {
-  animation: fade-in 0.5s var(--ease-standard) both;
+  animation: fade-in var(--motion-normal) var(--ease-emphasized) both;
   animation-delay: var(--delay, 0s);
-  transition: opacity 0.5s var(--ease-standard),
-              transform 0.5s var(--ease-standard);
+  transition: opacity var(--motion-normal) var(--ease-emphasized),
+              transform var(--motion-normal) var(--ease-spring-gentle);
 }
 
 /* TransitionGroup animations for add/remove */
@@ -1917,11 +1909,11 @@ onMounted(() => { loadMemos() })
 }
 .memo-anim-enter-from {
   opacity: 0;
-  transform: translateX(-30px) scale(0.95);
+  transform: translateY(12px) scale(0.98);
 }
 .memo-anim-leave-to {
   opacity: 0;
-  transform: translateX(30px) scale(0.95);
+  transform: translateY(-8px) scale(0.985);
 }
 .memo-anim-move {
   transition: transform 0.4s var(--ease-standard);
@@ -1976,7 +1968,7 @@ onMounted(() => { loadMemos() })
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--duration-fast) var(--ease-out);
+  transition: var(--transition-interactive);
   z-index: 10;
 }
 .viewer-close:hover {
@@ -1997,7 +1989,7 @@ onMounted(() => { loadMemos() })
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--duration-fast) var(--ease-out);
+  transition: var(--transition-interactive);
   z-index: 10;
   line-height: 1;
 }
@@ -2042,7 +2034,7 @@ onMounted(() => { loadMemos() })
   color: rgba(255, 255, 255, 0.8);
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  transition: all 0.15s ease;
+  transition: var(--transition-interactive);
 }
 .viewer-zoom-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
 .viewer-zoom-btn:active { transform: scale(0.92); }
@@ -2084,6 +2076,13 @@ onMounted(() => { loadMemos() })
   }
   .memo-images-1 .memo-image { max-height: 280px; width: 100%; height: auto; object-fit: cover; }
   .memo-card-body { padding: 14px 16px; border-radius: 14px; }
+  .dialog-content {
+    width: 100%;
+    max-width: none;
+    max-height: min(88dvh, 760px);
+    border-radius: 24px 24px 0 0;
+    padding: 34px 20px max(24px, env(safe-area-inset-bottom));
+  }
   .preset-chips { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .chip-track { flex-wrap: nowrap; }
   .chip { flex-shrink: 0; padding: 6px 12px; font-size: 12px; }

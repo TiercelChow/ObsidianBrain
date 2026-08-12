@@ -180,7 +180,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  transition: var(--transition-interactive);
 }
 .mv-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .mv-btn.mv-close:hover { background: rgba(248, 113, 113, 0.15); color: #f87171; border-color: rgba(248, 113, 113, 0.3); }
