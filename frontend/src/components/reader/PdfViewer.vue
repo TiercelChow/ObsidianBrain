@@ -31,12 +31,15 @@ import {
   computeRenderDpr,
   isWithinRenderWindow,
 } from './pdfRenderPolicy'
+import { getPdfRenderPolicy } from '@/utils/mobileLayoutPolicy'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 
 const props = defineProps<{ src: string }>()
 const emit = defineEmits<{
   outline: [items: { text: string; level: number; page: number }[]]
+  pagechange: [page: number]
+  pagecount: [pages: number]
 }>()
 const appStore = useAppStore()
 const theme = ref(appStore.theme)
@@ -53,8 +56,12 @@ interface PageWork {
   textRendered?: boolean
 }
 
-const RENDER_MARGIN_PX = 700
-const MAX_CONCURRENT_RENDERS = 2
+const renderPolicy = getPdfRenderPolicy(
+  window.innerWidth,
+  navigator.hardwareConcurrency,
+)
+const RENDER_MARGIN_PX = renderPolicy.renderMarginPx
+const MAX_CONCURRENT_RENDERS = renderPolicy.maxConcurrentRenders
 const RANGE_CHUNK_SIZE = 256 * 1024
 
 const scrollRef = ref<HTMLElement | null>(null)
@@ -182,7 +189,11 @@ async function renderPage(num: number, work: PageWork) {
     if (pageWork.get(num) !== work || work.generation !== loadGeneration) return
     work.page = page
     const viewport = page.getViewport({ scale: currentScale() })
-    const dpr = computeRenderDpr(viewport.width, viewport.height, window.devicePixelRatio || 1)
+    const dpr = computeRenderDpr(
+      viewport.width,
+      viewport.height,
+      Math.min(window.devicePixelRatio || 1, renderPolicy.maxRenderDpr),
+    )
     canvas.width = Math.max(1, Math.floor(viewport.width * dpr))
     canvas.height = Math.max(1, Math.floor(viewport.height * dpr))
     canvas.style.width = `${viewport.width}px`
@@ -295,6 +306,7 @@ function setupObservers() {
           visiblePages.delete(num)
         }
       }
+      if (visiblePages.size > 0) emit('pagechange', Math.min(...visiblePages))
     },
     { root },
   )
@@ -327,6 +339,7 @@ async function load() {
       return
     }
     pdfDoc = doc
+    emit('pagecount', doc.numPages)
     // Use page 1 to derive the fit-width scale; record every page's placeholder
     // size at that scale so the scroll area has correct height before render.
     const page1 = await doc.getPage(1)
@@ -442,12 +455,17 @@ function setZoom(mode: 'fit' | number) {
   void rerenderAll()
 }
 
+function setZoomRatio(ratio: number) {
+  zoomMode.value = baseScale * Math.max(0.6, Math.min(2, ratio))
+  void rerenderAll()
+}
+
 function scrollToPage(num: number) {
   const el = scrollRef.value?.querySelector<HTMLElement>(`.pdf-page-wrap[data-page-num="${num}"]`)
   el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-defineExpose({ scrollToPage, setZoom })
+defineExpose({ scrollToPage, setZoom, setZoomRatio })
 
 async function destroyCurrentDocument() {
   renderObserver?.disconnect()
@@ -562,4 +580,10 @@ onBeforeUnmount(() => {
 }
 .pdf-state.error { color: #f87171; }
 .pdf-state .is-loading { animation: spin 1s linear infinite; color: var(--accent); }
+
+@media (max-width: 768px) {
+  .pdf-viewer { padding: 8px 8px calc(112px + var(--safe-bottom)); }
+  .pdf-pages { gap: 10px; }
+  .pdf-page-wrap { border-radius: 6px; }
+}
 </style>

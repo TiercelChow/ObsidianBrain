@@ -130,4 +130,16 @@ function onFileClick(entry: DirEntry) {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+@media (max-width: 768px), (pointer: coarse) {
+  .ft-row {
+    min-height: var(--tap-target);
+    padding-top: 8px;
+    padding-bottom: 8px;
+    font-size: 14px;
+  }
+  .ft-caret { width: 18px; }
+  .ft-caret-spacer { width: 18px; }
+  .ft-icon { width: 18px; font-size: 17px; }
+}
 </style>

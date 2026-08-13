@@ -56,6 +56,7 @@
         批量摄入
       </el-button>
     </div>
+    <UndoSnackbar :show="Boolean(pendingSkip)" message="文章已跳过" @undo="undoSkip" />
   </div>
 </template>
 
@@ -65,6 +66,8 @@ import { ElMessage } from 'element-plus'
 import { Refresh, Loading } from '@element-plus/icons-vue'
 import { getRadar, dismissRadarItem } from '@/api'
 import { ingestSource } from '@/api/wiki'
+import UndoSnackbar from '@/components/motion/UndoSnackbar.vue'
+import { useUndoableRemoval } from '@/composables/useUndoableRemoval'
 
 interface Article {
   id: string
@@ -84,6 +87,11 @@ interface Article {
 const loading = ref(false)
 const batchLoading = ref(false)
 const articles = ref<Article[]>([])
+const { pending: pendingSkip, remove: queueSkip, undo: undoSkip } = useUndoableRemoval(
+  articles,
+  article => dismissRadarItem(article.id),
+  () => ElMessage.error('跳过失败，文章已恢复'),
+)
 
 const highRelevantCount = computed(() =>
   articles.value.filter(a => a.relevance === 'high' && !a.ingested).length
@@ -133,12 +141,7 @@ async function ingestArticle(article: Article) {
 }
 
 async function skipArticle(article: Article) {
-  try {
-    await dismissRadarItem(article.id)
-    articles.value = articles.value.filter(a => a.id !== article.id)
-  } catch (e) {
-    console.error('跳过失败:', e)
-  }
+  queueSkip(article)
 }
 
 async function batchIngestAll() {
@@ -189,6 +192,25 @@ onMounted(() => { loadArticles() })
 @media (max-width: 768px) {
   .page-header { margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
   .page-subtitle { width: 100%; order: 1; margin-top: 0; }
-  .article-card { padding: 16px; }
+  .article-card { padding: 16px; border-radius: 15px; }
+  .article-header { flex-wrap: wrap; }
+  .article-title { font-size: 15px; line-height: 1.45; }
+  .article-summary {
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .article-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .article-actions :deep(.el-button) { margin: 0; }
+  .batch-bar {
+    bottom: var(--safe-bottom);
+    padding: 10px 12px;
+    border: 1px solid var(--border-glass);
+    background: var(--bg-glass-strong);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
 }
 </style>

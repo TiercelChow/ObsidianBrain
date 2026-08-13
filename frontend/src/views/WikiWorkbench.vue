@@ -222,10 +222,10 @@ interface LintResult {
 }
 
 const tabs = [
-  { key: 'ingest', label: 'Ingest' },
-  { key: 'query', label: 'Query' },
-  { key: 'lint', label: 'Lint' },
-  { key: 'schema', label: 'Schema' },
+  { key: 'ingest', label: '摄入' },
+  { key: 'query', label: '查询' },
+  { key: 'lint', label: '检查' },
+  { key: 'schema', label: '规则' },
 ]
 
 const activeTab = ref('ingest')
@@ -503,10 +503,41 @@ onMounted(() => {
 @media (max-width: 768px) {
   .page-header { margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
   .page-subtitle { width: 100%; order: 1; margin-top: 0; }
-  .status-row { gap: 8px; }
-  .status-chip { padding: 8px 12px; }
+  .status-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .status-chip { padding: 9px 8px; justify-content: center; flex-direction: column; align-items: center; gap: 1px; }
   .status-chip .num { font-size: 16px; }
   .form-card { padding: 16px; }
-  .tab-btn { padding: 6px 14px; font-size: 13px; }
+  .tab-bar {
+    position: sticky;
+    top: calc(var(--mobile-header-height) + var(--safe-top));
+    z-index: 20;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(72px, 1fr));
+    gap: 4px;
+    margin: 0 -4px 16px;
+    padding: 4px;
+    overflow-x: auto;
+    background: var(--bg-glass-strong);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--border-glass);
+    border-radius: 15px;
+    scrollbar-width: none;
+  }
+  .tab-bar::-webkit-scrollbar { display: none; }
+  .tab-btn { min-height: var(--tap-target); padding: 8px 12px; font-size: 13px; white-space: nowrap; }
+  .refresh-raw-btn { width: var(--tap-target); height: var(--tap-target); }
+  .form-row :deep(.el-select) { width: 100% !important; }
+  .form-card > :deep(.el-button) { width: 100%; }
+  .log-entry { display: grid; grid-template-columns: 56px 18px minmax(0, 1fr); gap: 6px; }
+  .log-time { min-width: 0; }
+  .result-item { min-height: var(--tap-target); display: flex; align-items: center; word-break: break-all; }
+  .tab-panel { min-height: 0; padding-bottom: calc(12px + var(--safe-bottom)); }
+  .tab-panel textarea { min-height: 45dvh; }
 }
 </style>

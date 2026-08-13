@@ -325,10 +325,20 @@ function loadHistory() {
 .assessment p { color: #15803d; }
 
 @media (max-width: 768px) {
-  .mode-selector { grid-template-columns: 1fr; gap: 10px; }
-  .mode-option { padding: 14px; }
+  .mode-selector {
+    display: flex;
+    gap: 8px;
+    margin-inline: -2px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+  .mode-selector::-webkit-scrollbar { display: none; }
+  .mode-option { flex: 0 0 min(78vw, 260px); padding: 14px; scroll-snap-align: start; text-align: left; }
+  .mode-icon { float: left; margin: 0 10px 0 0; }
   .result-card { padding: 16px; }
   .note-selector { flex-direction: column; gap: 10px; }
+  .note-selector :deep(.el-button), .action-bar :deep(.el-button) { width: 100%; }
   .concepts-row { flex-direction: column; gap: 10px; }
   .concept-chip { padding: 8px 12px; }
 }

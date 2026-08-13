@@ -6,6 +6,7 @@
       'is-fullscreen': isFullscreen,
       'is-fs-transitioning': isFsTransitioning,
       'fs-ui-hidden': isFullscreen && !showFsUI,
+      'is-mobile-immersive': isMobileImmersive,
     }"
   >
     <header class="page-header">
@@ -23,7 +24,7 @@
         <span v-if="rootPath" class="pt-path">{{ rootPath }}</span>
         <span v-if="!rootPath" class="pt-hint">输入本地文件夹路径</span>
       </button>
-      <el-button class="icon-btn" :title="isFullscreen ? '退出全屏 (Esc)' : '全屏阅读'" @click="toggleFullscreen">
+      <el-button class="icon-btn" :title="isImmersive ? '退出沉浸阅读' : '沉浸阅读'" @click="toggleFullscreen">
         <el-icon><FullScreen /></el-icon>
       </el-button>
     </div>
@@ -32,7 +33,7 @@
     <transition name="overlay-fade">
       <div v-if="showHistory" class="path-overlay" @click.self="showHistory = false">
         <transition name="overlay-pop" appear>
-          <div v-if="showHistory" class="path-card">
+          <div v-if="showHistory" ref="pathCardRef" class="path-card" role="dialog" aria-modal="true" aria-label="打开文件夹" tabindex="-1">
             <div class="path-input-wrap">
               <el-input
                 ref="pathInputRef"
@@ -134,6 +135,8 @@
             :key="displayedFile"
             :src="displayedFile"
             @outline="onPdfOutline"
+            @pagechange="pdfCurrentPage = $event"
+            @pagecount="pdfPageCount = $event"
           />
           <article
             v-else-if="renderedHtml"
@@ -171,6 +174,14 @@
       </aside>
     </div>
 
+    <div v-if="fileKind === 'pdf' && displayedFile" class="pdf-mobile-toolbar" aria-label="PDF 阅读工具">
+      <button type="button" title="缩小" @click="setPdfZoom(-1)"><el-icon><Minus /></el-icon></button>
+      <button type="button" class="pdf-fit-btn" @click="fitPdf">适宽</button>
+      <span class="pdf-page-indicator">{{ pdfCurrentPage || 1 }} / {{ pdfPageCount || '—' }}</span>
+      <button type="button" title="放大" @click="setPdfZoom(1)"><el-icon><Plus /></el-icon></button>
+      <button type="button" title="打开目录" @click="tocDrawer = true"><el-icon><Menu /></el-icon></button>
+    </div>
+
     <!-- Mobile drawers: direct-manipulation panels that can be interrupted mid-swipe. -->
     <MotionDrawer v-model="treeDrawer" direction="left" aria-label="文件列表">
       <div class="drawer-inner">
@@ -200,8 +211,8 @@
     </MotionDrawer>
 
     <!-- Floating fullscreen UI (auto-hides) -->
-    <div v-if="isFullscreen" class="fs-ui" :class="{ hidden: !showFsUI }">
-      <button class="fs-fab" title="退出全屏 (Esc)" @click="toggleFullscreen">
+    <div v-if="isImmersive" class="fs-ui" :class="{ hidden: isFullscreen && !showFsUI }">
+      <button class="fs-fab" :title="isFullscreen ? '退出全屏 (Esc)' : '退出沉浸阅读'" @click="toggleFullscreen">
         <el-icon :size="20"><FullScreen /></el-icon>
       </button>
     </div>
@@ -234,7 +245,7 @@ import {
 } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  FolderOpened, Star, StarFilled, Delete, Menu, Document, FullScreen, EditPen, Refresh,
+  FolderOpened, Star, StarFilled, Delete, Menu, Document, FullScreen, EditPen, Refresh, Minus, Plus,
 } from '@element-plus/icons-vue'
 import {
   listLocalDir, readLocalFile, getReaderHistory, saveReaderHistory,
@@ -244,6 +255,8 @@ import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { useAppStore } from '@/stores/app'
 import FileTree from '@/components/reader/FileTree.vue'
 import MotionDrawer from '@/components/motion/MotionDrawer.vue'
+import { isPhoneViewport } from '@/utils/mobileLayoutPolicy'
+import { useModalEnvironment } from '@/composables/useModalEnvironment'
 
 // Heavy, optional readers stay out of the Markdown-first route chunk.
 const MermaidViewer = defineAsyncComponent(() => import('@/components/reader/MermaidViewer.vue'))
@@ -272,11 +285,13 @@ const showHistory = ref(false)
 const renamingPath = ref('')
 const renameValue = ref('')
 const pathInputRef = ref<{ focus: () => void } | null>(null)
+const pathCardRef = ref<HTMLElement | null>(null)
 
 // Auto-focus the input when the overlay opens.
 watch(showHistory, (v) => {
   if (v) nextTick(() => pathInputRef.value?.focus())
 })
+useModalEnvironment(() => showHistory.value, pathCardRef, () => { showHistory.value = false })
 const history = ref<HistoryItem[]>([])
 const treeDrawer = ref(false)
 const tocDrawer = ref(false)
@@ -289,6 +304,8 @@ const contentRef = ref<HTMLElement | null>(null)
 const readerPageRef = ref<HTMLElement | null>(null)
 const readerBodyRef = ref<HTMLElement | null>(null)
 const isFullscreen = ref(false)
+const isMobileImmersive = ref(false)
+const isImmersive = computed(() => isFullscreen.value || isMobileImmersive.value)
 const isFsTransitioning = ref(false)
 interface RectSnapshot { left: number; top: number; width: number; height: number }
 let pendingFullscreenRect: RectSnapshot | null = null
@@ -374,9 +391,29 @@ function animateFullscreenLayout(from: RectSnapshot | null, entering: boolean) {
   })
 }
 
+function leaveMobileImmersive() {
+  isMobileImmersive.value = false
+  document.documentElement.classList.remove('reader-mobile-immersive')
+}
+
+function onReaderKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && isMobileImmersive.value) leaveMobileImmersive()
+}
+
 async function toggleFullscreen() {
   const el = readerPageRef.value
   if (!el) return
+
+  if (isMobileImmersive.value) {
+    leaveMobileImmersive()
+    return
+  }
+
+  if (isPhoneViewport(window.innerWidth)) {
+    isMobileImmersive.value = true
+    document.documentElement.classList.add('reader-mobile-immersive')
+    return
+  }
 
   // Capture the live presentation rect, so a rapid reverse starts from what is
   // currently on screen instead of snapping to the previous logical target.
@@ -420,7 +457,25 @@ function onFullscreenChange() {
 // tree highlight.)
 const displayedFile = ref('')
 const fileKind = ref<'md' | 'pdf'>('md')
-const pdfViewerRef = ref<{ scrollToPage: (n: number) => void; setZoom: (m: 'fit' | number) => void } | null>(null)
+const pdfViewerRef = ref<{
+  scrollToPage: (n: number) => void
+  setZoom: (m: 'fit' | number) => void
+  setZoomRatio: (ratio: number) => void
+} | null>(null)
+const pdfCurrentPage = ref(1)
+const pdfPageCount = ref(0)
+const pdfZoomIndex = ref(2)
+const pdfZoomLevels = [0.7, 0.85, 1, 1.2, 1.45, 1.75]
+
+function fitPdf() {
+  pdfZoomIndex.value = 2
+  pdfViewerRef.value?.setZoom('fit')
+}
+
+function setPdfZoom(direction: -1 | 1) {
+  pdfZoomIndex.value = Math.max(0, Math.min(pdfZoomLevels.length - 1, pdfZoomIndex.value + direction))
+  pdfViewerRef.value?.setZoomRatio(pdfZoomLevels[pdfZoomIndex.value])
+}
 const transitionDir = ref<'page-next' | 'page-prev'>('page-next')
 
 // Markdown paths in tree display order (depth-first) — used to pick turn direction.
@@ -689,6 +744,9 @@ async function onSelectFile(path: string) {
       // PDF: don't read/render text — just hand the path to PdfViewer. The outline
       // arrives via onPdfOutline after pdf.js loads the document.
       fileKind.value = 'pdf'
+      pdfCurrentPage.value = 1
+      pdfPageCount.value = 0
+      pdfZoomIndex.value = 2
       renderedHtml.value = '' // ensure PdfViewer branch shows
       displayedFile.value = path
       toc.value = [] // outline arrives via onPdfOutline after load
@@ -822,6 +880,7 @@ function scrollToHeading(id: string) {
 
 onMounted(async () => {
   document.addEventListener('fullscreenchange', onFullscreenChange)
+  document.addEventListener('keydown', onReaderKeydown)
   await loadHistory()
   // Restore last opened folder + file (per-browser).
   const lastFolder = localStorage.getItem(LAST_FOLDER_KEY)
@@ -833,9 +892,11 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  leaveMobileImmersive()
   cancelPendingFileSelection()
   cleanupMarkdown()
   document.removeEventListener('fullscreenchange', onFullscreenChange)
+  document.removeEventListener('keydown', onReaderKeydown)
   document.removeEventListener('mousemove', onFsActivity)
   document.removeEventListener('touchstart', onFsActivity)
   cancelFullscreenAnimation()
@@ -852,6 +913,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 64px);
+  height: calc(100dvh - 64px);
   gap: 10px;
 }
 /* Tighter page-header spacing — the Reader is a tool page, not a content page. */
@@ -992,7 +1054,7 @@ onBeforeUnmount(() => {
 
 /* Floating fullscreen UI — auto-hides after inactivity. */
 .fs-ui {
-  position: fixed; top: 24px; right: 24px; z-index: 100;
+  position: fixed; top: max(24px, calc(var(--safe-top) + 12px)); right: max(24px, calc(var(--safe-right) + 12px)); z-index: 100;
   display: flex; gap: 10px;
   transition: opacity 0.4s var(--ease-out);
   animation: fs-ui-materialize var(--motion-fast) var(--ease-emphasized) backwards;
@@ -1193,6 +1255,8 @@ onBeforeUnmount(() => {
 .fab-center { left: 50%; transform: translateX(-50%); }
 .fab-center:active { transform: translateX(-50%) scale(0.9); }
 
+.pdf-mobile-toolbar { display: none; }
+
 
 /* ── Body / panes ── */
 .reader-body { flex: 1; display: flex; gap: 16px; min-height: 0; }
@@ -1338,18 +1402,11 @@ onBeforeUnmount(() => {
 
 /* ── Mobile ── */
 @media (max-width: 768px) {
-  /* Extend the reader-page up under the global header (cancel app-main's 56px top
-     padding) and pad its content down so the title/input sit below the header.
-     On scroll the top padding collapses so the document slides under the frosted
-     global header — same effect as Timeline. */
   .reader-page {
-    height: calc(100vh - 40px);
-    margin-top: -60px;
-    padding-top: 60px;
+    height: calc(100dvh - var(--mobile-header-height) - var(--safe-top) - 40px);
     gap: 6px;
-    transition: padding-top var(--duration-slow) var(--ease-standard);
   }
-  .app-main.mobile-scrolled .reader-page { padding-top: 0; }
+  .path-trigger { min-height: var(--tap-target); padding-block: 8px; }
   .fab { display: flex; }
   .pane-left, .pane-right { display: none; }
   .pane-center { width: 100%; overflow-x: clip; }
@@ -1357,6 +1414,63 @@ onBeforeUnmount(() => {
   .history-panel { max-height: 50vh; }
   .path-card { width: calc(100vw - 24px); }
   .path-overlay { padding-top: 10vh; }
+  .hp-item { min-height: var(--tap-target); padding-block: 4px; }
+  .hp-pin, .hp-del, .hp-edit { width: var(--tap-target); height: var(--tap-target); }
+  .hp-clear { min-height: var(--tap-target); padding-inline: 10px; }
+  .toc-item { min-height: var(--tap-target); display: flex; align-items: center; }
+  .drawer-inner { padding-bottom: var(--safe-bottom); }
+  .pdf-mobile-toolbar {
+    position: fixed;
+    left: 50%;
+    bottom: max(10px, var(--safe-bottom));
+    z-index: 80;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px;
+    border: 1px solid var(--border-glass);
+    border-radius: 18px;
+    background: var(--bg-glass-strong);
+    backdrop-filter: blur(22px) saturate(180%);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
+    box-shadow: var(--shadow-lg), var(--inset-highlight);
+    transform: translateX(-50%);
+  }
+  .pdf-mobile-toolbar button {
+    min-width: var(--tap-target);
+    height: var(--tap-target);
+    border: 0;
+    border-radius: 13px;
+    background: transparent;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pdf-mobile-toolbar button:active { transform: scale(0.94); background: var(--accent-light); }
+  .pdf-mobile-toolbar .pdf-fit-btn {
+    width: auto;
+    min-width: 52px;
+    padding-inline: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .pdf-page-indicator { min-width: 54px; text-align: center; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+  .reader-page.is-mobile-immersive {
+    position: fixed;
+    inset: 0;
+    z-index: 2100;
+    width: 100%;
+    height: 100dvh;
+    padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+    background: var(--bg-base);
+  }
+  .reader-page.is-mobile-immersive .page-header,
+  .reader-page.is-mobile-immersive .reader-topbar { display: none !important; }
+  .reader-page.is-mobile-immersive .reader-body { min-height: 0; }
+  .reader-page.is-mobile-immersive .pane-center { border: 0; border-radius: 0; }
   /* Collapse the topbar trigger on scroll, same as the page-header. */
   .reader-topbar { max-height: 60px; transition: max-height var(--duration-slow) var(--ease-standard), opacity var(--duration-normal) var(--ease-out), margin var(--duration-slow); }
   .app-main.mobile-scrolled .reader-topbar {

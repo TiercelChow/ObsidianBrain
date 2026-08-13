@@ -22,15 +22,13 @@
       <button
         class="mobile-menu-btn"
         type="button"
-        aria-label="打开导航"
-        :aria-expanded="!isCollapsed"
-        @click="openMobileSidebar"
+        :aria-label="mobileSidebarVisible ? '关闭导航' : '打开导航'"
+        :aria-expanded="mobileSidebarVisible"
+        @click="mobileSidebarVisible ? closeMobileSidebar() : openMobileSidebar()"
       >
-        <el-icon :size="20"><component :is="isCollapsed ? Expand : Fold" /></el-icon>
+        <el-icon :size="20"><component :is="mobileSidebarVisible ? Fold : Expand" /></el-icon>
       </button>
-      <transition name="title-fade">
-        <span v-if="isScrolled" class="mobile-page-title">{{ currentTitle }}</span>
-      </transition>
+      <span v-if="!mobileSidebarVisible" class="mobile-page-title">{{ currentTitle }}</span>
       <div class="mobile-header-spacer"></div>
     </div>
 
@@ -45,13 +43,20 @@
     </transition>
 
     <el-container class="app-container">
-      <el-aside
-        :width="isMobile ? '260px' : (isCollapsed ? '72px' : '230px')"
+      <aside
+        ref="appAsideRef"
         class="app-aside"
         :class="{ 'mobile-open': isMobile && !isCollapsed }"
+        :style="{ width: isMobile ? '260px' : (isCollapsed ? '72px' : '230px') }"
+        :role="isMobile && mobileSidebarVisible ? 'dialog' : undefined"
+        :aria-modal="isMobile && mobileSidebarVisible ? 'true' : undefined"
+        :aria-label="isMobile && mobileSidebarVisible ? '主导航' : undefined"
+        :aria-hidden="isMobile && !mobileSidebarVisible ? 'true' : undefined"
+        :inert="isMobile && !mobileSidebarVisible ? true : undefined"
+        :tabindex="isMobile && mobileSidebarVisible ? -1 : undefined"
       >
-        <Sidebar />
-      </el-aside>
+        <Sidebar :expanded-on-mobile="isMobile && mobileSidebarVisible" />
+      </aside>
       <el-main
         class="app-main"
         :class="{ 'mobile-full': isMobile, 'mobile-scrolled': isMobile && isScrolled }"
@@ -75,6 +80,8 @@ import { useRoute } from 'vue-router'
 import { useAppStore } from './stores/app'
 import { Expand, Fold } from '@element-plus/icons-vue'
 import Sidebar from './components/Sidebar.vue'
+import { isPhoneViewport } from './utils/mobileLayoutPolicy'
+import { useModalEnvironment } from './composables/useModalEnvironment'
 
 const route = useRoute()
 // Reset scroll state when navigating between pages.
@@ -83,10 +90,11 @@ const appStore = useAppStore()
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
 const currentTitle = computed(() => (route.meta?.title as string) || '')
 const appShellRef = ref<HTMLElement | null>(null)
+const appAsideRef = ref<HTMLElement | null>(null)
 
 // Mobile detection
 const windowWidth = ref(window.innerWidth)
-const isMobile = computed(() => windowWidth.value <= 768)
+const isMobile = computed(() => isPhoneViewport(windowWidth.value))
 
 // Mobile navigation follows the pointer 1:1. On release, position and recent
 // velocity are projected forward before snapping to the nearest resting state.
@@ -95,6 +103,11 @@ const EDGE_ACTIVATION_WIDTH = 24
 const GESTURE_THRESHOLD = 8
 const isSidebarDragging = ref(false)
 const mobileSidebarVisible = computed(() => isMobile.value && (!isCollapsed.value || isSidebarDragging.value))
+useModalEnvironment(
+  () => isMobile.value && !isCollapsed.value,
+  appAsideRef,
+  closeMobileSidebar,
+)
 let pointerId: number | null = null
 let pointerStartX = 0
 let pointerStartY = 0
@@ -262,6 +275,10 @@ html, body, #app {
   -moz-osx-font-smoothing: grayscale;
 }
 
+html.reader-mobile-immersive .mobile-global-header {
+  display: none !important;
+}
+
 /* ── Typography: size-specific tracking (Apple Design §15) ── */
 .page-title, h1, h2, h3 { letter-spacing: var(--tracking-tight); }
 .page-subtitle, .el-tag, .stat-chip .stat-label { letter-spacing: var(--tracking-wide); }
@@ -307,6 +324,13 @@ code, pre, .code-block { font-family: var(--font-mono); }
 
 /* ── Light Theme (default) ── */
 :root, :root[data-theme="light"] {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --mobile-header-height: 56px;
+  --tap-target: 44px;
+  --page-gutter: 40px;
   --bg-base: #f0f0f3;
   --bg-glass: rgba(255, 255, 255, 0.45);
   --bg-glass-strong: rgba(255, 255, 255, 0.65);
@@ -482,17 +506,62 @@ code, pre, .code-block { font-family: var(--font-mono); }
 /* Mobile: buttons should be bigger and easier to tap. */
 @media (max-width: 768px) {
   .el-button {
-    min-height: 38px !important;
+    min-height: var(--tap-target) !important;
     font-size: 14px !important;
     padding: 8px 16px !important;
   }
   .el-button--small {
-    min-height: 36px !important;
+    min-height: var(--tap-target) !important;
     font-size: 13px !important;
     padding: 7px 14px !important;
   }
   .header-actions .el-button {
-    min-height: 36px !important;
+    min-height: var(--tap-target) !important;
+  }
+
+  .el-input__inner,
+  .el-textarea__inner,
+  .el-select__selected-item,
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  .el-input__wrapper,
+  .el-select__wrapper,
+  .el-input-number,
+  .el-date-editor {
+    min-height: var(--tap-target) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .el-card,
+  .stat-card, .module-card, .status-card, .tool-card,
+  .stat-chip, .result-card, .recent-card,
+  .repo-card, .mode-option, .radar-card,
+  .insight-card, .config-card,
+  .combo-result, .question-result, .counterpoint-result,
+  .assessment {
+    background: color-mix(in srgb, var(--bg-glass-strong) 88%, var(--bg-base)) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .el-dialog {
+    width: calc(100vw - 16px) !important;
+    max-width: none !important;
+    max-height: calc(100dvh - var(--safe-top) - 8px) !important;
+    margin: calc(var(--safe-top) + 8px) 8px 0 !important;
+    border-radius: 22px 22px 0 0 !important;
+  }
+
+  .el-dialog__body {
+    max-height: calc(100dvh - var(--safe-top) - 130px) !important;
+    overflow: auto !important;
+    overscroll-behavior: contain;
+    padding-bottom: calc(20px + var(--safe-bottom)) !important;
   }
 }
 
@@ -887,6 +956,19 @@ code, pre, .code-block { font-family: var(--font-mono); }
   .page-title {
     font-size: 18px !important;
   }
+
+  .page-header {
+    align-items: center;
+    gap: 10px;
+  }
+
+  .header-actions {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .header-actions::-webkit-scrollbar { display: none; }
 }
 
 /* ── Unified keyframes (deduplicated) ── */
@@ -904,6 +986,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
 <style scoped>
 .app-shell {
   height: 100vh;
+  height: 100dvh;
   width: 100%;
   position: relative;
   overflow: hidden;
@@ -945,10 +1028,12 @@ code, pre, .code-block { font-family: var(--font-mono); }
 
 .app-container {
   height: 100vh;
+  height: 100dvh;
   position: relative;
 }
 
 .app-aside {
+  flex-shrink: 0;
   transition: width var(--motion-slow) var(--ease-spring-gentle);
   overflow: hidden;
   background: transparent;
@@ -996,10 +1081,10 @@ code, pre, .code-block { font-family: var(--font-mono); }
   left: 0;
   right: 0;
   z-index: 1001;
-  height: 56px;
+  min-height: calc(var(--mobile-header-height) + var(--safe-top));
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  padding: var(--safe-top) calc(12px + var(--safe-right)) 0 calc(12px + var(--safe-left));
   transition: background-color var(--motion-normal) var(--ease-emphasized),
               box-shadow var(--motion-normal) var(--ease-emphasized);
 }
@@ -1011,8 +1096,8 @@ code, pre, .code-block { font-family: var(--font-mono); }
 }
 
 .mobile-menu-btn {
-  width: 36px;
-  height: 36px;
+  width: var(--tap-target);
+  height: var(--tap-target);
   border-radius: 10px;
   border: 1px solid var(--border-glass);
   background: var(--bg-glass);
@@ -1043,7 +1128,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
 .mobile-page-title {
   flex: 1;
   text-align: center;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: -0.2px;
@@ -1052,7 +1137,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
   text-overflow: ellipsis;
 }
 .mobile-header-spacer {
-  width: 36px; /* match menu-btn width so title is visually centered */
+  width: var(--tap-target); /* match menu-btn width so title is visually centered */
   flex-shrink: 0;
 }
 
@@ -1104,9 +1189,8 @@ code, pre, .code-block { font-family: var(--font-mono); }
 }
 
 .app-main.mobile-full {
-  padding: 16px 12px;
-  padding-top: 60px; /* space for global header (56px + 4px gap) */
-  padding-bottom: 40px; /* extra space at bottom so last content is fully visible */
+  padding: 16px max(12px, var(--safe-right)) calc(32px + var(--safe-bottom)) max(12px, var(--safe-left));
+  padding-top: calc(var(--mobile-header-height) + var(--safe-top) + 8px);
   overflow-x: hidden;
   width: 100%;
   max-width: 100%;
@@ -1129,12 +1213,23 @@ code, pre, .code-block { font-family: var(--font-mono); }
 
   .app-shell { touch-action: pan-y; }
 
+  .route-stage {
+    min-height: calc(100dvh - var(--mobile-header-height) - var(--safe-top));
+  }
+
   .app-aside.mobile-open { transform: translate3d(var(--mobile-sidebar-x), 0, 0); }
 
   .sidebar-dragging .app-aside,
   .sidebar-dragging .app-main.mobile-full,
   .sidebar-dragging .mobile-overlay {
     transition: none !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-main.mobile-full {
+    padding-left: max(10px, var(--safe-left));
+    padding-right: max(10px, var(--safe-right));
   }
 }
 </style>

@@ -1,6 +1,6 @@
 <template>
   <div class="ppm-overlay" @click.self="close">
-    <div class="ppm-panel">
+    <div ref="panelRef" class="ppm-panel" role="dialog" aria-modal="true" aria-label="路径预览" tabindex="-1">
       <header class="ppm-head">
         <el-icon class="ppm-head-icon"><Document /></el-icon>
         <span class="ppm-path" :title="currentPath">{{ currentPath }}</span>
@@ -59,6 +59,7 @@ import {
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import FileTree from './FileTree.vue'
 import MermaidViewer from './MermaidViewer.vue'
+import { useModalEnvironment } from '@/composables/useModalEnvironment'
 
 const props = defineProps<{ path: string; root: string; anchor?: string }>()
 const emit = defineEmits<{
@@ -67,6 +68,7 @@ const emit = defineEmits<{
 }>()
 
 const currentPath = ref(props.path)
+const panelRef = ref<HTMLElement | null>(null)
 // Anchor (line/symbol/heading) to scroll to after the content renders.
 const pendingAnchor = ref(props.anchor || '')
 const bodyRef = ref<HTMLElement | null>(null)
@@ -276,6 +278,7 @@ function onTreeSelect(path: string) {
 function close() {
   emit('close')
 }
+useModalEnvironment(() => true, panelRef, close)
 
 watch(currentPath, () => { void load() })
 // Parent opened a new target (path prop changed) — sync currentPath + reset the anchor.
@@ -387,9 +390,10 @@ onMounted(() => { void load() })
 
 @media (max-width: 768px) {
   .ppm-overlay { padding: 0; }
-  .ppm-panel { width: 100%; height: 100vh; border-radius: 0; border: none; }
+  .ppm-panel { width: 100%; height: 100dvh; border-radius: 0; border: none; }
+  .ppm-head { padding: calc(8px + var(--safe-top)) max(10px, var(--safe-right)) 8px max(10px, var(--safe-left)); }
   .rbtn-label { display: none; }
-  .ppm-reader-btn { padding: 0; width: 30px; justify-content: center; }
-  .ppm-body { padding: 14px; }
+  .ppm-reader-btn, .ppm-close-btn { padding: 0; width: var(--tap-target); height: var(--tap-target); justify-content: center; }
+  .ppm-body { padding: 14px max(14px, var(--safe-right)) calc(14px + var(--safe-bottom)) max(14px, var(--safe-left)); }
 }
 </style>

@@ -1,10 +1,28 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import ElementPlus from 'element-plus'
+import {
+  ElButton,
+  ElContainer,
+  ElDatePicker,
+  ElDescriptions,
+  ElDescriptionsItem,
+  ElDialog,
+  ElEmpty,
+  ElForm,
+  ElFormItem,
+  ElIcon,
+  ElInput,
+  ElInputNumber,
+  ElMain,
+  ElOption,
+  ElSelect,
+  ElSlider,
+  ElSwitch,
+  ElTag,
+} from 'element-plus'
 import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
 import './styles/motion.css'
-import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
 
@@ -14,13 +32,31 @@ document.documentElement.setAttribute('data-theme', savedTheme || 'light')
 
 const app = createApp(App)
 
-// 注册所有 Element Plus 图标
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
-  app.component(key, component)
+const elementComponents = {
+  ElButton,
+  ElContainer,
+  ElDatePicker,
+  ElDescriptions,
+  ElDescriptionsItem,
+  ElDialog,
+  ElEmpty,
+  ElForm,
+  ElFormItem,
+  ElIcon,
+  ElInput,
+  ElInputNumber,
+  ElMain,
+  ElOption,
+  ElSelect,
+  ElSlider,
+  ElSwitch,
+  ElTag,
+}
+for (const [name, component] of Object.entries(elementComponents)) {
+  app.component(name, component)
 }
 
 app.use(createPinia())
 app.use(router)
-app.use(ElementPlus)
 
 app.mount('#app')

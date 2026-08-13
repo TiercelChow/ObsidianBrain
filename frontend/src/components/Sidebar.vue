@@ -22,20 +22,23 @@
         aria-hidden="true"
         :style="activeIndicatorStyle"
       ></span>
-      <router-link
-        v-for="item in navItems"
-        :key="item.path"
-        :to="item.path"
-        class="nav-item"
-        :class="{ active: isActive(item.path) }"
-        :aria-current="isActive(item.path) ? 'page' : undefined"
-        :data-nav-path="item.path"
-      >
-        <el-icon :size="18" class="nav-icon"><component :is="item.icon" /></el-icon>
-        <transition name="nav-label">
-          <span v-show="!isCollapsed" class="nav-label">{{ item.label }}</span>
-        </transition>
-      </router-link>
+      <div v-for="group in navGroups" :key="group.label" class="nav-group">
+        <span v-show="!isCollapsed" class="nav-group-label">{{ group.label }}</span>
+        <router-link
+          v-for="item in group.items"
+          :key="item.path"
+          :to="item.path"
+          class="nav-item"
+          :class="{ active: isActive(item.path) }"
+          :aria-current="isActive(item.path) ? 'page' : undefined"
+          :data-nav-path="item.path"
+        >
+          <el-icon :size="18" class="nav-icon"><component :is="item.icon" /></el-icon>
+          <transition name="nav-label">
+            <span v-show="!isCollapsed" class="nav-label">{{ item.label }}</span>
+          </transition>
+        </router-link>
+      </div>
     </nav>
 
     <!-- Collapse Toggle -->
@@ -73,7 +76,8 @@ import {
 
 const route = useRoute()
 const appStore = useAppStore()
-const isCollapsed = computed(() => appStore.sidebarCollapsed)
+const props = defineProps<{ expandedOnMobile?: boolean }>()
+const isCollapsed = computed(() => appStore.sidebarCollapsed && !props.expandedOnMobile)
 const activeIndicator = reactive({ top: 0, height: 0, visible: false })
 const activeIndicatorStyle = computed(() => ({
   height: `${activeIndicator.height}px`,
@@ -83,12 +87,14 @@ const activeIndicatorStyle = computed(() => ({
 function updateActiveIndicator() {
   nextTick(() => {
     const active = document.querySelector('.nav-list .nav-item.active') as HTMLElement | null
-    const list = active?.parentElement
+    const list = active?.closest<HTMLElement>('.nav-list')
     if (!active || !list) {
       activeIndicator.visible = false
       return
     }
-    activeIndicator.top = active.offsetTop
+    const listRect = list.getBoundingClientRect()
+    const activeRect = active.getBoundingClientRect()
+    activeIndicator.top = activeRect.top - listRect.top + list.scrollTop
     activeIndicator.height = active.offsetHeight
     activeIndicator.visible = true
   })
@@ -109,17 +115,32 @@ onMounted(() => {
 })
 onUnmounted(() => window.removeEventListener('resize', updateActiveIndicator))
 
-const navItems = [
-  { path: '/', label: '首页', icon: House },
-  { path: '/memory', label: '知识库', icon: Notebook },
-  { path: '/wiki-dashboard', label: 'Wiki 看板', icon: DataLine },
-  { path: '/wiki', label: 'Wiki 工作台', icon: Document },
-  { path: '/explore', label: '知识探索', icon: MagicStick },
-  { path: '/ingest', label: '外部摄入', icon: Connection },
-  { path: '/manual', label: '使用手册', icon: Reading },
-  { path: '/reader', label: '阅境轩', icon: Files },
-  { path: '/code-repo', label: '代码仓', icon: FolderOpened },
-  { path: '/timeline', label: '时光机', icon: Calendar },
+const navGroups = [
+  {
+    label: '日常',
+    items: [
+      { path: '/', label: '首页', icon: House },
+      { path: '/reader', label: '阅境轩', icon: Files },
+      { path: '/timeline', label: '时光机', icon: Calendar },
+    ],
+  },
+  {
+    label: '知识',
+    items: [
+      { path: '/memory', label: '知识库', icon: Notebook },
+      { path: '/wiki-dashboard', label: 'Wiki 看板', icon: DataLine },
+      { path: '/wiki', label: 'Wiki 工作台', icon: Document },
+      { path: '/explore', label: '知识探索', icon: MagicStick },
+      { path: '/ingest', label: '外部摄入', icon: Connection },
+    ],
+  },
+  {
+    label: '管理',
+    items: [
+      { path: '/code-repo', label: '代码仓', icon: FolderOpened },
+      { path: '/manual', label: '使用手册', icon: Reading },
+    ],
+  },
 ]
 
 function isActive(path: string) {
@@ -189,6 +210,17 @@ function isActive(path: string) {
   gap: 2px;
   overflow-y: auto;
   position: relative;
+}
+
+.nav-group { display: flex; flex-direction: column; gap: 2px; }
+.nav-group + .nav-group { margin-top: 8px; }
+.nav-group-label {
+  padding: 6px 12px 4px;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .nav-active-indicator {
@@ -343,8 +375,11 @@ function isActive(path: string) {
     display: none;
   }
   .nav-item {
-    padding: 12px 14px;
+    min-height: var(--tap-target);
+    padding: 10px 14px;
     font-size: 15px;
   }
+  .nav-group + .nav-group { margin-top: 12px; }
+  .nav-group-label { padding-top: 8px; font-size: 11px; }
 }
 </style>

@@ -27,7 +27,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useModalEnvironment } from '@/composables/useModalEnvironment'
 
 const props = withDefaults(defineProps<{
   modelValue: boolean
@@ -90,18 +91,10 @@ function resetGesture() {
   dragging.value = false
   dragY.value = 0
 }
-function onKeydown(event: KeyboardEvent) {
-  if (props.modelValue && event.key === 'Escape') close()
-}
-
 watch(() => props.modelValue, (open) => {
-  if (open) {
-    resetGesture()
-    nextTick(() => panelRef.value?.focus({ preventScroll: true }))
-  }
+  if (open) resetGesture()
 })
-onMounted(() => document.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
+useModalEnvironment(() => props.modelValue, panelRef, close)
 </script>
 
 <style scoped>
@@ -147,6 +140,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
     transform: translate3d(0, var(--motion-sheet-y), 0);
     touch-action: pan-y;
     overscroll-behavior: contain;
+    padding-bottom: env(safe-area-inset-bottom);
   }
   .motion-modal__handle {
     display: flex;

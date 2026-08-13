@@ -205,3 +205,21 @@ select:focus-visible,
     animation: none !important;
   }
 }
+
+@media (max-width: 768px) {
+  /* Long feeds skip layout and paint work until they approach the viewport. */
+  .memo-card,
+  .radar-card,
+  .article-card,
+  .repo-card,
+  .insight-card,
+  .question-card,
+  .gap-card,
+  .manual-section {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 240px;
+  }
+
+  .memo-card { contain-intrinsic-size: auto 320px; }
+  .manual-section { contain-intrinsic-size: auto 600px; }
+}

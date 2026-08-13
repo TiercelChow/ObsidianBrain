@@ -229,7 +229,13 @@ async function loadAll() {
   .page-header { margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
   .page-subtitle { width: 100%; order: 1; margin-top: 0; }
   .gap-card, .question-card, .collision-card { padding: 14px; }
-  .collision-concepts { gap: 12px; }
-  .collision-concept { padding: 10px 16px; }
+  .section-header { align-items: flex-start; gap: 10px; }
+  .section-header :deep(.el-button) { flex-shrink: 0; }
+  .question-card { gap: 10px; }
+  .collision-concepts { flex-direction: column; gap: 8px; }
+  .collision-concept { width: 100%; padding: 10px 16px; }
+  .collision-x { transform: rotate(45deg); }
+  .analysis-row { flex-direction: column; gap: 3px; }
+  .analysis-label { min-width: 0; }
 }
 </style>

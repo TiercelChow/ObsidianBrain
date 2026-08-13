@@ -26,7 +26,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useModalEnvironment } from '@/composables/useModalEnvironment'
 
 const props = withDefaults(defineProps<{
   modelValue: boolean
@@ -138,19 +139,11 @@ function onPointerCancel(event: PointerEvent) {
   if (event.pointerId === pointerId) resetGesture()
 }
 
-function onKeydown(event: KeyboardEvent) {
-  if (props.modelValue && event.key === 'Escape') close()
-}
-
 watch(() => props.modelValue, (open) => {
-  if (open) {
-    resetGesture()
-    nextTick(() => panelRef.value?.focus({ preventScroll: true }))
-  }
+  if (open) resetGesture()
 })
-onMounted(() => document.addEventListener('keydown', onKeydown))
+useModalEnvironment(() => props.modelValue, panelRef, close)
 onBeforeUnmount(() => {
-  document.removeEventListener('keydown', onKeydown)
   resetGesture()
 })
 </script>
@@ -185,6 +178,8 @@ onBeforeUnmount(() => {
   transition: transform var(--motion-normal) var(--ease-spring-gentle);
   touch-action: pan-y;
   outline: none;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .motion-drawer__panel.is-left { left: 0; border-radius: 0 22px 22px 0; }

@@ -38,8 +38,9 @@
           <el-button @click="viewDetail(repo.name)">
             <el-icon><View /></el-icon> 详情
           </el-button>
-          <el-button type="primary" @click="openVscode(repo.name)">
-            <el-icon><Monitor /></el-icon> VSCode
+          <el-button type="primary" @click="openRepo(repo)">
+            <el-icon><component :is="isMobile ? CopyDocument : Monitor" /></el-icon>
+            {{ isMobile ? '复制路径' : 'VSCode' }}
           </el-button>
         </div>
       </div>
@@ -51,7 +52,7 @@
 
     <!-- 仓库详情对话框 -->
     <el-dialog v-model="showDetailDialog" title="仓库详情" width="720px" v-if="selectedRepo">
-      <el-descriptions :column="2" border>
+      <el-descriptions :column="isMobile ? 1 : 2" border>
         <el-descriptions-item label="名称" :min-width="120">{{ selectedRepo.name }}</el-descriptions-item>
         <el-descriptions-item label="分支" :min-width="120">{{ selectedRepo.current_branch }}</el-descriptions-item>
         <el-descriptions-item label="HEAD" :min-width="120">{{ selectedRepo.head_hash?.substring(0, 7) || '-' }}</el-descriptions-item>
@@ -105,9 +106,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { addCodeRepo, listCodeRepos, getRepoDetail, openInVscode } from '@/api'
-import { Refresh, Plus, Connection, View, Monitor } from '@element-plus/icons-vue'
+import { Refresh, Plus, Connection, View, Monitor, CopyDocument } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 interface RepoInfo {
@@ -135,6 +136,9 @@ const showDetailDialog = ref(false)
 const adding = ref(false)
 const selectedRepo = ref<RepoDetail | null>(null)
 const addForm = ref({ path: '', name: '' })
+const windowWidth = ref(window.innerWidth)
+const isMobile = computed(() => windowWidth.value <= 768)
+function onResize() { windowWidth.value = window.innerWidth }
 
 async function loadRepos() {
   loading.value = true
@@ -187,7 +191,24 @@ async function openVscode(name: string) {
   }
 }
 
-onMounted(() => { loadRepos() })
+async function openRepo(repo: RepoInfo) {
+  if (!isMobile.value) {
+    await openVscode(repo.name)
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(repo.path)
+    ElMessage.success('仓库路径已复制')
+  } catch {
+    ElMessage.info(repo.path)
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('resize', onResize)
+  loadRepos()
+})
+onUnmounted(() => window.removeEventListener('resize', onResize))
 </script>
 
 <style scoped>
@@ -274,7 +295,14 @@ onMounted(() => { loadRepos() })
 @media (max-width: 768px) {
   .repo-grid { grid-template-columns: 1fr; gap: 12px; }
   .repo-card { padding: 14px; border-radius: 14px; }
-  .repo-actions { flex-wrap: wrap; }
+  .repo-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .repo-actions :deep(.el-button) { width: 100%; margin: 0; }
+  .commit-item { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 5px 8px; align-items: start; }
+  .commit-author { grid-column: 2; }
+  .detail-path { font-size: 11px; }
+  :deep(.el-descriptions__label) { width: 92px !important; min-width: 92px !important; }
+  :deep(.el-dialog__footer) { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  :deep(.el-dialog__footer .el-button) { width: 100%; margin: 0; }
 }
 </style>
 
@@ -286,7 +314,4 @@ onMounted(() => { loadRepos() })
 .el-descriptions { border-radius: 12px !important; overflow: hidden; }
 .el-descriptions__table { border-radius: 12px !important; }
 
-@media (max-width: 768px) {
-  .el-dialog { width: 90% !important; }
-}
 </style>

@@ -3,7 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#f0f0f3" />
+    <meta name="color-scheme" content="light dark" />
     <title>ObsidianBrain</title>
   </head>
   <body>
@@ -18,7 +20,7 @@
         backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
         -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
         box-shadow: 0 0 0 1px var(--border-glass) inset, var(--shadow-sm) !important;
-        transition: all 0.25s ease !important;
+        transition: background-color 0.25s ease, box-shadow 0.25s ease !important;
       }
       .el-input__wrapper:hover {
         box-shadow: 0 0 0 1px var(--accent-border) inset, var(--shadow-sm) !important;

@@ -380,9 +380,9 @@ onMounted(() => { loadAll() })
 @media (max-width: 768px) {
   .page-header { margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
   .page-subtitle { width: 100%; order: 1; margin-top: 0; }
-  .stats-grid { grid-template-columns: 1fr; gap: 10px; margin-bottom: 20px; }
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 20px; }
   .stat-card { padding: 14px; gap: 10px; border-radius: 14px; }
-  .stat-icon { width: 36px; height: 36px; border-radius: 10px; }
+  .stat-icon { width: 36px; height: 36px; border-radius: 10px; backdrop-filter: none; }
   .stat-value { font-size: 18px; }
   .stat-label { font-size: 11px; }
   .section { margin-bottom: 20px; }
@@ -394,5 +394,26 @@ onMounted(() => { loadAll() })
   .config-grid { grid-template-columns: 1fr; }
   .config-group { margin-bottom: 16px; padding-bottom: 14px; }
   .config-field.small { max-width: 100%; }
+  .config-field.inline { align-items: stretch; flex-direction: column; gap: 6px; }
+  .config-field.inline label { min-width: 0; }
+  .config-field :deep(.el-select),
+  .config-field :deep(.el-input-number),
+  .config-field :deep(.el-slider) { width: 100% !important; }
+  .config-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin: 8px -16px -16px;
+    padding: 10px 16px calc(10px + var(--safe-bottom));
+    background: var(--bg-glass-strong);
+    backdrop-filter: blur(18px) saturate(170%);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    border-top: 1px solid var(--border-glass);
+  }
+  .config-actions :deep(.el-button) { flex: 1; }
+}
+
+@media (max-width: 360px) {
+  .stat-card { flex-direction: column; align-items: flex-start; }
 }
 </style>

@@ -7,6 +7,13 @@
       </div>
     </header>
 
+    <div class="mobile-toc" aria-label="手册章节">
+      <span class="mobile-toc-label">章节</span>
+      <select :value="activeSection" @change="scrollTo(($event.target as HTMLSelectElement).value)">
+        <option v-for="s in sections" :key="s.id" :value="s.id">{{ s.num }}. {{ s.title }}</option>
+      </select>
+    </div>
+
     <div class="manual-layout">
       <!-- 左侧目录 -->
       <aside class="toc-sidebar">
@@ -381,6 +388,7 @@ const sections = [
 ]
 
 const activeSection = ref('intro')
+let scrollHost: HTMLElement | null = null
 
 function scrollTo(id: string) {
   const el = document.getElementById(id)
@@ -391,27 +399,24 @@ function scrollTo(id: string) {
 }
 
 function onScroll() {
-  const scrollEl = document.querySelector('.manual-content') as HTMLElement | null
-  if (!scrollEl) return
-  const scrollTop = scrollEl.scrollTop
+  const hostTop = scrollHost?.getBoundingClientRect().top ?? 0
+  const threshold = hostTop + 140
   for (const s of sections) {
     const el = document.getElementById(s.id)
-    if (el) {
-      const offsetTop = el.offsetTop - scrollEl.offsetTop
-      if (scrollTop >= offsetTop - 100) {
-        activeSection.value = s.id
-      }
-    }
+    if (el && el.getBoundingClientRect().top <= threshold) activeSection.value = s.id
   }
 }
 
 onMounted(() => {
-  const el = document.querySelector('.manual-content')
-  if (el) el.addEventListener('scroll', onScroll)
+  scrollHost = document.querySelector(
+    window.matchMedia('(max-width: 768px)').matches ? '.app-main' : '.manual-content',
+  ) as HTMLElement | null
+  scrollHost?.addEventListener('scroll', onScroll, { passive: true })
+  onScroll()
 })
 onUnmounted(() => {
-  const el = document.querySelector('.manual-content')
-  if (el) el.removeEventListener('scroll', onScroll)
+  scrollHost?.removeEventListener('scroll', onScroll)
+  scrollHost = null
 })
 </script>
 
@@ -419,6 +424,7 @@ onUnmounted(() => {
 .manual-page { max-width: 100%; min-height: 100%; }
 
 .manual-layout { display: flex; gap: 24px; }
+.mobile-toc { display: none; }
 
 /* 左侧目录 */
 .toc-sidebar { width: 200px; flex-shrink: 0; position: sticky; top: 0; align-self: flex-start; max-height: calc(100vh - 100px); overflow-y: auto; }
@@ -532,6 +538,39 @@ onUnmounted(() => {
 
 @media (max-width: 768px) {
   .toc-sidebar { display: none; }
+  .mobile-toc {
+    position: sticky;
+    top: calc(var(--mobile-header-height) + var(--safe-top));
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 52px;
+    margin-bottom: 16px;
+    padding: 6px 8px 6px 14px;
+    border: 1px solid var(--border-glass);
+    border-radius: 16px;
+    background: var(--bg-glass-strong);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+  .mobile-toc-label { color: var(--text-muted); font-size: 12px; font-weight: 700; }
+  .mobile-toc select {
+    flex: 1;
+    min-width: 0;
+    min-height: var(--tap-target);
+    padding: 0 10px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--bg-glass-subtle);
+    color: var(--text-primary);
+  }
+  .manual-layout { display: block; }
+  .manual-content { max-height: none; overflow: visible; padding-right: 0; }
+  .manual-section { scroll-margin-top: calc(var(--mobile-header-height) + var(--safe-top) + 68px); }
+  .info-table { display: block; max-width: 100%; overflow-x: auto; white-space: nowrap; }
+  .mock-row { overflow-x: auto; }
+  .mock-stat { min-width: 86px; }
   .feature-grid, .tab-flow, .config-grid { grid-template-columns: 1fr; }
   .explore-grid, .insight-grid { grid-template-columns: 1fr; }
   .flow-diagram, .pipeline { flex-direction: column; }

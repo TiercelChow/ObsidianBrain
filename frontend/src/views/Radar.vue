@@ -43,6 +43,7 @@
     </div>
 
     <el-empty v-else-if="!loading" description="暂无推荐文章" :image-size="80" />
+    <UndoSnackbar :show="Boolean(pendingDismiss)" message="文章已忽略" @undo="undoDismiss" />
   </div>
 </template>
 
@@ -51,6 +52,8 @@ import { ref, onMounted } from 'vue'
 import { getRadar, addToVault, dismissRadarItem } from '@/api'
 import { Refresh, Download } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import UndoSnackbar from '@/components/motion/UndoSnackbar.vue'
+import { useUndoableRemoval } from '@/composables/useUndoableRemoval'
 
 interface RadarItem {
   id: string
@@ -66,6 +69,11 @@ interface RadarItem {
 
 const items = ref<RadarItem[]>([])
 const loading = ref(false)
+const { pending: pendingDismiss, remove: queueDismiss, undo: undoDismiss } = useUndoableRemoval(
+  items,
+  item => dismissRadarItem(item.id),
+  () => ElMessage.error('忽略失败，文章已恢复'),
+)
 
 async function loadRadar() {
   loading.value = true
@@ -96,13 +104,8 @@ async function saveToVault(articleId: string) {
 }
 
 async function dismissItem(articleId: string) {
-  try {
-    await dismissRadarItem(articleId)
-    items.value = items.value.filter(i => i.id !== articleId)
-    ElMessage.success('已忽略')
-  } catch {
-    ElMessage.error('操作失败')
-  }
+  const item = items.value.find(i => i.id === articleId)
+  if (item) queueDismiss(item)
 }
 
 function statusType(status: string): string {
@@ -156,4 +159,21 @@ onMounted(() => { loadRadar() })
 }
 
 .radar-actions { display: flex; gap: 8px; }
+
+@media (max-width: 768px) {
+  .radar-list { gap: 10px; }
+  .radar-card { padding: 16px; border-radius: 15px; }
+  .radar-header { flex-wrap: wrap; }
+  .radar-title { font-size: 15px; line-height: 1.45; }
+  .radar-summary {
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .radar-meta { flex-wrap: wrap; gap: 8px 14px; }
+  .radar-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .radar-actions :deep(.el-button) { margin: 0; }
+}
 </style>

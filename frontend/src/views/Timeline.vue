@@ -2059,12 +2059,24 @@ onMounted(() => { loadMemos() })
 
 /* ── Responsive ── */
 @media (max-width: 768px) {
+  .glass-btn { min-height: var(--tap-target); }
   .time-nav { display: none; }
   .timeline-page {
   min-height: 100%; overflow-x: hidden; width: 100%; }
   .main-content { overflow-x: hidden; }
   .memo-scroll { min-width: 0; overflow-x: hidden; }
-  .toolbar-row { flex-wrap: wrap; }
+  .toolbar-row {
+    position: sticky;
+    top: calc(var(--mobile-header-height) + var(--safe-top));
+    z-index: 20;
+    flex-wrap: wrap;
+    padding: 8px;
+    border-radius: 16px;
+    background: var(--bg-glass-strong);
+    backdrop-filter: blur(18px) saturate(170%);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    border: 1px solid var(--border-glass);
+  }
   .search-box { max-width: 100%; min-width: 0; }
   .filter-right { flex-wrap: wrap; margin-left: 0; width: 100%; }
   .memo-card-main.has-images { flex-direction: column; }
@@ -2081,20 +2093,29 @@ onMounted(() => { loadMemos() })
     max-width: none;
     max-height: min(88dvh, 760px);
     border-radius: 24px 24px 0 0;
-    padding: 34px 20px max(24px, env(safe-area-inset-bottom));
+    margin: 0;
+    padding: 34px 20px calc(24px + var(--safe-bottom));
   }
   .preset-chips { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .chip-track { flex-wrap: nowrap; }
   .chip { flex-shrink: 0; padding: 6px 12px; font-size: 12px; }
 
-  /* Dialog full-screen on mobile */
-  .dialog-content {
-    width: 100% !important;
-    max-width: 100% !important;
-    border-radius: 16px !important;
-    margin: 0 8px;
-  }
   .image-preview-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .dialog-btns { width: 100%; }
+  .dialog-btns .glass-btn { flex: 1; min-height: var(--tap-target); }
+  .dialog-footer { flex-wrap: wrap; gap: 10px; }
+  .image-remove-btn { width: 32px; height: 32px; }
+  .viewer-close {
+    top: calc(var(--safe-top) + 10px);
+    right: max(10px, var(--safe-right));
+    width: var(--tap-target);
+    height: var(--tap-target);
+  }
+  .viewer-controls { bottom: calc(var(--safe-bottom) + 12px); }
+  .viewer-zoom-btn { width: var(--tap-target); height: var(--tap-target); }
+  .viewer-prev { left: max(8px, var(--safe-left)); }
+  .viewer-next { right: max(8px, var(--safe-right)); }
+  .viewer-image-wrap, .viewer-image { max-width: calc(100vw - 16px); max-height: calc(100dvh - 120px - var(--safe-top) - var(--safe-bottom)); }
 
   /* Date picker responsive */
   .date-range-picker {
