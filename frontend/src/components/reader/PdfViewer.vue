@@ -28,6 +28,7 @@ import { useAppStore } from '@/stores/app'
 import { localFileUrl } from '@/api/reader'
 import {
   MAX_CANVAS_PIXELS,
+  computePdfZoomScale,
   computeRenderDpr,
   isWithinRenderWindow,
 } from './pdfRenderPolicy'
@@ -72,7 +73,7 @@ const canvasRefs: Record<number, HTMLCanvasElement | null> = {}
 const textRefs: Record<number, HTMLDivElement | null> = {}
 let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null
 let loadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null
-let baseScale = 1 // fit-width scale derived from container width
+let fitScale = 1 // stable fit-width baseline used by toolbar zoom ratios
 let renderObserver: IntersectionObserver | null = null
 let visibleObserver: IntersectionObserver | null = null
 let resizeObserver: ResizeObserver | null = null
@@ -100,7 +101,7 @@ function setTextRef(num: number, el: HTMLDivElement | null) {
 }
 
 function currentScale(): number {
-  if (zoomMode.value === 'fit') return baseScale
+  if (zoomMode.value === 'fit') return fitScale
   return zoomMode.value
 }
 
@@ -343,8 +344,8 @@ async function load() {
     // Use page 1 to derive the fit-width scale; record every page's placeholder
     // size at that scale so the scroll area has correct height before render.
     const page1 = await doc.getPage(1)
-    baseScale = computeFitScale(page1)
-    const vp1 = page1.getViewport({ scale: baseScale })
+    fitScale = computeFitScale(page1)
+    const vp1 = page1.getViewport({ scale: fitScale })
     const metas: PageMeta[] = []
     for (let i = 1; i <= doc.numPages; i++) {
       // Assume uniform page size (common case); page 1 dimensions for all.
@@ -429,8 +430,8 @@ async function rerenderAll() {
   const generation = loadGeneration
   // Recompute placeholder sizes for the new scale.
   const page1 = await doc.getPage(1)
-  const s = zoomMode.value === 'fit' ? computeFitScale(page1) : zoomMode.value
-  baseScale = s
+  if (zoomMode.value === 'fit') fitScale = computeFitScale(page1)
+  const s = zoomMode.value === 'fit' ? fitScale : zoomMode.value
   const vp = page1.getViewport({ scale: s })
   pageMetas.value = pageMetas.value.map((p) => ({ ...p, width: vp.width, height: vp.height }))
   releaseAllPages()
@@ -456,7 +457,7 @@ function setZoom(mode: 'fit' | number) {
 }
 
 function setZoomRatio(ratio: number) {
-  zoomMode.value = baseScale * Math.max(0.6, Math.min(2, ratio))
+  zoomMode.value = computePdfZoomScale(fitScale, ratio)
   void rerenderAll()
 }
 

@@ -3,7 +3,9 @@ import test from 'node:test'
 
 import {
   getPdfRenderPolicy,
+  getMobileReaderToolbarState,
   isPhoneViewport,
+  shouldLockMobileReaderOuterScroll,
 } from '../src/utils/mobileLayoutPolicy.ts'
 
 test('isPhoneViewport treats the shared 768px breakpoint as phone layout', () => {
@@ -16,7 +18,7 @@ test('getPdfRenderPolicy reduces mobile pre-render work', () => {
   assert.deepEqual(getPdfRenderPolicy(390, 8), {
     renderMarginPx: 420,
     maxConcurrentRenders: 1,
-    maxRenderDpr: 1.5,
+    maxRenderDpr: 3,
   })
 })
 
@@ -30,4 +32,36 @@ test('getPdfRenderPolicy keeps desktop rendering responsive', () => {
 
 test('getPdfRenderPolicy avoids parallel canvas work on low-core devices', () => {
   assert.equal(getPdfRenderPolicy(1024, 4).maxConcurrentRenders, 1)
+})
+
+test('mobile reader toolbar stays pinned until the first document is selected', () => {
+  assert.deepEqual(getMobileReaderToolbarState(true, false, false), {
+    rendered: true,
+    pinned: true,
+    visible: true,
+  })
+})
+
+test('mobile reader toolbar returns to transient behavior while reading', () => {
+  assert.deepEqual(getMobileReaderToolbarState(true, true, false), {
+    rendered: true,
+    pinned: false,
+    visible: false,
+  })
+  assert.equal(getMobileReaderToolbarState(true, true, true).visible, true)
+})
+
+test('mobile reader toolbar is not rendered before a folder is opened', () => {
+  assert.deepEqual(getMobileReaderToolbarState(false, false, true), {
+    rendered: false,
+    pinned: false,
+    visible: false,
+  })
+})
+
+test('mobile reader owns vertical scrolling instead of chaining into the app shell', () => {
+  assert.equal(shouldLockMobileReaderOuterScroll(390, '/reader'), true)
+  assert.equal(shouldLockMobileReaderOuterScroll(768, '/reader'), true)
+  assert.equal(shouldLockMobileReaderOuterScroll(769, '/reader'), false)
+  assert.equal(shouldLockMobileReaderOuterScroll(390, '/timeline'), false)
 })

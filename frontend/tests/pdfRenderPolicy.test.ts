@@ -4,12 +4,17 @@ import test from 'node:test'
 import {
   MAX_CANVAS_PIXELS,
   MAX_RENDER_DPR,
+  computePdfZoomScale,
   computeRenderDpr,
   isWithinRenderWindow,
 } from '../src/components/reader/pdfRenderPolicy.ts'
 
 test('computeRenderDpr caps high-density displays', () => {
-  assert.equal(computeRenderDpr(800, 1_000, 3), MAX_RENDER_DPR)
+  assert.equal(computeRenderDpr(500, 700, 4), MAX_RENDER_DPR)
+})
+
+test('computeRenderDpr keeps native resolution on a 3x phone display', () => {
+  assert.equal(computeRenderDpr(360, 500, 3), 3)
 })
 
 test('computeRenderDpr keeps the canvas inside the pixel budget', () => {
@@ -30,4 +35,9 @@ test('isWithinRenderWindow includes nearby pages and excludes distant pages', ()
   assert.equal(isWithinRenderWindow({ top: 950, bottom: 1_150 }, root, 300), true)
   assert.equal(isWithinRenderWindow({ top: 1_250, bottom: 1_450 }, root, 300), false)
   assert.equal(isWithinRenderWindow({ top: -500, bottom: -250 }, root, 300), false)
+})
+
+test('computePdfZoomScale always uses the stable fit-width scale', () => {
+  assert.equal(computePdfZoomScale(0.5, 1.2), 0.6)
+  assert.equal(computePdfZoomScale(0.5, 1.45), 0.725)
 })

@@ -3,8 +3,8 @@ export interface VerticalRect {
   bottom: number
 }
 
-/** Retina remains crisp at 2x; denser buffers cost memory without visible gain. */
-export const MAX_RENDER_DPR = 2
+/** Preserve native resolution up to 3x; the pixel budget caps large/zoomed pages. */
+export const MAX_RENDER_DPR = 3
 
 /** Bound every live page canvas to roughly 16 MB of RGBA pixels. */
 export const MAX_CANVAS_PIXELS = 4_000_000
@@ -34,6 +34,13 @@ export function computeRenderDpr(
   const budgetDpr = Math.sqrt(MAX_CANVAS_PIXELS / (viewportWidth * viewportHeight))
 
   return Math.max(Number.EPSILON, Math.min(safeDeviceDpr, MAX_RENDER_DPR, budgetDpr))
+}
+
+/** Apply toolbar zoom relative to the immutable fit-width baseline. */
+export function computePdfZoomScale(fitScale: number, ratio: number): number {
+  const safeFitScale = Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1
+  const safeRatio = Number.isFinite(ratio) ? Math.max(0.6, Math.min(2, ratio)) : 1
+  return safeFitScale * safeRatio
 }
 
 /** Whether a page overlaps the viewport plus the pre-render/recycle margin. */

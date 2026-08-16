@@ -59,7 +59,11 @@
       </aside>
       <el-main
         class="app-main"
-        :class="{ 'mobile-full': isMobile, 'mobile-scrolled': isMobile && isScrolled }"
+        :class="{
+          'mobile-full': isMobile,
+          'mobile-scrolled': isMobile && isScrolled,
+          'reader-scroll-locked': lockMobileReaderOuterScroll,
+        }"
         @scroll="onMainScroll"
       >
         <div class="route-stage">
@@ -80,7 +84,7 @@ import { useRoute } from 'vue-router'
 import { useAppStore } from './stores/app'
 import { Expand, Fold } from '@element-plus/icons-vue'
 import Sidebar from './components/Sidebar.vue'
-import { isPhoneViewport } from './utils/mobileLayoutPolicy'
+import { isPhoneViewport, shouldLockMobileReaderOuterScroll } from './utils/mobileLayoutPolicy'
 import { useModalEnvironment } from './composables/useModalEnvironment'
 
 const route = useRoute()
@@ -95,6 +99,9 @@ const appAsideRef = ref<HTMLElement | null>(null)
 // Mobile detection
 const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => isPhoneViewport(windowWidth.value))
+const lockMobileReaderOuterScroll = computed(() => (
+  shouldLockMobileReaderOuterScroll(windowWidth.value, route.path)
+))
 
 // Mobile navigation follows the pointer 1:1. On release, position and recent
 // velocity are projected forward before snapping to the nearest resting state.
@@ -1197,6 +1204,17 @@ code, pre, .code-block { font-family: var(--font-mono); }
   transform-origin: right center;
   transform: translateX(var(--mobile-content-shift)) scale(var(--mobile-content-scale));
   transition: transform var(--motion-normal) var(--ease-spring-gentle);
+}
+
+/* Reader owns its vertical scroll on phones. Keeping the shell fixed prevents
+   a gesture at the document boundary from exposing persistent outer padding. */
+.app-main.mobile-full.reader-scroll-locked {
+  overflow-y: hidden;
+  overscroll-behavior-y: none;
+}
+.app-main.mobile-full.reader-scroll-locked .route-stage {
+  min-height: 0;
+  height: 100%;
 }
 
 @media (max-width: 768px) {

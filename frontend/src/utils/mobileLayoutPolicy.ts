@@ -4,6 +4,32 @@ export function isPhoneViewport(width: number): boolean {
   return Number.isFinite(width) && width <= PHONE_BREAKPOINT
 }
 
+/** Reader uses its own document scroller on phones; the app shell must stay fixed. */
+export function shouldLockMobileReaderOuterScroll(width: number, routePath: string): boolean {
+  return isPhoneViewport(width) && routePath === '/reader'
+}
+
+export interface MobileReaderToolbarState {
+  rendered: boolean
+  pinned: boolean
+  visible: boolean
+}
+
+/** Keep the document picker reachable until a folder has an active document. */
+export function getMobileReaderToolbarState(
+  hasOpenFolder: boolean,
+  hasDisplayedDocument: boolean,
+  transientVisible: boolean,
+): MobileReaderToolbarState {
+  const rendered = hasOpenFolder || hasDisplayedDocument
+  const pinned = hasOpenFolder && !hasDisplayedDocument
+  return {
+    rendered,
+    pinned,
+    visible: rendered && (pinned || transientVisible),
+  }
+}
+
 export interface PdfRenderPolicy {
   renderMarginPx: number
   maxConcurrentRenders: number
@@ -17,7 +43,10 @@ export function getPdfRenderPolicy(
 ): PdfRenderPolicy {
   const lowCoreDevice = !Number.isFinite(hardwareConcurrency) || hardwareConcurrency <= 4
   if (isPhoneViewport(viewportWidth)) {
-    return { renderMarginPx: 420, maxConcurrentRenders: 1, maxRenderDpr: 1.5 }
+    // A 1.5x backing buffer is visibly soft on 2x/3x phone displays,
+    // especially for PDFs with small type. Keep fewer pages alive instead of
+    // sacrificing the resolution of the page the user is actually reading.
+    return { renderMarginPx: 420, maxConcurrentRenders: 1, maxRenderDpr: 3 }
   }
 
   return {

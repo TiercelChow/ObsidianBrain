@@ -92,20 +92,6 @@
       </div>
     </transition>
 
-    <!-- Mobile floating buttons (file / TOC) — fade out while scrolling -->
-    <button
-      class="fab fab-left"
-      :class="{ hide: fabHide }"
-      title="文件"
-      @click="treeDrawer = true"
-    ><el-icon :size="24"><FolderOpened /></el-icon></button>
-    <button
-      class="fab fab-right"
-      :class="{ hide: fabHide }"
-      title="目录"
-      @click="tocDrawer = true"
-    ><el-icon :size="24"><Menu /></el-icon></button>
-
     <!-- Body: 3 panes -->
     <div ref="readerBodyRef" class="reader-body">
       <!-- Left: file tree -->
@@ -123,7 +109,12 @@
       </aside>
 
       <!-- Center: rendered content (page-turn transition on file switch) -->
-      <main ref="contentRef" class="pane pane-center" @scroll="onContentScroll">
+      <main
+        ref="contentRef"
+        class="pane pane-center"
+        @scroll="onContentScroll"
+        @touchmove.passive="revealMobileToolbar"
+      >
         <transition
           :name="transitionDir"
           @enter="onArticleEnter"
@@ -146,7 +137,7 @@
           ></article>
           <div v-else key="empty" class="center-state">
             <el-icon class="cs-icon"><Document /></el-icon>
-            <p>选择左侧的文件开始阅读</p>
+            <p>选择文件开始阅读</p>
           </div>
         </transition>
 
@@ -174,12 +165,36 @@
       </aside>
     </div>
 
-    <div v-if="fileKind === 'pdf' && displayedFile" class="pdf-mobile-toolbar" aria-label="PDF 阅读工具">
-      <button type="button" title="缩小" @click="setPdfZoom(-1)"><el-icon><Minus /></el-icon></button>
-      <button type="button" class="pdf-fit-btn" @click="fitPdf">适宽</button>
-      <span class="pdf-page-indicator">{{ pdfCurrentPage || 1 }} / {{ pdfPageCount || '—' }}</span>
-      <button type="button" title="放大" @click="setPdfZoom(1)"><el-icon><Plus /></el-icon></button>
-      <button type="button" title="打开目录" @click="tocDrawer = true"><el-icon><Menu /></el-icon></button>
+    <div
+      v-if="mobileToolbarState.rendered"
+      class="reader-mobile-toolbar"
+      :class="{
+        'is-visible': mobileToolbarState.visible,
+        'is-pinned': mobileToolbarState.pinned,
+      }"
+      :aria-hidden="!mobileToolbarState.visible"
+      :inert="!mobileToolbarState.visible ? true : undefined"
+      aria-label="阅读工具"
+      @pointerdown="revealMobileToolbar"
+    >
+      <button
+        type="button"
+        :aria-label="mobileToolbarState.pinned ? '选择文章' : '打开文件列表'"
+        :title="mobileToolbarState.pinned ? '选择文章' : '文件'"
+        @click="treeDrawer = true"
+      >
+        <el-icon><FolderOpened /></el-icon>
+      </button>
+      <template v-if="fileKind === 'pdf' && displayedFile">
+        <button type="button" aria-label="缩小 PDF" title="缩小" @click="setPdfZoom(-1)"><el-icon><Minus /></el-icon></button>
+        <button type="button" class="pdf-fit-btn" @click="fitPdf">适宽</button>
+        <span class="pdf-page-indicator">{{ pdfCurrentPage || 1 }} / {{ pdfPageCount || '—' }}</span>
+        <button type="button" aria-label="放大 PDF" title="放大" @click="setPdfZoom(1)"><el-icon><Plus /></el-icon></button>
+      </template>
+      <span v-else class="reader-document-label">{{ mobileDocumentLabel }}</span>
+      <button type="button" aria-label="打开文章目录" title="目录" @click="tocDrawer = true">
+        <el-icon><Menu /></el-icon>
+      </button>
     </div>
 
     <!-- Mobile drawers: direct-manipulation panels that can be interrupted mid-swipe. -->
@@ -255,7 +270,7 @@ import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { useAppStore } from '@/stores/app'
 import FileTree from '@/components/reader/FileTree.vue'
 import MotionDrawer from '@/components/motion/MotionDrawer.vue'
-import { isPhoneViewport } from '@/utils/mobileLayoutPolicy'
+import { getMobileReaderToolbarState, isPhoneViewport } from '@/utils/mobileLayoutPolicy'
 import { useModalEnvironment } from '@/composables/useModalEnvironment'
 
 // Heavy, optional readers stay out of the Markdown-first route chunk.
@@ -457,6 +472,9 @@ function onFullscreenChange() {
 // tree highlight.)
 const displayedFile = ref('')
 const fileKind = ref<'md' | 'pdf'>('md')
+const mobileDocumentLabel = computed(() => (
+  displayedFile.value.split('/').pop() || (rootPath.value ? '选择文章' : '阅读工具')
+))
 const pdfViewerRef = ref<{
   scrollToPage: (n: number) => void
   setZoom: (m: 'fit' | number) => void
@@ -824,14 +842,34 @@ function buildToc() {
     .map((el) => ({ id: el.id, text: el.textContent || '', level: Number(el.tagName[1]) }))
 }
 
-// Mobile FABs fade out while scrolling, fade back in after a short idle.
-const fabHide = ref(false)
-let fabHideTimer: ReturnType<typeof setTimeout> | null = null
-function updateFabOnScroll() {
-  if (!fabHide.value) fabHide.value = true
-  if (fabHideTimer) clearTimeout(fabHideTimer)
-  fabHideTimer = setTimeout(() => { fabHide.value = false }, 600)
+// Mobile controls stay out of the reading surface until the user moves it.
+const mobileToolbarVisible = ref(false)
+const mobileToolbarState = computed(() => getMobileReaderToolbarState(
+  Boolean(rootPath.value),
+  Boolean(displayedFile.value),
+  mobileToolbarVisible.value,
+))
+const MOBILE_TOOLBAR_IDLE_MS = 2800
+let mobileToolbarTimer: ReturnType<typeof setTimeout> | null = null
+function revealMobileToolbar() {
+  if (!isPhoneViewport(window.innerWidth)) return
+  mobileToolbarVisible.value = true
+  if (mobileToolbarTimer) clearTimeout(mobileToolbarTimer)
+  if (mobileToolbarState.value.pinned) {
+    mobileToolbarTimer = null
+    return
+  }
+  mobileToolbarTimer = setTimeout(() => {
+    mobileToolbarVisible.value = false
+    mobileToolbarTimer = null
+  }, MOBILE_TOOLBAR_IDLE_MS)
 }
+
+// Selecting the first document releases the pinned picker into the normal
+// transient reading chrome, while keeping it visible long enough for context.
+watch(displayedFile, (file, previousFile) => {
+  if (file && file !== previousFile) revealMobileToolbar()
+})
 
 let contentScrollFrame: number | null = null
 function onContentScroll() {
@@ -841,7 +879,7 @@ function onContentScroll() {
 
 function processContentScroll() {
   contentScrollFrame = null
-  updateFabOnScroll()
+  revealMobileToolbar()
   // Drive the app's mobile header + page-header collapse from the pane-center
   // scroll (app-main doesn't scroll on the Reader page).
   if (contentRef.value) appStore.setScrolled(contentRef.value.scrollTop > 20)
@@ -902,7 +940,7 @@ onBeforeUnmount(() => {
   cancelFullscreenAnimation()
   if (fsUiTimer) clearTimeout(fsUiTimer)
   if (refreshFlashTimer) clearTimeout(refreshFlashTimer)
-  if (fabHideTimer) clearTimeout(fabHideTimer)
+  if (mobileToolbarTimer) clearTimeout(mobileToolbarTimer)
   if (contentScrollFrame !== null) cancelAnimationFrame(contentScrollFrame)
   if (document.fullscreenElement) void document.exitFullscreen()
 })
@@ -1226,36 +1264,7 @@ onBeforeUnmount(() => {
 .overlay-pop-enter-from { opacity: 0; transform: scale(0.96) translateY(-12px); }
 .overlay-pop-leave-to { opacity: 0; transform: scale(0.98) translateY(-8px); }
 
-/* ── Mobile floating buttons (file / TOC) ── */
-.fab {
-  display: none;
-  position: fixed;
-  bottom: 42%;
-  width: 54px;
-  height: 54px;
-  border-radius: 50%;
-  border: none;
-  background: transparent;
-  backdrop-filter: blur(12px) saturate(150%);
-  -webkit-backdrop-filter: blur(12px) saturate(150%);
-  color: var(--text-primary);
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  z-index: 60;
-  opacity: 1;
-  transform: scale(1);
-  transition: opacity var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-spring);
-}
-.fab:active { transform: scale(0.9); }
-.fab.hide { opacity: 0; transform: scale(0.8); pointer-events: none; }
-.fab-left { left: 14px; }
-.fab-right { right: 14px; }
-.fab-center { left: 50%; transform: translateX(-50%); }
-.fab-center:active { transform: translateX(-50%) scale(0.9); }
-
-.pdf-mobile-toolbar { display: none; }
+.reader-mobile-toolbar { display: none; }
 
 
 /* ── Body / panes ── */
@@ -1407,9 +1416,13 @@ onBeforeUnmount(() => {
     gap: 6px;
   }
   .path-trigger { min-height: var(--tap-target); padding-block: 8px; }
-  .fab { display: flex; }
   .pane-left, .pane-right { display: none; }
-  .pane-center { width: 100%; overflow-x: clip; }
+  .pane-center {
+    width: 100%;
+    overflow-x: clip;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
   .markdown-body { padding: 12px 14px 100px; max-width: 100%; }
   .history-panel { max-height: 50vh; }
   .path-card { width: calc(100vw - 24px); }
@@ -1419,7 +1432,7 @@ onBeforeUnmount(() => {
   .hp-clear { min-height: var(--tap-target); padding-inline: 10px; }
   .toc-item { min-height: var(--tap-target); display: flex; align-items: center; }
   .drawer-inner { padding-bottom: var(--safe-bottom); }
-  .pdf-mobile-toolbar {
+  .reader-mobile-toolbar {
     position: fixed;
     left: 50%;
     bottom: max(10px, var(--safe-bottom));
@@ -1434,9 +1447,27 @@ onBeforeUnmount(() => {
     backdrop-filter: blur(22px) saturate(180%);
     -webkit-backdrop-filter: blur(22px) saturate(180%);
     box-shadow: var(--shadow-lg), var(--inset-highlight);
-    transform: translateX(-50%);
+    max-width: calc(100vw - 16px);
+    overflow-x: auto;
+    scrollbar-width: none;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translate3d(-50%, 12px, 0) scale(0.98);
+    transition: opacity 180ms var(--ease-out),
+                transform 260ms var(--ease-emphasized),
+                visibility 0s linear 260ms;
+    will-change: opacity, transform;
   }
-  .pdf-mobile-toolbar button {
+  .reader-mobile-toolbar::-webkit-scrollbar { display: none; }
+  .reader-mobile-toolbar.is-visible {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translate3d(-50%, 0, 0) scale(1);
+    transition-delay: 0s;
+  }
+  .reader-mobile-toolbar button {
     min-width: var(--tap-target);
     height: var(--tap-target);
     border: 0;
@@ -1446,9 +1477,10 @@ onBeforeUnmount(() => {
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
   }
-  .pdf-mobile-toolbar button:active { transform: scale(0.94); background: var(--accent-light); }
-  .pdf-mobile-toolbar .pdf-fit-btn {
+  .reader-mobile-toolbar button:active { transform: scale(0.94); background: var(--accent-light); }
+  .reader-mobile-toolbar .pdf-fit-btn {
     width: auto;
     min-width: 52px;
     padding-inline: 10px;
@@ -1457,6 +1489,17 @@ onBeforeUnmount(() => {
     white-space: nowrap;
   }
   .pdf-page-indicator { min-width: 54px; text-align: center; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .reader-document-label {
+    min-width: 84px;
+    max-width: min(46vw, 180px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding-inline: 8px;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+  }
 
   .reader-page.is-mobile-immersive {
     position: fixed;
@@ -1475,6 +1518,29 @@ onBeforeUnmount(() => {
   .reader-topbar { max-height: 60px; transition: max-height var(--duration-slow) var(--ease-standard), opacity var(--duration-normal) var(--ease-out), margin var(--duration-slow); }
   .app-main.mobile-scrolled .reader-topbar {
     max-height: 0; opacity: 0; margin: 0; overflow: hidden; pointer-events: none;
+  }
+}
+
+@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
+  .reader-mobile-toolbar {
+    transform: translateX(-50%);
+    transition: opacity 140ms ease-out, visibility 0s linear 140ms;
+  }
+  .reader-mobile-toolbar.is-visible { transform: translateX(-50%); }
+}
+
+@media (max-width: 768px) and (prefers-reduced-transparency: reduce) {
+  .reader-mobile-toolbar {
+    background: var(--bg-base);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (max-width: 768px) and (prefers-contrast: more) {
+  .reader-mobile-toolbar {
+    background: var(--bg-base);
+    border-color: var(--text-muted);
   }
 }
 </style>
