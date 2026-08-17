@@ -152,7 +152,7 @@ function dayAriaLabel(date: string) {
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
-.task-calendar { border-radius: 24px; padding: 18px; overflow: hidden; }
+.task-calendar { border-radius: 24px; padding: 20px; overflow: hidden; }
 .calendar-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .calendar-heading h2 { margin: 0; color: var(--text-primary); font-size: 22px; letter-spacing: var(--tracking-tight); }
 .calendar-heading span { display: block; margin-top: 3px; color: var(--text-faint); font-size: 12px; }
@@ -164,7 +164,7 @@ function dayAriaLabel(date: string) {
 .weekday-row, .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .weekday-row { color: var(--text-faint); font-size: 11px; font-weight: 650; text-align: center; letter-spacing: .08em; }
 .weekday-row span { padding: 7px; }
-.calendar-grid { margin-top: 2px; border-top: 1px solid var(--border-subtle); border-left: 1px solid var(--border-subtle); transition: opacity var(--motion-fast) ease; }
+.calendar-grid { gap: 6px; margin-top: 4px; transition: opacity var(--motion-fast) ease; }
 .calendar-grid.loading { opacity: .5; }
 .calendar-day {
   position: relative;
@@ -172,29 +172,31 @@ function dayAriaLabel(date: string) {
   min-height: 105px;
   padding: 8px;
   border: 0;
-  border-right: 1px solid var(--border-subtle);
-  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 15px;
   background: transparent;
   color: var(--text-primary);
   text-align: left;
   cursor: pointer;
   overflow: hidden;
-  transition: background var(--motion-fast) ease, box-shadow var(--motion-fast) ease;
+  transition: background var(--motion-fast) ease, transform var(--motion-instant) ease;
 }
-.calendar-day:hover { background: var(--bg-glass); }
-.calendar-day.selected { background: color-mix(in srgb, var(--accent) 7%, var(--bg-glass)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+.calendar-day:hover { background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+.calendar-day:active { transform: scale(.985); }
+.calendar-day.selected { background: transparent; }
 .calendar-day.muted { color: var(--text-faint); opacity: .58; }
-.day-number { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 50%; font-size: 12px; font-weight: 560; }
-.calendar-day.today .day-number { background: var(--accent); color: white; box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 30%, transparent); }
+.calendar-day.selected.muted { opacity: .82; }
+.day-number { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; font-size: 12px; font-weight: 560; transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-fast) var(--ease-spring-gentle); }
+.calendar-day.today:not(.selected) .day-number { background: color-mix(in srgb, var(--accent) 11%, transparent); color: var(--accent); font-weight: 680; }
+.calendar-day.selected .day-number { background: var(--accent); color: white; font-weight: 680; box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 28%, transparent); transform: scale(1.04); }
 .day-events { display: grid; gap: 3px; margin-top: 4px; }
-.event-pill { display: block; min-width: 0; padding: 3px 6px; border-radius: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: color-mix(in srgb, var(--accent) 10%, transparent); border-left: 2px solid var(--accent); color: var(--text-secondary); font-size: 10px; line-height: 1.3; }
-.event-pill.importance-low, .agenda-accent.importance-low { border-color: #8e8e93; background-color: color-mix(in srgb, #8e8e93 10%, transparent); }
-.event-pill.importance-high, .agenda-accent.importance-high { border-color: #ff9500; background-color: color-mix(in srgb, #ff9500 12%, transparent); }
-.event-pill.importance-urgent, .agenda-accent.importance-urgent { border-color: #ff3b30; background-color: color-mix(in srgb, #ff3b30 12%, transparent); }
-.event-pill.closed { opacity: .5; text-decoration: line-through; }
+.event-pill { display: block; min-width: 0; padding: 4px 7px; border-radius: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text-secondary); font-size: 10px; line-height: 1.3; }
+.event-pill.importance-low { background-color: color-mix(in srgb, #8e8e93 10%, transparent); }
+.event-pill.importance-high { background-color: color-mix(in srgb, #ff9500 12%, transparent); }
+.event-pill.importance-urgent { background-color: color-mix(in srgb, #ff3b30 12%, transparent); }
+.event-pill.closed { opacity: .5; }
 .more-events { padding-left: 7px; color: var(--text-faint); font-size: 10px; }
 .mobile-dots { display: none; }
-.agenda { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-subtle); }
+.agenda { margin-top: 20px; padding: 16px; border-radius: 18px; background: color-mix(in srgb, var(--text-primary) 2.5%, transparent); }
 .agenda-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .agenda-header div { display: flex; align-items: baseline; gap: 9px; }
 .agenda-header strong { color: var(--text-primary); font-size: 14px; }
@@ -205,6 +207,9 @@ function dayAriaLabel(date: string) {
 .agenda-card:hover { background: var(--bg-glass-strong); }
 .agenda-card:active { transform: scale(.99); }
 .agenda-accent { align-self: stretch; background: var(--accent); border: 0; }
+.agenda-accent.importance-low { background: #8e8e93; }
+.agenda-accent.importance-high { background: #ff9500; }
+.agenda-accent.importance-urgent { background: #ff3b30; }
 .agenda-copy { min-width: 0; display: grid; gap: 4px; }
 .agenda-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .agenda-copy span, .agenda-progress { color: var(--text-faint); font-size: 11px; }
@@ -214,13 +219,14 @@ function dayAriaLabel(date: string) {
 .agenda-item-enter-from, .agenda-item-leave-to { opacity: 0; transform: translateY(6px); }
 
 @media (max-width: 768px) {
-  .task-calendar { padding: 13px; border-radius: 20px; }
+  .task-calendar { padding: 14px; border-radius: 20px; }
   .calendar-header { margin-bottom: 10px; }
   .calendar-heading h2 { font-size: 18px; }
   .calendar-nav button { min-width: 44px; height: 44px; }
   .calendar-nav .today-button { display: none; }
   .weekday-row span { padding: 5px 1px; }
-  .calendar-day { min-height: 49px; padding: 4px 2px; text-align: center; overflow: visible; }
+  .calendar-grid { gap: 3px; }
+  .calendar-day { min-height: 0; aspect-ratio: 1; padding: 4px 2px; border-radius: 12px; text-align: center; overflow: visible; }
   .day-number { margin: 0 auto; width: 28px; height: 28px; }
   .day-events { display: none; }
   .mobile-dots { height: 6px; display: flex; align-items: center; justify-content: center; gap: 2px; }
@@ -228,14 +234,14 @@ function dayAriaLabel(date: string) {
   .mobile-dots i.importance-low { background: #8e8e93; }
   .mobile-dots i.importance-high { background: #ff9500; }
   .mobile-dots i.importance-urgent { background: #ff3b30; }
-  .agenda { margin-top: 13px; padding-top: 13px; }
+  .agenda { margin-top: 14px; padding: 12px; border-radius: 16px; }
   .agenda-header button { min-height: 44px; }
   .agenda-list { grid-template-columns: 1fr; }
   .agenda-card { min-height: 64px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .calendar-nav button, .calendar-grid, .calendar-day, .agenda-card, .agenda-item-enter-active, .agenda-item-leave-active { transition-duration: 1ms !important; }
+  .calendar-nav button, .calendar-grid, .calendar-day, .day-number, .agenda-card, .agenda-item-enter-active, .agenda-item-leave-active { transition-duration: 1ms !important; }
 }
 
 @media (prefers-reduced-transparency: reduce) {

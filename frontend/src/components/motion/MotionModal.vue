@@ -106,7 +106,9 @@ useModalEnvironment(() => props.modelValue, panelRef, close)
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.24);
+  background: color-mix(in srgb, #000 22%, transparent);
+  backdrop-filter: blur(8px) saturate(0.92);
+  -webkit-backdrop-filter: blur(8px) saturate(0.92);
 }
 .motion-modal__panel {
   position: relative;
@@ -170,5 +172,13 @@ useModalEnvironment(() => props.modelValue, panelRef, close)
 
 @media (prefers-reduced-motion: reduce) {
   .motion-modal__panel { transform: none !important; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .motion-modal {
+    background: rgba(0, 0, 0, 0.3);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 </style>

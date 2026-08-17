@@ -25,16 +25,30 @@
         <input v-model="searchQuery" type="search" placeholder="搜索标题或描述" />
       </label>
       <div class="filters">
-        <select v-model="kindFilter" aria-label="任务类型">
-          <option value="all">全部类型</option>
-          <option value="short">短期待办</option>
-          <option value="long">长期任务</option>
-        </select>
-        <select v-model="statusFilter" aria-label="任务状态">
-          <option value="active">进行中的</option>
-          <option value="all">全部状态</option>
-          <option v-for="option in statusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-        </select>
+        <el-select
+          v-model="kindFilter"
+          aria-label="任务类型"
+          popper-class="task-select-popper"
+          placement="bottom-start"
+          :offset="0"
+          :fit-input-width="true"
+        >
+          <el-option value="all" label="全部类型" />
+          <el-option value="short" label="短期待办" />
+          <el-option value="long" label="长期任务" />
+        </el-select>
+        <el-select
+          v-model="statusFilter"
+          aria-label="任务状态"
+          popper-class="task-select-popper"
+          placement="bottom-start"
+          :offset="0"
+          :fit-input-width="true"
+        >
+          <el-option value="active" label="进行中的" />
+          <el-option value="all" label="全部状态" />
+          <el-option v-for="option in statusOptions" :key="option.value" :value="option.value" :label="option.label" />
+        </el-select>
       </div>
     </section>
 
@@ -217,7 +231,7 @@
             <textarea v-model="progressForm.note" rows="5" required placeholder="记录发生了什么、下一步是什么…"></textarea>
           </label>
           <label class="check-field">
-            <input v-model="progressForm.includePercent" type="checkbox" />
+            <input v-model="progressForm.includePercent" type="checkbox" aria-label="同时更新明确完成度" />
             <span>同时更新明确完成度</span>
           </label>
           <label v-if="progressForm.includePercent" class="field full">
@@ -232,16 +246,22 @@
         <div v-else-if="sheetMode === 'status'" class="sheet-body">
           <label class="field full">
             <span>任务状态</span>
-            <select v-model="statusForm.status">
-              <option v-for="option in statusSheetOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-            </select>
+            <el-select
+              v-model="statusForm.status"
+              popper-class="task-select-popper"
+              placement="bottom-start"
+              :offset="0"
+              :fit-input-width="true"
+            >
+              <el-option v-for="option in statusSheetOptions" :key="option.value" :value="option.value" :label="option.label" />
+            </el-select>
           </label>
           <label v-if="isTerminalStatus" class="field full">
             <span>关闭说明（可选）</span>
             <textarea v-model="statusForm.note" rows="4" placeholder="总结结果、原因或后续安排…"></textarea>
           </label>
           <label v-if="targetNode?.role === 'root' && isTerminalStatus" class="check-field">
-            <input v-model="statusForm.cascade" type="checkbox" />
+            <input v-model="statusForm.cascade" type="checkbox" aria-label="同时关闭所有未完成的子任务" />
             <span>同时关闭所有未完成的子任务</span>
           </label>
         </div>
@@ -249,9 +269,16 @@
         <div v-else-if="sheetMode === 'move'" class="sheet-body">
           <label class="field full">
             <span>新的上级任务</span>
-            <select v-model="moveForm.parentId" required>
-              <option v-for="candidate in moveCandidates" :key="candidate.id" :value="candidate.id">{{ candidate.title }}</option>
-            </select>
+            <el-select
+              v-model="moveForm.parentId"
+              popper-class="task-select-popper"
+              placement="bottom-start"
+              :offset="0"
+              :fit-input-width="true"
+              required
+            >
+              <el-option v-for="candidate in moveCandidates" :key="candidate.id" :value="candidate.id" :label="candidate.title" />
+            </el-select>
           </label>
           <p class="sheet-hint">移动后，任务会排在新上级的子任务末尾。</p>
         </div>
@@ -274,17 +301,41 @@
           </label>
           <label class="field">
             <span>开始日期</span>
-            <input v-model="form.start_date" type="date" required />
+            <el-date-picker
+              v-model="form.start_date"
+              class="task-date-input"
+              type="date"
+              format="YYYY/MM/DD"
+              value-format="YYYY-MM-DD"
+              popper-class="glass-picker task-date-popper"
+              placement="bottom-start"
+              :clearable="false"
+            />
           </label>
           <label class="field">
             <span>结束日期</span>
-            <input v-model="form.end_date" type="date" required />
+            <el-date-picker
+              v-model="form.end_date"
+              class="task-date-input"
+              type="date"
+              format="YYYY/MM/DD"
+              value-format="YYYY-MM-DD"
+              popper-class="glass-picker task-date-popper"
+              placement="bottom-start"
+              :clearable="false"
+            />
           </label>
           <label class="field full">
             <span>重要程度</span>
-            <select v-model="form.importance">
-              <option v-for="option in importanceOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-            </select>
+            <el-select
+              v-model="form.importance"
+              popper-class="task-select-popper"
+              placement="bottom-start"
+              :offset="0"
+              :fit-input-width="true"
+            >
+              <el-option v-for="option in importanceOptions" :key="option.value" :value="option.value" :label="option.label" />
+            </el-select>
           </label>
         </div>
 
@@ -630,11 +681,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.tasks-page { min-height: 100%; padding: 28px 32px 44px; color: var(--text-primary); }
-.page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
-.page-title { margin: 0; font-size: 30px; font-weight: 690; letter-spacing: var(--tracking-tight); }
-.page-subtitle { margin: 6px 0 0; color: var(--text-muted); font-size: 14px; }
-.header-actions { display: flex; gap: 9px; }
+.tasks-page { min-height: 100%; max-width: 100%; color: var(--text-primary); }
 .glass-button { min-height: 42px; padding: 0 15px; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); box-shadow: var(--shadow-sm), var(--inset-highlight); color: var(--text-primary); font-weight: 580; cursor: pointer; transition: transform var(--motion-instant) ease, background var(--motion-fast) ease, box-shadow var(--motion-fast) ease; }
 .glass-button:active { transform: scale(.97); }
 .glass-button.primary { background: var(--accent); border-color: transparent; color: white; box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 25%, transparent); }
@@ -652,8 +699,9 @@ onMounted(async () => {
 .task-search:focus-within { background: var(--bg-glass-strong); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 .task-search input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: inherit; }
 .filters { display: flex; gap: 7px; }
-.filters select, .field input, .field textarea, .field select { border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-glass); color: var(--text-primary); font: inherit; outline: none; }
-.filters select { height: 40px; padding: 0 30px 0 11px; }
+.filters :deep(.el-select) { width: 132px; }
+.filters :deep(.el-select__wrapper) { min-height: 40px; border-radius: 12px !important; }
+.field input, .field textarea { border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-glass); color: var(--text-primary); font: inherit; outline: none; }
 .error-banner { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; padding: 10px 13px; border: 1px solid color-mix(in srgb, #ff3b30 28%, transparent); border-radius: 13px; background: color-mix(in srgb, #ff3b30 8%, var(--bg-glass)); color: var(--text-secondary); font-size: 13px; }
 .error-banner button { border: 0; background: transparent; color: #ff3b30; cursor: pointer; }
 .error-banner-enter-active, .error-banner-leave-active { transition: opacity var(--motion-fast) ease, transform var(--motion-fast) ease; }
@@ -736,24 +784,35 @@ onMounted(async () => {
 .detail-loading { height: 100%; display: flex; align-items: center; justify-content: center; gap: 5px; }.detail-loading span { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite alternate; }.detail-loading span:nth-child(2) { animation-delay: .15s; }.detail-loading span:nth-child(3) { animation-delay: .3s; }
 @keyframes pulse { to { opacity: .25; transform: translateY(-4px); } }
 .detail-illustration { position: relative; width: 78px; height: 64px; margin-bottom: 13px; }.detail-illustration span, .detail-illustration i { position: absolute; display: block; border: 1px solid var(--border-subtle); border-radius: 17px; background: var(--bg-glass); box-shadow: var(--shadow-sm); }.detail-illustration span { inset: 0 13px 8px 0; transform: rotate(-6deg); }.detail-illustration i { inset: 8px 0 0 13px; transform: rotate(5deg); }
-.task-sheet { max-height: calc(100dvh - 48px); display: flex; flex-direction: column; border-radius: 24px; border: 1px solid var(--border-glass); background: color-mix(in srgb, var(--bg-glass-strong) 82%, var(--bg-base)); box-shadow: var(--shadow-lg), var(--inset-highlight); backdrop-filter: blur(30px) saturate(1.35); -webkit-backdrop-filter: blur(30px) saturate(1.35); overflow: hidden; }
-.sheet-header { display: flex; align-items: center; justify-content: space-between; padding: 21px 22px 14px; }.sheet-header span { color: var(--text-faint); font-size: 10px; letter-spacing: .08em; }.sheet-header h3 { margin: 4px 0 0; font-size: 21px; }.sheet-header button { width: 38px; height: 38px; border: 0; border-radius: 12px; background: var(--bg-glass); color: var(--text-muted); font-size: 23px; cursor: pointer; }
-.sheet-body { overflow-y: auto; padding: 8px 22px 18px; }.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }.field { display: grid; gap: 6px; }.field.full { grid-column: 1 / -1; }.field > span:first-child { color: var(--text-muted); font-size: 11px; font-weight: 570; }.field input, .field select { height: 44px; padding: 0 11px; }.field textarea { resize: vertical; padding: 10px 11px; line-height: 1.5; }.field input:focus, .field select:focus, .field textarea:focus { border-color: color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: var(--focus-ring); }
+.task-sheet { max-height: calc(100dvh - 48px); display: flex; flex-direction: column; border-radius: 24px; border: 1px solid var(--border-glass); background: var(--bg-glass-strong); box-shadow: var(--shadow-lg), var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, .03); backdrop-filter: blur(40px) saturate(200%); -webkit-backdrop-filter: blur(40px) saturate(200%); overflow: hidden; }
+.sheet-header { display: flex; align-items: center; justify-content: space-between; padding: 28px 28px 16px; }.sheet-header span { color: var(--text-faint); font-size: 10px; letter-spacing: .08em; }.sheet-header h3 { margin: 4px 0 0; font-size: 18px; font-weight: 700; }.sheet-header button { width: 38px; height: 38px; border: 0; border-radius: 12px; background: var(--bg-glass); color: var(--text-muted); font-size: 23px; cursor: pointer; transition: background var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-instant) ease; }.sheet-header button:hover { background: var(--bg-hover); color: var(--text-primary); }.sheet-header button:active { transform: scale(.94); }
+.sheet-body { overflow-y: auto; padding: 4px 28px 10px; }.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }.field { display: grid; gap: 7px; }.field.full { grid-column: 1 / -1; }.field > span:first-child { color: var(--text-muted); font-size: 11px; font-weight: 570; }.field input { height: 44px; padding: 0 11px; }.field textarea { resize: vertical; padding: 10px 11px; line-height: 1.5; }.field input:focus, .field textarea:focus { border-color: color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: var(--focus-ring); }
+.field :deep(.el-select), .field :deep(.el-date-editor) { width: 100%; }
+.field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 44px; border-radius: 11px !important; }
+.task-date-input :deep(.el-input__wrapper) { width: 100%; box-sizing: border-box; }
 .kind-segment { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 5%, transparent); }.kind-segment button { height: 38px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); cursor: pointer; }.kind-segment button.active { background: var(--bg-glass-strong); box-shadow: var(--shadow-sm); color: var(--text-primary); font-weight: 600; }
-.range-field { display: grid; grid-template-columns: 1fr 48px; align-items: center; gap: 12px; }.range-field input { width: 100%; padding: 0; accent-color: var(--accent); }.range-field output { color: var(--accent); font-weight: 650; text-align: right; }.check-field { display: flex; align-items: center; gap: 9px; min-height: 44px; color: var(--text-muted); font-size: 12px; }.check-field input { width: 18px; height: 18px; accent-color: var(--accent); }.sheet-hint { margin: 0; color: var(--text-faint); font-size: 11px; }
-.sheet-footer { display: grid; grid-template-columns: 1fr 1.4fr; gap: 9px; padding: 13px 22px 21px; border-top: 1px solid var(--border-subtle); }.sheet-footer button { height: 44px; border-radius: 13px; font-weight: 620; cursor: pointer; }.sheet-footer .cancel { border: 1px solid var(--border-subtle); background: var(--bg-glass); color: var(--text-secondary); }.sheet-footer .confirm { border: 0; background: var(--accent); color: white; box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 22%, transparent); }.sheet-footer .confirm:disabled { opacity: .55; }
+.range-field { display: grid; grid-template-columns: 1fr 48px; align-items: center; gap: 12px; }.range-field input { width: 100%; padding: 0; accent-color: var(--accent); }.range-field output { color: var(--accent); font-weight: 650; text-align: right; }.check-field { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--text-muted); font-size: 12px; cursor: pointer; }.check-field input { appearance: none; -webkit-appearance: none; position: relative; width: 20px; height: 20px; flex: none; margin: 0; border: 1px solid color-mix(in srgb, var(--text-muted) 42%, transparent); border-radius: 6px; background: var(--bg-glass); box-shadow: var(--inset-highlight); cursor: pointer; transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease, transform var(--motion-instant) ease, box-shadow var(--motion-fast) ease; }.check-field input::after { content: ''; position: absolute; left: 6px; top: 3px; width: 5px; height: 9px; border: solid white; border-width: 0 2px 2px 0; opacity: 0; transform: rotate(45deg) scale(.65); transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--ease-spring-gentle); }.check-field input:checked { border-color: var(--accent); background: var(--accent); box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 24%, transparent), var(--inset-highlight); }.check-field input:checked::after { opacity: 1; transform: rotate(45deg) scale(1); }.check-field input:focus-visible { outline: 0; box-shadow: var(--focus-ring); }.check-field:active input { transform: scale(.92); }.sheet-hint { margin: 0; color: var(--text-faint); font-size: 11px; }
+.sheet-footer { display: grid; grid-template-columns: 1fr 1.4fr; gap: 9px; padding: 16px 28px 28px; }.sheet-footer button { height: 44px; border-radius: 13px; font-weight: 620; cursor: pointer; }.sheet-footer .cancel { border: 1px solid var(--border-subtle); background: var(--bg-glass); color: var(--text-secondary); }.sheet-footer .confirm { border: 0; background: var(--accent); color: white; box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 22%, transparent); }.sheet-footer .confirm:disabled { opacity: .55; }
+
+:global(.task-select-popper.el-popper) { z-index: 2501 !important; margin: 0 !important; border-radius: 0 0 14px 14px !important; border-top-color: color-mix(in srgb, var(--border-glass) 42%, transparent) !important; overflow: hidden; box-shadow: var(--shadow-lg), var(--inset-highlight) !important; backdrop-filter: blur(30px) saturate(1.65) !important; -webkit-backdrop-filter: blur(30px) saturate(1.65) !important; }
+:global(.task-select-popper.el-popper[data-popper-placement^='top']) { border-radius: 14px 14px 0 0 !important; border-top-color: var(--border-glass) !important; border-bottom-color: color-mix(in srgb, var(--border-glass) 42%, transparent) !important; }
+:global(.task-select-popper .el-popper__arrow) { display: none !important; }
+:global(.task-select-popper .el-select-dropdown__list) { padding: 5px !important; }
+:global(.task-select-popper .el-select-dropdown__item) { min-height: 38px; display: flex; align-items: center; border-radius: 9px; padding: 0 10px; }
+:global(.task-select-popper .el-select-dropdown__item.selected) { background: color-mix(in srgb, var(--accent) 10%, transparent) !important; }
+:global(.task-date-popper.el-popper) { z-index: 2501 !important; }
 
 @media (max-width: 1050px) {
   .task-workspace { grid-template-columns: 290px minmax(0, 1fr); }.detail-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }.detail-actions { flex-wrap: wrap; justify-content: flex-end; }
 }
 
 @media (max-width: 768px) {
-  .tasks-page { padding: 70px 12px 28px; }.page-header { align-items: center; margin-bottom: 14px; }.page-title { font-size: 24px; }.page-subtitle { font-size: 12px; }.header-actions .secondary { width: 44px; padding: 0; font-size: 0; }.header-actions .secondary span { font-size: 18px; }.glass-button { min-height: 44px; }.task-toolbar { flex-wrap: wrap; padding: 7px; }.view-switch { width: 100%; }.view-switch button { min-height: 38px; }.task-search { order: 2; min-width: 0; flex: 1; min-height: 44px; }.filters { order: 3; width: 100%; }.filters select { flex: 1; min-width: 0; height: 44px; }.task-workspace { min-height: calc(100dvh - 260px); height: auto; display: block; }.task-list-panel, .task-detail-panel { min-height: calc(100dvh - 260px); border-radius: 20px; }.task-detail-panel { display: none; padding: 12px; }.task-workspace.detail-open .task-list-panel { display: none; }.task-workspace.detail-open .task-detail-panel { display: block; }.mobile-detail-nav { height: 45px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }.mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font-weight: 600; }.mobile-detail-nav span { color: var(--text-faint); font-size: 11px; }.detail-header { display: block; }.detail-title-group h2 { font-size: 23px; }.detail-actions { display: grid; grid-template-columns: 1fr 1fr 44px; margin-top: 14px; }.detail-actions button { min-height: 44px; }.detail-facts { grid-template-columns: 1fr 1fr; margin: 14px 0; }.detail-facts div:last-child { grid-column: 1 / -1; }.progress-overview, .detail-section { padding: 13px; }.section-heading button { min-height: 44px; }.task-card { min-height: 110px; }.panel-heading button { min-width: 44px; min-height: 44px; }.task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }.sheet-header { padding-top: 32px; }.sheet-body { overscroll-behavior: contain; }.form-grid { grid-template-columns: 1fr; }.field.full { grid-column: auto; }.field input, .field select { min-height: 48px; }.sheet-footer { padding-bottom: max(18px, env(safe-area-inset-bottom)); }.sheet-footer button { min-height: 48px; }
+  .header-actions .secondary { width: 44px; padding: 0; font-size: 0; }.header-actions .secondary span { font-size: 18px; }.glass-button { min-height: 44px; }.task-toolbar { flex-wrap: wrap; padding: 7px; }.view-switch { width: 100%; }.view-switch button { min-height: 38px; }.task-search { order: 2; min-width: 0; flex: 1; min-height: 44px; }.filters { order: 3; width: 100%; }.filters :deep(.el-select) { flex: 1; width: auto; min-width: 0; }.filters :deep(.el-select__wrapper) { min-height: 44px; }.task-workspace { min-height: calc(100dvh - 260px); height: auto; display: block; }.task-list-panel, .task-detail-panel { min-height: calc(100dvh - 260px); border-radius: 20px; }.task-detail-panel { display: none; padding: 12px; }.task-workspace.detail-open .task-list-panel { display: none; }.task-workspace.detail-open .task-detail-panel { display: block; }.mobile-detail-nav { height: 45px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }.mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font-weight: 600; }.mobile-detail-nav span { color: var(--text-faint); font-size: 11px; }.detail-header { display: block; }.detail-title-group h2 { font-size: 23px; }.detail-actions { display: grid; grid-template-columns: 1fr 1fr 44px; margin-top: 14px; }.detail-actions button { min-height: 44px; }.detail-facts { grid-template-columns: 1fr 1fr; margin: 14px 0; }.detail-facts div:last-child { grid-column: 1 / -1; }.progress-overview, .detail-section { padding: 13px; }.section-heading button { min-height: 44px; }.task-card { min-height: 110px; }.panel-heading button { min-width: 44px; min-height: 44px; }.task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }.sheet-header { padding: 34px 20px 16px; }.sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }.form-grid { grid-template-columns: 1fr; }.field.full { grid-column: auto; }.field input, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; }.sheet-footer { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }.sheet-footer button { min-height: 48px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .switch-indicator, .task-card, .mini-progress i, .progress-track i, .error-banner-enter-active, .error-banner-leave-active, .task-card-enter-active, .task-card-leave-active { transition-duration: 1ms !important; }.spinning, .task-skeletons span, .detail-loading span { animation: none !important; }
+  .switch-indicator, .task-card, .mini-progress i, .progress-track i, .check-field input, .check-field input::after, .error-banner-enter-active, .error-banner-leave-active, .task-card-enter-active, .task-card-leave-active { transition-duration: 1ms !important; }.spinning, .task-skeletons span, .detail-loading span { animation: none !important; }
 }
-@media (prefers-reduced-transparency: reduce) { .glass-surface, .task-sheet { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--bg-primary); } }
-@media (prefers-contrast: more) { .task-card.selected, .progress-overview, .detail-section { border-color: var(--text-muted); } }
+@media (prefers-reduced-transparency: reduce) { .glass-surface, .task-sheet { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--bg-primary); }:global(.task-select-popper.el-popper), :global(.task-date-popper.el-popper) { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background: var(--bg-primary) !important; } }
+@media (prefers-contrast: more) { .task-card.selected, .progress-overview, .detail-section, .check-field input { border-color: var(--text-muted); } }
 </style>
