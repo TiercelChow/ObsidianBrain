@@ -70,6 +70,7 @@ import {
   Connection,
   Reading,
   Files,
+  Finished,
   Expand,
   Fold,
 } from '@element-plus/icons-vue'
@@ -122,6 +123,7 @@ const navGroups = [
       { path: '/', label: '首页', icon: House },
       { path: '/reader', label: '阅境轩', icon: Files },
       { path: '/timeline', label: '时光机', icon: Calendar },
+      { path: '/tasks', label: '任务中枢', icon: Finished },
     ],
   },
   {

@@ -67,9 +67,9 @@ mod tests {
         // No required fields.
         let schema = handler.input_schema();
         let required = schema.get("required").and_then(|v| v.as_array());
-        match required {
-            Some(arr) => assert!(arr.is_empty()),
-            None => {} // "required" key omitted — valid, means no required params
+        // A missing "required" key is also valid and means no required params.
+        if let Some(arr) = required {
+            assert!(arr.is_empty());
         }
     }
 }

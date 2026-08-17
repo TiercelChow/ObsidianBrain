@@ -479,6 +479,6 @@ mod tests {
             base_url: String::new(),
         };
         let estimate = provider.estimate_tokens("你好世界");
-        assert!(estimate >= 2 && estimate <= 4);
+        assert!((2..=4).contains(&estimate));
     }
 }

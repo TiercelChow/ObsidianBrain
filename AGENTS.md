@@ -26,7 +26,9 @@ docs/
 │   ├── 04-timeline.md               # 时间线
 │   ├── 05-code-repo.md              # 代码仓管理
 │   ├── 06-inspiration.md            # 灵感熔炉
-│   └── 07-radar.md                  # 智识雷达
+│   ├── 07-radar.md                  # 智识雷达
+│   ├── 08-llm-wiki.md               # LLM Wiki
+│   └── 09-task-management.md        # 个人任务管理
 └── development/                     # 开发设计文档（How）
     ├── 01-infrastructure.md         # 基础设施层
     ├── 02-tool-protocol.md          # 工具协议与 API
@@ -34,7 +36,8 @@ docs/
     ├── 04-timeline.md               # 时间线
     ├── 05-code-repo.md              # 代码仓管理
     ├── 06-inspiration.md            # 灵感熔炉
-    └── 07-radar.md                  # 智识雷达
+    ├── 07-radar.md                  # 智识雷达
+    └── 09-task-management.md        # 个人任务管理
 ```
 
 ### 文档编号与模块对应
@@ -48,6 +51,8 @@ docs/
 | 05 | 代码仓管理 (Code Repo Hub) | Phase 2 |
 | 06 | 灵感熔炉 (Inspiration Forge) | Phase 3 |
 | 07 | 智识雷达 (Knowledge Radar) | Phase 3 |
+| 08 | LLM Wiki | Phase 4 |
+| 09 | 个人任务管理 (Tasks) | Phase 5 |
 
 ---
 
@@ -91,6 +96,7 @@ ObsidianBrain/
     │   ├── mod.rs
     │   ├── memory.rs
     │   ├── timeline.rs
+    │   ├── tasks.rs
     │   ├── code_repo.rs
     │   ├── inspiration.rs
     │   └── radar.rs
@@ -112,7 +118,8 @@ ObsidianBrain/
         ├── note.rs
         ├── memory.rs
         ├── repo.rs
-        └── radar.rs
+        ├── radar.rs
+        └── task.rs
 ```
 
 ---
@@ -324,6 +331,12 @@ docker compose down           # 停止
 - [ ] 技能 YAML 扩展系统
 - [ ] 本地 ONNX Embedding
 - [ ] 性能优化与内存调优
+
+### Phase 5: 个人任务管理
+- [x] 短期待办与长期任务领域模型
+- [x] 多级任务拆解和进展记录
+- [x] 任务视图与日历视图
+- [x] Obsidian Tasks 文件存储与可重建索引
 
 ---
 

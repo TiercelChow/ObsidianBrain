@@ -28,6 +28,24 @@ pub enum BrainError {
     #[error("Repository not found: {0}")]
     RepoNotFound(PathBuf),
 
+    #[error("任务不存在: {0}")]
+    TaskNotFound(String),
+
+    #[error("任务校验失败: {0}")]
+    TaskValidation(String),
+
+    #[error("任务文档版本冲突: {0}")]
+    TaskVersionConflict(String),
+
+    #[error("任务 ID 冲突: {0}")]
+    TaskDuplicateId(String),
+
+    #[error("任务文档损坏 {path}: {detail}")]
+    TaskDocumentCorrupt { path: String, detail: String },
+
+    #[error("Obsidian API 不可用")]
+    ObsidianUnavailable,
+
     #[error("Git error in {path}: {detail}")]
     GitError { path: PathBuf, detail: String },
 
@@ -58,6 +76,12 @@ impl BrainError {
             Self::SearchError(_) => "SEARCH_ERROR",
             Self::EmbeddingError(_) => "EMBEDDING_ERROR",
             Self::RepoNotFound(_) => "REPO_NOT_FOUND",
+            Self::TaskNotFound(_) => "TASK_NOT_FOUND",
+            Self::TaskValidation(_) => "TASK_VALIDATION_ERROR",
+            Self::TaskVersionConflict(_) => "TASK_VERSION_CONFLICT",
+            Self::TaskDuplicateId(_) => "TASK_DUPLICATE_ID",
+            Self::TaskDocumentCorrupt { .. } => "TASK_DOCUMENT_CORRUPT",
+            Self::ObsidianUnavailable => "OBSIDIAN_UNAVAILABLE",
             Self::GitError { .. } => "GIT_ERROR",
             Self::QdrantError(_) => "QDRANT_ERROR",
             Self::LlmApiError { .. } => "LLM_API_ERROR",
@@ -85,6 +109,12 @@ impl BrainError {
                 Some("Check your embedding API key and network connectivity")
             }
             Self::RepoNotFound(_) => Some("Register the repository first via the code_repo tools"),
+            Self::TaskNotFound(_) => Some("请刷新任务列表或从 Obsidian 重新同步"),
+            Self::TaskValidation(_) => Some("请检查标题、日期、状态和任务层级"),
+            Self::TaskVersionConflict(_) => Some("任务已被修改，请刷新后重试"),
+            Self::TaskDuplicateId(_) => Some("请在 Obsidian 中修复重复任务 ID 后重新同步"),
+            Self::TaskDocumentCorrupt { .. } => Some("请检查 Tasks 文件的 YAML frontmatter"),
+            Self::ObsidianUnavailable => Some("请启用并检查 Obsidian Local REST API 插件"),
             Self::GitError { .. } => {
                 Some("Ensure the repository is a valid git repo and git is accessible")
             }
@@ -102,10 +132,15 @@ impl BrainError {
     fn status_code(&self) -> StatusCode {
         match self {
             Self::ConfigError(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::VaultNotFound(_) | Self::NoteNotFound(_) | Self::RepoNotFound(_) => {
-                StatusCode::NOT_FOUND
-            }
-            Self::ParseError { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::VaultNotFound(_)
+            | Self::NoteNotFound(_)
+            | Self::RepoNotFound(_)
+            | Self::TaskNotFound(_) => StatusCode::NOT_FOUND,
+            Self::ParseError { .. }
+            | Self::TaskValidation(_)
+            | Self::TaskDocumentCorrupt { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::TaskVersionConflict(_) | Self::TaskDuplicateId(_) => StatusCode::CONFLICT,
+            Self::ObsidianUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::SearchError(_)
             | Self::EmbeddingError(_)
             | Self::QdrantError(_)

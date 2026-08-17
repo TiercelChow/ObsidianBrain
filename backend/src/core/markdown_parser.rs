@@ -993,6 +993,6 @@ End of section.
             .iter()
             .find(|s| s.content.contains("Some content"))
             .unwrap();
-        assert!(section.heading.as_ref().map_or(true, |h| h.is_empty()));
+        assert!(section.heading.as_ref().is_none_or(|h| h.is_empty()));
     }
 }

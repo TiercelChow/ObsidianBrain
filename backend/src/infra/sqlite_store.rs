@@ -60,6 +60,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "memos (Time Machine)",
         sql: include_str!("../../migrations/008_memos.sql"),
     },
+    Migration {
+        version: 9,
+        description: "personal task management",
+        sql: include_str!("../../migrations/009_tasks.sql"),
+    },
 ];
 
 impl SqliteStore {
@@ -168,6 +173,18 @@ impl SqliteStore {
                 Err(e)
             }
         }
+    }
+
+    /// Execute a read-only closure with the shared SQLite connection.
+    pub fn with_connection<F, T>(&self, f: F) -> Result<T, BrainError>
+    where
+        F: FnOnce(&Connection) -> Result<T, BrainError>,
+    {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|error| BrainError::Internal(format!("SQLite 锁已损坏: {error}")))?;
+        f(&conn)
     }
 
     // ── App state helpers ──
@@ -727,7 +744,7 @@ mod tests {
         let count: u32 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(count, 8);
+        assert_eq!(count, 9);
     }
 
     #[test]

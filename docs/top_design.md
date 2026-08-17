@@ -1,6 +1,6 @@
 # ObsidianBrain — 顶层设计文档
 
-> **版本**: v1.0 | **最后更新**: 2026-06-02 | **状态**: 已实现
+> **版本**: v1.1 | **最后更新**: 2026-08-17 | **状态**: 持续演进
 
 ---
 
@@ -8,7 +8,7 @@
 
 ### 1.1 定位
 
-ObsidianBrain 是一个运行在本地的 **Rust 知识引擎**，对外提供标准化的 LLM Tool API（兼容 MCP 协议与 OpenAI function calling 格式）。它围绕用户的 **Obsidian 知识库** 和 **本地代码仓库**，提供记忆管理、代码仓概览、灵感催化、外部信息聚合、时间线回顾等能力。
+ObsidianBrain 是一个运行在本地的 **Rust 知识引擎**，对外提供标准化的 LLM Tool API（兼容 MCP 协议与 OpenAI function calling 格式）。它围绕用户的 **Obsidian 知识库** 和 **本地代码仓库**，提供记忆管理、代码仓概览、灵感催化、外部信息聚合、时间线回顾和个人任务管理等能力。
 
 **核心原则**：对话由 Claude / ChatGPT 等 LLM 前端完成，本引擎是 LLM 的 **"手"和"眼"**——负责感知（读取 vault、代码仓、外部信息）和执行（写入笔记、打开编辑器、保存文章）。
 
@@ -25,12 +25,13 @@ ObsidianBrain 是一个运行在本地的 **Rust 知识引擎**，对外提供�
 | 缺乏跨界灵感触发 | 灵感熔炉主动制造知识碰撞 |
 | 外部信息过载，手动筛选成本高 | 智识雷达基于个人知识图谱做个性化推荐 |
 | 时间维度上的知识演变不可见 | 时间线回溯知识动态 |
+| 短期待办容易遗忘，长期目标难以持续拆解和追踪 | 个人任务模块统一管理待办、任务树、进展和日历，并保存到 Obsidian |
 
 ### 1.4 非功能性需求
 
 - **隐私优先**：所有数据本地存储，服务仅监听 `127.0.0.1`，不上传任何用户数据（LLM API 调用除外）。
 - **低资源占用**：空闲时内存 < 50MB，CPU 接近零。
-- **快速响应**：工具调用 P95 延迟 < 200ms（不含 LLM 调用）。
+- **快速响应**：只读工具调用 P95 延迟目标 < 300ms；需要写入 Obsidian 的操作目标 < 500ms（不含外部异常重试与 LLM 调用）。
 - **可靠运行**：单进程，panic 自动重启（通过 systemd/launchd），数据持久化不丢失。
 - **易部署**：单一二进制 + Obsidian Local REST API 插件，无需额外服务。
 
@@ -57,16 +58,16 @@ ObsidianBrain 是一个运行在本地的 **Rust 知识引擎**，对外提供�
 │        │             │                                      │
 │  ┌─────┴─────────────┴────────────────────────────────────┐ │
 │  │                    核心服务层                            │ │
-│  │  ┌──────────────┐                                      │ │
-│  │  │ MemoryService│  (通过 Obsidian API 操作笔记)         │ │
-│  │  └──────┬───────┘                                      │ │
+│  │  ┌──────────────┐  ┌──────────────┐                    │ │
+│  │  │ MemoryService│  │ TaskService  │                    │ │
+│  │  └──────┬───────┘  └──────┬───────┘                    │ │
 │  └─────────┼──────────────────────────────────────────────┘ │
 │            │                                                │
 │  ┌─────────┴──────────────────────────────────────────────┐ │
 │  │                    基础设施层                            │ │
-│  │  ┌──────────────────┐                                  │ │
-│  │  │ ObsidianClient   │  (Obsidian Local REST API)      │ │
-│  │  └──────────────────┘                                  │ │
+│  │  ┌──────────────────┐  ┌──────────────────┐            │ │
+│  │  │ ObsidianClient   │  │ SQLite 投影索引   │            │ │
+│  │  └──────────────────┘  └──────────────────┘            │ │
 │  └────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
                            │
@@ -129,6 +130,7 @@ ObsidianBrain/
 │       │   ├── mod.rs
 │       │   ├── memory_service.rs    # 记忆引擎（通过 Obsidian API）
 │       │   ├── timeline.rs          # 时间线
+│       │   ├── tasks/               # 个人任务管理
 │       │   ├── code_repo/           # 代码仓管理
 │       │   ├── inspiration/         # 灵感熔炉
 │       │   └── radar/               # 智识雷达
@@ -150,7 +152,8 @@ ObsidianBrain/
 │           ├── repo.rs
 │           ├── radar.rs
 │           ├── inspiration.rs
-│           └── timeline.rs
+│           ├── timeline.rs
+│           └── task.rs
 └── frontend/                   # Vue3 前端
     ├── src/
     │   ├── views/              # 页面组件
@@ -192,7 +195,7 @@ ObsidianBrain/
 │  └──────┬───────┘                    │
 │         │                           │
 │         ├── Config: ./config/       │
-│         └── (无本地数据存储)         │
+│         └── SQLite（可重建查询投影）  │
 └─────────┼────────────────────────────┘
           │  HTTP (127.0.0.1:27123)
           ▼
@@ -202,7 +205,7 @@ ObsidianBrain/
 └──────────────────────────────────────┘
 ```
 
-**注意**：不再需要 Qdrant Docker 容器或本地索引存储。所有笔记数据由 Obsidian 管理，ObsidianBrain 仅通过 HTTP API 访问。
+**注意**：不再需要 Qdrant Docker 容器或笔记全文/向量索引。笔记与任务的权威内容由 Obsidian 管理；SQLite 只保存代码仓、雷达、时间线和任务等模块的可重建查询投影。
 
 ---
 
@@ -296,7 +299,38 @@ struct TimelineEvent {
 enum EventType { NoteCreated, NoteModified, RepoCommit, RadarSaved, MemoryCreated }
 ```
 
-### 4.6 SQLite Schema
+### 4.6 个人任务 (Task)
+
+```rust
+struct TaskNode {
+    id: Uuid,
+    root_id: Uuid,
+    parent_id: Option<Uuid>,
+    kind: TaskKind,             // Short | Long
+    role: TaskRole,             // Root | Subtask
+    title: String,
+    description: String,
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+    importance: TaskImportance, // Low | Normal | High | Urgent
+    status: TaskStatus,
+    position: i32,
+    revision: i64,
+}
+
+struct ProgressEntry {
+    id: Uuid,
+    root_id: Uuid,
+    task_id: Uuid,
+    recorded_at: DateTime<Utc>,
+    note: String,
+    percent_after: Option<u8>,
+}
+```
+
+短期待办按创建月份保存在 `Tasks/Short/YYYY-MM.md`；长期任务按根任务一文件保存在 `Tasks/Long/{slug}--{id8}.md`。Obsidian Markdown 是权威数据源，SQLite 仅保存可重建投影。完整字段和生命周期见 [任务需求设计](requirement/09-task-management.md)。
+
+### 4.7 SQLite Schema
 
 ```sql
 -- 代码仓库注册信息
@@ -507,6 +541,17 @@ GET  /v1/health             → 健康检查
 | | `generate_docs` | `repo_name, target_path?` | 自动生成文档笔记 |
 | | `open_in_vscode` | `repo_name` | VSCode 打开仓库 |
 | **时间线** | `get_timeline` | `start_date, end_date` | 查询时间线事件 |
+| **个人任务** | `create_task` | `kind, title, description?, start_date, end_date, importance` | 创建短期或长期任务 |
+| | `list_tasks` | `filters?, sort?, cursor?, limit?` | 查询任务列表 |
+| | `get_task` | `task_id, include_tree?, include_progress?` | 获取任务详情 |
+| | `update_task` | `task_id, patch, expected_version` | 编辑任务字段 |
+| | `set_task_status` | `task_id, status, closure_note?, cascade?, expected_version` | 关闭、完成、取消或重新打开 |
+| | `add_subtask` | `parent_id, fields, expected_version` | 拆解长期任务 |
+| | `move_subtask` | `task_id, new_parent_id, position, expected_version` | 移动或排序子任务 |
+| | `add_task_progress` | `task_id, note, percent_after?, expected_version` | 追加任务进展 |
+| | `get_task_calendar` | `start_date, end_date, filters?` | 查询日历范围内的任务 |
+| | `archive_task` | `task_id, archived, expected_version` | 归档或恢复任务 |
+| | `sync_tasks` | `dry_run?` | 从 Obsidian 刷新任务索引 |
 | **灵感** | `get_inspiration` | `type?, note_path?` | 获取灵感（概念碰撞/反向提问/对立观点） |
 | **雷达** | `get_radar` | `limit?, query?` | 获取外部信息推荐 |
 | | `add_to_vault` | `article_id, target_dir?` | 文章保存到 vault |
@@ -794,6 +839,32 @@ get_radar(limit: 5)
 
 ---
 
+### ✅ 5.6 个人任务管理 (Tasks)
+
+#### 定位
+
+用两种清晰的心智模型覆盖个人工作安排：短期待办强调快速记录和关闭说明，长期任务强调多级拆解和进展追踪。任务视图与日历视图消费同一数据模型。
+
+#### 核心能力
+
+- 短期待办：标题、描述、开始/结束日期、重要程度、完成/取消及关闭说明。
+- 长期任务：根任务与多级子任务共享通用字段，每个节点可追加进展。
+- 任务视图：桌面端 master-detail，手机端列表进入独立详情与底部操作面板。
+- 日历视图：桌面端月历加日程侧栏，手机端紧凑月历加选中日日程。
+- 可靠存储：Obsidian 先写、SQLite 后索引，revision + 内容哈希冲突检测，索引可从 Vault 重建。
+
+#### 存储约定
+
+```text
+Tasks/
+├── Short/YYYY-MM.md
+└── Long/{slug}--{id8}.md
+```
+
+首版日期语义为本地全天日期；不包含提醒、重复规则、任务依赖和外部日历同步。详细产品边界见 [需求设计](requirement/09-task-management.md)，实现方案见 [开发设计](development/09-task-management.md)。
+
+---
+
 ## 6. 配置规范
 
 主配置文件 `config/default.toml`：
@@ -838,6 +909,13 @@ search_top_k = 5
 
 [timeline]
 date_formats = ["%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"]
+
+[tasks]
+vault_root = "Tasks"
+max_tree_depth = 20
+max_nodes_per_document = 5000
+default_page_size = 50
+calendar_max_range_days = 366
 
 [radar]
 fetch_interval_hours = 6
@@ -1015,6 +1093,18 @@ enum BrainError {
 - [ ] 性能优化与内存调优
 - [ ] 完善的文档与使用指南
 - [ ] 考虑 Obsidian 插件端（可选，作为前端增强）
+
+### Phase 5: 个人任务管理（MVP 已实现）
+
+- [x] 任务领域模型、Markdown codec 与 SQLite 可重建投影
+- [x] 短期待办创建、编辑、关闭、重开和归档
+- [x] 长期任务多级拆解、移动、进展和状态管理
+- [x] 任务视图（桌面与手机）
+- [x] 日历视图（桌面与手机）
+- [x] 文档版本冲突、同步恢复和异常文件处理
+- [x] 11 个任务 Tool API
+
+**设计文档**：[需求设计](requirement/09-task-management.md) · [开发设计](development/09-task-management.md)
 
 ---
 

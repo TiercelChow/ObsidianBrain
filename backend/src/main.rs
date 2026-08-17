@@ -21,10 +21,13 @@ use crate::core::code_repo::note_linker::NoteLinker;
 use crate::core::inspiration::InspirationService;
 use crate::core::memory_service::MemoryService;
 use crate::core::radar::RadarService;
+use crate::core::tasks::TaskService;
 use crate::core::timeline::store::TimelineStore;
 use crate::core::timeline::{MemoManager, TimelineConfig, TimelineService};
 use crate::infra::obsidian_client::{new_provider, ObsidianClient};
 use crate::infra::sqlite_store::SqliteStore;
+use crate::infra::task_document_store::ObsidianTaskDocumentStore;
+use crate::infra::task_index_store::SqliteTaskIndexStore;
 use crate::tools::handlers::register_all_tools;
 use crate::tools::registry::ToolRegistry;
 
@@ -40,6 +43,7 @@ pub struct AppContext {
     pub note_linker: Arc<NoteLinker>,
     pub timeline_service: Arc<TimelineService>,
     pub memo_manager: Arc<MemoManager>,
+    pub task_service: Arc<TaskService>,
     pub inspiration_service: Arc<InspirationService>,
     pub radar_service: Arc<RadarService>,
     /// Server start time — used to compute uptime in health endpoint.
@@ -371,6 +375,10 @@ async fn run_server_async(
         TimelineConfig::default(),
     ));
     let memo_manager = Arc::new(MemoManager::new(db.clone(), obsidian.clone()));
+    let task_service = Arc::new(TaskService::new(
+        Arc::new(ObsidianTaskDocumentStore::new(obsidian.clone())),
+        Arc::new(SqliteTaskIndexStore::new(db.clone())),
+    ));
 
     let llm: Arc<dyn crate::infra::llm_client::LlmProvider> =
         crate::infra::llm_client::LlmClientFactory::create(&config.llm)
@@ -425,6 +433,7 @@ async fn run_server_async(
         note_linker,
         timeline_service,
         memo_manager,
+        task_service,
         inspiration_service,
         radar_service,
         start_time,
@@ -642,6 +651,10 @@ mod test_helpers {
                 TimelineConfig::default(),
             ));
             let memo_manager = Arc::new(MemoManager::new(db.clone(), obsidian_provider.clone()));
+            let task_service = Arc::new(TaskService::new(
+                Arc::new(ObsidianTaskDocumentStore::new(obsidian_provider.clone())),
+                Arc::new(SqliteTaskIndexStore::new(db.clone())),
+            ));
 
             let llm_config = crate::config::LlmConfig::default();
             let llm: Arc<dyn crate::infra::llm_client::LlmProvider> = Arc::from(
@@ -675,6 +688,7 @@ mod test_helpers {
                 note_linker,
                 timeline_service,
                 memo_manager,
+                task_service,
                 inspiration_service,
                 radar_service,
                 start_time: chrono::Utc::now(),

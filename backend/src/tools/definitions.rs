@@ -6,6 +6,28 @@
 
 use serde_json::{json, Value};
 
+fn expected_task_version_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "revision": { "type": "integer", "minimum": 1 },
+            "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+        },
+        "required": ["revision", "content_hash"],
+        "additionalProperties": false
+    })
+}
+
+fn task_fields_schema() -> Value {
+    json!({
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 10000 },
+        "start_date": { "type": "string", "format": "date" },
+        "end_date": { "type": "string", "format": "date" },
+        "importance": { "type": "string", "enum": ["low", "normal", "high", "urgent"] }
+    })
+}
+
 /// Schema for `search_notes` — note search via Obsidian API.
 pub fn search_notes_schema() -> Value {
     json!({
@@ -72,6 +94,166 @@ pub fn get_memory_stats_schema() -> Value {
     json!({
         "type": "object",
         "properties": {},
+        "additionalProperties": false
+    })
+}
+
+// ── Personal Task Tools ──
+
+pub fn create_task_schema() -> Value {
+    let fields = task_fields_schema();
+    json!({
+        "type": "object",
+        "properties": {
+            "kind": { "type": "string", "enum": ["short", "long"] },
+            "title": fields["title"],
+            "description": fields["description"],
+            "start_date": fields["start_date"],
+            "end_date": fields["end_date"],
+            "importance": fields["importance"]
+        },
+        "required": ["kind", "title", "start_date", "end_date", "importance"],
+        "additionalProperties": false
+    })
+}
+
+pub fn list_tasks_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "kinds": { "type": "array", "items": { "type": "string", "enum": ["short", "long"] } },
+            "statuses": { "type": "array", "items": { "type": "string", "enum": ["open", "planned", "in_progress", "blocked", "completed", "cancelled"] } },
+            "importance": { "type": "array", "items": { "type": "string", "enum": ["low", "normal", "high", "urgent"] } },
+            "start_date": { "type": "string", "format": "date" },
+            "end_date": { "type": "string", "format": "date" },
+            "query": { "type": "string" },
+            "include_archived": { "type": "boolean", "default": false },
+            "include_subtasks": { "type": "boolean", "default": false },
+            "sort": { "type": "string", "enum": ["priority", "start_date", "updated_at", "created_at", "importance"], "default": "priority" },
+            "cursor": { "type": "string" },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 }
+        },
+        "additionalProperties": false
+    })
+}
+
+pub fn get_task_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": { "task_id": { "type": "string", "format": "uuid" } },
+        "required": ["task_id"],
+        "additionalProperties": false
+    })
+}
+
+pub fn update_task_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "task_id": { "type": "string", "format": "uuid" },
+            "patch": { "type": "object", "properties": task_fields_schema(), "minProperties": 1, "additionalProperties": false },
+            "expected_version": expected_task_version_schema()
+        },
+        "required": ["task_id", "patch", "expected_version"],
+        "additionalProperties": false
+    })
+}
+
+pub fn set_task_status_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "task_id": { "type": "string", "format": "uuid" },
+            "status": { "type": "string", "enum": ["open", "planned", "in_progress", "blocked", "completed", "cancelled"] },
+            "closure_note": { "type": "string", "maxLength": 10000 },
+            "cascade": { "type": "boolean", "default": false },
+            "expected_version": expected_task_version_schema()
+        },
+        "required": ["task_id", "status", "expected_version"],
+        "additionalProperties": false
+    })
+}
+
+pub fn add_subtask_schema() -> Value {
+    let fields = task_fields_schema();
+    json!({
+        "type": "object",
+        "properties": {
+            "parent_id": { "type": "string", "format": "uuid" },
+            "title": fields["title"],
+            "description": fields["description"],
+            "start_date": fields["start_date"],
+            "end_date": fields["end_date"],
+            "importance": fields["importance"],
+            "expected_version": expected_task_version_schema()
+        },
+        "required": ["parent_id", "title", "start_date", "end_date", "importance", "expected_version"],
+        "additionalProperties": false
+    })
+}
+
+pub fn move_subtask_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "task_id": { "type": "string", "format": "uuid" },
+            "new_parent_id": { "type": "string", "format": "uuid" },
+            "position": { "type": "integer", "minimum": 0 },
+            "expected_version": expected_task_version_schema()
+        },
+        "required": ["task_id", "new_parent_id", "position", "expected_version"],
+        "additionalProperties": false
+    })
+}
+
+pub fn add_task_progress_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "task_id": { "type": "string", "format": "uuid" },
+            "note": { "type": "string", "minLength": 1, "maxLength": 10000 },
+            "percent_after": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "expected_version": expected_task_version_schema()
+        },
+        "required": ["task_id", "note", "expected_version"],
+        "additionalProperties": false
+    })
+}
+
+pub fn get_task_calendar_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "start_date": { "type": "string", "format": "date" },
+            "end_date": { "type": "string", "format": "date" },
+            "include_subtasks": { "type": "boolean", "default": false },
+            "include_archived": { "type": "boolean", "default": false },
+            "kinds": { "type": "array", "items": { "type": "string", "enum": ["short", "long"] } },
+            "statuses": { "type": "array", "items": { "type": "string", "enum": ["open", "planned", "in_progress", "blocked", "completed", "cancelled"] } },
+            "importance": { "type": "array", "items": { "type": "string", "enum": ["low", "normal", "high", "urgent"] } }
+        },
+        "required": ["start_date", "end_date"],
+        "additionalProperties": false
+    })
+}
+
+pub fn archive_task_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "task_id": { "type": "string", "format": "uuid" },
+            "archived": { "type": "boolean" },
+            "expected_version": expected_task_version_schema()
+        },
+        "required": ["task_id", "archived", "expected_version"],
+        "additionalProperties": false
+    })
+}
+
+pub fn sync_tasks_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": { "dry_run": { "type": "boolean", "default": false } },
         "additionalProperties": false
     })
 }

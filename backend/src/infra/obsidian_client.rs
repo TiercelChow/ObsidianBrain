@@ -334,6 +334,10 @@ impl ObsidianClient {
             .await
             .map_err(|e| self.map_error("列出文件", e))?;
 
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(Vec::new());
+        }
+
         self.check_response(&resp)?;
 
         let body: serde_json::Value = resp

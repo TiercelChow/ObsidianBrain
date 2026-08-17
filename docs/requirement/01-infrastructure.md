@@ -119,7 +119,7 @@ API Key 等敏感信息不直接写入配置文件，而是通过环境变量名
 - **Schema 迁移**：支持版本化的 Schema 迁移机制，每次启动时检查并执行待执行的迁移
 - **迁移脚本管理**：迁移脚本存放在 `migrations/` 目录下，命名格式为 `V{version}__{description}.sql`（如 `V001__initial_schema.sql`）
 
-当前 Schema 需包含以下表（详见[顶层设计文档 §4.6](../top_design.md)）：
+当前 Schema 需包含以下表（详见[顶层设计文档 §4.7](../top_design.md)）：
 
 | 表名 | 用途 |
 |------|------|

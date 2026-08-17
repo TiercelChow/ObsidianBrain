@@ -506,7 +506,7 @@ get_inspiration(type?, note_path?)
 
 ### 5.5 SQLite 存储
 
-灵感历史记录存储在 `inspiration_history` 表中（见 [top_design.md §4.6](../top_design.md)）。
+灵感历史记录存储在 `inspiration_history` 表中（见 [top_design.md §4.7](../top_design.md)）。
 
 ---
 

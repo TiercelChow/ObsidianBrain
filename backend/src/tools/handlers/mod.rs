@@ -18,6 +18,7 @@ pub mod memory_handlers;
 pub mod radar_handlers;
 pub mod reader_handlers;
 pub mod search_handlers;
+pub mod task_handlers;
 pub mod timeline_handlers;
 pub mod wiki_handlers;
 
@@ -34,6 +35,7 @@ use crate::tools::handlers::memory_handlers::GetMemoryStatsHandler;
 use crate::tools::handlers::radar_handlers::*;
 use crate::tools::handlers::reader_handlers::*;
 use crate::tools::handlers::search_handlers::*;
+use crate::tools::handlers::task_handlers::*;
 use crate::tools::handlers::timeline_handlers::*;
 use crate::tools::handlers::wiki_handlers::*;
 use crate::tools::registry::ToolRegistry;
@@ -71,6 +73,19 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     registry.register(Arc::new(SearchMemosHandler)).await;
     registry.register(Arc::new(SyncMemosHandler)).await;
     registry.register(Arc::new(GetMemoStatsHandler)).await;
+
+    // Personal task management
+    registry.register(Arc::new(CreateTaskHandler)).await;
+    registry.register(Arc::new(ListTasksHandler)).await;
+    registry.register(Arc::new(GetTaskHandler)).await;
+    registry.register(Arc::new(UpdateTaskHandler)).await;
+    registry.register(Arc::new(SetTaskStatusHandler)).await;
+    registry.register(Arc::new(AddSubtaskHandler)).await;
+    registry.register(Arc::new(MoveSubtaskHandler)).await;
+    registry.register(Arc::new(AddTaskProgressHandler)).await;
+    registry.register(Arc::new(GetTaskCalendarHandler)).await;
+    registry.register(Arc::new(ArchiveTaskHandler)).await;
+    registry.register(Arc::new(SyncTasksHandler)).await;
 
     // Inspiration module
     registry.register(Arc::new(GetInspirationHandler)).await;

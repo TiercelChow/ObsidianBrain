@@ -64,6 +64,12 @@ const router = createRouter({
       meta: { title: '时光机' },
     },
     {
+      path: '/tasks',
+      name: 'Tasks',
+      component: () => import('@/views/Tasks.vue'),
+      meta: { title: '任务中枢' },
+    },
+    {
       path: '/inspiration',
       name: 'Inspiration',
       component: () => import('@/views/Inspiration.vue'),
