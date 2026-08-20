@@ -299,38 +299,41 @@
       </div>
     </MotionModal>
 
-    <!-- Image Viewer Modal -->
-    <Transition name="viewer">
-      <div v-if="imageViewer.show" class="image-viewer-overlay" @click.self="closeImageViewer">
-        <button class="viewer-close" @click="closeImageViewer">✕</button>
-        <button
-          v-if="imageViewer.images.length > 1"
-          class="viewer-nav viewer-prev"
-          @click="viewerPrev"
-        ><el-icon :size="22"><ArrowLeft /></el-icon></button>
-        <div class="viewer-image-wrap" ref="viewerStageRef">
-          <img
-            ref="viewerImgRef"
-            :src="vaultImageUrl(imageViewer.images[imageViewer.index])"
-            class="viewer-image"
-            @click.stop
-          />
-          <div v-if="imageViewer.images.length > 1" class="viewer-counter">
-            {{ imageViewer.index + 1 }} / {{ imageViewer.images.length }}
+    <!-- Image Viewer Modal — teleported to body so .app-main.mobile-full's
+         transform no longer reparents the fixed overlay away from the viewport. -->
+    <Teleport to="body">
+      <Transition name="viewer">
+        <div v-if="imageViewer.show" class="image-viewer-overlay" @click.self="closeImageViewer">
+          <button class="viewer-close" @click="closeImageViewer">✕</button>
+          <button
+            v-if="imageViewer.images.length > 1"
+            class="viewer-nav viewer-prev"
+            @click="viewerPrev"
+          ><el-icon :size="22"><ArrowLeft /></el-icon></button>
+          <div class="viewer-image-wrap" ref="viewerStageRef">
+            <img
+              ref="viewerImgRef"
+              :src="vaultImageUrl(imageViewer.images[imageViewer.index])"
+              class="viewer-image"
+              @click.stop
+            />
+            <div v-if="imageViewer.images.length > 1" class="viewer-counter">
+              {{ imageViewer.index + 1 }} / {{ imageViewer.images.length }}
+            </div>
           </div>
+          <div class="viewer-controls">
+            <button class="viewer-zoom-btn" title="缩小" @click.stop="viewerZoom(0.8)"><el-icon :size="18"><Minus /></el-icon></button>
+            <button class="viewer-zoom-btn" title="放大" @click.stop="viewerZoom(1.25)"><el-icon :size="18"><Plus /></el-icon></button>
+            <button class="viewer-zoom-btn" title="重置" @click.stop="viewerReset"><el-icon :size="18"><Refresh /></el-icon></button>
+          </div>
+          <button
+            v-if="imageViewer.images.length > 1"
+            class="viewer-nav viewer-next"
+            @click="viewerNext"
+          ><el-icon :size="22"><ArrowRight /></el-icon></button>
         </div>
-        <div class="viewer-controls">
-          <button class="viewer-zoom-btn" title="缩小" @click.stop="viewerZoom(0.8)"><el-icon :size="18"><Minus /></el-icon></button>
-          <button class="viewer-zoom-btn" title="放大" @click.stop="viewerZoom(1.25)"><el-icon :size="18"><Plus /></el-icon></button>
-          <button class="viewer-zoom-btn" title="重置" @click.stop="viewerReset"><el-icon :size="18"><Refresh /></el-icon></button>
-        </div>
-        <button
-          v-if="imageViewer.images.length > 1"
-          class="viewer-nav viewer-next"
-          @click="viewerNext"
-        ><el-icon :size="22"><ArrowRight /></el-icon></button>
-      </div>
-    </Transition>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
