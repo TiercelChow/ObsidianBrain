@@ -12,96 +12,102 @@
       </div>
     </header>
 
-    <div class="weekday-row" aria-hidden="true">
-      <span v-for="weekday in weekdays" :key="weekday">{{ weekday }}</span>
-    </div>
-
-    <div class="calendar-grid" :class="{ loading }">
-      <button
-        v-for="day in days"
-        :key="day.date"
-        type="button"
-        class="calendar-day"
-        :class="{
-          muted: !day.inCurrentMonth,
-          today: day.isToday,
-          selected: selectedDate === day.date,
-          busy: topLevelEventsFor(day.date).length > 0,
-        }"
-        :aria-label="dayAriaLabel(day.date)"
-        @click="$emit('select-date', day.date)"
-        @dblclick="$emit('create', day.date)"
-      >
-        <span class="date-badge">
-          <span class="day-number">{{ day.day }}</span>
-          <span class="lunar-date">{{ formatLunarDate(day.date) }}</span>
-        </span>
-        <span class="mobile-dots" aria-hidden="true">
-          <i
-            v-for="task in topLevelEventsFor(day.date).slice(0, 3)"
-            :key="task.id"
-            :class="`importance-${task.importance}`"
-          ></i>
-        </span>
-        <span class="day-events">
-          <span
-            v-for="task in topLevelEventsFor(day.date).slice(0, 3)"
-            :key="task.id"
-            class="event-pill"
-            :class="[
-              `importance-${task.importance}`,
-              { closed: task.status === 'completed' || task.status === 'cancelled' },
-            ]"
-            @click.stop="$emit('open-task', task.id)"
-          >
-            {{ task.title }}
-          </span>
-          <span v-if="topLevelEventsFor(day.date).length > 3" class="more-events">
-            +{{ topLevelEventsFor(day.date).length - 3 }}
-          </span>
-        </span>
-      </button>
-    </div>
-
-    <div class="agenda">
-      <div class="agenda-header">
-        <div>
-          <strong>{{ selectedDateLabel }}</strong>
-          <span>{{ selectedRootCount ? `${selectedRootCount} 项任务` : '暂无安排' }}</span>
+    <div class="calendar-body">
+      <div class="calendar-month">
+        <div class="weekday-row" aria-hidden="true">
+          <span v-for="weekday in weekdays" :key="weekday">{{ weekday }}</span>
         </div>
-        <button type="button" @click="$emit('create', selectedDate)">＋ 添加</button>
-      </div>
-      <TransitionGroup name="agenda-item" tag="div" class="agenda-list">
-        <article
-          v-for="entry in selectedEntries"
-          :key="entry.task.id"
-          class="agenda-card"
-          :class="{ subtask: entry.depth > 0 }"
-          :style="{ '--agenda-depth': entry.depth }"
-        >
-          <span class="agenda-accent" :class="`importance-${entry.task.importance}`"></span>
-          <button type="button" class="agenda-open" @click="$emit('open-task', entry.task.id)">
-            <span class="agenda-copy">
-              <strong>{{ entry.task.title }}</strong>
-              <span>{{ entry.depth > 0 ? '子任务 · ' : '' }}{{ formatTaskDateRange(entry.task.start_date, entry.task.end_date) }}</span>
+
+        <div class="calendar-grid" :class="{ loading }">
+          <button
+            v-for="day in days"
+            :key="day.date"
+            type="button"
+            class="calendar-day"
+            :class="{
+              muted: !day.inCurrentMonth,
+              today: day.isToday,
+              selected: selectedDate === day.date,
+              busy: topLevelEventsFor(day.date).length > 0,
+            }"
+            :aria-label="dayAriaLabel(day.date)"
+            @click="$emit('select-date', day.date)"
+            @dblclick="$emit('create', day.date)"
+          >
+            <span class="date-badge">
+              <span class="day-number">{{ day.day }}</span>
+              <span class="lunar-date">{{ formatLunarDate(day.date) }}</span>
+            </span>
+            <span class="mobile-dots" aria-hidden="true">
+              <i
+                v-for="task in topLevelEventsFor(day.date).slice(0, 3)"
+                :key="task.id"
+                :class="`importance-${task.importance}`"
+              ></i>
+            </span>
+            <span class="day-events">
+              <span
+                v-for="task in topLevelEventsFor(day.date).slice(0, 3)"
+                :key="task.id"
+                class="event-pill"
+                :class="[
+                  `importance-${task.importance}`,
+                  { closed: task.status === 'completed' || task.status === 'cancelled' },
+                ]"
+                @click.stop="$emit('open-task', task.id)"
+              >
+                {{ task.title }}
+              </span>
+              <span v-if="topLevelEventsFor(day.date).length > 3" class="more-events">
+                +{{ topLevelEventsFor(day.date).length - 3 }}
+              </span>
             </span>
           </button>
-          <span class="agenda-progress">{{ entry.task.progress_percent }}%</span>
-          <button
-            v-if="entry.depth === 0 && entry.hasChildren"
-            type="button"
-            class="agenda-expand"
-            :class="{ expanded: expandedAgendaIds.has(entry.task.id) }"
-            :aria-expanded="expandedAgendaIds.has(entry.task.id)"
-            :aria-label="expandedAgendaIds.has(entry.task.id) ? `收起 ${entry.task.title} 的子任务` : `展开 ${entry.task.title} 的子任务`"
-            @click="toggleAgenda(entry.task.id)"
-          >›</button>
-          <span v-else class="agenda-arrow" aria-hidden="true">›</span>
-        </article>
-      </TransitionGroup>
-      <button v-if="selectedEntries.length === 0" type="button" class="agenda-empty" @click="$emit('create', selectedDate)">
-        这一天还很空，安排一项任务
-      </button>
+        </div>
+      </div>
+
+      <aside class="agenda" aria-label="当日日程">
+        <div class="agenda-header">
+          <div>
+            <strong>{{ selectedDateLabel }}</strong>
+            <span>{{ selectedRootCount ? `${selectedRootCount} 项任务` : '暂无安排' }}</span>
+          </div>
+          <button type="button" @click="$emit('create', selectedDate)">＋ 添加</button>
+        </div>
+        <div class="agenda-body">
+          <TransitionGroup name="agenda-item" tag="div" class="agenda-list">
+            <article
+              v-for="entry in selectedEntries"
+              :key="entry.task.id"
+              class="agenda-card"
+              :class="{ subtask: entry.depth > 0 }"
+              :style="{ '--agenda-depth': entry.depth }"
+            >
+              <span class="agenda-accent" :class="`importance-${entry.task.importance}`"></span>
+              <button type="button" class="agenda-open" @click="$emit('open-task', entry.task.id)">
+                <span class="agenda-copy">
+                  <strong>{{ entry.task.title }}</strong>
+                  <span>{{ entry.depth > 0 ? '子任务 · ' : '' }}{{ formatTaskDateRange(entry.task.start_date, entry.task.end_date) }}</span>
+                </span>
+              </button>
+              <span class="agenda-progress">{{ entry.task.progress_percent }}%</span>
+              <button
+                v-if="entry.depth === 0 && entry.hasChildren"
+                type="button"
+                class="agenda-expand"
+                :class="{ expanded: expandedAgendaIds.has(entry.task.id) }"
+                :aria-expanded="expandedAgendaIds.has(entry.task.id)"
+                :aria-label="expandedAgendaIds.has(entry.task.id) ? `收起 ${entry.task.title} 的子任务` : `展开 ${entry.task.title} 的子任务`"
+                @click="toggleAgenda(entry.task.id)"
+              >›</button>
+              <span v-else class="agenda-arrow" aria-hidden="true">›</span>
+            </article>
+          </TransitionGroup>
+          <button v-if="selectedEntries.length === 0" type="button" class="agenda-empty" @click="$emit('create', selectedDate)">
+            这一天还很空，安排一项任务
+          </button>
+        </div>
+      </aside>
     </div>
   </section>
 </template>
@@ -182,8 +188,8 @@ watch(() => props.selectedDate, () => {
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
-.task-calendar { border-radius: 24px; padding: 20px; overflow: hidden; }
-.calendar-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.task-calendar { border-radius: 24px; padding: 20px; overflow: hidden; display: flex; flex-direction: column; height: calc(100dvh - 208px); }
+.calendar-header { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .calendar-heading h2 { margin: 0; color: var(--text-primary); font-size: 22px; letter-spacing: var(--tracking-tight); }
 .calendar-heading span { display: block; margin-top: 3px; color: var(--text-faint); font-size: 12px; }
 .calendar-nav { display: flex; align-items: center; gap: 5px; padding: 4px; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-glass); }
@@ -191,15 +197,18 @@ watch(() => props.selectedDate, () => {
 .calendar-nav button:hover { color: var(--text-primary); background: var(--bg-glass-strong); }
 .calendar-nav button:active { transform: scale(.94); }
 .calendar-nav .today-button { width: auto; padding: 0 11px; font-size: 13px; font-weight: 600; }
+
+.calendar-body { flex: 1; min-height: 0; display: flex; gap: 18px; align-items: stretch; }
+.calendar-month { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .weekday-row, .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
-.weekday-row { color: var(--text-faint); font-size: 11px; font-weight: 650; text-align: center; letter-spacing: .08em; }
+.weekday-row { flex: none; color: var(--text-faint); font-size: 11px; font-weight: 650; text-align: center; letter-spacing: .08em; }
 .weekday-row span { padding: 7px; }
-.calendar-grid { gap: 6px; margin-top: 4px; transition: opacity var(--motion-fast) ease; }
+.calendar-grid { flex: 1; gap: 6px; margin-top: 4px; grid-template-rows: repeat(6, minmax(0, 1fr)); transition: opacity var(--motion-fast) ease; }
 .calendar-grid.loading { opacity: .5; }
 .calendar-day {
   position: relative;
   min-width: 0;
-  min-height: 105px;
+  min-height: 0;
   padding: 8px;
   border: 0;
   border-radius: 15px;
@@ -228,13 +237,15 @@ watch(() => props.selectedDate, () => {
 .event-pill.closed { opacity: .5; }
 .more-events { padding-left: 7px; color: var(--text-faint); font-size: 11px; }
 .mobile-dots { display: none; }
-.agenda { margin-top: 20px; padding: 16px; border-radius: 18px; background: color-mix(in srgb, var(--text-primary) 2.5%, transparent); }
-.agenda-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.agenda-header div { display: flex; align-items: baseline; gap: 9px; }
+
+.agenda { flex: none; width: 340px; margin-top: 0; padding: 16px; border-radius: 18px; background: color-mix(in srgb, var(--text-primary) 2.5%, transparent); display: flex; flex-direction: column; overflow: hidden; }
+.agenda-header { flex: none; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.agenda-header div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .agenda-header strong { color: var(--text-primary); font-size: 15px; }
 .agenda-header span { color: var(--text-faint); font-size: 12px; }
 .agenda-header button { min-height: 38px; padding: 0 12px; border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-glass); color: var(--accent); font-weight: 600; cursor: pointer; }
-.agenda-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.agenda-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; scrollbar-width: thin; }
+.agenda-list { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .agenda-card { display: grid; grid-template-columns: 4px minmax(0, 1fr) auto 34px; align-items: center; gap: 10px; min-height: 58px; padding: 8px 7px 8px 0; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-glass); color: var(--text-primary); text-align: left; transition: transform var(--motion-instant) ease, background var(--motion-fast) ease; overflow: hidden; }
 .agenda-card.subtask { margin-left: min(calc(var(--agenda-depth) * 18px), 54px); background: color-mix(in srgb, var(--bg-glass) 72%, transparent); }
 .agenda-card:hover { background: var(--bg-glass-strong); }
@@ -251,18 +262,24 @@ watch(() => props.selectedDate, () => {
 .agenda-expand { border: 0; background: transparent; cursor: pointer; transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-normal) var(--ease-spring-gentle); }
 .agenda-expand:hover { background: color-mix(in srgb, var(--text-primary) 6%, transparent); color: var(--text-primary); }
 .agenda-expand.expanded { color: var(--accent); transform: rotate(90deg); }
-.agenda-empty { width: 100%; min-height: 58px; border: 1px dashed var(--border-subtle); border-radius: 14px; background: transparent; color: var(--text-faint); cursor: pointer; }
+.agenda-empty { flex: 1; min-height: 58px; border: 1px dashed var(--border-subtle); border-radius: 14px; background: transparent; color: var(--text-faint); cursor: pointer; }
 .agenda-item-enter-active, .agenda-item-leave-active { transition: opacity var(--motion-normal) ease, transform var(--motion-normal) var(--ease-spring-gentle); }
 .agenda-item-enter-from, .agenda-item-leave-to { opacity: 0; transform: translateY(6px); }
 
+@media (max-width: 1050px) {
+  .agenda { width: 300px; }
+}
+
 @media (max-width: 768px) {
-  .task-calendar { padding: 14px; border-radius: 20px; }
+  .task-calendar { height: auto; min-height: calc(100dvh - 260px); padding: 14px; border-radius: 20px; }
   .calendar-header { margin-bottom: 10px; }
   .calendar-heading h2 { font-size: 18px; }
   .calendar-nav button { min-width: 44px; height: 44px; }
   .calendar-nav .today-button { display: none; }
+  .calendar-body { flex-direction: column; gap: 0; }
+  .calendar-month { overflow: visible; }
   .weekday-row span { padding: 5px 1px; }
-  .calendar-grid { gap: 3px; }
+  .calendar-grid { gap: 3px; grid-template-rows: none; }
   .calendar-day { min-height: 0; aspect-ratio: 1; padding: 4px 2px; border-radius: 12px; text-align: center; overflow: visible; }
   .date-badge { position: absolute; top: 1px; right: 1px; width: 40px; height: 40px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; border-radius: 50%; transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-fast) var(--ease-spring-gentle); }
   .lunar-date { position: static; width: auto; max-width: 34px; color: var(--text-muted); font-size: 8px; line-height: 9px; text-align: center; }
@@ -277,9 +294,9 @@ watch(() => props.selectedDate, () => {
   .mobile-dots i.importance-low { background: #8e8e93; }
   .mobile-dots i.importance-high { background: #ff9500; }
   .mobile-dots i.importance-urgent { background: #ff3b30; }
-  .agenda { margin-top: 14px; padding: 12px; border-radius: 16px; }
+  .agenda { width: auto; margin-top: 14px; padding: 12px; border-radius: 16px; }
   .agenda-header button { min-height: 44px; }
-  .agenda-list { grid-template-columns: 1fr; }
+  .agenda-body { overflow-y: visible; overscroll-behavior: auto; }
   .agenda-card { min-height: 64px; }
 }
 
