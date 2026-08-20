@@ -35,13 +35,22 @@ a,
 button:focus-visible,
 a:focus-visible,
 [role="button"]:focus-visible,
-input:not(.el-input__inner):focus-visible,
-textarea:not(.el-textarea__inner):focus-visible,
-select:focus-visible,
 .el-button:focus-visible,
 .el-drawer:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring) !important;
+}
+
+/* Text entry keeps a calm material response without a detached rectangular halo. */
+input:focus,
+input:focus-visible,
+textarea:focus,
+textarea:focus-visible,
+select:focus,
+select:focus-visible,
+[contenteditable="true"]:focus,
+[contenteditable="true"]:focus-visible {
+  outline: none !important;
 }
 
 .el-button,
@@ -191,9 +200,7 @@ select:focus-visible,
 
   button:focus-visible,
   a:focus-visible,
-  [role="button"]:focus-visible,
-  input:not(.el-input__inner):focus-visible,
-  textarea:not(.el-textarea__inner):focus-visible {
+  [role="button"]:focus-visible {
     outline: 2px solid var(--accent) !important;
     outline-offset: 2px;
   }

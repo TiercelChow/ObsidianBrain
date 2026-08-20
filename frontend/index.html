@@ -26,7 +26,16 @@
         box-shadow: 0 0 0 1px var(--accent-border) inset, var(--shadow-sm) !important;
       }
       .el-input__wrapper.is-focus {
-        box-shadow: 0 0 0 2px var(--accent-light), 0 0 0 1px var(--border-glass) inset !important;
+        background: var(--bg-glass) !important;
+        box-shadow: 0 0 0 1px var(--border-glass) inset, var(--shadow-sm) !important;
+      }
+      .el-select__wrapper.is-focused {
+        background: var(--bg-glass) !important;
+        box-shadow: 0 0 0 1px var(--border-glass) inset, var(--shadow-sm) !important;
+      }
+      .el-textarea__inner:focus {
+        outline: none !important;
+        box-shadow: 0 0 0 1px var(--border-glass) inset, var(--shadow-sm) !important;
       }
       .el-input__inner { color: var(--text-primary) !important; }
       .el-input__inner::placeholder { color: var(--text-faint) !important; }

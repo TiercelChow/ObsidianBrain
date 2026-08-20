@@ -860,10 +860,16 @@ onMounted(() => { loadMemos() })
 <style scoped>
 /* ── Page Root ── */
 .timeline-page {
-  min-height: 100%;
+  height: calc(100dvh - 64px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   position: relative;
   max-width: 100%;
+  overflow: hidden;
 }
+.timeline-page > .page-header,
+.timeline-page > .toolbar { flex: none; }
 
 /* ── Glass Surfaces ── */
 .glass-surface {
@@ -1001,7 +1007,7 @@ onMounted(() => { loadMemos() })
 .glass-textarea::placeholder { color: var(--text-faint); }
 .glass-textarea:focus {
   border-color: rgba(129, 140, 248, 0.4);
-  box-shadow: 0 0 0 3px rgba(124, 124, 255, 0.15), inset var(--shadow-sm);
+  box-shadow: inset var(--shadow-sm);
 }
 
 /* ── Toolbar ── */
@@ -1037,7 +1043,6 @@ onMounted(() => { loadMemos() })
 .search-box:focus-within {
   background: var(--bg-glass-strong);
   box-shadow:
-    0 0 0 3px rgba(124, 124, 255, 0.15),
     0 4px 16px rgba(0, 0, 0, 0.06),
     inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
@@ -1136,7 +1141,7 @@ onMounted(() => { loadMemos() })
 }
 .date-range-picker :deep(.el-range-editor.is-active) {
   border-color: rgba(129, 140, 248, 0.4) !important;
-  box-shadow: 0 0 0 3px rgba(124, 124, 255, 0.15), var(--shadow-sm) !important;
+  box-shadow: var(--shadow-sm), var(--inset-highlight) !important;
 }
 .date-range-picker :deep(.el-range-input) {
   background: transparent !important;
@@ -1161,16 +1166,20 @@ onMounted(() => { loadMemos() })
 
 /* ── Main Content ── */
 .main-content {
+  flex: 1;
+  min-height: 0;
   display: flex;
   gap: 20px;
+  overflow: hidden;
 }
 
 /* ── Time Nav ── */
 .time-nav {
   width: 160px;
+  height: 100%;
   flex-shrink: 0;
   overflow-y: auto;
-  max-height: calc(100vh - 280px);
+  max-height: none;
   border-radius: 20px;
   padding: 16px 8px 16px 4px;
   scrollbar-width: thin;
@@ -1249,6 +1258,8 @@ onMounted(() => { loadMemos() })
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
   padding-right: 4px;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.06) transparent;
@@ -2062,9 +2073,17 @@ onMounted(() => { loadMemos() })
   .glass-btn { min-height: var(--tap-target); }
   .time-nav { display: none; }
   .timeline-page {
-  min-height: 100%; overflow-x: hidden; width: 100%; }
-  .main-content { overflow-x: hidden; }
-  .memo-scroll { min-width: 0; overflow-x: hidden; }
+    width: 100%;
+    height: auto;
+    min-height: 100%;
+    display: block;
+    overflow-x: hidden;
+    overflow-y: visible;
+  }
+  .timeline-page > .page-header,
+  .timeline-page > .toolbar { flex: initial; }
+  .main-content { flex: none; min-height: 0; overflow-x: hidden; overflow-y: visible; }
+  .memo-scroll { min-width: 0; overflow-x: hidden; overflow-y: visible; overscroll-behavior-y: auto; -webkit-overflow-scrolling: auto; }
   .toolbar-row {
     position: sticky;
     top: calc(var(--mobile-header-height) + var(--safe-top));

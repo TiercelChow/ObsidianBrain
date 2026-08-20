@@ -609,7 +609,8 @@ code, pre, .code-block { font-family: var(--font-mono); }
   box-shadow: 0 0 0 1px rgba(124, 124, 255, 0.3) inset !important;
 }
 :root[data-theme="dark"] .el-input__wrapper.is-focus {
-  box-shadow: 0 0 0 2px rgba(124, 124, 255, 0.2) inset !important;
+  background: var(--bg-glass) !important;
+  box-shadow: 0 0 0 1px var(--border-glass) inset !important;
 }
 :root[data-theme="dark"] .el-input__inner {
   color: var(--text-primary) !important;
