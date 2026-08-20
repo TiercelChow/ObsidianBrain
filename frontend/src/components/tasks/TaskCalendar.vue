@@ -3,7 +3,7 @@
     <header class="calendar-header">
       <div class="calendar-heading">
         <h2>{{ monthTitle(anchor) }}</h2>
-        <span>{{ tasks.length }} 项安排</span>
+        <span>{{ topLevelTasks.length }} 项安排</span>
       </div>
       <div class="calendar-nav">
         <button type="button" aria-label="上个月" @click="$emit('shift', -1)">‹</button>
@@ -26,23 +26,26 @@
           muted: !day.inCurrentMonth,
           today: day.isToday,
           selected: selectedDate === day.date,
-          busy: eventsFor(day.date).length > 0,
+          busy: topLevelEventsFor(day.date).length > 0,
         }"
         :aria-label="dayAriaLabel(day.date)"
         @click="$emit('select-date', day.date)"
         @dblclick="$emit('create', day.date)"
       >
-        <span class="day-number">{{ day.day }}</span>
+        <span class="date-badge">
+          <span class="day-number">{{ day.day }}</span>
+          <span class="lunar-date">{{ formatLunarDate(day.date) }}</span>
+        </span>
         <span class="mobile-dots" aria-hidden="true">
           <i
-            v-for="task in eventsFor(day.date).slice(0, 3)"
+            v-for="task in topLevelEventsFor(day.date).slice(0, 3)"
             :key="task.id"
             :class="`importance-${task.importance}`"
           ></i>
         </span>
         <span class="day-events">
           <span
-            v-for="task in eventsFor(day.date).slice(0, 3)"
+            v-for="task in topLevelEventsFor(day.date).slice(0, 3)"
             :key="task.id"
             class="event-pill"
             :class="[
@@ -53,8 +56,8 @@
           >
             {{ task.title }}
           </span>
-          <span v-if="eventsFor(day.date).length > 3" class="more-events">
-            +{{ eventsFor(day.date).length - 3 }}
+          <span v-if="topLevelEventsFor(day.date).length > 3" class="more-events">
+            +{{ topLevelEventsFor(day.date).length - 3 }}
           </span>
         </span>
       </button>
@@ -64,28 +67,39 @@
       <div class="agenda-header">
         <div>
           <strong>{{ selectedDateLabel }}</strong>
-          <span>{{ selectedTasks.length ? `${selectedTasks.length} 项任务` : '暂无安排' }}</span>
+          <span>{{ selectedRootCount ? `${selectedRootCount} 项任务` : '暂无安排' }}</span>
         </div>
         <button type="button" @click="$emit('create', selectedDate)">＋ 添加</button>
       </div>
       <TransitionGroup name="agenda-item" tag="div" class="agenda-list">
-        <button
-          v-for="task in selectedTasks"
-          :key="task.id"
-          type="button"
+        <article
+          v-for="entry in selectedEntries"
+          :key="entry.task.id"
           class="agenda-card"
-          @click="$emit('open-task', task.id)"
+          :class="{ subtask: entry.depth > 0 }"
+          :style="{ '--agenda-depth': entry.depth }"
         >
-          <span class="agenda-accent" :class="`importance-${task.importance}`"></span>
-          <span class="agenda-copy">
-            <strong>{{ task.title }}</strong>
-            <span>{{ formatTaskDateRange(task.start_date, task.end_date) }}</span>
-          </span>
-          <span class="agenda-progress">{{ task.progress_percent }}%</span>
-          <span class="agenda-arrow">›</span>
-        </button>
+          <span class="agenda-accent" :class="`importance-${entry.task.importance}`"></span>
+          <button type="button" class="agenda-open" @click="$emit('open-task', entry.task.id)">
+            <span class="agenda-copy">
+              <strong>{{ entry.task.title }}</strong>
+              <span>{{ entry.depth > 0 ? '子任务 · ' : '' }}{{ formatTaskDateRange(entry.task.start_date, entry.task.end_date) }}</span>
+            </span>
+          </button>
+          <span class="agenda-progress">{{ entry.task.progress_percent }}%</span>
+          <button
+            v-if="entry.depth === 0 && entry.hasChildren"
+            type="button"
+            class="agenda-expand"
+            :class="{ expanded: expandedAgendaIds.has(entry.task.id) }"
+            :aria-expanded="expandedAgendaIds.has(entry.task.id)"
+            :aria-label="expandedAgendaIds.has(entry.task.id) ? `收起 ${entry.task.title} 的子任务` : `展开 ${entry.task.title} 的子任务`"
+            @click="toggleAgenda(entry.task.id)"
+          >›</button>
+          <span v-else class="agenda-arrow" aria-hidden="true">›</span>
+        </article>
       </TransitionGroup>
-      <button v-if="selectedTasks.length === 0" type="button" class="agenda-empty" @click="$emit('create', selectedDate)">
+      <button v-if="selectedEntries.length === 0" type="button" class="agenda-empty" @click="$emit('create', selectedDate)">
         这一天还很空，安排一项任务
       </button>
     </div>
@@ -93,16 +107,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { TaskSummary } from '@/api/tasks'
 import {
   buildMonthGrid,
   dateInRange,
+  formatLunarDate,
   formatShortDate,
   formatTaskDateRange,
   monthTitle,
   parseLocalDate,
 } from '@/utils/taskDates'
+import { calendarAgendaEntries, calendarTopLevelTasks } from '@/utils/taskHierarchy'
 
 const props = defineProps<{
   anchor: string
@@ -121,15 +137,18 @@ defineEmits<{
 
 const weekdays = ['一', '二', '三', '四', '五', '六', '日']
 const days = computed(() => buildMonthGrid(props.anchor))
-const selectedTasks = computed(() => eventsFor(props.selectedDate))
+const topLevelTasks = computed(() => calendarTopLevelTasks(props.tasks))
+const expandedAgendaIds = ref<Set<string>>(new Set())
+const selectedEntries = computed(() => calendarAgendaEntries(props.tasks, props.selectedDate, expandedAgendaIds.value))
+const selectedRootCount = computed(() => selectedEntries.value.filter(entry => entry.depth === 0).length)
 const selectedDateLabel = computed(() => {
   const parts = parseLocalDate(props.selectedDate)
   const weekday = new Date(parts.year, parts.month - 1, parts.day, 12).toLocaleDateString('zh-CN', { weekday: 'long' })
   return `${formatShortDate(props.selectedDate)} · ${weekday}`
 })
 
-function eventsFor(date: string) {
-  return props.tasks
+function topLevelEventsFor(date: string) {
+  return topLevelTasks.value
     .filter((task) => dateInRange(date, task.start_date, task.end_date))
     .sort((a, b) => importanceRank(b.importance) - importanceRank(a.importance) || a.end_date.localeCompare(b.end_date))
 }
@@ -139,9 +158,20 @@ function importanceRank(value: TaskSummary['importance']) {
 }
 
 function dayAriaLabel(date: string) {
-  const count = eventsFor(date).length
-  return `${date}，${count ? `${count} 项任务` : '无任务'}`
+  const count = topLevelEventsFor(date).length
+  return `${date}，农历${formatLunarDate(date)}，${count ? `${count} 项任务` : '无任务'}`
 }
+
+function toggleAgenda(id: string) {
+  const next = new Set(expandedAgendaIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expandedAgendaIds.value = next
+}
+
+watch(() => props.selectedDate, () => {
+  expandedAgendaIds.value = new Set()
+})
 </script>
 
 <style scoped>
@@ -185,35 +215,42 @@ function dayAriaLabel(date: string) {
 .calendar-day.selected { background: transparent; }
 .calendar-day.muted { color: var(--text-faint); opacity: .58; }
 .calendar-day.selected.muted { opacity: .82; }
-.day-number { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; font-size: 12px; font-weight: 560; transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-fast) var(--ease-spring-gentle); }
-.calendar-day.today:not(.selected) .day-number { background: color-mix(in srgb, var(--accent) 11%, transparent); color: var(--accent); font-weight: 680; }
-.calendar-day.selected .day-number { background: var(--accent); color: white; font-weight: 680; box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 28%, transparent); transform: scale(1.04); }
-.day-events { display: grid; gap: 3px; margin-top: 4px; }
-.event-pill { display: block; min-width: 0; padding: 4px 7px; border-radius: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text-secondary); font-size: 10px; line-height: 1.3; }
+.date-badge { display: contents; }
+.lunar-date { position: absolute; top: 12px; left: 10px; max-width: calc(100% - 50px); overflow: hidden; color: var(--text-faint); font-size: 10px; line-height: 1; white-space: nowrap; }
+.day-number { position: absolute; top: 7px; right: 7px; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; font-size: 15px; font-weight: 590; font-variant-numeric: tabular-nums; transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-fast) var(--ease-spring-gentle); }
+.calendar-day.today .day-number { background: var(--accent); color: white; font-weight: 700; box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 28%, transparent); }
+.calendar-day.selected:not(.today) .day-number { color: var(--accent); font-weight: 700; }
+.day-events { display: grid; gap: 3px; margin-top: 36px; }
+.event-pill { display: block; min-width: 0; padding: 4px 7px; border-radius: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text-secondary); font-size: 11px; line-height: 1.35; }
 .event-pill.importance-low { background-color: color-mix(in srgb, #8e8e93 10%, transparent); }
 .event-pill.importance-high { background-color: color-mix(in srgb, #ff9500 12%, transparent); }
 .event-pill.importance-urgent { background-color: color-mix(in srgb, #ff3b30 12%, transparent); }
 .event-pill.closed { opacity: .5; }
-.more-events { padding-left: 7px; color: var(--text-faint); font-size: 10px; }
+.more-events { padding-left: 7px; color: var(--text-faint); font-size: 11px; }
 .mobile-dots { display: none; }
 .agenda { margin-top: 20px; padding: 16px; border-radius: 18px; background: color-mix(in srgb, var(--text-primary) 2.5%, transparent); }
 .agenda-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .agenda-header div { display: flex; align-items: baseline; gap: 9px; }
-.agenda-header strong { color: var(--text-primary); font-size: 14px; }
-.agenda-header span { color: var(--text-faint); font-size: 11px; }
+.agenda-header strong { color: var(--text-primary); font-size: 15px; }
+.agenda-header span { color: var(--text-faint); font-size: 12px; }
 .agenda-header button { min-height: 38px; padding: 0 12px; border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-glass); color: var(--accent); font-weight: 600; cursor: pointer; }
 .agenda-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.agenda-card { display: grid; grid-template-columns: 4px minmax(0, 1fr) auto 18px; align-items: center; gap: 10px; min-height: 58px; padding: 8px 10px 8px 0; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-glass); color: var(--text-primary); text-align: left; cursor: pointer; transition: transform var(--motion-instant) ease, background var(--motion-fast) ease; overflow: hidden; }
+.agenda-card { display: grid; grid-template-columns: 4px minmax(0, 1fr) auto 34px; align-items: center; gap: 10px; min-height: 58px; padding: 8px 7px 8px 0; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-glass); color: var(--text-primary); text-align: left; transition: transform var(--motion-instant) ease, background var(--motion-fast) ease; overflow: hidden; }
+.agenda-card.subtask { margin-left: min(calc(var(--agenda-depth) * 18px), 54px); background: color-mix(in srgb, var(--bg-glass) 72%, transparent); }
 .agenda-card:hover { background: var(--bg-glass-strong); }
 .agenda-card:active { transform: scale(.99); }
 .agenda-accent { align-self: stretch; background: var(--accent); border: 0; }
 .agenda-accent.importance-low { background: #8e8e93; }
 .agenda-accent.importance-high { background: #ff9500; }
 .agenda-accent.importance-urgent { background: #ff3b30; }
+.agenda-open { min-width: 0; padding: 4px 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .agenda-copy { min-width: 0; display: grid; gap: 4px; }
-.agenda-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.agenda-copy span, .agenda-progress { color: var(--text-faint); font-size: 11px; }
-.agenda-arrow { color: var(--text-faint); font-size: 20px; }
+.agenda-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.agenda-copy span, .agenda-progress { color: var(--text-faint); font-size: 12px; }
+.agenda-expand, .agenda-arrow { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; color: var(--text-faint); font-size: 20px; }
+.agenda-expand { border: 0; background: transparent; cursor: pointer; transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-normal) var(--ease-spring-gentle); }
+.agenda-expand:hover { background: color-mix(in srgb, var(--text-primary) 6%, transparent); color: var(--text-primary); }
+.agenda-expand.expanded { color: var(--accent); transform: rotate(90deg); }
 .agenda-empty { width: 100%; min-height: 58px; border: 1px dashed var(--border-subtle); border-radius: 14px; background: transparent; color: var(--text-faint); cursor: pointer; }
 .agenda-item-enter-active, .agenda-item-leave-active { transition: opacity var(--motion-normal) ease, transform var(--motion-normal) var(--ease-spring-gentle); }
 .agenda-item-enter-from, .agenda-item-leave-to { opacity: 0; transform: translateY(6px); }
@@ -227,9 +264,15 @@ function dayAriaLabel(date: string) {
   .weekday-row span { padding: 5px 1px; }
   .calendar-grid { gap: 3px; }
   .calendar-day { min-height: 0; aspect-ratio: 1; padding: 4px 2px; border-radius: 12px; text-align: center; overflow: visible; }
-  .day-number { margin: 0 auto; width: 28px; height: 28px; }
+  .date-badge { position: absolute; top: 1px; right: 1px; width: 40px; height: 40px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; border-radius: 50%; transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-fast) var(--ease-spring-gentle); }
+  .lunar-date { position: static; width: auto; max-width: 34px; color: var(--text-muted); font-size: 8px; line-height: 9px; text-align: center; }
+  .day-number { position: static; width: auto; height: auto; border-radius: 0; font-size: 17px; line-height: 19px; }
+  .calendar-day.today .date-badge { background: var(--accent); color: white; box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 28%, transparent); }
+  .calendar-day.today .day-number { background: transparent; color: white; box-shadow: none; }
+  .calendar-day.today .lunar-date { color: color-mix(in srgb, white 78%, transparent); }
+  .calendar-day.selected:not(.today) .lunar-date { color: var(--accent); }
   .day-events { display: none; }
-  .mobile-dots { height: 6px; display: flex; align-items: center; justify-content: center; gap: 2px; }
+  .mobile-dots { position: absolute; top: 5px; right: auto; bottom: auto; left: -1px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 2px; }
   .mobile-dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }
   .mobile-dots i.importance-low { background: #8e8e93; }
   .mobile-dots i.importance-high { background: #ff9500; }
@@ -241,7 +284,7 @@ function dayAriaLabel(date: string) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .calendar-nav button, .calendar-grid, .calendar-day, .day-number, .agenda-card, .agenda-item-enter-active, .agenda-item-leave-active { transition-duration: 1ms !important; }
+  .calendar-nav button, .calendar-grid, .calendar-day, .date-badge, .day-number, .agenda-card, .agenda-expand, .agenda-item-enter-active, .agenda-item-leave-active { transition-duration: 1ms !important; }
 }
 
 @media (prefers-reduced-transparency: reduce) {

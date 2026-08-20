@@ -11,6 +11,13 @@ export interface CalendarDay {
   isToday: boolean
 }
 
+const lunarFormatter = new Intl.DateTimeFormat('zh-CN-u-ca-chinese', {
+  month: 'short',
+  day: 'numeric',
+})
+
+const chineseDigits = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
+
 export function parseLocalDate(value: string): LocalDateParts {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   if (!match) throw new Error(`无效日期: ${value}`)
@@ -26,6 +33,23 @@ export function parseLocalDate(value: string): LocalDateParts {
 
 export function formatLocalDate(parts: LocalDateParts): string {
   return `${parts.year.toString().padStart(4, '0')}-${parts.month.toString().padStart(2, '0')}-${parts.day.toString().padStart(2, '0')}`
+}
+
+/** Compact lunar label used in calendar cells: month on the first, day otherwise. */
+export function formatLunarDate(value: string): string {
+  const parts = parseLocalDate(value)
+  const date = new Date(parts.year, parts.month - 1, parts.day, 12)
+  const lunarParts = lunarFormatter.formatToParts(date)
+  const month = lunarParts.find(part => part.type === 'month')?.value || ''
+  const lunarDay = Number(lunarParts.find(part => part.type === 'day')?.value)
+
+  if (!Number.isFinite(lunarDay)) return month
+  if (lunarDay === 1) return month
+  if (lunarDay <= 10) return `初${chineseDigits[lunarDay]}`
+  if (lunarDay < 20) return `十${chineseDigits[lunarDay - 10]}`
+  if (lunarDay === 20) return '二十'
+  if (lunarDay < 30) return `廿${chineseDigits[lunarDay - 20]}`
+  return '三十'
 }
 
 export function todayLocal(): string {

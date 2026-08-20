@@ -71,12 +71,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { TaskImportance, TaskNode, TaskStatus } from '@/api/tasks'
-
-interface FlatTask {
-  node: TaskNode
-  depth: number
-  hasChildren: boolean
-}
+import { flattenVisibleSubtasks } from '@/utils/taskHierarchy'
 
 const props = defineProps<{
   tasks: TaskNode[]
@@ -109,31 +104,7 @@ watch(
   { immediate: true },
 )
 
-const flattened = computed<FlatTask[]>(() => {
-  const children = new Map<string | null, TaskNode[]>()
-  for (const task of props.tasks) {
-    const siblings = children.get(task.parent_id) || []
-    siblings.push(task)
-    children.set(task.parent_id, siblings)
-  }
-  for (const siblings of children.values()) {
-    siblings.sort((a, b) => a.position - b.position || a.created_at.localeCompare(b.created_at))
-  }
-
-  const rows: FlatTask[] = []
-  const visited = new Set<string>()
-  function visit(node: TaskNode, depth: number) {
-    if (visited.has(node.id)) return
-    visited.add(node.id)
-    const nested = children.get(node.id) || []
-    rows.push({ node, depth, hasChildren: nested.length > 0 })
-    if (expanded.value.has(node.id)) nested.forEach((child) => visit(child, depth + 1))
-  }
-  const roots = props.tasks.filter((task) => task.role === 'root' || !task.parent_id)
-  roots.forEach((root) => visit(root, 0))
-  props.tasks.filter((task) => !visited.has(task.id)).forEach((task) => visit(task, 0))
-  return rows
-})
+const flattened = computed(() => flattenVisibleSubtasks(props.tasks, expanded.value))
 
 function toggle(id: string) {
   const next = new Set(expanded.value)
@@ -221,16 +192,16 @@ function importanceLabel(importance: TaskImportance) {
 .status-in_progress { border-color: var(--accent); box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent); }
 .status-blocked { border-color: #ff9500; }
 .tree-copy { min-width: 0; }
-.tree-title { color: var(--text-primary); font-size: 14px; font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree-meta { display: flex; gap: 8px; margin-top: 3px; color: var(--text-faint); font-size: 11px; }
+.tree-title { color: var(--text-primary); font-size: 15px; font-weight: 580; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-meta { display: flex; gap: 8px; margin-top: 3px; color: var(--text-faint); font-size: 12px; }
 .importance { font-weight: 600; }
 .importance-high { color: #ff9500; }
 .importance-urgent { color: #ff3b30; }
 .tree-actions { display: flex; opacity: 0; transform: translateX(4px); transition: opacity var(--motion-fast) ease, transform var(--motion-fast) ease; }
 .tree-row:hover .tree-actions, .tree-row:focus-within .tree-actions { opacity: 1; transform: none; }
-.tree-actions button { min-height: 36px; padding: 0 7px; border-radius: 9px; font-size: 12px; }
+.tree-actions button { min-height: 36px; padding: 0 8px; border-radius: 9px; font-size: 13px; }
 .tree-actions button:hover { color: var(--text-primary); background: var(--bg-glass-strong); }
-.tree-empty { padding: 28px; text-align: center; color: var(--text-faint); font-size: 13px; }
+.tree-empty { padding: 28px; text-align: center; color: var(--text-faint); font-size: 14px; }
 
 @media (max-width: 768px) {
   .tree-row { --indent: calc(var(--tree-depth) * 15px); grid-template-columns: 22px 30px minmax(0, 1fr) auto; padding-left: calc(3px + var(--indent)); }

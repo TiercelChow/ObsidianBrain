@@ -7,10 +7,13 @@
       </div>
       <div class="header-actions">
         <button class="glass-button secondary" type="button" :disabled="store.syncing" @click="syncNow">
-          <span :class="{ spinning: store.syncing }">↻</span>
+          <el-icon :class="{ spinning: store.syncing }"><Refresh /></el-icon>
           {{ store.syncing ? '同步中' : '同步 Obsidian' }}
         </button>
-        <button class="glass-button primary" type="button" @click="openCreate()">＋ 新建任务</button>
+        <button class="glass-button primary" type="button" @click="openCreate()">
+          <el-icon><Plus /></el-icon>
+          新建任务
+        </button>
       </div>
     </header>
 
@@ -20,10 +23,11 @@
         <button type="button" :class="{ active: viewMode === 'tasks' }" @click="changeView('tasks')">任务</button>
         <button type="button" :class="{ active: viewMode === 'calendar' }" @click="changeView('calendar')">日历</button>
       </div>
-      <label class="task-search">
-        <span>⌕</span>
-        <input v-model="searchQuery" type="search" placeholder="搜索标题或描述" />
-      </label>
+      <div class="task-search glass-surface" role="search">
+        <el-icon class="task-search-icon"><Search /></el-icon>
+        <input v-model="searchQuery" type="search" aria-label="搜索任务" placeholder="搜索标题或描述" />
+        <button v-if="searchQuery" type="button" class="task-search-clear" aria-label="清除搜索" @click="searchQuery = ''">×</button>
+      </div>
       <div class="filters">
         <el-select
           v-model="kindFilter"
@@ -93,7 +97,6 @@
                     <strong>{{ task.title }}</strong>
                     <span class="kind-badge">{{ task.kind === 'short' ? '待办' : '长期' }}</span>
                   </span>
-                  <span class="card-description">{{ task.description || '暂无描述' }}</span>
                   <span class="card-footer">
                     <span :class="{ danger: task.derived.overdue }">{{ formatTaskDateRange(task.start_date, task.end_date) }}</span>
                     <span>{{ statusLabel(task.status) }}</span>
@@ -137,7 +140,7 @@
             <div class="detail-actions">
               <button type="button" @click="openStatus(activeNode)">更改状态</button>
               <button type="button" @click="openEdit(activeNode)">编辑</button>
-              <button type="button" class="more-button" aria-label="归档任务" @click="archiveCurrent">···</button>
+              <button type="button" class="more-button" aria-label="归档任务" @click="openArchiveConfirm">···</button>
             </div>
           </header>
 
@@ -161,7 +164,7 @@
 
           <section v-if="detail.root.kind === 'long'" class="detail-section task-breakdown">
             <div class="section-heading">
-              <div><span>任务拆解</span><strong>{{ detail.tasks.length }} 个节点</strong></div>
+              <div><span>任务拆解</span><strong>{{ subtaskCount }} 个子任务</strong></div>
               <button type="button" @click="openSubtask(activeNode)">＋ 添加子任务</button>
             </div>
             <TaskTree
@@ -184,10 +187,12 @@
             <div v-if="activity.length" class="activity-list">
               <article v-for="item in activity" :key="item.id" class="activity-item">
                 <span class="activity-dot" :class="item.type"></span>
-                <div>
-                  <strong>{{ item.title }}</strong>
+                <div class="activity-copy">
+                  <div class="activity-head">
+                    <strong>{{ item.title }}</strong>
+                    <time>{{ formatTimestamp(item.time) }}</time>
+                  </div>
                   <p v-if="item.note">{{ item.note }}</p>
-                  <time>{{ formatTimestamp(item.time) }}</time>
                 </div>
               </article>
             </div>
@@ -345,12 +350,33 @@
         </footer>
       </form>
     </MotionModal>
+
+    <MotionModal v-model="archiveConfirmOpen" aria-label="归档任务">
+      <section class="archive-dialog glass-surface-heavy">
+        <div class="archive-dialog-icon" aria-hidden="true">
+          <el-icon><FolderChecked /></el-icon>
+        </div>
+        <div class="archive-dialog-copy">
+          <span>收纳已完成的计划</span>
+          <h3>归档这项任务？</h3>
+          <p>归档后将不再默认出现在任务列表中，但 Obsidian 内的文件和历史记录都会保留。</p>
+          <strong v-if="detail?.root.title">{{ detail.root.title }}</strong>
+        </div>
+        <footer class="archive-dialog-actions">
+          <button type="button" class="cancel" @click="archiveConfirmOpen = false">取消</button>
+          <button type="button" class="confirm" :disabled="store.saving" @click="confirmArchive">
+            {{ store.saving ? '归档中…' : '确认归档' }}
+          </button>
+        </footer>
+      </section>
+    </MotionModal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { FolderChecked, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import TaskCalendar from '@/components/tasks/TaskCalendar.vue'
@@ -370,6 +396,7 @@ import {
   shiftMonth,
   todayLocal,
 } from '@/utils/taskDates'
+import { taskFieldsPayload } from '@/utils/taskPayloads'
 
 type ViewMode = 'tasks' | 'calendar'
 type SheetMode = 'create' | 'edit' | 'subtask' | 'progress' | 'status' | 'move'
@@ -386,6 +413,7 @@ const calendarAnchor = ref(`${today.slice(0, 7)}-01`)
 const selectedDate = ref(typeof route.query.date === 'string' ? route.query.date : today)
 const activeNodeId = ref<string | null>(null)
 const sheetOpen = ref(false)
+const archiveConfirmOpen = ref(false)
 const sheetMode = ref<SheetMode>('create')
 const targetNode = ref<TaskNode | null>(null)
 const form = ref<TaskFields & { kind: TaskKind }>({
@@ -412,6 +440,7 @@ const importanceOptions: Array<{ value: TaskImportance; label: string }> = [
 
 const detail = computed(() => store.selectedDetail)
 const activeNode = computed(() => detail.value?.tasks.find((task) => task.id === activeNodeId.value) || detail.value?.root || null)
+const subtaskCount = computed(() => detail.value?.tasks.filter(task => task.role === 'subtask').length || 0)
 const isTerminalStatus = computed(() => statusForm.value.status === 'completed' || statusForm.value.status === 'cancelled')
 const statusSheetOptions = computed(() => targetNode.value?.kind === 'short'
   ? statusOptions.filter((option) => ['open', 'completed', 'cancelled'].includes(option.value))
@@ -488,7 +517,7 @@ async function refreshCurrent() {
 async function openTask(id: string) {
   const loaded = await store.loadDetail(id).catch(() => null)
   if (!loaded) return
-  activeNodeId.value = loaded.root.id
+  activeNodeId.value = loaded.tasks.some(task => task.id === id) ? id : loaded.root.id
   await router.replace({ query: { ...route.query, view: 'tasks', task: loaded.root.id } })
 }
 
@@ -586,9 +615,10 @@ async function submitSheet() {
       ElMessage.warning('结束日期不能早于开始日期')
       return
     }
-    if (sheetMode.value === 'create') await store.create(form.value.kind, form.value)
-    else if (sheetMode.value === 'edit' && targetNode.value) await store.update(targetNode.value.id, form.value)
-    else if (sheetMode.value === 'subtask' && targetNode.value) await store.addSubtask(targetNode.value.id, form.value)
+    const fields = taskFieldsPayload(form.value)
+    if (sheetMode.value === 'create') await store.create(form.value.kind, fields)
+    else if (sheetMode.value === 'edit' && targetNode.value) await store.update(targetNode.value.id, fields)
+    else if (sheetMode.value === 'subtask' && targetNode.value) await store.addSubtask(targetNode.value.id, fields)
     else if (sheetMode.value === 'progress' && targetNode.value) await store.addProgress(targetNode.value.id, progressForm.value.note, progressForm.value.includePercent ? progressForm.value.percent : undefined)
     else if (sheetMode.value === 'status' && targetNode.value) await store.setStatus(targetNode.value.id, statusForm.value.status, statusForm.value.note || undefined, statusForm.value.cascade)
     else if (sheetMode.value === 'move' && targetNode.value) await store.moveSubtask(targetNode.value.id, moveForm.value.parentId, 9999)
@@ -608,15 +638,19 @@ async function quickMove(taskId: string, parentId: string) {
   } catch { /* shown by store */ }
 }
 
-async function archiveCurrent() {
+function openArchiveConfirm() {
+  archiveConfirmOpen.value = true
+}
+
+async function confirmArchive() {
   if (!detail.value) return
   try {
-    await ElMessageBox.confirm('归档后默认不会出现在任务列表中，但文件仍会保留在 Obsidian。', '归档任务', { confirmButtonText: '归档', cancelButtonText: '取消' })
     await store.archive(detail.value.root.id, true)
+    archiveConfirmOpen.value = false
     closeMobileDetail()
     await refreshCurrent()
     ElMessage.success('任务已归档')
-  } catch { /* cancellation or store error */ }
+  } catch { /* shown by store */ }
 }
 
 async function syncNow() {
@@ -682,7 +716,8 @@ onMounted(async () => {
 
 <style scoped>
 .tasks-page { min-height: 100%; max-width: 100%; color: var(--text-primary); }
-.glass-button { min-height: 42px; padding: 0 15px; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); box-shadow: var(--shadow-sm), var(--inset-highlight); color: var(--text-primary); font-weight: 580; cursor: pointer; transition: transform var(--motion-instant) ease, background var(--motion-fast) ease, box-shadow var(--motion-fast) ease; }
+.glass-button { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 15px; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); box-shadow: var(--shadow-sm), var(--inset-highlight); color: var(--text-primary); font-weight: 580; cursor: pointer; transition: transform var(--motion-instant) ease, background var(--motion-fast) ease, box-shadow var(--motion-fast) ease; }
+.glass-button .el-icon { width: 1em; height: 1em; font-size: 14px; }
 .glass-button:active { transform: scale(.97); }
 .glass-button.primary { background: var(--accent); border-color: transparent; color: white; box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 25%, transparent); }
 .glass-button:disabled { opacity: .55; cursor: wait; }
@@ -695,9 +730,15 @@ onMounted(async () => {
 .switch-indicator.calendar { transform: translateX(100%); }
 .view-switch button { min-height: 36px; border: 0; background: transparent; color: var(--text-muted); font-weight: 570; cursor: pointer; }
 .view-switch button.active { color: var(--text-primary); }
-.task-search { flex: 1; min-width: 170px; height: 40px; display: flex; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid transparent; border-radius: 12px; color: var(--text-faint); transition: border-color var(--motion-fast) ease, background var(--motion-fast) ease; }
-.task-search:focus-within { background: var(--bg-glass-strong); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
-.task-search input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: inherit; }
+.task-search { flex: 1; min-width: 170px; max-width: 320px; height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-radius: 12px; color: var(--text-faint); transition: background-color var(--motion-fast) var(--ease-emphasized), border-color var(--motion-fast) var(--ease-emphasized), box-shadow var(--motion-fast) var(--ease-emphasized), transform var(--motion-normal) var(--ease-spring-gentle); }
+.task-search:focus-within { background: var(--bg-glass-strong); box-shadow: 0 4px 16px rgba(0, 0, 0, .06), inset 0 1px 0 rgba(255, 255, 255, .03); }
+.task-search-icon { flex: none; color: var(--text-faint); transition: color var(--motion-fast) var(--ease-emphasized); }
+.task-search:focus-within .task-search-icon { color: var(--accent); }
+.task-search input { width: 100%; min-width: 0; padding: 0; border: 0; outline: 0; appearance: none; -webkit-appearance: none; background: transparent; color: var(--text-primary); font: inherit; font-size: 14px; }
+.task-search input::-webkit-search-cancel-button { display: none; }
+.task-search input::placeholder { color: var(--text-faint); }
+.task-search-clear { width: 22px; height: 22px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--border-faint); color: var(--text-muted); font-size: 13px; line-height: 1; cursor: pointer; transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-instant) ease; }
+.task-search-clear:active { transform: scale(.9); }
 .filters { display: flex; gap: 7px; }
 .filters :deep(.el-select) { width: 132px; }
 .filters :deep(.el-select__wrapper) { min-height: 40px; border-radius: 12px !important; }
@@ -733,7 +774,6 @@ onMounted(async () => {
 .card-topline { min-width: 0; display: flex; align-items: center; gap: 7px; }
 .card-topline strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .kind-badge { flex: none; padding: 2px 6px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--text-muted); font-size: 9px; }
-.card-description { margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 11px; }
 .card-footer { display: flex; justify-content: space-between; margin-top: 8px; color: var(--text-faint); font-size: 10px; }
 .danger { color: #ff3b30; }
 .mini-progress { height: 3px; margin-top: 7px; border-radius: 3px; background: color-mix(in srgb, var(--text-primary) 7%, transparent); overflow: hidden; }
@@ -776,8 +816,11 @@ onMounted(async () => {
 .progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 65%, #34c759)); transition: width var(--motion-slow) var(--ease-spring-gentle); }
 .activity-list { display: grid; gap: 0; }
 .activity-item { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 9px; min-height: 56px; }
-.activity-item > div { padding: 0 0 14px 3px; border-bottom: 1px solid var(--border-subtle); }
-.activity-item:last-child > div { border-bottom: 0; }
+.activity-copy { min-width: 0; padding: 0 0 14px 3px; border-bottom: 1px solid var(--border-subtle); }
+.activity-item:last-child .activity-copy { border-bottom: 0; }
+.activity-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.activity-head strong { min-width: 0; }
+.activity-head time { flex: none; padding-top: 1px; text-align: right; font-variant-numeric: tabular-nums; }
 .activity-dot { width: 9px; height: 9px; margin-top: 4px; border: 2px solid var(--accent); border-radius: 50%; background: var(--bg-base); }
 .activity-dot.audit { border-color: var(--text-faint); }
 .activity-item strong { font-size: 12px; }.activity-item p { margin: 5px 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; white-space: pre-wrap; }.activity-item time { color: var(--text-faint); font-size: 10px; }
@@ -794,6 +837,62 @@ onMounted(async () => {
 .range-field { display: grid; grid-template-columns: 1fr 48px; align-items: center; gap: 12px; }.range-field input { width: 100%; padding: 0; accent-color: var(--accent); }.range-field output { color: var(--accent); font-weight: 650; text-align: right; }.check-field { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--text-muted); font-size: 12px; cursor: pointer; }.check-field input { appearance: none; -webkit-appearance: none; position: relative; width: 20px; height: 20px; flex: none; margin: 0; border: 1px solid color-mix(in srgb, var(--text-muted) 42%, transparent); border-radius: 6px; background: var(--bg-glass); box-shadow: var(--inset-highlight); cursor: pointer; transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease, transform var(--motion-instant) ease, box-shadow var(--motion-fast) ease; }.check-field input::after { content: ''; position: absolute; left: 6px; top: 3px; width: 5px; height: 9px; border: solid white; border-width: 0 2px 2px 0; opacity: 0; transform: rotate(45deg) scale(.65); transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--ease-spring-gentle); }.check-field input:checked { border-color: var(--accent); background: var(--accent); box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 24%, transparent), var(--inset-highlight); }.check-field input:checked::after { opacity: 1; transform: rotate(45deg) scale(1); }.check-field input:focus-visible { outline: 0; box-shadow: var(--focus-ring); }.check-field:active input { transform: scale(.92); }.sheet-hint { margin: 0; color: var(--text-faint); font-size: 11px; }
 .sheet-footer { display: grid; grid-template-columns: 1fr 1.4fr; gap: 9px; padding: 16px 28px 28px; }.sheet-footer button { height: 44px; border-radius: 13px; font-weight: 620; cursor: pointer; }.sheet-footer .cancel { border: 1px solid var(--border-subtle); background: var(--bg-glass); color: var(--text-secondary); }.sheet-footer .confirm { border: 0; background: var(--accent); color: white; box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 22%, transparent); }.sheet-footer .confirm:disabled { opacity: .55; }
 
+.field input:focus, .field textarea:focus { box-shadow: none; }
+.check-field input:focus-visible { border-color: var(--accent); box-shadow: var(--inset-highlight); }
+
+/* Rebalanced type scale: task pages are read-and-decide surfaces, not dense tables. */
+.panel-heading strong { font-size: 15px; }
+.panel-heading span { font-size: 12px; }
+.task-group-title span { font-size: 12px; }
+.task-group-title small, .kind-badge { font-size: 10px; }
+.task-card { min-height: 88px; }
+.card-topline strong { font-size: 15px; font-weight: 620; }
+.card-footer { font-size: 11px; }
+.empty-list p, .empty-detail p { font-size: 13px; }
+.detail-kicker { font-size: 12px; }
+.detail-title-group p { font-size: 14px; line-height: 1.65; }
+.detail-actions button, .section-heading button { font-size: 13px; }
+.detail-facts span { font-size: 11px; }
+.detail-facts strong { font-size: 13px; }
+.section-heading span { font-size: 13px; }
+.section-heading small { font-size: 11px; }
+.activity-item strong, .activity-item p { font-size: 13px; }
+.activity-item time { font-size: 11px; }
+.field > span:first-child { font-size: 12px; }
+.sheet-hint, .mobile-detail-nav span { font-size: 12px; }
+
+.archive-dialog {
+  width: 100%;
+  padding: 28px;
+  border: 1px solid var(--border-glass);
+  border-radius: 24px;
+  background: var(--bg-glass-strong);
+  box-shadow: var(--shadow-lg), var(--shadow-sm), var(--inset-highlight);
+  backdrop-filter: blur(40px) saturate(190%);
+  -webkit-backdrop-filter: blur(40px) saturate(190%);
+}
+.archive-dialog-icon {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 18px;
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 24px;
+  box-shadow: var(--inset-highlight);
+}
+.archive-dialog-copy > span { color: var(--text-faint); font-size: 11px; font-weight: 650; letter-spacing: .08em; }
+.archive-dialog-copy h3 { margin: 5px 0 9px; color: var(--text-primary); font-size: 21px; line-height: 1.25; }
+.archive-dialog-copy p { margin: 0; color: var(--text-muted); font-size: 14px; line-height: 1.65; }
+.archive-dialog-copy strong { display: block; margin-top: 16px; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--text-primary) 4%, transparent); color: var(--text-secondary); font-size: 14px; font-weight: 620; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.archive-dialog-actions { display: grid; grid-template-columns: 1fr 1.35fr; gap: 9px; margin-top: 24px; }
+.archive-dialog-actions button { min-height: 44px; border-radius: 13px; font: inherit; font-weight: 620; cursor: pointer; }
+.archive-dialog-actions .cancel { border: 1px solid var(--border-subtle); background: var(--bg-glass); color: var(--text-secondary); }
+.archive-dialog-actions .confirm { border: 0; background: var(--accent); color: white; box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 22%, transparent); }
+.archive-dialog-actions .confirm:disabled { opacity: .55; cursor: wait; }
+
 :global(.task-select-popper.el-popper) { z-index: 2501 !important; margin: 0 !important; border-radius: 0 0 14px 14px !important; border-top-color: color-mix(in srgb, var(--border-glass) 42%, transparent) !important; overflow: hidden; box-shadow: var(--shadow-lg), var(--inset-highlight) !important; backdrop-filter: blur(30px) saturate(1.65) !important; -webkit-backdrop-filter: blur(30px) saturate(1.65) !important; }
 :global(.task-select-popper.el-popper[data-popper-placement^='top']) { border-radius: 14px 14px 0 0 !important; border-top-color: var(--border-glass) !important; border-bottom-color: color-mix(in srgb, var(--border-glass) 42%, transparent) !important; }
 :global(.task-select-popper .el-popper__arrow) { display: none !important; }
@@ -807,12 +906,18 @@ onMounted(async () => {
 }
 
 @media (max-width: 768px) {
-  .header-actions .secondary { width: 44px; padding: 0; font-size: 0; }.header-actions .secondary span { font-size: 18px; }.glass-button { min-height: 44px; }.task-toolbar { flex-wrap: wrap; padding: 7px; }.view-switch { width: 100%; }.view-switch button { min-height: 38px; }.task-search { order: 2; min-width: 0; flex: 1; min-height: 44px; }.filters { order: 3; width: 100%; }.filters :deep(.el-select) { flex: 1; width: auto; min-width: 0; }.filters :deep(.el-select__wrapper) { min-height: 44px; }.task-workspace { min-height: calc(100dvh - 260px); height: auto; display: block; }.task-list-panel, .task-detail-panel { min-height: calc(100dvh - 260px); border-radius: 20px; }.task-detail-panel { display: none; padding: 12px; }.task-workspace.detail-open .task-list-panel { display: none; }.task-workspace.detail-open .task-detail-panel { display: block; }.mobile-detail-nav { height: 45px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }.mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font-weight: 600; }.mobile-detail-nav span { color: var(--text-faint); font-size: 11px; }.detail-header { display: block; }.detail-title-group h2 { font-size: 23px; }.detail-actions { display: grid; grid-template-columns: 1fr 1fr 44px; margin-top: 14px; }.detail-actions button { min-height: 44px; }.detail-facts { grid-template-columns: 1fr 1fr; margin: 14px 0; }.detail-facts div:last-child { grid-column: 1 / -1; }.progress-overview, .detail-section { padding: 13px; }.section-heading button { min-height: 44px; }.task-card { min-height: 110px; }.panel-heading button { min-width: 44px; min-height: 44px; }.task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }.sheet-header { padding: 34px 20px 16px; }.sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }.form-grid { grid-template-columns: 1fr; }.field.full { grid-column: auto; }.field input, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; }.sheet-footer { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }.sheet-footer button { min-height: 48px; }
+  .header-actions .secondary { width: 44px; padding: 0; font-size: 0; }.header-actions .secondary span { font-size: 18px; }.glass-button { min-height: 44px; }.task-toolbar { flex-wrap: wrap; padding: 7px; }.view-switch { width: 100%; }.view-switch button { min-height: 38px; }.task-search { order: 2; min-width: 0; max-width: none; flex: 1; min-height: 44px; }.filters { order: 3; width: 100%; }.filters :deep(.el-select) { flex: 1; width: auto; min-width: 0; }.filters :deep(.el-select__wrapper) { min-height: 44px; }.task-workspace { min-height: calc(100dvh - 260px); height: auto; display: block; }.task-list-panel, .task-detail-panel { min-height: calc(100dvh - 260px); border-radius: 20px; }.task-detail-panel { display: none; padding: 12px; }.task-workspace.detail-open .task-list-panel { display: none; }.task-workspace.detail-open .task-detail-panel { display: block; }.mobile-detail-nav { height: 45px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }.mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font-weight: 600; }.mobile-detail-nav span { color: var(--text-faint); font-size: 11px; }.detail-header { display: block; }.detail-title-group h2 { font-size: 23px; }.detail-actions { display: grid; grid-template-columns: 1fr 1fr 44px; margin-top: 14px; }.detail-actions button { min-height: 44px; }.detail-facts { grid-template-columns: 1fr 1fr; margin: 14px 0; }.detail-facts div:last-child { grid-column: 1 / -1; }.progress-overview, .detail-section { padding: 13px; }.section-heading button { min-height: 44px; }.task-card { min-height: 110px; }.panel-heading button { min-width: 44px; min-height: 44px; }.task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }.sheet-header { padding: 34px 20px 16px; }.sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }.form-grid { grid-template-columns: 1fr; }.field.full { grid-column: auto; }.field input, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; }.sheet-footer { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }.sheet-footer button { min-height: 48px; }
+}
+
+@media (max-width: 768px) {
+  .header-actions .secondary .el-icon { font-size: 16px; }
+  .archive-dialog { padding: 38px 20px max(22px, env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; border-bottom: 0; }
+  .archive-dialog-actions button { min-height: 48px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .switch-indicator, .task-card, .mini-progress i, .progress-track i, .check-field input, .check-field input::after, .error-banner-enter-active, .error-banner-leave-active, .task-card-enter-active, .task-card-leave-active { transition-duration: 1ms !important; }.spinning, .task-skeletons span, .detail-loading span { animation: none !important; }
 }
-@media (prefers-reduced-transparency: reduce) { .glass-surface, .task-sheet { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--bg-primary); }:global(.task-select-popper.el-popper), :global(.task-date-popper.el-popper) { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background: var(--bg-primary) !important; } }
+@media (prefers-reduced-transparency: reduce) { .glass-surface, .task-sheet, .archive-dialog { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--bg-primary); }:global(.task-select-popper.el-popper), :global(.task-date-popper.el-popper) { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background: var(--bg-primary) !important; } }
 @media (prefers-contrast: more) { .task-card.selected, .progress-overview, .detail-section, .check-field input { border-color: var(--text-muted); } }
 </style>

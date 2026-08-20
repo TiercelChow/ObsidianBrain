@@ -5,6 +5,7 @@ import {
   addLocalDays,
   buildMonthGrid,
   dateInRange,
+  formatLunarDate,
   formatLocalDate,
   parseLocalDate,
   rangesOverlap,
@@ -27,4 +28,10 @@ test('date math crosses leap day and range overlap is inclusive', () => {
   assert.equal(addLocalDays('2028-02-28', 1), '2028-02-29')
   assert.equal(rangesOverlap('2026-08-10', '2026-08-17', '2026-08-17', '2026-08-20'), true)
   assert.equal(dateInRange('2026-08-17', '2026-08-17', '2026-08-17'), true)
+})
+
+test('lunar date uses compact Chinese calendar labels', () => {
+  assert.equal(formatLunarDate('2026-02-17'), '正月')
+  assert.equal(formatLunarDate('2026-08-19'), '初七')
+  assert.equal(formatLunarDate('2026-09-11'), '八月')
 })
