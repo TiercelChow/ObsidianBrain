@@ -24,7 +24,6 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 notify = "6"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 tantivy = "0.22"
-jieba-rs = "0.7"
 async-trait = "0.1"
 futures = "0.3"
 
