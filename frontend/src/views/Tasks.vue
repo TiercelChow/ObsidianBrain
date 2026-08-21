@@ -128,7 +128,7 @@
             <span>{{ detail.root.kind === 'short' ? '短期待办' : '长期任务' }}</span>
           </div>
 
-          <header class="detail-header">
+          <header ref="detailHeaderRef" class="detail-header">
             <div class="detail-title-group">
               <div class="detail-kicker">
                 <span class="status-dot" :class="`status-${activeNode.status}`"></span>
@@ -170,7 +170,7 @@
             <TaskTree
               :tasks="detail.tasks"
               :selected-id="activeNodeId"
-              @select="activeNodeId = $event"
+              @select="selectNode"
               @add="openSubtask"
               @progress="openProgress"
               @status="openStatus"
@@ -179,7 +179,7 @@
             />
           </section>
 
-          <section class="detail-section activity-section">
+          <section ref="activitySectionRef" class="detail-section activity-section">
             <div class="section-heading">
               <div><span>进展与记录</span><strong>{{ detail.progress.length + detail.audit.length }} 条</strong></div>
               <button type="button" @click="openProgress(activeNode)">＋ 添加进展</button>
@@ -226,6 +226,7 @@
           <div>
             <span>{{ sheetEyebrow }}</span>
             <h3>{{ sheetTitle }}</h3>
+            <p v-if="targetNode" class="sheet-target">{{ sheetMode === 'subtask' ? '父任务' : '应用于' }}：{{ targetNode.title }}</p>
           </div>
           <button type="button" aria-label="关闭" @click="sheetOpen = false">×</button>
         </header>
@@ -374,7 +375,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { FolderChecked, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
@@ -412,6 +413,8 @@ const today = todayLocal()
 const calendarAnchor = ref(`${today.slice(0, 7)}-01`)
 const selectedDate = ref(typeof route.query.date === 'string' ? route.query.date : today)
 const activeNodeId = ref<string | null>(null)
+const detailHeaderRef = ref<HTMLElement | null>(null)
+const activitySectionRef = ref<HTMLElement | null>(null)
 const sheetOpen = ref(false)
 const archiveConfirmOpen = ref(false)
 const sheetMode = ref<SheetMode>('create')
@@ -588,6 +591,19 @@ function openSubtask(parent: TaskNode) {
   sheetOpen.value = true
 }
 
+async function revealDetailEl(el: HTMLElement | null) {
+  if (!el) return
+  await nextTick()
+  // Bring the freshly-updated detail into view: on narrow screens (and when the
+  // panel is scrolled to the tree) the header/activity live far above the tap.
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+async function selectNode(id: string) {
+  activeNodeId.value = id
+  await revealDetailEl(detailHeaderRef.value)
+}
+
 function openProgress(task: TaskNode) {
   sheetMode.value = 'progress'
   targetNode.value = task
@@ -616,16 +632,20 @@ async function submitSheet() {
       return
     }
     const fields = taskFieldsPayload(form.value)
-    if (sheetMode.value === 'create') await store.create(form.value.kind, fields)
-    else if (sheetMode.value === 'edit' && targetNode.value) await store.update(targetNode.value.id, fields)
-    else if (sheetMode.value === 'subtask' && targetNode.value) await store.addSubtask(targetNode.value.id, fields)
-    else if (sheetMode.value === 'progress' && targetNode.value) await store.addProgress(targetNode.value.id, progressForm.value.note, progressForm.value.includePercent ? progressForm.value.percent : undefined)
-    else if (sheetMode.value === 'status' && targetNode.value) await store.setStatus(targetNode.value.id, statusForm.value.status, statusForm.value.note || undefined, statusForm.value.cascade)
-    else if (sheetMode.value === 'move' && targetNode.value) await store.moveSubtask(targetNode.value.id, moveForm.value.parentId, 9999)
+    const mode = sheetMode.value
+    if (mode === 'create') await store.create(form.value.kind, fields)
+    else if (mode === 'edit' && targetNode.value) await store.update(targetNode.value.id, fields)
+    else if (mode === 'subtask' && targetNode.value) await store.addSubtask(targetNode.value.id, fields)
+    else if (mode === 'progress' && targetNode.value) await store.addProgress(targetNode.value.id, progressForm.value.note, progressForm.value.includePercent ? progressForm.value.percent : undefined)
+    else if (mode === 'status' && targetNode.value) await store.setStatus(targetNode.value.id, statusForm.value.status, statusForm.value.note || undefined, statusForm.value.cascade)
+    else if (mode === 'move' && targetNode.value) await store.moveSubtask(targetNode.value.id, moveForm.value.parentId, 9999)
     sheetOpen.value = false
     activeNodeId.value = targetNode.value?.id || store.selectedDetail?.root.id || null
     await refreshCurrent()
     ElMessage.success(`${sheetAction.value}成功`)
+    // Show the user what changed: the new activity entry for progress writes,
+    // the refreshed header for everything else.
+    await revealDetailEl(mode === 'progress' ? activitySectionRef.value : detailHeaderRef.value)
   } catch {
     // The store exposes the actionable error in the page banner.
   }
@@ -792,6 +812,8 @@ onMounted(async () => {
 .task-detail-panel { padding: 24px 26px; }
 .mobile-detail-nav { display: none; }
 .detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+/* Keep scrollIntoView() reveals clear of the fixed mobile global header. */
+.detail-header, .activity-section { scroll-margin-top: calc(var(--mobile-header-height) + var(--safe-top) + 12px); }
 .detail-title-group { min-width: 0; }
 .detail-kicker { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 11px; font-weight: 580; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #8e8e93; box-shadow: 0 0 0 4px color-mix(in srgb, #8e8e93 10%, transparent); }
@@ -828,7 +850,7 @@ onMounted(async () => {
 @keyframes pulse { to { opacity: .25; transform: translateY(-4px); } }
 .detail-illustration { position: relative; width: 78px; height: 64px; margin-bottom: 13px; }.detail-illustration span, .detail-illustration i { position: absolute; display: block; border: 1px solid var(--border-subtle); border-radius: 17px; background: var(--bg-glass); box-shadow: var(--shadow-sm); }.detail-illustration span { inset: 0 13px 8px 0; transform: rotate(-6deg); }.detail-illustration i { inset: 8px 0 0 13px; transform: rotate(5deg); }
 .task-sheet { max-height: calc(100dvh - 48px); display: flex; flex-direction: column; border-radius: 24px; border: 1px solid var(--border-glass); background: var(--bg-glass-strong); box-shadow: var(--shadow-lg), var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, .03); backdrop-filter: blur(40px) saturate(200%); -webkit-backdrop-filter: blur(40px) saturate(200%); overflow: hidden; }
-.sheet-header { display: flex; align-items: center; justify-content: space-between; padding: 28px 28px 16px; }.sheet-header span { color: var(--text-faint); font-size: 10px; letter-spacing: .08em; }.sheet-header h3 { margin: 4px 0 0; font-size: 18px; font-weight: 700; }.sheet-header button { width: 38px; height: 38px; border: 0; border-radius: 12px; background: var(--bg-glass); color: var(--text-muted); font-size: 23px; cursor: pointer; transition: background var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-instant) ease; }.sheet-header button:hover { background: var(--bg-hover); color: var(--text-primary); }.sheet-header button:active { transform: scale(.94); }
+.sheet-header { display: flex; align-items: center; justify-content: space-between; padding: 28px 28px 16px; }.sheet-header span { color: var(--text-faint); font-size: 10px; letter-spacing: .08em; }.sheet-header h3 { margin: 4px 0 0; font-size: 18px; font-weight: 700; }.sheet-target { margin: 3px 0 0; color: var(--text-secondary); font-size: 12px; }.sheet-header button { width: 38px; height: 38px; border: 0; border-radius: 12px; background: var(--bg-glass); color: var(--text-muted); font-size: 23px; cursor: pointer; transition: background var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-instant) ease; }.sheet-header button:hover { background: var(--bg-hover); color: var(--text-primary); }.sheet-header button:active { transform: scale(.94); }
 .sheet-body { overflow-y: auto; padding: 4px 28px 10px; }.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }.field { display: grid; gap: 7px; }.field.full { grid-column: 1 / -1; }.field > span:first-child { color: var(--text-muted); font-size: 11px; font-weight: 570; }.field input { height: 44px; padding: 0 11px; }.field textarea { resize: vertical; padding: 10px 11px; line-height: 1.5; }.field input:focus, .field textarea:focus { border-color: color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: var(--focus-ring); }
 .field :deep(.el-select), .field :deep(.el-date-editor) { width: 100%; }
 .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 44px; border-radius: 11px !important; }
