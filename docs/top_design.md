@@ -551,7 +551,6 @@ GET  /v1/health             → 健康检查
 | | `add_task_progress` | `task_id, note, percent_after?, expected_version` | 追加任务进展 |
 | | `get_task_calendar` | `start_date, end_date, filters?` | 查询日历范围内的任务 |
 | | `archive_task` | `task_id, archived, expected_version` | 归档或恢复任务 |
-| | `sync_tasks` | `dry_run?` | 从 Obsidian 刷新任务索引 |
 | **灵感** | `get_inspiration` | `type?, note_path?` | 获取灵感（概念碰撞/反向提问/对立观点） |
 | **雷达** | `get_radar` | `limit?, query?` | 获取外部信息推荐 |
 | | `add_to_vault` | `article_id, target_dir?` | 文章保存到 vault |
