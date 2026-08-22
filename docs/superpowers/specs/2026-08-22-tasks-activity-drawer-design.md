@@ -156,3 +156,34 @@ expose: { revealActivity(): void }   // 供父级在操作成功后滚动到进�
 - 分支 `feature/tasks-subtask-drawer` 叠在 `refactor/tasks-decouple-obsidian` 之上；合并顺序：先合 refactor，再合本分支。
 - 纯前端改动，部署路径与 decoupling 相同：`npx vite build --outDir dist_new` → `cargo build --release` → sudo 安装重启。可与 decoupling 的安装合并为一次操作（同一枚举二进制）。
 - 开发期验证：vite dev server（代理 :9876）交互验收 + 门禁。
+
+## 12. 调整波（2026-08-23）：体验细化
+
+用户验收后提出的 8 项调整；本节优先于前文与之冲突的描述。
+
+### 12.1 抽屉结构（修订 §5）
+
+- 新增「子任务」栏目：列出当前任务的直接子任务（按 `position` 排序，含状态圆点与标题，点击行内箭头下钻）；点击即在抽屉内切换到该子任务。抽屉头部显示「‹ {父任务名}」返回行——父任务为根任务时点击收起抽屉回总览（沿用 `focusTask` 语义）。仍不做二级抽屉（§10.1 维持）。
+- 操作按钮重组：删除五按钮堆叠。编辑/更改状态/移动 → 抽屉右上角三个紧凑图标按钮（EditPen/Refresh/Rank，带 `title` 与 `aria-label`）；记录进展/添加子任务 → 各自栏目标题行的「＋」按钮。
+- 收起交互：删除 ✕ 关闭按钮。抽屉左缘中部一个常驻「‹」收起符号（竖长圆角把手：桌面端置于抽屉与主面板之间的 26px 把手槽内，窄屏浮层形态下悬浮于遮罩之上）。Esc 与点遮罩关闭保留。
+
+### 12.2 活动流条目（修订 §4）
+
+- 条目改为「类型胶囊 + 明细」结构：标题行只显示类型胶囊与时间——类型标签为名词式短语：`进展` / `状态变更` / `重新打开` / `归档` / `取消归档` / `级联完成` / `移动` / `创建` / `更新`，未知 event_type 兜底 `变更`。替换原「记录了新进展」「状态变为X」类口语化文案。
+- 下方明细行 = 任务名（可点击）+ 具体变化：progress 条目带 `percent_after` 时为「完成度 X%」；status 族条目为「{from} → {to}」（缺 from 时只显示 to）。备注独占一行。抽屉内专属流省略任务名。
+- `TaskActivityEntry` 增加 `detail: string | null` 字段；`title` 语义改为类型标签。
+- 间隔线：分隔线两侧各留约 14px 呼吸空间（后续条目 `border-top` + 条目上下 padding 实现）。
+
+### 12.3 属性胶囊（新增）
+
+任务状态、重要程度等关键属性用软色胶囊（`.task-pill` 及 `status-*`/`importance-*`/`type-*` 修饰类，定义于 App.vue 全局样式块）：状态沿用既有状态色系（accent/橙/绿/灰），重要程度 low/normal/high/urgent 为灰/中性/橙/红；活动流类型标签同样胶囊化（progress=accent 色、audit=中性）。应用于主面板眉标、抽屉眉标、活动流类型标签。
+
+### 12.4 留白与页面锁定（修订 §6）
+
+- 留白：详情面板下半部分（事实行、拆解、进展记录）节奏放宽——facts 上下边距 26px、区块 `margin-top` 18px、区块 padding 18px、面板底部 padding 34px，对齐阅境轩（Reader.vue）的疏朗节奏。
+- 页面锁定：任务视图下整页不滚动——`.tasks-page.view-tasks` 锁定为 `calc(100dvh - 64px)`（桌面 = app-main 上下 padding 之和）的 flex 列，workspace 为 `flex: 1 1 auto; min-height: 0`；只有左侧列表、详情面板、抽屉内部各自滚动。移动端锁定高度 `calc(100dvh - 96px - var(--safe-top) - var(--safe-bottom))`，列表/详情二选一占满剩余高度。日历视图不受影响（锁定类仅在任务视图分支挂载）。
+- 抽屉 push 布局微调：slot 打开总宽 = `min(400px, 30vw) + 26px`（`padding-left: 26px` 把手槽），`margin-left` 移除；<1150px 浮层形态不变（把手绝对定位 `left: -24px` 悬于遮罩上）。
+
+### 12.5 组件契约变更（修订 §5 props/emits）
+
+`SubtaskDrawer` props 增加 `children: TaskNode[]`（当前任务的直接子任务，按 `position` 排序）与 `parent: TaskNode | null`（父节点，含根任务；找不到时为 null 且不渲染返回行）；emits 增加 `select: [taskId: string]`（点击子任务行或返回行，父级绑定为 `focusTask`）。✕ 关闭按钮与其 focus 逻辑移除，抽屉打开时的键盘焦点落点改为收起把手。
