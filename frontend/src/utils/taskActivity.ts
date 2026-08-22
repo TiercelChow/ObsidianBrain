@@ -6,7 +6,10 @@ export interface TaskActivityEntry {
   type: 'progress' | 'audit'
   taskId: string
   taskTitle: string
+  /** Terse type label rendered as a pill: 进展 / 状态变更 / 移动 / … */
   title: string
+  /** One-line specifics under the label: 完成度 35% / 已计划 → 进行中 / null */
+  detail: string | null
   note: string | null
   time: string
 }
@@ -26,9 +29,27 @@ export function taskImportanceLabel(importance: TaskImportance): string {
   return ({ low: '低', normal: '普通', high: '重要', urgent: '紧急' } satisfies Record<TaskImportance, string>)[importance]
 }
 
-function auditTitle(item: Pick<AuditEvent, 'event_type' | 'to_status'>): string {
-  if (item.event_type === 'status_changed' && item.to_status) return `状态变为${taskStatusLabel(item.to_status)}`
-  return ({ created: '创建了任务', updated: '更新了任务', moved: '移动了任务', archived: '归档了任务', reopened: '重新打开任务' } as Record<string, string>)[item.event_type] || '任务发生变化'
+/** Noun-style type labels — no narrative phrasing ("记录了新进展" and friends are gone). */
+const AUDIT_TYPE_LABELS: Record<string, string> = {
+  status_changed: '状态变更',
+  reopened: '重新打开',
+  archived: '归档',
+  unarchived: '取消归档',
+  cascade_completed: '级联完成',
+  moved: '移动',
+  created: '创建',
+  updated: '更新',
+}
+
+function auditTitle(item: Pick<AuditEvent, 'event_type'>): string {
+  return AUDIT_TYPE_LABELS[item.event_type] || '变更'
+}
+
+function auditDetail(item: Pick<AuditEvent, 'from_status' | 'to_status'>): string | null {
+  const from = item.from_status ? taskStatusLabel(item.from_status) : null
+  const to = item.to_status ? taskStatusLabel(item.to_status) : null
+  if (from && to) return `${from} → ${to}`
+  return to
 }
 
 /**
@@ -52,7 +73,8 @@ export function buildTaskActivity(
       type: 'progress' as const,
       taskId: item.task_id,
       taskTitle: titleOf(item.task_id),
-      title: item.percent_after == null ? '记录了新进展' : `进展更新为 ${item.percent_after}%`,
+      title: '进展',
+      detail: item.percent_after == null ? null : `完成度 ${item.percent_after}%`,
       note: item.note,
       time: item.recorded_at,
     }))
@@ -64,6 +86,7 @@ export function buildTaskActivity(
       taskId: item.task_id,
       taskTitle: titleOf(item.task_id),
       title: auditTitle(item),
+      detail: auditDetail(item),
       note: item.note,
       time: item.occurred_at,
     }))

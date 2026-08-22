@@ -30,14 +30,14 @@ const audit = [
   { id: 'a2', root_id: 'root', task_id: 'child', event_type: 'moved', from_status: null, to_status: null, note: '移动到 根任务', occurred_at: '2026-08-21T08:36:07Z' },
 ]
 
-test('aggregates progress and audit across the whole tree with task attribution', () => {
+test('aggregates progress and audit across the whole tree with type labels and details', () => {
   const entries = buildTaskActivity(nodes, progress, audit)
 
-  assert.deepEqual(entries.map((entry) => [entry.id, entry.taskTitle, entry.title]), [
-    ['progress:p2', '子任务甲', '记录了新进展'],
-    ['audit:a2', '子任务甲', '移动了任务'],
-    ['audit:a1', '根任务', '状态变为进行中'],
-    ['progress:p1', '根任务', '进展更新为 35%'],
+  assert.deepEqual(entries.map((entry) => [entry.id, entry.taskTitle, entry.title, entry.detail]), [
+    ['progress:p2', '子任务甲', '进展', null],
+    ['audit:a2', '子任务甲', '移动', null],
+    ['audit:a1', '根任务', '状态变更', '已计划 → 进行中'],
+    ['progress:p1', '根任务', '进展', '完成度 35%'],
   ])
   assert.equal(entries[0].note, '111111')
   assert.equal(entries[0].time, '2026-08-21T09:52:16Z')
@@ -54,6 +54,25 @@ test('unknown task ids fall back to 未知任务', () => {
 
   assert.equal(entries.length, 2)
   assert.ok(entries.every((entry) => entry.taskTitle === '未知任务'))
+})
+
+test('audit type labels and status details cover the event enum', () => {
+  const auditEvents = [
+    { id: 'r1', root_id: 'root', task_id: 'root', event_type: 'reopened', from_status: 'completed', to_status: 'in_progress', note: null, occurred_at: '2026-08-21T10:00:00Z' },
+    { id: 'r2', root_id: 'root', task_id: 'root', event_type: 'archived', from_status: null, to_status: null, note: null, occurred_at: '2026-08-21T10:01:00Z' },
+    { id: 'r3', root_id: 'root', task_id: 'root', event_type: 'unarchived', from_status: null, to_status: null, note: null, occurred_at: '2026-08-21T10:02:00Z' },
+    { id: 'r4', root_id: 'root', task_id: 'root', event_type: 'cascade_completed', from_status: 'planned', to_status: 'completed', note: null, occurred_at: '2026-08-21T10:03:00Z' },
+    { id: 'r5', root_id: 'root', task_id: 'root', event_type: 'mystery', from_status: null, to_status: 'blocked', note: null, occurred_at: '2026-08-21T10:04:00Z' },
+  ]
+  const entries = buildTaskActivity(nodes, [], auditEvents)
+
+  assert.deepEqual(entries.map((entry) => [entry.title, entry.detail]), [
+    ['变更', '受阻'],
+    ['级联完成', '已计划 → 已完成'],
+    ['取消归档', null],
+    ['归档', null],
+    ['重新打开', '已完成 → 进行中'],
+  ])
 })
 
 test('status and importance labels cover enum values', () => {
