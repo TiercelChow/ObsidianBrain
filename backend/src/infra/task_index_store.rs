@@ -1,5 +1,6 @@
 //! Rebuildable SQLite projection for personal tasks.
 
+use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -13,9 +14,9 @@ use crate::core::tasks::tree::calculate_progress;
 use crate::error::BrainError;
 use crate::infra::sqlite_store::SqliteStore;
 use crate::models::task::{
-    CalendarTaskQuery, DocumentVersion, TaskDerivedState, TaskDocument, TaskDocumentKind,
-    TaskImportance, TaskKind, TaskListResponse, TaskNode, TaskQuery, TaskRole, TaskStatus,
-    TaskSummary,
+    AuditEvent, CalendarTaskQuery, DocumentVersion, ProgressEntry, TaskDerivedState, TaskDocument,
+    TaskDocumentKind, TaskEventType, TaskImportance, TaskKind, TaskListResponse, TaskNode,
+    TaskQuery, TaskRole, TaskStatus, TaskSummary,
 };
 
 #[derive(Debug, Clone)]
@@ -39,6 +40,7 @@ pub trait TaskIndexStore: Send + Sync {
         &self,
         task_id: Uuid,
     ) -> Result<Option<TaskDocumentMeta>, BrainError>;
+    async fn load_document(&self, path: &str) -> Result<Option<TaskDocument>, BrainError>;
     async fn document_meta(&self, path: &str) -> Result<Option<TaskDocumentMeta>, BrainError>;
     async fn list_document_paths(&self) -> Result<Vec<String>, BrainError>;
     async fn remove_document(&self, path: &str) -> Result<(), BrainError>;
@@ -202,6 +204,83 @@ impl TaskIndexStore for SqliteTaskIndexStore {
                 meta_from_row,
             );
             optional_row(result)
+        })
+    }
+
+    async fn load_document(&self, path: &str) -> Result<Option<TaskDocument>, BrainError> {
+        self.db.with_connection(|conn| {
+            let header = conn.query_row(
+                "SELECT document_kind, storage_month, revision
+                 FROM task_documents WHERE path = ?1",
+                params![path],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            );
+            let (kind, storage_month, revision) = match optional_row(header)? {
+                Some(header) => header,
+                None => return Ok(None),
+            };
+            let document_kind = match kind.as_str() {
+                "short_month" => TaskDocumentKind::ShortMonth,
+                "long_task" => TaskDocumentKind::LongTask,
+                other => {
+                    return Err(BrainError::TaskDocumentCorrupt {
+                        path: path.to_string(),
+                        detail: format!("未知文档类型: {other}"),
+                    })
+                }
+            };
+
+            let tasks = {
+                let mut statement = conn.prepare(
+                    "SELECT id, root_id, parent_id, kind, role, title, description, status,
+                            importance, start_date, end_date, position, closure_note, closed_at,
+                            created_at, updated_at, revision, archived_at
+                     FROM task_nodes WHERE storage_path = ?1 ORDER BY rowid",
+                )?;
+                let rows = statement.query_map(params![path], node_from_row)?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
+
+            let progress = {
+                let mut statement = conn.prepare(
+                    "SELECT id, root_id, task_id, recorded_at, note, percent_after, created_at
+                     FROM task_progress WHERE storage_path = ?1 ORDER BY rowid",
+                )?;
+                let rows = statement.query_map(params![path], progress_from_row)?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
+
+            let audit = {
+                let mut statement = conn.prepare(
+                    "SELECT id, root_id, task_id, event_type, from_status, to_status, note,
+                            occurred_at
+                     FROM task_audit_events WHERE storage_path = ?1 ORDER BY rowid",
+                )?;
+                let rows = statement.query_map(params![path], audit_from_row)?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
+
+            Ok(Some(TaskDocument {
+                schema: match document_kind {
+                    TaskDocumentKind::ShortMonth => "tasks-short/v1",
+                    TaskDocumentKind::LongTask => "tasks-long/v1",
+                }
+                .to_string(),
+                document_kind,
+                storage_month,
+                revision,
+                tasks,
+                progress,
+                audit,
+                extra: BTreeMap::new(),
+                freeform_notes: String::new(),
+            }))
         })
     }
 
@@ -490,6 +569,61 @@ fn meta_from_row(row: &Row<'_>) -> rusqlite::Result<TaskDocumentMeta> {
     })
 }
 
+fn node_from_row(row: &Row<'_>) -> rusqlite::Result<TaskNode> {
+    Ok(TaskNode {
+        id: parse_uuid(row, 0)?,
+        root_id: parse_uuid(row, 1)?,
+        parent_id: parse_optional_uuid(row, 2)?,
+        kind: parse_enum::<TaskKind>(row, 3)?,
+        role: parse_enum::<TaskRole>(row, 4)?,
+        title: row.get(5)?,
+        description: row.get(6)?,
+        status: parse_enum::<TaskStatus>(row, 7)?,
+        importance: parse_enum::<TaskImportance>(row, 8)?,
+        start_date: parse_date(row, 9)?,
+        end_date: parse_date(row, 10)?,
+        position: row.get(11)?,
+        closure_note: row.get(12)?,
+        closed_at: parse_optional_datetime(row, 13)?,
+        created_at: parse_datetime(row, 14)?,
+        updated_at: parse_datetime(row, 15)?,
+        revision: row.get(16)?,
+        archived_at: parse_optional_datetime(row, 17)?,
+    })
+}
+
+fn progress_from_row(row: &Row<'_>) -> rusqlite::Result<ProgressEntry> {
+    Ok(ProgressEntry {
+        id: parse_uuid(row, 0)?,
+        root_id: parse_uuid(row, 1)?,
+        task_id: parse_uuid(row, 2)?,
+        recorded_at: parse_datetime(row, 3)?,
+        note: row.get(4)?,
+        percent_after: row.get(5)?,
+        created_at: parse_datetime(row, 6)?,
+    })
+}
+
+fn audit_from_row(row: &Row<'_>) -> rusqlite::Result<AuditEvent> {
+    Ok(AuditEvent {
+        id: parse_uuid(row, 0)?,
+        root_id: parse_uuid(row, 1)?,
+        task_id: parse_uuid(row, 2)?,
+        event_type: parse_enum::<TaskEventType>(row, 3)?,
+        from_status: parse_optional_status(row, 4)?,
+        to_status: parse_optional_status(row, 5)?,
+        note: row.get(6)?,
+        occurred_at: parse_datetime(row, 7)?,
+    })
+}
+
+fn parse_optional_status(row: &Row<'_>, index: usize) -> rusqlite::Result<Option<TaskStatus>> {
+    let value: Option<String> = row.get(index)?;
+    value
+        .map(|value| TaskStatus::from_str(&value).map_err(|error| conversion_error(index, error)))
+        .transpose()
+}
+
 fn optional_row<T>(result: rusqlite::Result<T>) -> Result<Option<T>, BrainError> {
     match result {
         Ok(value) => Ok(Some(value)),
@@ -630,6 +764,124 @@ mod tests {
         assert_eq!(result.tasks.len(), 1);
         assert_eq!(result.tasks[0].node.title, "索引任务");
         assert!(result.tasks[0].derived.active_today);
+    }
+
+    fn roundtrip_document() -> TaskDocument {
+        let root_id = Uuid::new_v4();
+        let subtask_id = Uuid::new_v4();
+        let now = Utc::now();
+        let date = NaiveDate::from_ymd_opt(2026, 8, 17).expect("valid date");
+        TaskDocument {
+            schema: "tasks-long/v1".to_string(),
+            document_kind: TaskDocumentKind::LongTask,
+            storage_month: None,
+            revision: 7,
+            tasks: vec![
+                TaskNode {
+                    id: root_id,
+                    root_id,
+                    parent_id: None,
+                    kind: TaskKind::Long,
+                    role: TaskRole::Root,
+                    title: "长期任务".to_string(),
+                    description: "描述".to_string(),
+                    start_date: date,
+                    end_date: date,
+                    importance: TaskImportance::High,
+                    status: TaskStatus::InProgress,
+                    position: 0,
+                    closure_note: None,
+                    closed_at: None,
+                    created_at: now,
+                    updated_at: now,
+                    revision: 7,
+                    archived_at: None,
+                },
+                TaskNode {
+                    id: subtask_id,
+                    root_id,
+                    parent_id: Some(root_id),
+                    kind: TaskKind::Long,
+                    role: TaskRole::Subtask,
+                    title: "子任务".to_string(),
+                    description: String::new(),
+                    start_date: date,
+                    end_date: date,
+                    importance: TaskImportance::Normal,
+                    status: TaskStatus::Planned,
+                    position: 0,
+                    closure_note: None,
+                    closed_at: None,
+                    created_at: now,
+                    updated_at: now,
+                    revision: 7,
+                    archived_at: None,
+                },
+            ],
+            progress: vec![ProgressEntry {
+                id: Uuid::new_v4(),
+                root_id,
+                task_id: subtask_id,
+                recorded_at: now,
+                note: "进展".to_string(),
+                percent_after: Some(40),
+                created_at: now,
+            }],
+            audit: vec![AuditEvent {
+                id: Uuid::new_v4(),
+                root_id,
+                task_id: root_id,
+                event_type: TaskEventType::StatusChanged,
+                from_status: Some(TaskStatus::Planned),
+                to_status: Some(TaskStatus::InProgress),
+                note: None,
+                occurred_at: now,
+            }],
+            extra: BTreeMap::new(),
+            freeform_notes: String::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_load_document_reconstructs_full_document() {
+        let (_dir, store) = store();
+        let document = roundtrip_document();
+        store
+            .replace_document("Tasks/Long/roundtrip.md", "sha256:test", &document)
+            .await
+            .expect("replace");
+
+        let loaded = store
+            .load_document("Tasks/Long/roundtrip.md")
+            .await
+            .expect("load")
+            .expect("document exists");
+
+        assert_eq!(loaded.document_kind, TaskDocumentKind::LongTask);
+        assert_eq!(loaded.storage_month, None);
+        assert_eq!(loaded.revision, 7);
+        assert_eq!(loaded.tasks.len(), 2);
+        assert_eq!(loaded.tasks[0].title, "长期任务");
+        assert_eq!(loaded.tasks[0].status, TaskStatus::InProgress);
+        assert_eq!(loaded.tasks[1].id, document.tasks[1].id);
+        assert_eq!(loaded.tasks[1].parent_id, Some(document.tasks[0].id));
+        assert_eq!(loaded.progress.len(), 1);
+        assert_eq!(loaded.progress[0].note, "进展");
+        assert_eq!(loaded.progress[0].percent_after, Some(40));
+        assert_eq!(loaded.audit.len(), 1);
+        assert_eq!(loaded.audit[0].event_type, TaskEventType::StatusChanged);
+        assert_eq!(loaded.audit[0].from_status, Some(TaskStatus::Planned));
+        assert_eq!(loaded.audit[0].to_status, Some(TaskStatus::InProgress));
+    }
+
+    #[tokio::test]
+    async fn test_load_document_missing_path_returns_none() {
+        let (_dir, store) = store();
+        let loaded = store
+            .load_document("Tasks/Long/missing.md")
+            .await
+            .expect("load");
+        assert!(loaded.is_none());
     }
 
     #[tokio::test]

@@ -257,6 +257,22 @@ impl TaskEventType {
     }
 }
 
+impl FromStr for TaskEventType {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "status_changed" => Ok(Self::StatusChanged),
+            "reopened" => Ok(Self::Reopened),
+            "archived" => Ok(Self::Archived),
+            "unarchived" => Ok(Self::Unarchived),
+            "cascade_completed" => Ok(Self::CascadeCompleted),
+            "moved" => Ok(Self::Moved),
+            other => Err(format!("未知事件类型: {other}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuditEvent {
     pub id: Uuid,
