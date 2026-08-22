@@ -113,3 +113,9 @@ export function monthTitle(value: string): string {
   const parts = parseLocalDate(value)
   return `${parts.year}年 ${parts.month}月`
 }
+
+/** Format an ISO timestamp as "M/D HH:mm" for activity feeds; unparseable values pass through. */
+export function formatTimestamp(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}

@@ -7,6 +7,7 @@ import {
   dateInRange,
   formatLunarDate,
   formatLocalDate,
+  formatTimestamp,
   parseLocalDate,
   rangesOverlap,
 } from '../src/utils/taskDates.ts'
@@ -34,4 +35,12 @@ test('lunar date uses compact Chinese calendar labels', () => {
   assert.equal(formatLunarDate('2026-02-17'), '正月')
   assert.equal(formatLunarDate('2026-08-19'), '初七')
   assert.equal(formatLunarDate('2026-09-11'), '八月')
+})
+
+test('formatTimestamp keeps unparseable values verbatim', () => {
+  assert.equal(formatTimestamp('not-a-date'), 'not-a-date')
+})
+
+test('formatTimestamp renders month/day and hh:mm', () => {
+  assert.match(formatTimestamp('2026-08-21T09:52:16Z'), /^\d{1,2}\/\d{1,2},? \d{2}:\d{2}$/)
 })
