@@ -95,7 +95,7 @@
                   </span>
                   <span class="card-footer">
                     <span :class="{ danger: task.derived.overdue }">{{ formatTaskDateRange(task.start_date, task.end_date) }}</span>
-                    <span>{{ statusLabel(task.status) }}</span>
+                    <span>{{ taskStatusLabel(task.status) }}</span>
                   </span>
                   <span v-if="task.kind === 'long'" class="mini-progress">
                     <i :style="{ width: `${task.progress_percent}%` }"></i>
@@ -114,11 +114,12 @@
         </div>
       </aside>
 
-      <main class="task-detail-panel glass-surface">
+      <div class="task-detail-zone">
+        <main class="task-detail-panel glass-surface">
         <div v-if="store.detailLoading" class="detail-loading">
           <span></span><span></span><span></span>
         </div>
-        <template v-else-if="detail && activeNode">
+        <template v-else-if="detail">
           <div class="mobile-detail-nav">
             <button type="button" @click="closeMobileDetail">‹ 任务列表</button>
             <span>{{ detail.root.kind === 'short' ? '短期待办' : '长期任务' }}</span>
@@ -127,23 +128,23 @@
           <header ref="detailHeaderRef" class="detail-header">
             <div class="detail-title-group">
               <div class="detail-kicker">
-                <span class="status-dot" :class="`status-${activeNode.status}`"></span>
-                {{ statusLabel(activeNode.status) }} · {{ importanceLabel(activeNode.importance) }}
+                <span class="status-dot" :class="`status-${detail.root.status}`"></span>
+                {{ taskStatusLabel(detail.root.status) }} · {{ taskImportanceLabel(detail.root.importance) }}
               </div>
-              <h2>{{ activeNode.title }}</h2>
-              <p>{{ activeNode.description || '这个任务还没有描述。' }}</p>
+              <h2>{{ detail.root.title }}</h2>
+              <p>{{ detail.root.description || '这个任务还没有描述。' }}</p>
             </div>
             <div class="detail-actions">
-              <button type="button" @click="openStatus(activeNode)">更改状态</button>
-              <button type="button" @click="openEdit(activeNode)">编辑</button>
+              <button type="button" @click="openStatus(detail.root)">更改状态</button>
+              <button type="button" @click="openEdit(detail.root)">编辑</button>
               <button type="button" class="more-button" aria-label="归档任务" @click="openArchiveConfirm">···</button>
             </div>
           </header>
 
           <div class="detail-facts">
-            <div><span>开始</span><strong>{{ activeNode.start_date }}</strong></div>
-            <div><span>结束</span><strong>{{ activeNode.end_date }}</strong></div>
-            <div><span>优先级</span><strong>{{ importanceLabel(activeNode.importance) }}</strong></div>
+            <div><span>开始</span><strong>{{ detail.root.start_date }}</strong></div>
+            <div><span>结束</span><strong>{{ detail.root.end_date }}</strong></div>
+            <div><span>优先级</span><strong>{{ taskImportanceLabel(detail.root.importance) }}</strong></div>
           </div>
 
           <section v-if="detail.root.kind === 'long'" class="progress-overview">
@@ -160,12 +161,12 @@
           <section v-if="detail.root.kind === 'long'" class="detail-section task-breakdown">
             <div class="section-heading">
               <div><span>任务拆解</span><strong>{{ subtaskCount }} 个子任务</strong></div>
-              <button type="button" @click="openSubtask(activeNode)">＋ 添加子任务</button>
+              <button type="button" @click="openSubtask(detail.root)">＋ 添加子任务</button>
             </div>
             <TaskTree
               :tasks="detail.tasks"
-              :selected-id="activeNodeId"
-              @select="selectNode"
+              :selected-id="drawerNodeId || detail.root.id"
+              @select="focusTask"
               @add="openSubtask"
               @progress="openProgress"
               @status="openStatus"
@@ -177,21 +178,24 @@
           <section ref="activitySectionRef" class="detail-section activity-section">
             <div class="section-heading">
               <div><span>进展与记录</span><strong>{{ detail.progress.length + detail.audit.length }} 条</strong></div>
-              <button type="button" @click="openProgress(activeNode)">＋ 添加进展</button>
+              <button type="button" @click="openProgress(detail.root)">＋ 添加进展</button>
             </div>
             <div v-if="activity.length" class="activity-list">
               <article v-for="item in activity" :key="item.id" class="activity-item">
                 <span class="activity-dot" :class="item.type"></span>
                 <div class="activity-copy">
                   <div class="activity-head">
-                    <strong>{{ item.title }}</strong>
+                    <strong>
+                      <button type="button" class="activity-task" :title="item.taskTitle" @click="focusTask(item.taskId)">{{ item.taskTitle }}</button>
+                      <span class="activity-sep">·</span>{{ item.title }}
+                    </strong>
                     <time>{{ formatTimestamp(item.time) }}</time>
                   </div>
                   <p v-if="item.note">{{ item.note }}</p>
                 </div>
               </article>
             </div>
-            <button v-else type="button" class="activity-empty" @click="openProgress(activeNode)">记录第一条进展</button>
+            <button v-else type="button" class="activity-empty" @click="openProgress(detail.root)">记录第一条进展</button>
           </section>
         </template>
         <div v-else class="empty-detail">
@@ -199,7 +203,19 @@
           <strong>选择一项任务</strong>
           <p>在这里查看计划、拆解与每一步进展。</p>
         </div>
-      </main>
+        </main>
+        <SubtaskDrawer
+          ref="drawerRef"
+          :node="drawerNode"
+          :activity="drawerActivity"
+          @close="closeDrawer"
+          @progress="openProgress"
+          @add="openSubtask"
+          @status="openStatus"
+          @edit="openEdit"
+          @move="openMove"
+        />
+      </div>
     </div>
 
     <TaskCalendar
@@ -370,11 +386,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { FolderChecked, Plus, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import MotionModal from '@/components/motion/MotionModal.vue'
+import SubtaskDrawer from '@/components/tasks/SubtaskDrawer.vue'
 import TaskCalendar from '@/components/tasks/TaskCalendar.vue'
 import TaskTree from '@/components/tasks/TaskTree.vue'
 import {
@@ -389,9 +406,11 @@ import {
   addLocalDays,
   buildMonthGrid,
   formatTaskDateRange,
+  formatTimestamp,
   shiftMonth,
   todayLocal,
 } from '@/utils/taskDates'
+import { buildTaskActivity, taskImportanceLabel, taskStatusLabel } from '@/utils/taskActivity'
 import { taskFieldsPayload } from '@/utils/taskPayloads'
 
 type ViewMode = 'tasks' | 'calendar'
@@ -407,7 +426,8 @@ const statusFilter = ref<'active' | 'all' | TaskStatus>('active')
 const today = todayLocal()
 const calendarAnchor = ref(`${today.slice(0, 7)}-01`)
 const selectedDate = ref(typeof route.query.date === 'string' ? route.query.date : today)
-const activeNodeId = ref<string | null>(null)
+const drawerNodeId = ref<string | null>(null)
+const drawerRef = ref<InstanceType<typeof SubtaskDrawer> | null>(null)
 const detailHeaderRef = ref<HTMLElement | null>(null)
 const activitySectionRef = ref<HTMLElement | null>(null)
 const sheetOpen = ref(false)
@@ -437,7 +457,7 @@ const importanceOptions: Array<{ value: TaskImportance; label: string }> = [
 ]
 
 const detail = computed(() => store.selectedDetail)
-const activeNode = computed(() => detail.value?.tasks.find((task) => task.id === activeNodeId.value) || detail.value?.root || null)
+const drawerNode = computed(() => (drawerNodeId.value ? detail.value?.tasks.find((task) => task.id === drawerNodeId.value) || null : null))
 const subtaskCount = computed(() => detail.value?.tasks.filter(task => task.role === 'subtask').length || 0)
 const isTerminalStatus = computed(() => statusForm.value.status === 'completed' || statusForm.value.status === 'cancelled')
 const statusSheetOptions = computed(() => targetNode.value?.kind === 'short'
@@ -470,17 +490,10 @@ const moveCandidates = computed(() => {
   const blocked = descendantIds(targetNode.value.id, detail.value.tasks)
   return detail.value.tasks.filter((task) => !blocked.has(task.id) && task.id !== targetNode.value?.id)
 })
-const activity = computed(() => {
-  if (!detail.value || !activeNode.value) return []
-  const taskId = activeNode.value.id
-  const progress = detail.value.progress
-    .filter((item) => item.task_id === taskId)
-    .map((item) => ({ id: item.id, type: 'progress', title: item.percent_after == null ? '记录了新进展' : `进展更新为 ${item.percent_after}%`, note: item.note, time: item.recorded_at }))
-  const audit = detail.value.audit
-    .filter((item) => item.task_id === taskId)
-    .map((item) => ({ id: item.id, type: 'audit', title: auditTitle(item), note: item.note, time: item.occurred_at }))
-  return [...progress, ...audit].sort((a, b) => b.time.localeCompare(a.time))
-})
+// Root overview shows the whole tree's history with per-task attribution;
+// the drawer gets the focused feed for its own node.
+const activity = computed(() => buildTaskActivity(detail.value?.tasks ?? [], detail.value?.progress ?? [], detail.value?.audit ?? []))
+const drawerActivity = computed(() => (drawerNode.value ? buildTaskActivity(detail.value?.tasks ?? [], detail.value?.progress ?? [], detail.value?.audit ?? [], drawerNode.value.id) : []))
 const sheetTitle = computed(() => ({
   create: '新建任务', edit: '编辑任务', subtask: '添加子任务', progress: '记录进展', status: '更改状态', move: '移动子任务',
 })[sheetMode.value])
@@ -515,7 +528,7 @@ async function refreshCurrent() {
 async function openTask(id: string) {
   const loaded = await store.loadDetail(id).catch(() => null)
   if (!loaded) return
-  activeNodeId.value = loaded.tasks.some(task => task.id === id) ? id : loaded.root.id
+  drawerNodeId.value = null
   await router.replace({ query: { ...route.query, view: 'tasks', task: loaded.root.id } })
 }
 
@@ -526,7 +539,7 @@ async function openFromCalendar(id: string) {
 
 function closeMobileDetail() {
   store.clearSelection()
-  activeNodeId.value = null
+  drawerNodeId.value = null
   const query = { ...route.query }
   delete query.task
   void router.replace({ query })
@@ -594,9 +607,27 @@ async function revealDetailEl(el: HTMLElement | null) {
   el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-async function selectNode(id: string) {
-  activeNodeId.value = id
-  await revealDetailEl(detailHeaderRef.value)
+/** Focus a task: subtasks surface in the right drawer, the root closes it back to the overview. */
+function focusTask(id: string) {
+  if (!detail.value || id === detail.value.root.id) {
+    closeDrawer()
+    return
+  }
+  drawerNodeId.value = id
+}
+
+function closeDrawer() {
+  drawerNodeId.value = null
+}
+
+// Switching to another task in the list must not keep a stale drawer open.
+watch(() => store.selectedDetail?.root.id, () => {
+  drawerNodeId.value = null
+})
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || !drawerNodeId.value || sheetOpen.value || archiveConfirmOpen.value) return
+  closeDrawer()
 }
 
 function openProgress(task: TaskNode) {
@@ -628,19 +659,27 @@ async function submitSheet() {
     }
     const fields = taskFieldsPayload(form.value)
     const mode = sheetMode.value
+    const writeTarget = targetNode.value
     if (mode === 'create') await store.create(form.value.kind, fields)
-    else if (mode === 'edit' && targetNode.value) await store.update(targetNode.value.id, fields)
-    else if (mode === 'subtask' && targetNode.value) await store.addSubtask(targetNode.value.id, fields)
-    else if (mode === 'progress' && targetNode.value) await store.addProgress(targetNode.value.id, progressForm.value.note, progressForm.value.includePercent ? progressForm.value.percent : undefined)
-    else if (mode === 'status' && targetNode.value) await store.setStatus(targetNode.value.id, statusForm.value.status, statusForm.value.note || undefined, statusForm.value.cascade)
-    else if (mode === 'move' && targetNode.value) await store.moveSubtask(targetNode.value.id, moveForm.value.parentId, 9999)
+    else if (mode === 'edit' && writeTarget) await store.update(writeTarget.id, fields)
+    else if (mode === 'subtask' && writeTarget) await store.addSubtask(writeTarget.id, fields)
+    else if (mode === 'progress' && writeTarget) await store.addProgress(writeTarget.id, progressForm.value.note, progressForm.value.includePercent ? progressForm.value.percent : undefined)
+    else if (mode === 'status' && writeTarget) await store.setStatus(writeTarget.id, statusForm.value.status, statusForm.value.note || undefined, statusForm.value.cascade)
+    else if (mode === 'move' && writeTarget) await store.moveSubtask(writeTarget.id, moveForm.value.parentId, 9999)
     sheetOpen.value = false
-    activeNodeId.value = targetNode.value?.id || store.selectedDetail?.root.id || null
+    // Surface the affected task: subtask writes open its drawer, root writes stay on the overview.
+    drawerNodeId.value = writeTarget && writeTarget.role === 'subtask' ? writeTarget.id : null
     await refreshCurrent()
     ElMessage.success(`${sheetAction.value}成功`)
-    // Show the user what changed: the new activity entry for progress writes,
-    // the refreshed header for everything else.
-    await revealDetailEl(mode === 'progress' ? activitySectionRef.value : detailHeaderRef.value)
+    // Show the user what changed: progress writes reveal the new entry (in the
+    // drawer when one is open, otherwise the panel's activity section); other
+    // writes reveal the refreshed header when no drawer is open.
+    if (mode === 'progress' && drawerNodeId.value) {
+      await nextTick()
+      drawerRef.value?.revealActivity()
+    } else if (!drawerNodeId.value) {
+      await revealDetailEl(mode === 'progress' ? activitySectionRef.value : detailHeaderRef.value)
+    }
   } catch {
     // The store exposes the actionable error in the page banner.
   }
@@ -683,24 +722,6 @@ function descendantIds(id: string, tasks: TaskNode[]) {
   return result
 }
 
-function statusLabel(status: TaskStatus) {
-  return statusOptions.find((item) => item.value === status)?.label || status
-}
-
-function importanceLabel(importance: TaskImportance) {
-  return importanceOptions.find((item) => item.value === importance)?.label || importance
-}
-
-function formatTimestamp(value: string) {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
-
-function auditTitle(item: { event_type: string; from_status: TaskStatus | null; to_status: TaskStatus | null }) {
-  if (item.event_type === 'status_changed' && item.to_status) return `状态变为${statusLabel(item.to_status)}`
-  return ({ created: '创建了任务', updated: '更新了任务', moved: '移动了任务', archived: '归档了任务', reopened: '重新打开任务' } as Record<string, string>)[item.event_type] || '任务发生变化'
-}
-
 let filterTimer: number | undefined
 watch([searchQuery, kindFilter, statusFilter], () => {
   window.clearTimeout(filterTimer)
@@ -708,6 +729,14 @@ watch([searchQuery, kindFilter, statusFilter], () => {
     void loadList()
     if (viewMode.value === 'calendar') void loadCalendar()
   }, 220)
+})
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
 })
 
 onMounted(async () => {
@@ -749,6 +778,8 @@ onMounted(async () => {
 .error-banner-enter-active, .error-banner-leave-active { transition: opacity var(--motion-fast) ease, transform var(--motion-fast) ease; }
 .error-banner-enter-from, .error-banner-leave-to { opacity: 0; transform: translateY(-5px); }
 .task-workspace { min-height: 620px; height: calc(100dvh - 208px); display: grid; grid-template-columns: minmax(270px, 340px) minmax(0, 1fr); gap: 14px; }
+.task-detail-zone { min-width: 0; min-height: 0; display: flex; }
+.task-detail-zone .task-detail-panel { flex: 1 1 0; }
 .task-list-panel, .task-detail-panel { border-radius: 22px; min-height: 0; overflow: auto; }
 .task-list-panel { padding: 10px; }
 .panel-heading { height: 45px; display: flex; align-items: center; justify-content: space-between; padding: 0 7px 6px; }
@@ -822,7 +853,10 @@ onMounted(async () => {
 .activity-copy { min-width: 0; padding: 0 0 14px 3px; border-bottom: 1px solid var(--border-subtle); }
 .activity-item:last-child .activity-copy { border-bottom: 0; }
 .activity-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
-.activity-head strong { min-width: 0; }
+.activity-head strong { min-width: 0; display: flex; align-items: baseline; gap: 0; }
+.activity-task { display: inline-block; max-width: 11em; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 650; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-task:hover { text-decoration: underline; }
+.activity-sep { flex: none; margin: 0 5px; color: var(--text-faint); font-weight: 450; }
 .activity-head time { flex: none; padding-top: 1px; text-align: right; font-variant-numeric: tabular-nums; }
 .activity-dot { width: 9px; height: 9px; margin-top: 4px; border: 2px solid var(--accent); border-radius: 50%; background: var(--bg-base); }
 .activity-dot.audit { border-color: var(--text-faint); }
@@ -910,6 +944,7 @@ onMounted(async () => {
 
 @media (max-width: 768px) {
   .glass-button { min-height: 44px; }.task-toolbar { flex-wrap: wrap; padding: 7px; }.view-switch { width: 100%; }.view-switch button { min-height: 38px; }.task-search { order: 2; min-width: 0; max-width: none; flex: 1; min-height: 44px; }.filters { order: 3; width: 100%; }.filters :deep(.el-select) { flex: 1; width: auto; min-width: 0; }.filters :deep(.el-select__wrapper) { min-height: 44px; }.task-workspace { min-height: calc(100dvh - 260px); height: auto; display: block; }.task-list-panel, .task-detail-panel { min-height: calc(100dvh - 260px); border-radius: 20px; }.task-detail-panel { display: none; padding: 12px; }.task-workspace.detail-open .task-list-panel { display: none; }.task-workspace.detail-open .task-detail-panel { display: block; }.mobile-detail-nav { height: 45px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }.mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font-weight: 600; }.mobile-detail-nav span { color: var(--text-faint); font-size: 11px; }.detail-header { display: block; }.detail-title-group h2 { font-size: 23px; }.detail-actions { display: grid; grid-template-columns: 1fr 1fr 44px; margin-top: 14px; }.detail-actions button { min-height: 44px; }.detail-facts { grid-template-columns: 1fr 1fr; margin: 14px 0; }.detail-facts div:last-child { grid-column: 1 / -1; }.progress-overview, .detail-section { padding: 13px; }.section-heading button { min-height: 44px; }.task-card { min-height: 110px; }.panel-heading button { min-width: 44px; min-height: 44px; }.task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }.sheet-header { padding: 34px 20px 16px; }.sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }.form-grid { grid-template-columns: 1fr; }.field.full { grid-column: auto; }.field input, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; }.sheet-footer { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }.sheet-footer button { min-height: 48px; }
+  .task-detail-zone { display: block; }
 }
 
 @media (max-width: 768px) {
