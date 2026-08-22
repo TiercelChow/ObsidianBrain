@@ -653,9 +653,11 @@ eachDayOfInterval(start: string, end: string): string[]
 ### 11.3 详情交互与子任务抽屉
 
 - 详情面板恒渲染根任务（总览、拆解树、聚合活动流）；`Tasks.vue` 以 `drawerNodeId` ref 驱动子任务抽屉，不再有整面板切换。
-- `utils/taskActivity.ts` 的 `buildTaskActivity(nodes, progress, audit, scopeTaskId?)` 负责全树聚合（省略 scope）与单任务过滤（传入 scope，供抽屉），条目携带 `taskTitle` 归因；`taskStatusLabel`/`taskImportanceLabel`/`formatTimestamp` 一并从视图层下沉到 utils。
-- `SubtaskDrawer.vue` 常驻挂载：桌面端（≥1150px）以 flex 定宽 slot 实现 push 压缩；<1150px 转为 fixed 浮层 + 遮罩；≤768px 宽度 min(88vw, 400px)。z-index 2300/2301，低于 MotionModal 的 2400。
+- `utils/taskActivity.ts` 的 `buildTaskActivity(nodes, progress, audit, scopeTaskId?)` 负责全树聚合（省略 scope）与单任务过滤（传入 scope，供抽屉）；条目 `title` 为名词式类型标签（进展/状态变更/移动…），`detail` 携带具体变化（完成度 X%、状态 A → B），`taskTitle` 归因；`taskStatusLabel`/`taskImportanceLabel`/`formatTimestamp` 一并从视图层下沉到 utils。
+- `SubtaskDrawer.vue` 常驻挂载：桌面端（≥1150px）以 flex 定宽 slot 实现 push 压缩（slot 总宽 `min(400px, 30vw) + 24px`，其中 24px 为左缘把手槽）；<1150px 转为 fixed 浮层 + 遮罩；≤768px 宽度 min(88vw, 400px)。z-index 2300/2301，低于 MotionModal 的 2400。
+- 抽屉结构：头部「‹ 返回上级」行（emit `select`，父级绑 `focusTask`）+ 眉标属性胶囊 + 右上角编辑/更改状态/移动图标按钮（EditPen/Refresh/Rank）；正文为「子任务」栏目（直属子任务列表，点击下钻）与「进展与记录」栏目（栏目标题行「＋」分别为添加子任务/记录进展）；左缘中部「‹」收起把手替代关闭按钮（打开时键盘焦点落于把手）。
 - 抽屉操作全部 emit 回 `Tasks.vue` 复用 sheet 表单体系；写入成功后子任务目标自动打开其抽屉，根任务目标回到总览。
+- 布局锁定：`.tasks-page.view-tasks` 为 `calc(100dvh - 64px)` 的 flex 列（移动端 `calc(100dvh - 96px - safe-top - safe-bottom)`），workspace `flex: 1 1 auto; min-height: 0`，仅面板内部滚动；属性胶囊 `.task-pill`（status-*/importance-*/type-*）定义于 App.vue 全局样式块，主面板与抽屉共用。
 
 ### 11.4 路由状态
 
