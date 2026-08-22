@@ -6,10 +6,6 @@
         <p class="page-subtitle">让临期待办轻巧落地，让长期目标稳步生长</p>
       </div>
       <div class="header-actions">
-        <button class="glass-button secondary" type="button" :disabled="store.syncing" @click="syncNow">
-          <el-icon :class="{ spinning: store.syncing }"><Refresh /></el-icon>
-          {{ store.syncing ? '同步中' : '同步 Obsidian' }}
-        </button>
         <button class="glass-button primary" type="button" @click="openCreate()">
           <el-icon><Plus /></el-icon>
           新建任务
@@ -376,7 +372,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { FolderChecked, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { FolderChecked, Plus, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import MotionModal from '@/components/motion/MotionModal.vue'
@@ -673,14 +669,6 @@ async function confirmArchive() {
   } catch { /* shown by store */ }
 }
 
-async function syncNow() {
-  try {
-    const result = await store.sync()
-    await refreshCurrent()
-    ElMessage.success(`同步完成：${result.created} 个新增，${result.updated} 个更新`)
-  } catch { /* shown by store */ }
-}
-
 function descendantIds(id: string, tasks: TaskNode[]) {
   const result = new Set<string>([id])
   let changed = true
@@ -724,11 +712,7 @@ watch([searchQuery, kindFilter, statusFilter], () => {
 })
 
 onMounted(async () => {
-  const tasks = await store.loadTasks(taskFilters()).catch(() => [])
-  if (tasks.length === 0) {
-    await store.sync().catch(() => undefined)
-    await loadList()
-  }
+  await store.loadTasks(taskFilters()).catch(() => [])
   if (viewMode.value === 'calendar') await loadCalendar()
   if (typeof route.query.task === 'string') await openTask(route.query.task)
 })
@@ -741,7 +725,6 @@ onMounted(async () => {
 .glass-button:active { transform: scale(.97); }
 .glass-button.primary { background: var(--accent); border-color: transparent; color: white; box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 25%, transparent); }
 .glass-button:disabled { opacity: .55; cursor: wait; }
-.spinning { display: inline-block; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .glass-surface { background: var(--bg-glass); border: 1px solid var(--border-glass); box-shadow: var(--shadow-sm), var(--inset-highlight); backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)); }
 .task-toolbar { min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 8px 10px; margin-bottom: 14px; border-radius: 18px; }

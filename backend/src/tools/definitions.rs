@@ -250,14 +250,6 @@ pub fn archive_task_schema() -> Value {
     })
 }
 
-pub fn sync_tasks_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": { "dry_run": { "type": "boolean", "default": false } },
-        "additionalProperties": false
-    })
-}
-
 // ── Code Repo Tools ──
 
 /// Schema for `add_code_repo` — register a code repository.

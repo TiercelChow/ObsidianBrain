@@ -659,22 +659,6 @@ pub struct TaskWriteResponse {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct TaskSyncResult {
-    pub created: usize,
-    pub updated: usize,
-    pub unchanged: usize,
-    pub removed: usize,
-    pub errors: Vec<TaskSyncError>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskSyncError {
-    pub path: String,
-    pub code: String,
-    pub message: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

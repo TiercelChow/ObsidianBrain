@@ -90,14 +90,6 @@ export interface TaskWriteResponse {
   warnings: string[]
 }
 
-export interface TaskSyncResult {
-  created: number
-  updated: number
-  unchanged: number
-  removed: number
-  errors: Array<{ path: string; code: string; message: string }>
-}
-
 export interface TaskFields {
   title: string
   description?: string
@@ -243,8 +235,4 @@ export function archiveTask(taskId: string, archived: boolean, expectedVersion: 
     archived,
     expected_version: expectedVersion,
   })
-}
-
-export function syncTasks(dryRun = false) {
-  return taskCall<TaskSyncResult>('sync_tasks', { dry_run: dryRun })
 }

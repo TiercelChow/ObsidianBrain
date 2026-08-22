@@ -170,23 +170,6 @@ task_handler!(
     }
 );
 
-#[derive(Debug, Default, Deserialize)]
-struct SyncTasksArgs {
-    #[serde(default)]
-    dry_run: bool,
-}
-
-task_handler!(
-    SyncTasksHandler,
-    "sync_tasks",
-    "从 Obsidian Tasks 文件夹增量刷新或预检任务索引",
-    sync_tasks_schema,
-    |args, ctx| {
-        let request: SyncTasksArgs = parse(args)?;
-        json(ctx.task_service.sync_tasks(request.dry_run).await?)
-    }
-);
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,9 +187,8 @@ mod tests {
             Box::new(AddTaskProgressHandler),
             Box::new(GetTaskCalendarHandler),
             Box::new(ArchiveTaskHandler),
-            Box::new(SyncTasksHandler),
         ];
-        assert_eq!(handlers.len(), 11);
+        assert_eq!(handlers.len(), 10);
         assert!(handlers
             .iter()
             .all(|handler| handler.module() == "tasks" && handler.input_schema().is_object()));

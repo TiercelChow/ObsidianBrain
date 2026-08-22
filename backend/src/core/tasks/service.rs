@@ -481,68 +481,6 @@ impl TaskService {
             .await
     }
 
-    pub async fn sync_tasks(&self, dry_run: bool) -> Result<TaskSyncResult, BrainError> {
-        let mut result = TaskSyncResult::default();
-        let mut paths = self.documents.list("Tasks/Short").await?;
-        paths.extend(self.documents.list("Tasks/Long").await?);
-        paths.sort();
-        paths.dedup();
-        let active_paths: HashSet<String> = paths.iter().cloned().collect();
-
-        for path in paths {
-            let markdown = match self.documents.read(&path).await {
-                Ok(Some(markdown)) => markdown,
-                Ok(None) => continue,
-                Err(error) => {
-                    result.errors.push(sync_error(&path, &error));
-                    continue;
-                }
-            };
-            let content_hash = content_hash(&markdown);
-            let existing = self.index.document_meta(&path).await?;
-            if existing
-                .as_ref()
-                .is_some_and(|meta| meta.content_hash == content_hash)
-            {
-                result.unchanged += 1;
-                continue;
-            }
-            let document = match self.codec.parse(&path, &markdown) {
-                Ok(document) => document,
-                Err(error) => {
-                    result.errors.push(sync_error(&path, &error));
-                    continue;
-                }
-            };
-            if existing.is_some() {
-                result.updated += 1;
-            } else {
-                result.created += 1;
-            }
-            if !dry_run {
-                if let Err(error) = self
-                    .index
-                    .replace_document(&path, &content_hash, &document)
-                    .await
-                {
-                    result.errors.push(sync_error(&path, &error));
-                    continue;
-                }
-                self.clear_dirty(&path);
-            }
-        }
-
-        for stored_path in self.index.list_document_paths().await? {
-            if !active_paths.contains(&stored_path) {
-                result.removed += 1;
-                if !dry_run {
-                    self.index.remove_document(&stored_path).await?;
-                }
-            }
-        }
-        Ok(result)
-    }
-
     async fn create_short_task(
         &self,
         request: TaskCreateRequest,
@@ -875,14 +813,6 @@ fn slugify(title: &str) -> String {
         "task".to_string()
     } else {
         slug
-    }
-}
-
-fn sync_error(path: &str, error: &BrainError) -> TaskSyncError {
-    TaskSyncError {
-        path: path.to_string(),
-        code: error.error_code().to_string(),
-        message: error.to_string(),
     }
 }
 

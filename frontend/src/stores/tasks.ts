@@ -11,7 +11,6 @@ import {
   listTasks as listTasksApi,
   moveSubtask as moveSubtaskApi,
   setTaskStatus as setTaskStatusApi,
-  syncTasks as syncTasksApi,
   updateTask as updateTaskApi,
   type DocumentVersion,
   type TaskDetail,
@@ -20,7 +19,6 @@ import {
   type TaskKind,
   type TaskStatus,
   type TaskSummary,
-  type TaskSyncResult,
 } from '@/api/tasks'
 
 export const useTasksStore = defineStore('tasks', () => {
@@ -32,9 +30,7 @@ export const useTasksStore = defineStore('tasks', () => {
   const detailLoading = ref(false)
   const calendarLoading = ref(false)
   const saving = ref(false)
-  const syncing = ref(false)
   const error = ref<string | null>(null)
-  const lastSync = ref<TaskSyncResult | null>(null)
   let listSequence = 0
   let detailSequence = 0
   let calendarSequence = 0
@@ -161,21 +157,6 @@ export const useTasksStore = defineStore('tasks', () => {
     return runWrite(() => archiveTaskApi(taskId, archived, version))
   }
 
-  async function sync(dryRun = false) {
-    syncing.value = true
-    error.value = null
-    try {
-      const result = await syncTasksApi(dryRun)
-      lastSync.value = result
-      return result
-    } catch (cause) {
-      error.value = describeError(cause)
-      throw cause
-    } finally {
-      syncing.value = false
-    }
-  }
-
   function clearSelection() {
     selectedTaskId.value = null
   }
@@ -194,9 +175,7 @@ export const useTasksStore = defineStore('tasks', () => {
     detailLoading,
     calendarLoading,
     saving,
-    syncing,
     error,
-    lastSync,
     loadTasks,
     loadDetail,
     loadCalendar,
@@ -207,7 +186,6 @@ export const useTasksStore = defineStore('tasks', () => {
     moveSubtask,
     addProgress,
     archive,
-    sync,
     clearSelection,
     clearError,
   }

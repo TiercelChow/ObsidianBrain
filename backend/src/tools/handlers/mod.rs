@@ -85,7 +85,6 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     registry.register(Arc::new(AddTaskProgressHandler)).await;
     registry.register(Arc::new(GetTaskCalendarHandler)).await;
     registry.register(Arc::new(ArchiveTaskHandler)).await;
-    registry.register(Arc::new(SyncTasksHandler)).await;
 
     // Inspiration module
     registry.register(Arc::new(GetInspirationHandler)).await;
