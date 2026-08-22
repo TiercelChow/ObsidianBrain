@@ -1,5 +1,5 @@
 <template>
-  <div class="tasks-page">
+  <div class="tasks-page" :class="{ 'view-tasks': viewMode === 'tasks' }">
     <header class="page-header">
       <div>
         <h1 class="page-title">任务中枢</h1>
@@ -128,8 +128,8 @@
           <header ref="detailHeaderRef" class="detail-header">
             <div class="detail-title-group">
               <div class="detail-kicker">
-                <span class="status-dot" :class="`status-${detail.root.status}`"></span>
-                {{ taskStatusLabel(detail.root.status) }} · {{ taskImportanceLabel(detail.root.importance) }}
+                <span class="task-pill" :class="`status-${detail.root.status}`">{{ taskStatusLabel(detail.root.status) }}</span>
+                <span class="task-pill" :class="`importance-${detail.root.importance}`">{{ taskImportanceLabel(detail.root.importance) }}</span>
               </div>
               <h2>{{ detail.root.title }}</h2>
               <p>{{ detail.root.description || '这个任务还没有描述。' }}</p>
@@ -185,13 +185,14 @@
                 <span class="activity-dot" :class="item.type"></span>
                 <div class="activity-copy">
                   <div class="activity-head">
-                    <strong>
-                      <button type="button" class="activity-task" :title="item.taskTitle" @click="focusTask(item.taskId)">{{ item.taskTitle }}</button>
-                      <span class="activity-sep">·</span>{{ item.title }}
-                    </strong>
+                    <strong><span class="task-pill" :class="`type-${item.type}`">{{ item.title }}</span></strong>
                     <time>{{ formatTimestamp(item.time) }}</time>
                   </div>
-                  <p v-if="item.note">{{ item.note }}</p>
+                  <p class="activity-meta">
+                    <button type="button" class="activity-task" :title="item.taskTitle" @click="focusTask(item.taskId)">{{ item.taskTitle }}</button>
+                    <span v-if="item.detail" class="activity-detail">{{ item.detail }}</span>
+                  </p>
+                  <p v-if="item.note" class="activity-note">{{ item.note }}</p>
                 </div>
               </article>
             </div>
@@ -208,7 +209,10 @@
           ref="drawerRef"
           :node="drawerNode"
           :activity="drawerActivity"
+          :children="drawerChildren"
+          :parent="drawerParent"
           @close="closeDrawer"
+          @select="focusTask"
           @progress="openProgress"
           @add="openSubtask"
           @status="openStatus"
@@ -458,6 +462,19 @@ const importanceOptions: Array<{ value: TaskImportance; label: string }> = [
 
 const detail = computed(() => store.selectedDetail)
 const drawerNode = computed(() => (drawerNodeId.value ? detail.value?.tasks.find((task) => task.id === drawerNodeId.value) || null : null))
+// Direct children of the drawer's node (drill-down list) and its parent (back row).
+const drawerChildren = computed(() => {
+  const node = drawerNode.value
+  if (!node) return []
+  return (detail.value?.tasks ?? [])
+    .filter((task) => task.parent_id === node.id)
+    .sort((a, b) => a.position - b.position)
+})
+const drawerParent = computed(() => {
+  const parentId = drawerNode.value?.parent_id
+  if (!parentId) return null
+  return detail.value?.tasks.find((task) => task.id === parentId) ?? null
+})
 const subtaskCount = computed(() => detail.value?.tasks.filter(task => task.role === 'subtask').length || 0)
 const isTerminalStatus = computed(() => statusForm.value.status === 'completed' || statusForm.value.status === 'cancelled')
 const statusSheetOptions = computed(() => targetNode.value?.kind === 'short'
@@ -750,6 +767,9 @@ onMounted(async () => {
 
 <style scoped>
 .tasks-page { min-height: 100%; max-width: 100%; color: var(--text-primary); }
+/* Task view locks the page: only the list/detail/drawer panes scroll (Reader.vue pattern). */
+.tasks-page.view-tasks { display: flex; flex-direction: column; height: calc(100vh - 64px); height: calc(100dvh - 64px); overflow: hidden; }
+.tasks-page.view-tasks > :not(.task-workspace) { flex-shrink: 0; }
 .glass-button { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 15px; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); box-shadow: var(--shadow-sm), var(--inset-highlight); color: var(--text-primary); font-weight: 580; cursor: pointer; transition: transform var(--motion-instant) ease, background var(--motion-fast) ease, box-shadow var(--motion-fast) ease; }
 .glass-button .el-icon { width: 1em; height: 1em; font-size: 14px; }
 .glass-button:active { transform: scale(.97); }
@@ -779,7 +799,7 @@ onMounted(async () => {
 .error-banner button { border: 0; background: transparent; color: #ff3b30; cursor: pointer; }
 .error-banner-enter-active, .error-banner-leave-active { transition: opacity var(--motion-fast) ease, transform var(--motion-fast) ease; }
 .error-banner-enter-from, .error-banner-leave-to { opacity: 0; transform: translateY(-5px); }
-.task-workspace { min-height: 620px; height: calc(100dvh - 208px); display: grid; grid-template-columns: minmax(270px, 340px) minmax(0, 1fr); gap: 14px; }
+.task-workspace { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(270px, 340px) minmax(0, 1fr); gap: 14px; }
 .task-detail-zone { min-width: 0; min-height: 0; display: flex; }
 .task-detail-zone .task-detail-panel { flex: 1 1 0; }
 .task-list-panel, .task-detail-panel { border-radius: 22px; min-height: 0; overflow: auto; }
@@ -823,27 +843,24 @@ onMounted(async () => {
 .empty-list p, .empty-detail p { margin: 7px 0 15px; color: var(--text-faint); font-size: 12px; }
 .empty-list button, .activity-empty { min-height: 40px; padding: 0 13px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-glass); color: var(--accent); cursor: pointer; }
 .empty-orb { width: 54px; height: 54px; display: grid; place-items: center; margin-bottom: 13px; border-radius: 18px; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); font-size: 25px; }
-.task-detail-panel { padding: 24px 26px; }
+.task-detail-panel { padding: 24px 26px 34px; }
 .mobile-detail-nav { display: none; }
 .detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 /* Keep scrollIntoView() reveals clear of the fixed mobile global header. */
 .detail-header, .activity-section { scroll-margin-top: calc(var(--mobile-header-height) + var(--safe-top) + 12px); }
 .detail-title-group { min-width: 0; }
-.detail-kicker { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 11px; font-weight: 580; }
-.status-dot { width: 7px; height: 7px; border-radius: 50%; background: #8e8e93; box-shadow: 0 0 0 4px color-mix(in srgb, #8e8e93 10%, transparent); }
-.status-in_progress { background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 11%, transparent); }
-.status-blocked { background: #ff9500; }.status-completed { background: #34c759; }.status-cancelled { background: #8e8e93; }
+.detail-kicker { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .detail-title-group h2 { margin: 7px 0 5px; font-size: clamp(22px, 3vw, 30px); line-height: 1.18; letter-spacing: var(--tracking-tight); }
 .detail-title-group p { max-width: 720px; margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 .detail-actions { display: flex; gap: 7px; flex: none; }
 .detail-actions button, .section-heading button { min-height: 38px; padding: 0 11px; border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-glass); color: var(--text-secondary); cursor: pointer; }
 .detail-actions .more-button { width: 40px; padding: 0; }
-.detail-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 22px 0; }
+.detail-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 26px 0; }
 .detail-facts div { min-width: 0; display: grid; gap: 5px; padding: 10px 12px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 3%, transparent); }
 .detail-facts span { color: var(--text-faint); font-size: 10px; }
 .detail-facts strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 570; }
-.progress-overview, .detail-section { padding: 16px; border: 1px solid var(--border-subtle); border-radius: 17px; background: color-mix(in srgb, var(--bg-glass) 72%, transparent); }
-.detail-section { margin-top: 12px; }
+.progress-overview, .detail-section { padding: 18px; border: 1px solid var(--border-subtle); border-radius: 17px; background: color-mix(in srgb, var(--bg-glass) 72%, transparent); }
+.detail-section { margin-top: 18px; }
 .section-heading { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .section-heading div { display: flex; align-items: baseline; gap: 8px; }
 .section-heading span { color: var(--text-muted); font-size: 12px; }
@@ -851,18 +868,21 @@ onMounted(async () => {
 .progress-track { height: 8px; border-radius: 8px; background: color-mix(in srgb, var(--text-primary) 6%, transparent); overflow: hidden; }
 .progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 65%, #34c759)); transition: width var(--motion-slow) var(--ease-spring-gentle); }
 .activity-list { display: grid; gap: 0; }
-.activity-item { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 9px; min-height: 56px; }
-.activity-copy { min-width: 0; padding: 0 0 14px 3px; border-bottom: 1px solid var(--border-subtle); }
-.activity-item:last-child .activity-copy { border-bottom: 0; }
-.activity-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
-.activity-head strong { min-width: 0; display: flex; align-items: baseline; gap: 0; }
+/* Dividers breathe on both sides: the next entry carries the top border plus its own padding. */
+.activity-item { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 9px; padding: 14px 0; }
+.activity-item + .activity-item { border-top: 1px solid var(--border-subtle); }
+.activity-copy { min-width: 0; }
+.activity-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.activity-head strong { min-width: 0; display: flex; align-items: center; }
+.activity-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px; margin: 7px 0 0; }
 .activity-task { display: inline-block; max-width: 11em; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 650; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .activity-task:hover { text-decoration: underline; }
-.activity-sep { flex: none; margin: 0 5px; color: var(--text-faint); font-weight: 450; }
+.activity-detail { color: var(--text-secondary); }
+.activity-note { margin: 5px 0 0; color: var(--text-muted); line-height: 1.5; white-space: pre-wrap; }
 .activity-head time { flex: none; padding-top: 1px; text-align: right; font-variant-numeric: tabular-nums; }
-.activity-dot { width: 9px; height: 9px; margin-top: 4px; border: 2px solid var(--accent); border-radius: 50%; background: var(--bg-base); }
+.activity-dot { width: 9px; height: 9px; margin-top: 5px; border: 2px solid var(--accent); border-radius: 50%; background: var(--bg-base); }
 .activity-dot.audit { border-color: var(--text-faint); }
-.activity-item strong { font-size: 12px; }.activity-item p { margin: 5px 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; white-space: pre-wrap; }.activity-item time { color: var(--text-faint); font-size: 10px; }
+.activity-item time { color: var(--text-faint); font-size: 10px; }
 .detail-loading { height: 100%; display: flex; align-items: center; justify-content: center; gap: 5px; }.detail-loading span { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite alternate; }.detail-loading span:nth-child(2) { animation-delay: .15s; }.detail-loading span:nth-child(3) { animation-delay: .3s; }
 @keyframes pulse { to { opacity: .25; transform: translateY(-4px); } }
 .detail-illustration { position: relative; width: 78px; height: 64px; margin-bottom: 13px; }.detail-illustration span, .detail-illustration i { position: absolute; display: block; border: 1px solid var(--border-subtle); border-radius: 17px; background: var(--bg-glass); box-shadow: var(--shadow-sm); }.detail-illustration span { inset: 0 13px 8px 0; transform: rotate(-6deg); }.detail-illustration i { inset: 8px 0 0 13px; transform: rotate(5deg); }
@@ -888,14 +908,13 @@ onMounted(async () => {
 .card-topline strong { font-size: 15px; font-weight: 620; }
 .card-footer { font-size: 11px; }
 .empty-list p, .empty-detail p { font-size: 13px; }
-.detail-kicker { font-size: 12px; }
 .detail-title-group p { font-size: 14px; line-height: 1.65; }
 .detail-actions button, .section-heading button { font-size: 13px; }
 .detail-facts span { font-size: 11px; }
 .detail-facts strong { font-size: 13px; }
 .section-heading span { font-size: 13px; }
 .section-heading small { font-size: 11px; }
-.activity-item strong, .activity-item p { font-size: 13px; }
+.activity-meta, .activity-note { font-size: 13px; }
 .activity-item time { font-size: 11px; }
 .field > span:first-child { font-size: 12px; }
 .sheet-hint, .mobile-detail-nav span { font-size: 12px; }
@@ -946,7 +965,7 @@ onMounted(async () => {
 }
 
 @media (max-width: 768px) {
-  .glass-button { min-height: 44px; }.task-toolbar { flex-wrap: wrap; padding: 7px; }.view-switch { width: 100%; }.view-switch button { min-height: 38px; }.task-search { order: 2; min-width: 0; max-width: none; flex: 1; min-height: 44px; }.filters { order: 3; width: 100%; }.filters :deep(.el-select) { flex: 1; width: auto; min-width: 0; }.filters :deep(.el-select__wrapper) { min-height: 44px; }.task-workspace { min-height: calc(100dvh - 260px); height: auto; display: block; }.task-list-panel, .task-detail-panel { min-height: calc(100dvh - 260px); border-radius: 20px; }.task-detail-panel { display: none; padding: 12px; }.task-workspace.detail-open .task-list-panel { display: none; }.task-workspace.detail-open .task-detail-panel { display: block; }.mobile-detail-nav { height: 45px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }.mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font-weight: 600; }.mobile-detail-nav span { color: var(--text-faint); font-size: 11px; }.detail-header { display: block; }.detail-title-group h2 { font-size: 23px; }.detail-actions { display: grid; grid-template-columns: 1fr 1fr 44px; margin-top: 14px; }.detail-actions button { min-height: 44px; }.detail-facts { grid-template-columns: 1fr 1fr; margin: 14px 0; }.detail-facts div:last-child { grid-column: 1 / -1; }.progress-overview, .detail-section { padding: 13px; }.section-heading button { min-height: 44px; }.task-card { min-height: 110px; }.panel-heading button { min-width: 44px; min-height: 44px; }.task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }.sheet-header { padding: 34px 20px 16px; }.sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }.form-grid { grid-template-columns: 1fr; }.field.full { grid-column: auto; }.field input, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; }.sheet-footer { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }.sheet-footer button { min-height: 48px; }
+  .glass-button { min-height: 44px; }.task-toolbar { flex-wrap: wrap; padding: 7px; }.view-switch { width: 100%; }.view-switch button { min-height: 38px; }.task-search { order: 2; min-width: 0; max-width: none; flex: 1; min-height: 44px; }.filters { order: 3; width: 100%; }.filters :deep(.el-select) { flex: 1; width: auto; min-width: 0; }.filters :deep(.el-select__wrapper) { min-height: 44px; }.tasks-page.view-tasks { height: calc(100dvh - 96px - var(--safe-top) - var(--safe-bottom)); }.task-workspace { flex: 1 1 auto; min-height: 0; height: auto; display: block; }.task-list-panel, .task-detail-panel { height: 100%; min-height: 0; border-radius: 20px; }.task-detail-panel { display: none; padding: 12px; }.task-workspace.detail-open .task-list-panel { display: none; }.task-workspace.detail-open .task-detail-panel { display: block; }.mobile-detail-nav { height: 45px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }.mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font-weight: 600; }.mobile-detail-nav span { color: var(--text-faint); font-size: 11px; }.detail-header { display: block; }.detail-title-group h2 { font-size: 23px; }.detail-actions { display: grid; grid-template-columns: 1fr 1fr 44px; margin-top: 14px; }.detail-actions button { min-height: 44px; }.detail-facts { grid-template-columns: 1fr 1fr; margin: 14px 0; }.detail-facts div:last-child { grid-column: 1 / -1; }.progress-overview, .detail-section { padding: 13px; }.section-heading button { min-height: 44px; }.task-card { min-height: 110px; }.panel-heading button { min-width: 44px; min-height: 44px; }.task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }.sheet-header { padding: 34px 20px 16px; }.sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }.form-grid { grid-template-columns: 1fr; }.field.full { grid-column: auto; }.field input, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; }.sheet-footer { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }.sheet-footer button { min-height: 48px; }
   .task-detail-zone { display: block; }
 }
 
