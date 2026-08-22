@@ -314,6 +314,31 @@ code, pre, .code-block { font-family: var(--font-mono); }
 }
 .header-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
+/* ── Task attribute pills (shared by Tasks view + subtask drawer) ── */
+.task-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 620;
+  line-height: 1;
+  white-space: nowrap;
+}
+.task-pill.status-open, .task-pill.status-cancelled { background: color-mix(in srgb, #8e8e93 15%, transparent); color: color-mix(in srgb, #8e8e93 85%, var(--text-primary)); }
+.task-pill.status-planned { background: color-mix(in srgb, var(--text-primary) 7%, transparent); color: var(--text-secondary); }
+.task-pill.status-in_progress { background: color-mix(in srgb, var(--accent) 13%, transparent); color: color-mix(in srgb, var(--accent) 82%, var(--text-primary)); }
+.task-pill.status-blocked { background: color-mix(in srgb, #ff9500 15%, transparent); color: color-mix(in srgb, #ff9500 85%, var(--text-primary)); }
+.task-pill.status-completed { background: color-mix(in srgb, #34c759 15%, transparent); color: color-mix(in srgb, #34c759 85%, var(--text-primary)); }
+.task-pill.importance-low { background: color-mix(in srgb, #8e8e93 13%, transparent); color: var(--text-muted); }
+.task-pill.importance-normal { background: color-mix(in srgb, var(--text-primary) 6%, transparent); color: var(--text-secondary); }
+.task-pill.importance-high { background: color-mix(in srgb, #ff9500 15%, transparent); color: color-mix(in srgb, #ff9500 85%, var(--text-primary)); }
+.task-pill.importance-urgent { background: color-mix(in srgb, #ff3b30 15%, transparent); color: color-mix(in srgb, #ff3b30 85%, var(--text-primary)); }
+.task-pill.type-progress { background: color-mix(in srgb, var(--accent) 12%, transparent); color: color-mix(in srgb, var(--accent) 82%, var(--text-primary)); }
+.task-pill.type-audit { background: color-mix(in srgb, var(--text-primary) 6%, transparent); color: var(--text-secondary); }
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
