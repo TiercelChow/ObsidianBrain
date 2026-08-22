@@ -1,4 +1,4 @@
-//! Rebuildable SQLite projection for personal tasks.
+//! SQLite authority store for personal tasks.
 
 use std::str::FromStr;
 use std::sync::Arc;

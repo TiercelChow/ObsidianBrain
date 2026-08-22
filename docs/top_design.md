@@ -25,7 +25,7 @@ ObsidianBrain 是一个运行在本地的 **Rust 知识引擎**，对外提供�
 | 缺乏跨界灵感触发 | 灵感熔炉主动制造知识碰撞 |
 | 外部信息过载，手动筛选成本高 | 智识雷达基于个人知识图谱做个性化推荐 |
 | 时间维度上的知识演变不可见 | 时间线回溯知识动态 |
-| 短期待办容易遗忘，长期目标难以持续拆解和追踪 | 个人任务模块统一管理待办、任务树、进展和日历，并保存到 Obsidian |
+| 短期待办容易遗忘，长期目标难以持续拆解和追踪 | 个人任务模块统一管理待办、任务树、进展和日历，并持久化到本地 SQLite |
 
 ### 1.4 非功能性需求
 
@@ -328,7 +328,7 @@ struct ProgressEntry {
 }
 ```
 
-短期待办按创建月份保存在 `Tasks/Short/YYYY-MM.md`；长期任务按根任务一文件保存在 `Tasks/Long/{slug}--{id8}.md`。Obsidian Markdown 是权威数据源，SQLite 仅保存可重建投影。完整字段和生命周期见 [任务需求设计](requirement/09-task-management.md)。
+个人任务以 SQLite 为唯一权威存储（四张表：task_documents / task_nodes / task_progress / task_audit_events），不再读写 Markdown 文件；文档键为 `db:short:{uuid}` / `db:long:{uuid}`（存量行保留原路径字符串作为主键）。完整字段和生命周期见 [任务需求设计](requirement/09-task-management.md)。
 
 ### 4.7 SQLite Schema
 
@@ -850,15 +850,7 @@ get_radar(limit: 5)
 - 长期任务：根任务与多级子任务共享通用字段，每个节点可追加进展。
 - 任务视图：桌面端 master-detail，手机端列表进入独立详情与底部操作面板。
 - 日历视图：桌面端月历加日程侧栏，手机端紧凑月历加选中日日程。
-- 可靠存储：Obsidian 先写、SQLite 后索引，revision + 内容哈希冲突检测，索引可从 Vault 重建。
-
-#### 存储约定
-
-```text
-Tasks/
-├── Short/YYYY-MM.md
-└── Long/{slug}--{id8}.md
-```
+- 可靠存储：任务写入为单事务 SQLite 直写（load → 变更闭包 → revision+1 → 版本令牌 sha256(path:revision) → replace_document 全量重建文档行），失败整体回滚；SQLite 不可由 Vault 重建（备份属基础设施话题）。
 
 首版日期语义为本地全天日期；不包含提醒、重复规则、任务依赖和外部日历同步。详细产品边界见 [需求设计](requirement/09-task-management.md)，实现方案见 [开发设计](development/09-task-management.md)。
 
@@ -1095,7 +1087,7 @@ enum BrainError {
 
 ### Phase 5: 个人任务管理（MVP 已实现）
 
-- [x] 任务领域模型、Markdown codec 与 SQLite 可重建投影
+- [x] 任务领域模型与 SQLite 权威存储
 - [x] 短期待办创建、编辑、关闭、重开和归档
 - [x] 长期任务多级拆解、移动、进展和状态管理
 - [x] 任务视图（桌面与手机）

@@ -109,11 +109,11 @@ impl BrainError {
                 Some("Check your embedding API key and network connectivity")
             }
             Self::RepoNotFound(_) => Some("Register the repository first via the code_repo tools"),
-            Self::TaskNotFound(_) => Some("请刷新任务列表或从 Obsidian 重新同步"),
+            Self::TaskNotFound(_) => Some("请刷新任务列表"),
             Self::TaskValidation(_) => Some("请检查标题、日期、状态和任务层级"),
             Self::TaskVersionConflict(_) => Some("任务已被修改，请刷新后重试"),
-            Self::TaskDuplicateId(_) => Some("请在 Obsidian 中修复重复任务 ID 后重新同步"),
-            Self::TaskDocumentCorrupt { .. } => Some("请检查 Tasks 文件的 YAML frontmatter"),
+            Self::TaskDuplicateId(_) => Some("任务 ID 冲突，请重试或反馈"),
+            Self::TaskDocumentCorrupt { .. } => Some("任务数据损坏，请检查数据库"),
             Self::ObsidianUnavailable => Some("请启用并检查 Obsidian Local REST API 插件"),
             Self::GitError { .. } => {
                 Some("Ensure the repository is a valid git repo and git is accessible")
