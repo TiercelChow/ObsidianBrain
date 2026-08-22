@@ -1,6 +1,6 @@
 //! Application service for personal task management.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 
 use chrono::{DateTime, Local, NaiveDate, Utc};
@@ -8,10 +8,8 @@ use sha2::{Digest, Sha256};
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
-use crate::core::tasks::markdown_codec::TaskMarkdownCodec;
 use crate::core::tasks::tree::{calculate_progress, descendant_ids, normalize_sibling_positions};
 use crate::error::BrainError;
-use crate::infra::task_document_store::TaskDocumentStore;
 use crate::infra::task_index_store::{TaskDocumentMeta, TaskIndexStore};
 use crate::models::task::*;
 
@@ -39,30 +37,20 @@ impl TaskClock for SystemTaskClock {
 }
 
 pub struct TaskService {
-    documents: Arc<dyn TaskDocumentStore>,
     index: Arc<dyn TaskIndexStore>,
-    codec: TaskMarkdownCodec,
     path_locks: Mutex<HashMap<String, Weak<AsyncMutex<()>>>>,
-    dirty_paths: Mutex<HashSet<String>>,
     clock: Arc<dyn TaskClock>,
 }
 
 impl TaskService {
-    pub fn new(documents: Arc<dyn TaskDocumentStore>, index: Arc<dyn TaskIndexStore>) -> Self {
-        Self::with_clock(documents, index, Arc::new(SystemTaskClock))
+    pub fn new(index: Arc<dyn TaskIndexStore>) -> Self {
+        Self::with_clock(index, Arc::new(SystemTaskClock))
     }
 
-    pub fn with_clock(
-        documents: Arc<dyn TaskDocumentStore>,
-        index: Arc<dyn TaskIndexStore>,
-        clock: Arc<dyn TaskClock>,
-    ) -> Self {
+    pub fn with_clock(index: Arc<dyn TaskIndexStore>, clock: Arc<dyn TaskClock>) -> Self {
         Self {
-            documents,
             index,
-            codec: TaskMarkdownCodec,
             path_locks: Mutex::new(HashMap::new()),
-            dirty_paths: Mutex::new(HashSet::new()),
             clock,
         }
     }
@@ -89,13 +77,15 @@ impl TaskService {
 
     pub async fn get_task(&self, task_id: Uuid) -> Result<TaskDetail, BrainError> {
         let meta = self.meta_for_task(task_id).await?;
-        let (document, markdown) = self.load_path(&meta.path).await?;
-        let version = version_for(&document, &markdown);
-        if version.content_hash != meta.content_hash || version.revision != meta.revision {
-            self.index
-                .replace_document(&meta.path, &version.content_hash, &document)
-                .await?;
-        }
+        let document = self
+            .index
+            .load_document(&meta.path)
+            .await?
+            .ok_or_else(|| BrainError::TaskNotFound(task_id.to_string()))?;
+        let version = DocumentVersion {
+            revision: meta.revision,
+            content_hash: meta.content_hash,
+        };
         detail_from_document(&document, &meta.path, version, task_id)
     }
 
@@ -486,48 +476,36 @@ impl TaskService {
         request: TaskCreateRequest,
     ) -> Result<TaskWriteResponse, BrainError> {
         let storage_month = self.clock.storage_month();
-        let path = format!("Tasks/Short/{storage_month}.md");
-        let path_lock = self.path_lock(&path)?;
-        let _guard = path_lock.lock().await;
-        let now = self.clock.now_utc();
-        let mut document = match self.documents.read(&path).await? {
-            Some(markdown) => self.codec.parse(&path, &markdown)?,
-            None => TaskDocument {
-                schema: "tasks-short/v1".to_string(),
-                document_kind: TaskDocumentKind::ShortMonth,
-                storage_month: Some(storage_month),
-                revision: 0,
-                tasks: Vec::new(),
-                progress: Vec::new(),
-                audit: Vec::new(),
-                extra: BTreeMap::new(),
-                freeform_notes: String::new(),
-            },
-        };
-        let next_revision = document.revision + 1;
         let id = Uuid::new_v4();
-        let position = document.tasks.len() as i32;
-        document.tasks.push(TaskNode {
-            id,
-            root_id: id,
-            parent_id: None,
-            kind: TaskKind::Short,
-            role: TaskRole::Root,
-            title: request.title.trim().to_string(),
-            description: request.description,
-            start_date: request.start_date,
-            end_date: request.end_date,
-            importance: request.importance,
-            status: TaskStatus::Open,
-            position,
-            closure_note: None,
-            closed_at: None,
-            created_at: now,
-            updated_at: now,
-            revision: next_revision,
-            archived_at: None,
-        });
-        document.revision = next_revision;
+        let path = format!("db:short:{id}");
+        let now = self.clock.now_utc();
+        let document = TaskDocument {
+            document_kind: TaskDocumentKind::ShortMonth,
+            storage_month: Some(storage_month),
+            revision: 1,
+            tasks: vec![TaskNode {
+                id,
+                root_id: id,
+                parent_id: None,
+                kind: TaskKind::Short,
+                role: TaskRole::Root,
+                title: request.title.trim().to_string(),
+                description: request.description,
+                start_date: request.start_date,
+                end_date: request.end_date,
+                importance: request.importance,
+                status: TaskStatus::Open,
+                position: 0,
+                closure_note: None,
+                closed_at: None,
+                created_at: now,
+                updated_at: now,
+                revision: 1,
+                archived_at: None,
+            }],
+            progress: Vec::new(),
+            audit: Vec::new(),
+        };
         self.persist_document(&path, document, id).await
     }
 
@@ -536,19 +514,9 @@ impl TaskService {
         request: TaskCreateRequest,
     ) -> Result<TaskWriteResponse, BrainError> {
         let id = Uuid::new_v4();
-        let path = format!(
-            "Tasks/Long/{}--{}.md",
-            slugify(&request.title),
-            &id.simple().to_string()[..8]
-        );
-        let path_lock = self.path_lock(&path)?;
-        let _guard = path_lock.lock().await;
-        if self.documents.read(&path).await?.is_some() {
-            return Err(BrainError::TaskDuplicateId(id.to_string()));
-        }
+        let path = format!("db:long:{id}");
         let now = self.clock.now_utc();
         let document = TaskDocument {
-            schema: "tasks-long/v1".to_string(),
             document_kind: TaskDocumentKind::LongTask,
             storage_month: None,
             revision: 1,
@@ -574,8 +542,6 @@ impl TaskService {
             }],
             progress: Vec::new(),
             audit: Vec::new(),
-            extra: BTreeMap::new(),
-            freeform_notes: String::new(),
         };
         self.persist_document(&path, document, id).await
     }
@@ -592,8 +558,15 @@ impl TaskService {
         let meta = self.meta_for_task(task_id).await?;
         let path_lock = self.path_lock(&meta.path)?;
         let _guard = path_lock.lock().await;
-        let (mut document, markdown) = self.load_path(&meta.path).await?;
-        let actual_version = version_for(&document, &markdown);
+        let mut document = self
+            .index
+            .load_document(&meta.path)
+            .await?
+            .ok_or_else(|| BrainError::TaskNotFound(task_id.to_string()))?;
+        let actual_version = DocumentVersion {
+            revision: meta.revision,
+            content_hash: meta.content_hash.clone(),
+        };
         verify_version(&expected_version, &actual_version)?;
         let next_revision = document.revision + 1;
         mutate(&mut document, self.clock.now_utc(), next_revision)?;
@@ -608,25 +581,16 @@ impl TaskService {
         focused_task_id: Uuid,
     ) -> Result<TaskWriteResponse, BrainError> {
         document.validate().map_err(BrainError::TaskValidation)?;
-        let markdown = self.codec.render(&document)?;
-        self.documents.write(path, &markdown).await?;
-        let version = version_for(&document, &markdown);
-        let mut warnings = Vec::new();
-        if let Err(error) = self
-            .index
+        let version = DocumentVersion {
+            revision: document.revision,
+            content_hash: version_token(path, document.revision),
+        };
+        self.index
             .replace_document(path, &version.content_hash, &document)
-            .await
-        {
-            warnings.push(format!("index_out_of_sync: {error}"));
-            let _ = self.index.enqueue_sync(path, &error.to_string()).await;
-            self.mark_dirty(path);
-        } else {
-            self.clear_dirty(path);
-        }
+            .await?;
         tracing::info!(path = %path, revision = document.revision, "任务文档写入完成");
         Ok(TaskWriteResponse {
             task: detail_from_document(&document, path, version, focused_task_id)?,
-            warnings,
         })
     }
 
@@ -635,16 +599,6 @@ impl TaskService {
             .find_document_by_task(task_id)
             .await?
             .ok_or_else(|| BrainError::TaskNotFound(task_id.to_string()))
-    }
-
-    async fn load_path(&self, path: &str) -> Result<(TaskDocument, String), BrainError> {
-        let markdown = self
-            .documents
-            .read(path)
-            .await?
-            .ok_or_else(|| BrainError::TaskNotFound(path.to_string()))?;
-        let document = self.codec.parse(path, &markdown)?;
-        Ok((document, markdown))
     }
 
     fn path_lock(&self, path: &str) -> Result<Arc<AsyncMutex<()>>, BrainError> {
@@ -659,18 +613,6 @@ impl TaskService {
         let lock = Arc::new(AsyncMutex::new(()));
         locks.insert(path.to_string(), Arc::downgrade(&lock));
         Ok(lock)
-    }
-
-    fn mark_dirty(&self, path: &str) {
-        if let Ok(mut dirty) = self.dirty_paths.lock() {
-            dirty.insert(path.to_string());
-        }
-    }
-
-    fn clear_dirty(&self, path: &str) {
-        if let Ok(mut dirty) = self.dirty_paths.lock() {
-            dirty.remove(path);
-        }
     }
 }
 
@@ -767,7 +709,6 @@ fn detail_from_document(
         progress_percent: metrics.percent,
         completed_leaf_count: metrics.completed_leaf_count,
         effective_leaf_count: metrics.effective_leaf_count,
-        freeform_notes: document.freeform_notes.clone(),
     })
 }
 
@@ -781,88 +722,20 @@ fn verify_version(expected: &DocumentVersion, actual: &DocumentVersion) -> Resul
     )))
 }
 
-fn version_for(document: &TaskDocument, markdown: &str) -> DocumentVersion {
-    DocumentVersion {
-        revision: document.revision,
-        content_hash: content_hash(markdown),
-    }
-}
-
-fn content_hash(content: &str) -> String {
-    format!("sha256:{}", hex::encode(Sha256::digest(content.as_bytes())))
-}
-
-fn slugify(title: &str) -> String {
-    let mut slug = String::new();
-    let mut pending_dash = false;
-    for character in title.trim().chars() {
-        if character.is_alphanumeric() {
-            if pending_dash && !slug.is_empty() {
-                slug.push('-');
-            }
-            pending_dash = false;
-            slug.extend(character.to_lowercase());
-        } else if character.is_whitespace() || matches!(character, '-' | '_' | '—') {
-            pending_dash = true;
-        }
-        if slug.chars().count() >= 48 {
-            break;
-        }
-    }
-    if slug.is_empty() {
-        "task".to_string()
-    } else {
-        slug
-    }
+fn version_token(path: &str, revision: i64) -> String {
+    format!(
+        "sha256:{}",
+        hex::encode(Sha256::digest(format!("{path}:{revision}").as_bytes()))
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::sync::RwLock;
-
-    use async_trait::async_trait;
     use tempfile::TempDir;
 
     use super::*;
     use crate::infra::sqlite_store::SqliteStore;
     use crate::infra::task_index_store::SqliteTaskIndexStore;
-
-    #[derive(Default)]
-    struct MemoryDocuments {
-        files: RwLock<HashMap<String, String>>,
-    }
-
-    #[async_trait]
-    impl TaskDocumentStore for MemoryDocuments {
-        async fn read(&self, path: &str) -> Result<Option<String>, BrainError> {
-            Ok(self
-                .files
-                .read()
-                .map_err(|error| BrainError::Internal(error.to_string()))?
-                .get(path)
-                .cloned())
-        }
-
-        async fn write(&self, path: &str, content: &str) -> Result<(), BrainError> {
-            self.files
-                .write()
-                .map_err(|error| BrainError::Internal(error.to_string()))?
-                .insert(path.to_string(), content.to_string());
-            Ok(())
-        }
-
-        async fn list(&self, prefix: &str) -> Result<Vec<String>, BrainError> {
-            Ok(self
-                .files
-                .read()
-                .map_err(|error| BrainError::Internal(error.to_string()))?
-                .keys()
-                .filter(|path| path.starts_with(prefix))
-                .cloned()
-                .collect())
-        }
-    }
 
     struct FixedClock;
 
@@ -882,13 +755,12 @@ mod tests {
         }
     }
 
-    fn service() -> (TempDir, Arc<MemoryDocuments>, TaskService) {
+    fn service() -> (TempDir, TaskService) {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = Arc::new(SqliteStore::new(&dir.path().join("tasks.db")).expect("sqlite"));
-        let documents = Arc::new(MemoryDocuments::default());
         let index = Arc::new(SqliteTaskIndexStore::new(db));
-        let service = TaskService::with_clock(documents.clone(), index, Arc::new(FixedClock));
-        (dir, documents, service)
+        let service = TaskService::with_clock(index, Arc::new(FixedClock));
+        (dir, service)
     }
 
     fn create_request(kind: TaskKind) -> TaskCreateRequest {
@@ -903,18 +775,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_short_task_writes_creation_month_and_indexes() {
-        let (_dir, documents, service) = service();
+    async fn test_create_short_task_persists_dedicated_document() {
+        let (_dir, service) = service();
         let response = service
             .create_task(create_request(TaskKind::Short))
             .await
             .expect("create");
-        assert_eq!(response.task.storage_path, "Tasks/Short/2026-08.md");
-        assert!(documents
-            .read("Tasks/Short/2026-08.md")
-            .await
-            .expect("read")
-            .is_some());
+        assert!(response.task.storage_path.starts_with("db:short:"));
+        assert_eq!(response.task.document_version.revision, 1);
         let listed = service
             .list_tasks(TaskQuery::default())
             .await
@@ -924,7 +792,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_second_short_task_returns_requested_root_only() {
-        let (_dir, _documents, service) = service();
+        let (_dir, service) = service();
         let first = service
             .create_task(create_request(TaskKind::Short))
             .await
@@ -948,7 +816,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_rejects_stale_content_hash() {
-        let (_dir, _documents, service) = service();
+        let (_dir, service) = service();
         let created = service
             .create_task(create_request(TaskKind::Long))
             .await
@@ -970,8 +838,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_each_write_rotates_version_token() {
+        let (_dir, service) = service();
+        let created = service
+            .create_task(create_request(TaskKind::Long))
+            .await
+            .expect("create");
+        let task_id = created.task.root.id;
+        let updated = service
+            .update_task(TaskUpdateRequest {
+                task_id,
+                patch: TaskPatch {
+                    title: Some("新标题".to_string()),
+                    ..Default::default()
+                },
+                expected_version: created.task.document_version.clone(),
+            })
+            .await
+            .expect("update");
+        assert_eq!(updated.task.document_version.revision, 2);
+        assert_ne!(
+            updated.task.document_version.content_hash,
+            created.task.document_version.content_hash
+        );
+        // 旧版本再次提交必须冲突
+        let stale = service
+            .update_task(TaskUpdateRequest {
+                task_id,
+                patch: TaskPatch {
+                    title: Some("旧标题".to_string()),
+                    ..Default::default()
+                },
+                expected_version: created.task.document_version.clone(),
+            })
+            .await;
+        assert!(matches!(stale, Err(BrainError::TaskVersionConflict(_))));
+    }
+
+    #[tokio::test]
     async fn test_long_task_subtask_progress_and_cascade_completion() {
-        let (_dir, _documents, service) = service();
+        let (_dir, service) = service();
         let created = service
             .create_task(create_request(TaskKind::Long))
             .await
@@ -1044,7 +950,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_short_task_close_and_reopen_preserves_audit_note() {
-        let (_dir, _documents, service) = service();
+        let (_dir, service) = service();
         let created = service
             .create_task(create_request(TaskKind::Short))
             .await

@@ -5,5 +5,4 @@ pub mod llm_client;
 pub mod obsidian_client;
 #[allow(dead_code)]
 pub mod sqlite_store;
-pub mod task_document_store;
 pub mod task_index_store;

@@ -26,7 +26,6 @@ use crate::core::timeline::store::TimelineStore;
 use crate::core::timeline::{MemoManager, TimelineConfig, TimelineService};
 use crate::infra::obsidian_client::{new_provider, ObsidianClient};
 use crate::infra::sqlite_store::SqliteStore;
-use crate::infra::task_document_store::ObsidianTaskDocumentStore;
 use crate::infra::task_index_store::SqliteTaskIndexStore;
 use crate::tools::handlers::register_all_tools;
 use crate::tools::registry::ToolRegistry;
@@ -375,10 +374,9 @@ async fn run_server_async(
         TimelineConfig::default(),
     ));
     let memo_manager = Arc::new(MemoManager::new(db.clone(), obsidian.clone()));
-    let task_service = Arc::new(TaskService::new(
-        Arc::new(ObsidianTaskDocumentStore::new(obsidian.clone())),
-        Arc::new(SqliteTaskIndexStore::new(db.clone())),
-    ));
+    let task_service = Arc::new(TaskService::new(Arc::new(SqliteTaskIndexStore::new(
+        db.clone(),
+    ))));
 
     let llm: Arc<dyn crate::infra::llm_client::LlmProvider> =
         crate::infra::llm_client::LlmClientFactory::create(&config.llm)
@@ -651,10 +649,9 @@ mod test_helpers {
                 TimelineConfig::default(),
             ));
             let memo_manager = Arc::new(MemoManager::new(db.clone(), obsidian_provider.clone()));
-            let task_service = Arc::new(TaskService::new(
-                Arc::new(ObsidianTaskDocumentStore::new(obsidian_provider.clone())),
-                Arc::new(SqliteTaskIndexStore::new(db.clone())),
-            ));
+            let task_service = Arc::new(TaskService::new(Arc::new(SqliteTaskIndexStore::new(
+                db.clone(),
+            ))));
 
             let llm_config = crate::config::LlmConfig::default();
             let llm: Arc<dyn crate::infra::llm_client::LlmProvider> = Arc::from(

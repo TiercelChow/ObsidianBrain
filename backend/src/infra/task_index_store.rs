@@ -1,6 +1,5 @@
 //! Rebuildable SQLite projection for personal tasks.
 
-use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -22,8 +21,6 @@ use crate::models::task::{
 #[derive(Debug, Clone)]
 pub struct TaskDocumentMeta {
     pub path: String,
-    pub document_kind: TaskDocumentKind,
-    pub root_id: Option<Uuid>,
     pub revision: i64,
     pub content_hash: String,
 }
@@ -41,9 +38,6 @@ pub trait TaskIndexStore: Send + Sync {
         task_id: Uuid,
     ) -> Result<Option<TaskDocumentMeta>, BrainError>;
     async fn load_document(&self, path: &str) -> Result<Option<TaskDocument>, BrainError>;
-    async fn document_meta(&self, path: &str) -> Result<Option<TaskDocumentMeta>, BrainError>;
-    async fn list_document_paths(&self) -> Result<Vec<String>, BrainError>;
-    async fn remove_document(&self, path: &str) -> Result<(), BrainError>;
     async fn list_tasks(
         &self,
         query: &TaskQuery,
@@ -54,7 +48,6 @@ pub trait TaskIndexStore: Send + Sync {
         query: &CalendarTaskQuery,
         today: NaiveDate,
     ) -> Result<Vec<TaskSummary>, BrainError>;
-    async fn enqueue_sync(&self, path: &str, reason: &str) -> Result<(), BrainError>;
 }
 
 pub struct SqliteTaskIndexStore {
@@ -90,8 +83,8 @@ impl TaskIndexStore for SqliteTaskIndexStore {
             conn.execute("DELETE FROM task_documents WHERE path = ?1", params![path])?;
             conn.execute(
                 "INSERT INTO task_documents
-                 (path, document_kind, root_id, storage_month, revision, content_hash, indexed_at, sync_error)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)",
+                 (path, document_kind, root_id, storage_month, revision, content_hash, indexed_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
                     path,
                     document_kind,
@@ -186,7 +179,6 @@ impl TaskIndexStore for SqliteTaskIndexStore {
                     ],
                 )?;
             }
-            conn.execute("DELETE FROM task_sync_queue WHERE path = ?1", params![path])?;
             Ok(())
         })
     }
@@ -197,7 +189,7 @@ impl TaskIndexStore for SqliteTaskIndexStore {
     ) -> Result<Option<TaskDocumentMeta>, BrainError> {
         self.db.with_connection(|conn| {
             let result = conn.query_row(
-                "SELECT d.path, d.document_kind, d.root_id, d.revision, d.content_hash
+                "SELECT d.path, d.revision, d.content_hash
                  FROM task_nodes n JOIN task_documents d ON d.path = n.storage_path
                  WHERE n.id = ?1",
                 params![task_id.to_string()],
@@ -267,47 +259,13 @@ impl TaskIndexStore for SqliteTaskIndexStore {
             };
 
             Ok(Some(TaskDocument {
-                schema: match document_kind {
-                    TaskDocumentKind::ShortMonth => "tasks-short/v1",
-                    TaskDocumentKind::LongTask => "tasks-long/v1",
-                }
-                .to_string(),
                 document_kind,
                 storage_month,
                 revision,
                 tasks,
                 progress,
                 audit,
-                extra: BTreeMap::new(),
-                freeform_notes: String::new(),
             }))
-        })
-    }
-
-    async fn document_meta(&self, path: &str) -> Result<Option<TaskDocumentMeta>, BrainError> {
-        self.db.with_connection(|conn| {
-            let result = conn.query_row(
-                "SELECT path, document_kind, root_id, revision, content_hash
-                 FROM task_documents WHERE path = ?1",
-                params![path],
-                meta_from_row,
-            );
-            optional_row(result)
-        })
-    }
-
-    async fn list_document_paths(&self) -> Result<Vec<String>, BrainError> {
-        self.db.with_connection(|conn| {
-            let mut statement = conn.prepare("SELECT path FROM task_documents ORDER BY path")?;
-            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-        })
-    }
-
-    async fn remove_document(&self, path: &str) -> Result<(), BrainError> {
-        self.db.with_connection(|conn| {
-            conn.execute("DELETE FROM task_documents WHERE path = ?1", params![path])?;
-            Ok(())
         })
     }
 
@@ -353,22 +311,6 @@ impl TaskIndexStore for SqliteTaskIndexStore {
             .with_connection(|conn| query_summaries(conn, &sql, &params, today))?;
         tasks.truncate(200);
         Ok(tasks)
-    }
-
-    async fn enqueue_sync(&self, path: &str, reason: &str) -> Result<(), BrainError> {
-        let now = Utc::now().to_rfc3339();
-        self.db.with_connection(|conn| {
-            conn.execute(
-                "INSERT INTO task_sync_queue (path, reason, retry_count, created_at, updated_at)
-                 VALUES (?1, ?2, 0, ?3, ?3)
-                 ON CONFLICT(path) DO UPDATE SET
-                   reason = excluded.reason,
-                   retry_count = task_sync_queue.retry_count + 1,
-                   updated_at = excluded.updated_at",
-                params![path, reason, now],
-            )?;
-            Ok(())
-        })
     }
 }
 
@@ -554,18 +496,10 @@ fn summary_from_row(row: &Row<'_>, today: NaiveDate) -> rusqlite::Result<TaskSum
 }
 
 fn meta_from_row(row: &Row<'_>) -> rusqlite::Result<TaskDocumentMeta> {
-    let kind: String = row.get(1)?;
-    let document_kind = match kind.as_str() {
-        "short_month" => TaskDocumentKind::ShortMonth,
-        "long_task" => TaskDocumentKind::LongTask,
-        _ => return Err(conversion_error(1, format!("未知文档类型: {kind}"))),
-    };
     Ok(TaskDocumentMeta {
         path: row.get(0)?,
-        document_kind,
-        root_id: parse_optional_uuid(row, 2)?,
-        revision: row.get(3)?,
-        content_hash: row.get(4)?,
+        revision: row.get(1)?,
+        content_hash: row.get(2)?,
     })
 }
 
@@ -695,8 +629,6 @@ fn escape_like(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use chrono::Utc;
     use tempfile::TempDir;
 
@@ -706,7 +638,6 @@ mod tests {
         let id = Uuid::new_v4();
         let now = Utc::now();
         TaskDocument {
-            schema: "tasks-long/v1".to_string(),
             document_kind: TaskDocumentKind::LongTask,
             storage_month: None,
             revision: 1,
@@ -732,8 +663,6 @@ mod tests {
             }],
             progress: vec![],
             audit: vec![],
-            extra: BTreeMap::new(),
-            freeform_notes: String::new(),
         }
     }
 
@@ -772,7 +701,6 @@ mod tests {
         let now = Utc::now();
         let date = NaiveDate::from_ymd_opt(2026, 8, 17).expect("valid date");
         TaskDocument {
-            schema: "tasks-long/v1".to_string(),
             document_kind: TaskDocumentKind::LongTask,
             storage_month: None,
             revision: 7,
@@ -837,8 +765,6 @@ mod tests {
                 note: None,
                 occurred_at: now,
             }],
-            extra: BTreeMap::new(),
-            freeform_notes: String::new(),
         }
     }
 
@@ -882,24 +808,5 @@ mod tests {
             .await
             .expect("load");
         assert!(loaded.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_remove_document_cascades_projection() {
-        let (_dir, store) = store();
-        let document = sample_document();
-        store
-            .replace_document("Tasks/Long/test.md", "sha256:test", &document)
-            .await
-            .expect("replace");
-        store
-            .remove_document("Tasks/Long/test.md")
-            .await
-            .expect("remove");
-        let result = store
-            .list_tasks(&TaskQuery::default(), Utc::now().date_naive())
-            .await
-            .expect("query");
-        assert!(result.tasks.is_empty());
     }
 }

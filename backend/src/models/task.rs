@@ -1,6 +1,6 @@
 //! Personal task management domain models.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
 use chrono::{DateTime, NaiveDate, Utc};
@@ -297,7 +297,6 @@ pub enum TaskDocumentKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TaskDocument {
-    pub schema: String,
     pub document_kind: TaskDocumentKind,
     pub storage_month: Option<String>,
     pub revision: i64,
@@ -306,10 +305,6 @@ pub struct TaskDocument {
     pub progress: Vec<ProgressEntry>,
     #[serde(default)]
     pub audit: Vec<AuditEvent>,
-    #[serde(default)]
-    pub extra: BTreeMap<String, serde_yaml::Value>,
-    #[serde(default)]
-    pub freeform_notes: String,
 }
 
 impl TaskDocument {
@@ -349,9 +344,6 @@ impl TaskDocument {
 
         match self.document_kind {
             TaskDocumentKind::ShortMonth => {
-                if self.schema != "tasks-short/v1" {
-                    return Err(format!("短期待办 schema 不受支持: {}", self.schema));
-                }
                 if self
                     .storage_month
                     .as_deref()
@@ -372,9 +364,6 @@ impl TaskDocument {
                 }
             }
             TaskDocumentKind::LongTask => {
-                if self.schema != "tasks-long/v1" {
-                    return Err(format!("长期任务 schema 不受支持: {}", self.schema));
-                }
                 if self.storage_month.is_some() {
                     return Err("长期任务文档不能设置 storage_month".to_string());
                 }
@@ -644,7 +633,6 @@ pub struct TaskDetail {
     pub progress_percent: u8,
     pub completed_leaf_count: u32,
     pub effective_leaf_count: u32,
-    pub freeform_notes: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -656,7 +644,6 @@ pub struct TaskListResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskWriteResponse {
     pub task: TaskDetail,
-    pub warnings: Vec<String>,
 }
 
 #[cfg(test)]
@@ -715,15 +702,12 @@ mod tests {
         first.parent_id = Some(second.id);
         second.parent_id = Some(first.id);
         let document = TaskDocument {
-            schema: "tasks-long/v1".to_string(),
             document_kind: TaskDocumentKind::LongTask,
             storage_month: None,
             revision: 1,
             tasks: vec![root, first, second],
             progress: vec![],
             audit: vec![],
-            extra: BTreeMap::new(),
-            freeform_notes: String::new(),
         };
         assert!(document.validate().is_err());
     }

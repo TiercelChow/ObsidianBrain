@@ -131,8 +131,6 @@ fn children_map(document: &TaskDocument) -> HashMap<Uuid, Vec<Uuid>> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use chrono::{NaiveDate, Utc};
 
     use super::*;
@@ -175,15 +173,12 @@ mod tests {
         first.closed_at = Some(Utc::now());
         let second = node(root.id, Some(root.id), TaskStatus::InProgress, 1);
         TaskDocument {
-            schema: "tasks-long/v1".to_string(),
             document_kind: TaskDocumentKind::LongTask,
             storage_month: None,
             revision: 1,
             tasks: vec![root, first, second],
             progress: vec![],
             audit: vec![],
-            extra: BTreeMap::new(),
-            freeform_notes: String::new(),
         }
     }
 
