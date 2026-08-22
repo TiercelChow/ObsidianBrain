@@ -77,7 +77,6 @@ export interface TaskDetail {
   progress_percent: number
   completed_leaf_count: number
   effective_leaf_count: number
-  freeform_notes: string
 }
 
 export interface TaskListResponse {
@@ -87,7 +86,6 @@ export interface TaskListResponse {
 
 export interface TaskWriteResponse {
   task: TaskDetail
-  warnings: string[]
 }
 
 export interface TaskFields {

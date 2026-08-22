@@ -144,7 +144,6 @@
             <div><span>开始</span><strong>{{ activeNode.start_date }}</strong></div>
             <div><span>结束</span><strong>{{ activeNode.end_date }}</strong></div>
             <div><span>优先级</span><strong>{{ importanceLabel(activeNode.importance) }}</strong></div>
-            <div><span>位置</span><strong>{{ detail.storage_path }}</strong></div>
           </div>
 
           <section v-if="detail.root.kind === 'long'" class="progress-overview">
@@ -807,7 +806,7 @@ onMounted(async () => {
 .detail-actions { display: flex; gap: 7px; flex: none; }
 .detail-actions button, .section-heading button { min-height: 38px; padding: 0 11px; border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-glass); color: var(--text-secondary); cursor: pointer; }
 .detail-actions .more-button { width: 40px; padding: 0; }
-.detail-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 22px 0; }
+.detail-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 22px 0; }
 .detail-facts div { min-width: 0; display: grid; gap: 5px; padding: 10px 12px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 3%, transparent); }
 .detail-facts span { color: var(--text-faint); font-size: 10px; }
 .detail-facts strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 570; }
