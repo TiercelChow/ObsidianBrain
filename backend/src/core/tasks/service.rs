@@ -555,9 +555,13 @@ impl TaskService {
     where
         F: FnOnce(&mut TaskDocument, DateTime<Utc>, i64) -> Result<(), BrainError>,
     {
-        let meta = self.meta_for_task(task_id).await?;
-        let path_lock = self.path_lock(&meta.path)?;
+        // 第一次查询只用于确定路径锁的 key；OCC 校验必须基于拿到锁之后的最新
+        // 快照，否则锁外读到的 meta 可能已被并发写入越过，补丁会落在客户端从未
+        // 见过的内容上（丢失更新）。
+        let lock_path = self.meta_for_task(task_id).await?.path;
+        let path_lock = self.path_lock(&lock_path)?;
         let _guard = path_lock.lock().await;
+        let meta = self.meta_for_task(task_id).await?;
         let mut document = self
             .index
             .load_document(&meta.path)
@@ -731,6 +735,7 @@ fn version_token(path: &str, revision: i64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use async_trait::async_trait;
     use tempfile::TempDir;
 
     use super::*;
@@ -984,5 +989,113 @@ mod tests {
             .audit
             .iter()
             .any(|event| event.note.as_deref() == Some("已经处理完")));
+    }
+
+    /// 装饰真实索引存储：第一次 `find_document_by_task` 返回注入的过期 meta，
+    /// 之后全部委托给真实存储。用于确定性地复现"请求 A 在拿到路径锁之前读到
+    /// 旧 meta，请求 B 的写入随后落库，A 加锁后加载到的已是 B 写过的新文档"
+    /// 这一并发交错（真实存储里已经是 rev N+1 的文档与 meta）。
+    struct StaleFirstLookupStore {
+        inner: Arc<SqliteTaskIndexStore>,
+        stale_meta: Mutex<Option<TaskDocumentMeta>>,
+    }
+
+    #[async_trait]
+    impl TaskIndexStore for StaleFirstLookupStore {
+        async fn replace_document(
+            &self,
+            path: &str,
+            content_hash: &str,
+            document: &TaskDocument,
+        ) -> Result<(), BrainError> {
+            self.inner
+                .replace_document(path, content_hash, document)
+                .await
+        }
+
+        async fn find_document_by_task(
+            &self,
+            task_id: Uuid,
+        ) -> Result<Option<TaskDocumentMeta>, BrainError> {
+            if let Some(stale) = self.stale_meta.lock().expect("stale meta lock").take() {
+                return Ok(Some(stale));
+            }
+            self.inner.find_document_by_task(task_id).await
+        }
+
+        async fn load_document(&self, path: &str) -> Result<Option<TaskDocument>, BrainError> {
+            self.inner.load_document(path).await
+        }
+
+        async fn list_tasks(
+            &self,
+            query: &TaskQuery,
+            today: NaiveDate,
+        ) -> Result<TaskListResponse, BrainError> {
+            self.inner.list_tasks(query, today).await
+        }
+
+        async fn calendar_tasks(
+            &self,
+            query: &CalendarTaskQuery,
+            today: NaiveDate,
+        ) -> Result<Vec<TaskSummary>, BrainError> {
+            self.inner.calendar_tasks(query, today).await
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_conflicts_when_meta_written_after_prelock_read() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = Arc::new(SqliteStore::new(&dir.path().join("tasks.db")).expect("sqlite"));
+        let real = Arc::new(SqliteTaskIndexStore::new(db));
+        let writer = TaskService::with_clock(real.clone(), Arc::new(FixedClock));
+        let created = writer
+            .create_task(create_request(TaskKind::Long))
+            .await
+            .expect("create");
+        let task_id = created.task.root.id;
+
+        // 请求 B 先完成一次写入：文档从 rev 1 真实推进到 rev 2。
+        let bumped = writer
+            .update_task(TaskUpdateRequest {
+                task_id,
+                patch: TaskPatch {
+                    title: Some("请求 B 的标题".to_string()),
+                    ..Default::default()
+                },
+                expected_version: created.task.document_version.clone(),
+            })
+            .await
+            .expect("request B writes rev 2");
+        assert_eq!(bumped.task.document_version.revision, 2);
+
+        // 请求 A 仍持有创建时的 rev-1 版本；装饰器把 A 的第一次 meta 查询
+        // （发生在拿到路径锁之前）固定为过期的 rev-1 meta，模拟 B 的写入
+        // 恰好落在 A 读取 meta 与 A 加锁之间。
+        let stale_meta = TaskDocumentMeta {
+            path: created.task.storage_path.clone(),
+            revision: created.task.document_version.revision,
+            content_hash: created.task.document_version.content_hash.clone(),
+        };
+        let victim = TaskService::with_clock(
+            Arc::new(StaleFirstLookupStore {
+                inner: real,
+                stale_meta: Mutex::new(Some(stale_meta)),
+            }),
+            Arc::new(FixedClock),
+        );
+        let error = victim
+            .update_task(TaskUpdateRequest {
+                task_id,
+                patch: TaskPatch {
+                    title: Some("请求 A 的标题".to_string()),
+                    ..Default::default()
+                },
+                expected_version: created.task.document_version,
+            })
+            .await
+            .expect_err("stale pre-lock snapshot must conflict");
+        assert!(matches!(error, BrainError::TaskVersionConflict(_)));
     }
 }
