@@ -1,6 +1,6 @@
 # 个人任务管理模块 (Tasks) — 开发设计文档
 
-> **文档编号**: DEV-09 | **版本**: v1.1 | **状态**: MVP 已实现 | **最后更新**: 2026-08-18
+> **文档编号**: DEV-09 | **版本**: v1.2 | **状态**: MVP 已实现 | **最后更新**: 2026-08-22
 >
 > **对应需求**: [个人任务管理需求设计](../requirement/09-task-management.md) | **上游设计**: [顶层设计](../top_design.md) §5.6
 
@@ -8,14 +8,14 @@
 
 ## 1. 设计目标
 
-本模块在不改变 ObsidianBrain “Obsidian 为权威数据源”原则的前提下，提供可交互、可检索、可重建的个人任务管理能力。
+本模块以 SQLite 为唯一权威任务存储，提供可交互、可检索的个人任务管理能力，不再读写任何 Obsidian Markdown 文件。
 
 技术目标：
 
 1. 短期待办和长期任务使用统一领域模型，避免前后端出现两套状态语义。
-2. Markdown 文件可被人直接阅读、备份和有限度地手工修改。
-3. SQLite 仅保存可重建投影，用于列表、筛选、日历和排序，不成为第二权威数据源。
-4. 所有更新采用 revision + 内容哈希的文档版本控制，避免应用与 Obsidian 同时编辑时静默覆盖。
+2. 任务数据保存在 SQLite `task_documents`、`task_nodes`、`task_progress`、`task_audit_events` 四张表中，是唯一权威存储。
+3. SQLite 不可由 Vault 重建；数据库备份属基础设施话题，另行立项（这是脱离 Obsidian 存储的显式取舍）。
+4. 所有更新采用 revision + 版本令牌的文档版本控制，避免并发写入时静默覆盖。
 5. 长期任务树支持多级拆分，同时具备深度、循环和跨根移动保护。
 6. 桌面端和手机端共享数据与视觉语言，但针对输入方式和屏幕宽度采用不同交互。
 
@@ -23,10 +23,9 @@
 
 | 方案 | 不采用原因 |
 |---|---|
-| 每个子任务单独一个 Markdown 文件 | 文件数量膨胀，移动和重排需要多文件事务，离线阅读上下文割裂 |
-| SQLite 为主、定时导出 Markdown | 导出失败会让 Vault 数据滞后，不符合 Obsidian 优先原则 |
-| 用标题或文件路径作为任务 ID | 重命名会破坏引用和进展归属 |
-| 直接在 YAML 中保存嵌套树 | 深层编辑和节点移动会产生大范围 diff，解析与迁移更脆弱 |
+| Obsidian Markdown 为权威存储、SQLite 作可重建索引 | 双写一致性成本高（同步队列、脏路径、外部编辑检测），事务原子性受文件接口限制；已在任务中枢中放弃 |
+| 用标题作为任务 ID | 标题修改会破坏引用和进展归属 |
+| 在关系行之外再嵌套一份树形文本表示 | 深层编辑和节点移动会产生大范围 diff，两份表示易失同步 |
 | 首版引入完整日历组件 | 体积和定制成本高；MVP 只需月视图、跨日条和日程列表 |
 
 ---
@@ -42,27 +41,26 @@ Tasks.vue / LLM Tool API
   │       │           │
   ▼       ▼           ▼
 Validator TreeEngine ProgressCalculator
-  │
-  ├──────────────┐
-  ▼              ▼
-TaskDocumentStore  TaskIndexStore
-(Obsidian adapter) (SQLite adapter)
-  │              │
-  ▼              ▼
-Tasks/*.md    task_* tables
-权威数据源      可重建投影
+          │
+          ▼
+     TaskIndexStore
+     (SqliteTaskIndexStore)
+          │
+          ▼
+      task_* tables
+      唯一权威存储
 ```
 
 写入顺序固定为：
 
 ```text
-校验请求 → 读取最新 Markdown → 校验文档版本 → 生成新文档
-       → 写入 Obsidian → 更新 SQLite 投影 → 返回结果
+校验请求 → 从索引解析文档键 → 获取按路径的异步锁 → 锁内重取文档元数据
+       → 从行装配文档 → 校验文档版本（OCC）→ 应用变更 → revision + 1
+       → 生成新版本令牌 → 单事务 replace_document → 返回结果
 ```
 
-- Obsidian 写入失败：整个操作失败，SQLite 不得产生新记录。
-- Obsidian 写入成功、SQLite 更新失败：任务写入仍视为成功，响应附带 `index_out_of_sync` 警告；优先登记到持久同步队列，数据库整体不可用时暂存到有界内存 dirty set，并在下次启动执行增量扫描。
-- 查询默认走 SQLite；索引不可用时，对单任务读取可回退到 Markdown，批量查询返回明确的降级或同步提示。
+- 写入在单个 SQLite 事务内整体替换文档的全部行（`task_documents` 头 + 节点 + 进展 + 审计）；事务失败即整体回滚，不产生部分写入，也没有“数据落盘但索引未更新”的降级路径。
+- 查询直接走 SQLite；存储层即权威数据，没有第二份需要重建或同步的数据。
 
 ---
 
@@ -78,21 +76,15 @@ backend/src/
 │   └── tasks/
 │       ├── mod.rs
 │       ├── service.rs
-│       ├── validation.rs
-│       ├── tree.rs
-│       ├── progress.rs
-│       ├── markdown_codec.rs
-│       ├── document_store.rs
-│       ├── index_store.rs
-│       └── sync.rs
+│       └── tree.rs
 ├── infra/
-│   ├── obsidian_task_store.rs
-│   └── sqlite_task_store.rs
+│   └── task_index_store.rs
 └── tools/handlers/
     └── task_handlers.rs
 
 backend/migrations/
-└── 009_tasks.sql
+├── 009_tasks.sql
+└── 010_remove_task_sync.sql
 ```
 
 需要同时修改：
@@ -103,7 +95,6 @@ backend/migrations/
 - `backend/src/tools/definitions.rs`
 - `backend/src/tools/registry.rs`
 - `backend/src/app_context.rs`（以仓库实际 AppContext 所在文件为准）
-- `backend/Cargo.toml`：增加 `serde_yaml`，用于 YAML frontmatter 编解码
 
 ### 3.2 前端
 
@@ -112,24 +103,16 @@ frontend/src/
 ├── views/
 │   └── Tasks.vue
 ├── components/tasks/
-│   ├── TaskToolbar.vue
-│   ├── TaskList.vue
-│   ├── TaskCard.vue
-│   ├── TaskDetail.vue
 │   ├── TaskTree.vue
-│   ├── TaskNodeEditor.vue
-│   ├── TaskCloseSheet.vue
-│   ├── ProgressTimeline.vue
-│   ├── TaskCalendar.vue
-│   ├── CalendarMonth.vue
-│   └── DayAgenda.vue
+│   └── TaskCalendar.vue
 ├── stores/
 │   └── tasks.ts
 ├── api/
 │   └── tasks.ts
 └── utils/
     ├── taskDates.ts
-    └── taskTree.ts
+    ├── taskHierarchy.ts
+    └── taskPayloads.ts
 ```
 
 路由增加 `/tasks`，桌面端详情选中态使用查询参数 `?task=<uuid>`，视图使用 `?view=list|calendar`。手机端仍保持相同 URL，使浏览器前进/后退可恢复上下文。
@@ -232,39 +215,38 @@ pub struct AuditEvent {
 
 ```rust
 pub struct TaskDocument {
-    #[serde(rename = "obsidianbrain_schema")]
-    pub schema: String,              // "tasks-short/v1" | "tasks-long/v1"
-    pub document_kind: DocumentKind, // ShortMonth | LongTask
-    pub storage_month: Option<YearMonth>,
-    pub root_id: Option<Uuid>,
+    pub document_kind: TaskDocumentKind, // ShortMonth | LongTask
+    pub storage_month: Option<String>,
     pub revision: i64,
     pub tasks: Vec<TaskNode>,
     pub progress: Vec<ProgressEntry>,
     pub audit: Vec<AuditEvent>,
-    pub extra: BTreeMap<String, serde_yaml::Value>,
-    pub freeform_notes: Option<String>,
 }
 ```
 
-`extra` 保留未知的顶层 frontmatter 字段，保证新旧版本或用户自定义字段经过应用编辑后不会被无意删除。
+- 文档是读、写、并发校验的基本单元：长期任务的根节点、全部子任务、进展和审计事件同属一个文档。
+- 存量短期文档可能包含多个待办（历史月份文件迁移而来）；新建短期待办一律一任务一文档。
+- `storage_month` 在创建时写定且不可变。
 
 ### 4.4 API 读模型
 
 写模型保持规范化；返回前组装读模型：
 
 ```rust
-pub struct TaskView {
-    pub node: TaskNode,
-    pub derived: TaskDerivedState,
+pub struct TaskDetail {
+    pub root: TaskNode,
+    pub tasks: Vec<TaskNode>,
+    pub progress: Vec<ProgressEntry>,
+    pub audit: Vec<AuditEvent>,
+    pub storage_path: String,
+    pub document_version: DocumentVersion,
     pub progress_percent: u8,
     pub completed_leaf_count: u32,
     pub effective_leaf_count: u32,
-    pub child_count: u32,
-    pub storage_path: String,
 }
 ```
 
-`overdue`、`active_today` 等派生字段以请求所带时区计算，不落盘。
+`overdue`、`active_today` 等派生字段以请求所带时区计算，不落盘（节点行上的 `progress_percent`、`completed_leaf_count`、`effective_leaf_count` 为写入时物化的聚合指标）。
 
 并发令牌使用明确类型：
 
@@ -274,6 +256,8 @@ pub struct DocumentVersion {
     pub content_hash: String,
 }
 ```
+
+写工具的统一响应只包含 `task`（`TaskWriteResponse { task }`）；`storage_path` 与 `document_version` 内嵌在 `TaskDetail` 中，没有独立的警告字段。
 
 ---
 
@@ -295,7 +279,7 @@ pub struct DocumentVersion {
 
 ### 5.2 树构建
 
-长期任务在 Markdown 中平铺保存，读取后一次构建：
+长期任务节点在文档内平铺保存（`task_nodes` 行按 `rowid` 排列，行序即文档顺序），装配后一次构建：
 
 1. 建立 `id -> node` 映射，拒绝重复 ID。
 2. 确认唯一根节点，且 `root.id == root.root_id`。
@@ -315,7 +299,7 @@ pub struct DocumentVersion {
 - 新父节点不可是节点自身或后代。
 - 预计算移动后深度，任何后代超过 20 层则拒绝。
 - 同一文档内一次性更新原同级、新同级和移动节点 position。
-- 整个移动只产生一次 Markdown revision 增量，便于撤销与冲突提示。
+- 整个移动只使文档 revision 加 1，便于撤销与冲突提示。
 
 ### 5.4 进度计算
 
@@ -333,104 +317,55 @@ cancelled                => 不纳入父节点分母
 
 ---
 
-## 6. Obsidian 文档协议
+## 6. 文档模型与版本协议
 
-### 6.1 路径
+### 6.1 文档键
 
-```text
-Tasks/
-├── Short/
-│   ├── 2026-08.md
-│   └── 2026-09.md
-└── Long/
-    ├── redesign-reader--7d82ac11.md
-    └── learn-rust--ed43b203.md
-```
-
-- `slug` 仅在创建文件时生成：保留安全的 Unicode 字母与数字，把空白归一为连字符，移除路径分隔符、控制字符和平台保留名称，最长 48 个 Unicode 字符；无可用字符时使用 `task`。
-- `id8` 为 UUID 去连字符后的前 8 位。
-- 路径由服务端生成，Tool API 不接受任意写入路径。
+- 新建文档使用合成键：短期待办为 `db:short:{uuid}`（ShortMonth 种类，记录 `storage_month`），长期根任务为 `db:long:{uuid}`。
+- 存量数据行保留 `Tasks/...` 形式的历史路径字符串作为 `task_documents.path` 主键；该字符串仅是文档主键，无文件系统语义，系统不再据此读写文件。
+- 文档键由服务端生成；Tool API 不接受调用方指定文档键。
 
 ### 6.2 文档结构
 
-文档分为三部分：
-
-```markdown
----
-<机器可读 YAML frontmatter>
----
-
-<!-- obsidianbrain:generated:start -->
-<供人在 Obsidian 中阅读的生成快照>
-<!-- obsidianbrain:generated:end -->
-
-<!-- obsidianbrain:notes:start -->
-<用户自由笔记，仅长期任务存在，重写时原样保留>
-<!-- obsidianbrain:notes:end -->
-```
-
-规则：
-
-- frontmatter 是任务结构的权威表示。
-- generated 区域每次保存整体重建，不从这里反向解析结构。
-- notes 区域逐字保留；如果标记损坏，同步报告错误而不是猜测并覆盖。
-- 短期月文件不提供自由 notes 区，避免月份文件同时承担任务外笔记。
-- YAML 使用固定键顺序和 2 空格缩进，集合按 position/时间排序，减少无意义 diff。
+- 文档没有文本表示；`load_document` 按 `rowid` 顺序读取 `task_nodes`、`task_progress`、`task_audit_events` 行装配聚合，行序即文档顺序。
+- 文档没有 schema 标记字段、自由笔记区或未知字段保留区；结构演进完全由数据库迁移表达。
+- 长期任务的树形结构不落盘为嵌套形态，由 `parent_id` + `position` 在装配时构建（见 §5.2）。
 
 ### 6.3 文档版本
 
-- 每个短期月份文件有一个 `revision`；其中任一待办更新都会使文件 revision 加 1。
-- 每个长期任务文件有独立 `revision`；根、子任务、进展或审计更新共享该 revision。
-- 节点上的 `revision` 同步记录最近修改该节点时的文档 revision，用于界面展示；并发校验以文档 revision 为准。
-- API 请求中的 `expected_version` 同时包含文档 revision 与完整 Markdown 内容哈希，避免应用内并发更新或未递增 revision 的 Obsidian 外部编辑被静默覆盖。
-
-### 6.4 编解码策略
-
-`TaskMarkdownCodec` 是纯函数组件：
-
-```rust
-pub trait TaskMarkdownCodec: Send + Sync {
-    fn parse(&self, path: &str, markdown: &str) -> Result<TaskDocument, BrainError>;
-    fn render(&self, document: &TaskDocument) -> Result<String, BrainError>;
-}
-```
-
-解析流程：
-
-1. 分离 frontmatter、generated 和 notes 区域。
-2. 用 `serde_yaml` 反序列化并校验 `schema`。
-3. 执行字段、身份、树、状态组合校验。
-4. 对文档做规范化，但同步读取阶段不自动回写。
-5. 返回结构与原始 notes。
-
-必须提供 golden tests，验证“解析 → 渲染 → 再解析”的语义等价和 notes/未知字段保留。
+- 每个文档有独立 `revision`；文档内任何节点、进展或审计更新都使该 revision 加 1。
+- 节点上的 `revision` 记录最近修改该节点时的文档 revision，用于界面展示；并发校验以文档 revision + 版本令牌为准。
+- 版本令牌由服务端在每次写入时重新生成：对 `"{path}:{revision}"` 取 SHA-256 十六进制摘要并加 `sha256:` 前缀。令牌随 revision 逐次写入轮换。
+- API 请求中的 `expected_version` 必须与写入锁内重新获取的最新文档元数据完全一致，否则返回 `TASK_VERSION_CONFLICT`，用于发现读取之后发生的并发写入。
 
 ---
 
-## 7. 存储抽象与 SQLite 投影
+## 7. 存储层
 
-### 7.1 外部依赖抽象
+### 7.1 存储抽象
 
 ```rust
 #[async_trait]
-pub trait TaskDocumentStore: Send + Sync {
-    async fn read(&self, path: &str) -> Result<Option<String>, BrainError>;
-    async fn write(&self, path: &str, content: &str) -> Result<(), BrainError>;
-    async fn list(&self, prefix: &str) -> Result<Vec<String>, BrainError>;
+pub trait TaskIndexStore: Send + Sync {
+    async fn replace_document(&self, path: &str, content_hash: &str, document: &TaskDocument) -> Result<(), BrainError>;
+    async fn find_document_by_task(&self, task_id: Uuid) -> Result<Option<TaskDocumentMeta>, BrainError>;
+    async fn load_document(&self, path: &str) -> Result<Option<TaskDocument>, BrainError>;
+    async fn list_tasks(&self, query: &TaskQuery, today: NaiveDate) -> Result<TaskListResponse, BrainError>;
+    async fn calendar_tasks(&self, query: &CalendarTaskQuery, today: NaiveDate) -> Result<Vec<TaskSummary>, BrainError>;
 }
 
-#[async_trait]
-pub trait TaskIndexStore: Send + Sync {
-    async fn get_document_meta(&self, path: &str) -> Result<Option<TaskDocumentMeta>, BrainError>;
-    async fn replace_document(&self, projection: &TaskProjection) -> Result<(), BrainError>;
-    async fn remove_document(&self, path: &str) -> Result<(), BrainError>;
-    async fn query(&self, query: &TaskQuery) -> Result<TaskPage, BrainError>;
+pub struct TaskDocumentMeta {
+    pub path: String,
+    pub revision: i64,
+    pub content_hash: String,
 }
 ```
 
-`ObsidianTaskStore` 适配现有 `ObsidianClient`；测试使用内存 fake。`SqliteTaskStore` 使用现有连接池并在事务内替换单文档的全部投影。
+`SqliteTaskIndexStore` 是唯一实现，直接持有现有 `SqliteStore` 连接池；测试使用内存 fake。存储层同时承担权威数据的读写与查询投影，不再区分“文档存储”与“索引”两个角色。
 
-### 7.2 Migration 009
+### 7.2 Migration 009 + 010
+
+`009_tasks.sql` 创建四张任务表（历史版本还带有同步队列与同步错误列），`010_remove_task_sync.sql` 删除了同步队列表和 `task_documents` 的同步错误列。当前最终结构：
 
 ```sql
 CREATE TABLE task_documents (
@@ -440,30 +375,32 @@ CREATE TABLE task_documents (
     storage_month   TEXT,
     revision        INTEGER NOT NULL,
     content_hash    TEXT NOT NULL,
-    indexed_at      TEXT NOT NULL,
-    sync_error      TEXT
+    indexed_at      TEXT NOT NULL
 );
 
 CREATE TABLE task_nodes (
-    id              TEXT PRIMARY KEY,
-    root_id         TEXT NOT NULL,
-    parent_id       TEXT,
-    storage_path    TEXT NOT NULL REFERENCES task_documents(path) ON DELETE CASCADE,
-    kind            TEXT NOT NULL CHECK (kind IN ('short', 'long')),
-    role            TEXT NOT NULL CHECK (role IN ('root', 'subtask')),
-    title           TEXT NOT NULL,
-    description     TEXT NOT NULL DEFAULT '',
-    status          TEXT NOT NULL,
-    importance      TEXT NOT NULL,
-    start_date      TEXT NOT NULL,
-    end_date        TEXT NOT NULL,
-    position        INTEGER NOT NULL,
-    closure_note    TEXT,
-    closed_at       TEXT,
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL,
-    revision        INTEGER NOT NULL,
-    archived_at     TEXT
+    id                      TEXT PRIMARY KEY,
+    root_id                 TEXT NOT NULL,
+    parent_id               TEXT,
+    storage_path            TEXT NOT NULL REFERENCES task_documents(path) ON DELETE CASCADE,
+    kind                    TEXT NOT NULL CHECK (kind IN ('short', 'long')),
+    role                    TEXT NOT NULL CHECK (role IN ('root', 'subtask')),
+    title                   TEXT NOT NULL,
+    description             TEXT NOT NULL DEFAULT '',
+    status                  TEXT NOT NULL,
+    importance              TEXT NOT NULL,
+    start_date              TEXT NOT NULL,
+    end_date                TEXT NOT NULL,
+    position                INTEGER NOT NULL,
+    closure_note            TEXT,
+    closed_at               TEXT,
+    created_at              TEXT NOT NULL,
+    updated_at              TEXT NOT NULL,
+    revision                INTEGER NOT NULL,
+    archived_at             TEXT,
+    progress_percent        INTEGER NOT NULL DEFAULT 0 CHECK (progress_percent BETWEEN 0 AND 100),
+    completed_leaf_count    INTEGER NOT NULL DEFAULT 0,
+    effective_leaf_count    INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE task_progress (
@@ -489,14 +426,6 @@ CREATE TABLE task_audit_events (
     occurred_at     TEXT NOT NULL
 );
 
-CREATE TABLE task_sync_queue (
-    path            TEXT PRIMARY KEY,
-    reason          TEXT NOT NULL,
-    retry_count     INTEGER NOT NULL DEFAULT 0,
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL
-);
-
 CREATE INDEX idx_task_nodes_status ON task_nodes(status, archived_at);
 CREATE INDEX idx_task_nodes_dates ON task_nodes(start_date, end_date);
 CREATE INDEX idx_task_nodes_kind_importance ON task_nodes(kind, importance);
@@ -504,13 +433,12 @@ CREATE INDEX idx_task_nodes_root_parent ON task_nodes(root_id, parent_id, positi
 CREATE INDEX idx_task_progress_task_time ON task_progress(task_id, recorded_at DESC);
 ```
 
-`parent_id` 的存在性、同根关系和无环约束由服务层校验；SQLite 外键无法直接表达跨行的全部树约束。
+`parent_id` 的存在性、同根关系和无环约束由服务层校验；SQLite 外键无法直接表达跨行的全部树约束。`progress_percent`、`completed_leaf_count`、`effective_leaf_count` 是写入时物化的聚合指标，避免列表查询实时递归计算。
 
-### 7.3 内容哈希
+### 7.3 内容哈希列
 
-- 使用完整 Markdown 内容的 SHA-256 作为 `content_hash`。
-- 同步时哈希未变则跳过 YAML 解析和数据库写入。
-- 哈希同时用于增量变更检测和文档版本并发校验；数据库索引仍以完整 SHA-256 保存。
+- `task_documents.content_hash` 保存当前版本令牌（见 §6.3），用于 OCC 并发校验。
+- 令牌随每次写入轮换；没有第二数据源，因此不再承担增量变更检测职责。
 
 ---
 
@@ -519,55 +447,48 @@ CREATE INDEX idx_task_progress_task_time ON task_progress(task_id, recorded_at D
 ### 8.1 服务结构
 
 ```rust
-pub struct TaskService<D, I, C>
-where
-    D: TaskDocumentStore,
-    I: TaskIndexStore,
-    C: TaskMarkdownCodec,
-{
-    documents: Arc<D>,
-    index: Arc<I>,
-    codec: Arc<C>,
+pub struct TaskService {
+    index: Arc<dyn TaskIndexStore>,
     path_locks: PathLockMap,
-    clock: Arc<dyn Clock>,
+    clock: Arc<dyn TaskClock>,
+}
+
+impl TaskService {
+    pub fn new(index: Arc<dyn TaskIndexStore>) -> Self;
+    pub fn with_clock(index: Arc<dyn TaskIndexStore>, clock: Arc<dyn TaskClock>) -> Self;
 }
 ```
 
-`Clock` 也通过 trait 注入，保证逾期、今天和时间戳测试稳定。
+`TaskClock` 通过 trait 注入，保证逾期、今天和时间戳测试稳定。
 
 ### 8.2 单文档写入算法
 
 ```text
-1. 根据 task_id 从索引解析 storage_path
-2. 获取 storage_path 对应的异步互斥锁
-3. 从 Obsidian 重新读取当前文档
-4. parse + validate
-5. 比较 expected_version.revision 与 expected_version.content_hash
+1. 根据 task_id 从索引解析文档键（第一次查询只用于确定锁的 key）
+2. 获取该文档键对应的异步互斥锁
+3. 锁内重新获取文档元数据（OCC 必须基于锁后最新快照，锁外读到的 meta 可能已被并发写入越过）
+4. load_document 从行装配当前文档（行按 rowid 排序）
+5. 比较 expected_version 与锁内最新 revision + 版本令牌
 6. 应用领域命令并写审计事件
 7. document.revision += 1
-8. render
-9. Obsidian PUT
-10. SQLite transaction: replace_document
-11. 返回新 document_version 与 TaskView
+8. 生成新版本令牌 sha256("{path}:{revision}")
+9. 单事务 replace_document：删除并重建该文档的全部行
+10. 返回 TaskDetail（内嵌新 document_version）
 ```
 
-不能只基于 SQLite 中的旧快照更新，因为用户可能刚在 Obsidian 中修改过文件。
+写入只涉及一个数据库事务：要么整文档替换成功，要么整体回滚。没有“权威写入成功但索引失败”的路径，也没有同步队列或脏路径集合。
 
-`PathLockMap` 只解决当前进程内并发；文档版本令牌负责发现读取后发生的跨请求或外部编辑。锁表使用弱引用或操作结束清理，不能随访问文件数永久增长。
+`PathLockMap` 只解决当前进程内并发；文档版本令牌负责发现读取后发生的跨请求并发写入。锁表使用弱引用并在每次取锁时清理失效项，不随文档数永久增长。
 
-### 8.3 短期月文件创建竞争
+### 8.3 短期任务创建
 
 创建短期待办时：
 
-1. 由服务端时间计算 `storage_month` 和路径。
-2. 获取月文件锁。
-3. 文件不存在则创建 revision 1 的空文档聚合，再加入任务。
-4. 文件存在则读取当前 revision 后追加。
-5. 新任务写入后对整个文件做一次原子替换语义的 PUT。
+1. 由服务端时间计算 `storage_month`。
+2. 生成新 UUID 并构造 `db:short:{uuid}` 文档（revision 1，ShortMonth 种类）。
+3. 单事务写入新文档。
 
-同进程内锁保证并行快速创建不会丢失；跨进程外部竞争通过写后同步和文档版本冲突提示处理。若未来 Obsidian API 支持 ETag，应升级为 `If-Match` 条件写入。
-
-需要明确剩余风险：如果 Obsidian API 不提供条件写入，外部编辑器恰好在“应用校验文档版本”与“应用 PUT”之间写入，版本令牌仍无法完全消除这一极短竞争窗口。实施时应先确认 API 是否返回并接受 ETag；若不支持，采用写后重读校验、冲突日志和保留 Vault 版本历史降低风险，不宣称具备跨进程原子比较交换能力。
+新建待办不与他人共享文档，不存在月文件合并时代的同文档竞争；并行快速创建天然隔离。修改已有待办仍走 §8.2 的按路径锁 + OCC 流程。
 
 ### 8.4 状态变更
 
@@ -616,28 +537,9 @@ start_date <= :visible_end AND end_date >= :visible_start
 
 ---
 
-## 9. 同步与冲突处理
+## 9. 冲突处理
 
-### 9.1 启动与手动同步
-
-`sync_tasks` 执行：
-
-1. 列出 `Tasks/Short/` 和 `Tasks/Long/` 下 Markdown 文件。
-2. 读取文件，计算 hash，仅解析新增或变化文件。
-3. 校验 schema、路径归属、ID、状态和树结构。
-4. 在单文件数据库事务内替换投影。
-5. 删除已经不存在文件对应的 SQLite 投影。
-6. 汇总 `created/updated/unchanged/removed/errors/conflicts`。
-
-单个损坏文件不阻断其他文件同步；错误要带 path、错误码和可操作提示。
-
-### 9.2 重复 ID
-
-- 相同任务 ID 出现在两个文件中属于 `TASK_DUPLICATE_ID`。
-- 同步保留第一次成功索引的记录，后续冲突文件标记 `sync_error`，不静默覆盖。
-- UI 提供“在 Obsidian 中打开文件”入口，引导用户修复；MVP 不自动重写用户文件中的 ID。
-
-### 9.3 文档版本冲突
+### 9.1 文档版本冲突
 
 返回 HTTP/Tool 错误：
 
@@ -649,19 +551,17 @@ start_date <= :visible_end AND end_date >= :visible_start
     "task_id": "...",
     "expected_version": {"revision": 7, "content_hash": "sha256:old…"},
     "actual_version": {"revision": 8, "content_hash": "sha256:new…"},
-    "storage_path": "Tasks/Long/example--12345678.md"
+    "storage_path": "db:long:57d6201e-527c-487f-9c79-e54c06ee1c6d"
   }
 }
 ```
 
 前端保留用户尚未提交的表单内容，重新载入最新数据后允许复制或重新应用；不得自动用旧内容覆盖新版本。
 
-### 9.4 用户手改 Markdown
+### 9.2 文档内完整性
 
-- 结构合法：同步后作为最新事实进入索引。
-- revision 未递增但内容 hash 改变：允许同步，并记录 `external_edit_without_revision` 警告；同步后返回的新版本令牌包含新 hash，下一次应用写入从当前 revision 加 1。
-- YAML 损坏：保留原文件，只在 UI 显示同步错误。
-- generated 快照与 frontmatter 不一致：以 frontmatter 为准，下次应用成功写入时重建快照。
+- 同一文档内出现重复任务 ID 属于 `TASK_DUPLICATE_ID`，写入前校验并拒绝，不产生静默覆盖。
+- 装配文档时发现根节点缺失、父子关系断裂等结构性损坏属于 `TASK_DOCUMENT_CORRUPT`，读写路径都会校验。
 
 ---
 
@@ -681,7 +581,8 @@ start_date <= :visible_end AND end_date >= :visible_start
 | `add_task_progress` | task_id、note、percent_after、expected_version | 追加进展 |
 | `get_task_calendar` | start_date、end_date、filters | 获取日历范围任务 |
 | `archive_task` | task_id、archived、expected_version | 归档或恢复 |
-| `sync_tasks` | dry_run | 从 Obsidian 重建/刷新索引 |
+
+共 10 个任务工具。
 
 ### 10.2 请求约束
 
@@ -691,8 +592,8 @@ start_date <= :visible_end AND end_date >= :visible_start
 - `get_task_calendar` 最长查询 366 天，防止无界范围扫描。
 - `update_task.patch` 仅允许白名单字段，不允许修改 `id/root_id/parent_id/kind/role/storage_path`。
 - `archive_task` 仅接受短期或长期根任务 ID；子任务随长期根任务归档状态展示。
-- `expected_version` 必须同时包含最近读取的 revision 和 `sha256:` 内容哈希。
-- 写工具成功响应统一返回 `task`、`document_version`、`storage_path`、`warnings`。
+- `expected_version` 必须同时包含最近读取的 revision 和 `sha256:` 版本令牌。
+- 写工具成功响应统一返回 `task`（`TaskWriteResponse { task }`）；`document_version` 与 `storage_path` 内嵌在 `TaskDetail` 中。
 
 ### 10.3 错误映射
 
@@ -703,7 +604,6 @@ start_date <= :visible_end AND end_date >= :visible_start
 | `TaskVersionConflict` | 409 | `TASK_VERSION_CONFLICT` |
 | `TaskDuplicateId` | 409 | `TASK_DUPLICATE_ID` |
 | `TaskDocumentCorrupt` | 422 | `TASK_DOCUMENT_CORRUPT` |
-| Obsidian 不可用 | 503 | `OBSIDIAN_UNAVAILABLE` |
 
 ---
 
@@ -730,7 +630,7 @@ interface TaskState {
 
 - 列表请求返回摘要，打开详情后再请求树和进展，避免首页加载所有历史。
 - 使用 request token 或 `AbortController` 忽略过期响应。
-- 乐观更新仅用于纯 UI 状态（展开、选中）；任务写入等待服务端成功后落实体，避免 Obsidian 写入失败造成假成功。
+- 乐观更新仅用于纯 UI 状态（展开、选中）；任务写入等待服务端成功后落实体，避免写入失败造成假成功。
 - 保存期间只锁当前任务相关控件，其他任务仍可操作。
 
 ### 11.2 日期处理
@@ -845,13 +745,13 @@ MVP 使用 CSS Grid + 纯日期工具实现，不引入完整日历套件：
 
 ### 15.1 后端
 
-- 列表只读 SQLite 摘要，不解析全部 Markdown。
-- 单个长期任务详情只读取一个文件。
-- 同步按 hash 增量解析；单文件事务更新。
+- 列表查询只读 SQLite 摘要行，不装配完整文档。
+- 单个长期任务详情只加载一个文档。
+- 写入在单事务内整体替换文档行，无第二数据源需要增量维护。
 - `list_tasks` 默认 50 条、最大 200 条。
-- 任务树后端限制 5000 个节点/文档、20 层；超过限制返回明确错误，防止异常文件耗尽内存或栈。
+- 任务树后端限制 5000 个节点/文档、20 层；超过限制返回明确错误，防止异常数据耗尽内存或栈。
 - 树遍历使用迭代方式或受控深度，禁止对未校验输入做无界递归。
-- Path lock、解析缓存和详情缓存都设置容量或生命周期上限。
+- Path lock 和详情缓存都设置容量或生命周期上限。
 
 ### 15.2 前端
 
@@ -868,7 +768,7 @@ MVP 使用 CSS Grid + 纯日期工具实现，不引入完整日历套件：
 | 10,000 个已索引节点的列表首屏（返回 50 条） | P95 < 300ms |
 | 月历范围查询 | P95 < 200ms |
 | 单任务详情（500 节点、1000 进展） | P95 < 500ms |
-| 普通写入到界面确认 | P95 < 500ms，不含 Obsidian 外部异常 |
+| 普通写入到界面确认 | P95 < 500ms |
 | 前端切换列表/日历 | 60fps 目标，无持续布局抖动 |
 
 ---
@@ -900,35 +800,21 @@ MVP 使用 CSS Grid + 纯日期工具实现，不引入完整日历套件：
 - 最新显式进度覆盖子项聚合。
 - 叶子完成数统计正确。
 
-**Markdown codec**
-
-- 短期和长期 golden fixture 往返等价。
-- 自由 notes 和未知 frontmatter 字段被保留。
-- 标记损坏、schema 不支持、重复 ID 返回精确错误。
-- Markdown 特殊字符、中文、多行文本正确转义。
-
 ### 16.2 服务测试
 
-用 fake `TaskDocumentStore`、fake `TaskIndexStore` 和 fake `Clock`：
+用 fake `TaskIndexStore` 和 fake `TaskClock`：
 
-- 创建短期任务写入正确月份。
-- 修改日期不迁移月份文件。
-- Obsidian 写入失败时索引不变。
-- 索引更新失败时返回成功与同步警告。
-- stale revision 或内容哈希返回冲突且不写文件。
+- 创建短期任务生成 `db:short:` 文档并记录正确 `storage_month`。
+- 修改日期不改变 `storage_month`。
+- 存量 `Tasks/...` 文档键的读写不依赖文件系统。
+- 写入失败时整个操作失败，数据库无部分结果。
+- stale revision 或版本令牌返回冲突且不写数据库。
+- 每次写入轮换版本令牌。
 - 根任务有活动后代时不能直接完成。
-- 并行修改同一文件被路径锁串行化。
+- 并行修改同一文档被路径锁串行化。
 - 不同长期任务可并行写入。
 
-### 16.3 同步测试
-
-- 首次同步、增量未变化、文件更新、文件删除。
-- 单个损坏文件不阻断其他文件。
-- 跨文件重复 ID 被报告且不覆盖。
-- 外部修改未增加 revision 时产生警告。
-- SQLite 清空后可从 Vault 完整重建。
-
-### 16.4 Tool 与前端测试
+### 16.3 Tool 与前端测试
 
 - JSON Schema 必填字段、枚举和 limit 上限。
 - Tool 错误映射保持稳定。
@@ -949,8 +835,7 @@ MVP 使用 CSS Grid + 纯日期工具实现，不引入完整日历套件：
 ```rust
 tracing::info!(task_id = %task_id, kind = ?kind, path = %path, "任务创建完成");
 tracing::debug!(path = %path, old_revision, new_revision, "任务文档已更新");
-tracing::warn!(path = %path, error = %error, "任务索引更新失败，已加入同步队列");
-tracing::warn!(path = %path, task_id = %task_id, "同步发现重复任务 ID");
+tracing::warn!(path = %path, task_id = %task_id, "文档内发现重复任务 ID，写入被拒绝");
 ```
 
 不得记录完整描述、关闭说明或进展正文，避免个人信息进入日志。
@@ -959,9 +844,7 @@ tracing::warn!(path = %path, task_id = %task_id, "同步发现重复任务 ID");
 
 - `task_write_duration_ms`
 - `task_query_duration_ms`
-- `task_sync_files_total{result}`
 - `task_version_conflicts_total`
-- `task_index_out_of_sync_total`
 
 ---
 
@@ -971,19 +854,16 @@ tracing::warn!(path = %path, task_id = %task_id, "同步发现重复任务 ID");
 
 1. 增加模型、枚举、校验和错误类型测试。
 2. 实现树构建、移动和进度计算。
-3. 实现 Markdown codec 与 fixtures。
-4. 添加 migration 009 和 SQLite store。
-5. 实现 Obsidian store adapter。
+3. 添加 migration 009/010 和 SQLite 存储层（装配、替换、查询）。
 
-交付标准：领域/codec/store 单测通过，可从 fixture 重建索引。
+交付标准：领域/store 单测通过。
 
 ### 阶段 B：服务与 Tool API
 
 1. 实现 TaskService 创建、编辑、状态、子任务、进展和归档。
-2. 加入 path lock、文档版本和 out-of-sync 机制。
-3. 实现同步服务。
-4. 注册 11 个 Tool 定义与 handler。
-5. 接入 AppContext。
+2. 加入 path lock 与文档版本控制。
+3. 注册 10 个 Tool 定义与 handler。
+4. 接入 AppContext。
 
 交付标准：通过 Tool API 完成两类任务核心闭环。
 
@@ -1007,20 +887,20 @@ tracing::warn!(path = %path, task_id = %task_id, "同步发现重复任务 ID");
 
 ### 阶段 E：可靠性与验收
 
-1. 完成损坏文件、重复 ID、冲突和恢复流程。
-2. 进行 10,000 个索引节点、500 节点长期任务的性能验证。
+1. 完成重复 ID、版本冲突和事务回滚流程。
+2. 进行 10,000 个存储节点、500 节点长期任务的性能验证。
 3. 检查内存、事件监听器和 observer 释放。
 4. 执行格式化、lint、全部测试和端到端回归。
-5. 更新用户文档与示例文件。
+5. 更新用户文档。
 
 ---
 
 ## 19. 完成定义
 
 - [ ] 需求文档 §10 的全部 MVP 验收项通过。
-- [ ] Obsidian 中的短期月文件和长期单任务文件可独立阅读。
-- [ ] SQLite 删除后能够无损重建任务查询投影。
-- [ ] stale 文档版本、重复 ID、损坏 YAML 均不会静默丢数据。
+- [ ] SQLite 为唯一权威存储，全模块不产生任何 Vault 文件写入。
+- [ ] 写入失败时事务整体回滚，不产生半写状态。
+- [ ] stale 文档版本、重复 ID 均不会静默丢数据。
 - [ ] 桌面端和手机端完成创建、编辑、拆解、进展、关闭、日历闭环。
 - [ ] 所有核心操作具备键盘/触控等价路径及 reduced-motion 支持。
 - [ ] `cargo fmt --check`、`cargo clippy -- -D warnings`、`cargo test` 通过。
@@ -1040,4 +920,4 @@ MVP 数据模型为以下能力预留兼容空间，但暂不实现：
 - `calendar_links` 扩展：外部日历事件 ID 和同步游标。
 - `assignee` 扩展：若未来支持多人协作，新增负责人而不改变稳定 task ID。
 
-任何扩展都必须通过新 schema 版本和显式迁移实现，不能在解析器中静默猜测旧数据。
+任何扩展都必须通过显式数据库迁移实现，不能在读取路径中静默猜测旧数据。
