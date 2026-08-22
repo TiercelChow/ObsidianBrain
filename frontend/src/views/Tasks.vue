@@ -626,6 +626,8 @@ watch(() => store.selectedDetail?.root.id, () => {
 })
 
 function onKeydown(event: KeyboardEvent) {
+  // useModalEnvironment (document level) preventDefaults the Esc it consumes; don't double-handle it.
+  if (event.defaultPrevented) return
   if (event.key !== 'Escape' || !drawerNodeId.value || sheetOpen.value || archiveConfirmOpen.value) return
   closeDrawer()
 }
@@ -937,6 +939,7 @@ onMounted(async () => {
 :global(.task-select-popper .el-select-dropdown__item) { min-height: 38px; display: flex; align-items: center; border-radius: 9px; padding: 0 10px; }
 :global(.task-select-popper .el-select-dropdown__item.selected) { background: color-mix(in srgb, var(--accent) 10%, transparent) !important; }
 :global(.task-date-popper.el-popper) { z-index: 2501 !important; }
+:global(.el-message) { z-index: 2600 !important; }
 
 @media (max-width: 1050px) {
   .task-workspace { grid-template-columns: 290px minmax(0, 1fr); }.detail-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }.detail-actions { flex-wrap: wrap; justify-content: flex-end; }

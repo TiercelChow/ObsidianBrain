@@ -78,9 +78,9 @@ const activityRef = ref<HTMLElement | null>(null)
 const closeButtonRef = ref<HTMLButtonElement | null>(null)
 
 // Move focus into the drawer when it opens so keyboard users land on the close affordance.
-watch(() => props.node, async (node) => {
+watch(() => props.node?.id, async (id) => {
   await nextTick()
-  if (node) closeButtonRef.value?.focus()
+  if (id) closeButtonRef.value?.focus()
 })
 
 function revealActivity() {
