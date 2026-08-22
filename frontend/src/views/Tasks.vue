@@ -60,7 +60,7 @@
     </Transition>
 
     <div v-if="viewMode === 'tasks'" class="task-workspace" :class="{ 'detail-open': !!store.selectedDetail }">
-      <aside class="task-list-panel glass-surface">
+      <aside class="task-list-panel glass-surface" @scroll="onPanelScroll">
         <div class="panel-heading">
           <div>
             <strong>我的任务</strong>
@@ -115,7 +115,7 @@
       </aside>
 
       <div class="task-detail-zone">
-        <main class="task-detail-panel glass-surface">
+        <main class="task-detail-panel glass-surface" @scroll="onPanelScroll">
         <div v-if="store.detailLoading" class="detail-loading">
           <span></span><span></span><span></span>
         </div>
@@ -405,6 +405,7 @@ import {
   type TaskNode,
   type TaskStatus,
 } from '@/api/tasks'
+import { useAppStore } from '@/stores/app'
 import { useTasksStore } from '@/stores/tasks'
 import {
   addLocalDays,
@@ -423,6 +424,7 @@ type SheetMode = 'create' | 'edit' | 'subtask' | 'progress' | 'status' | 'move'
 const route = useRoute()
 const router = useRouter()
 const store = useTasksStore()
+const appStore = useAppStore()
 const viewMode = ref<ViewMode>(route.query.view === 'calendar' ? 'calendar' : 'tasks')
 const searchQuery = ref('')
 const kindFilter = ref<'all' | TaskKind>('all')
@@ -635,6 +637,13 @@ function focusTask(id: string) {
 
 function closeDrawer() {
   drawerNodeId.value = null
+}
+
+// The locked page never scrolls app-main; forward panel scroll so the mobile
+// header still collapses exactly like Reader does (App.vue: onMainScroll).
+function onPanelScroll(event: Event) {
+  const el = event.target as HTMLElement
+  appStore.setScrolled(el.scrollTop > 20)
 }
 
 // Switching to another task in the list must not keep a stale drawer open.
