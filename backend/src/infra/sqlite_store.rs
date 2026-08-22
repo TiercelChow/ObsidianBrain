@@ -65,6 +65,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "personal task management",
         sql: include_str!("../../migrations/009_tasks.sql"),
     },
+    Migration {
+        version: 10,
+        description: "remove task sync queue and sync_error marker",
+        sql: include_str!("../../migrations/010_remove_task_sync.sql"),
+    },
 ];
 
 impl SqliteStore {
@@ -744,7 +749,33 @@ mod tests {
         let count: u32 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(count, 9);
+        assert_eq!(count, 10);
+    }
+
+    #[test]
+    fn test_migration_010_removes_task_sync_objects() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+        let conn = store.conn.lock().unwrap();
+
+        let queue_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='task_sync_queue'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!queue_exists);
+
+        let sync_error_columns: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('task_documents') WHERE name='sync_error'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(sync_error_columns, 0);
     }
 
     #[test]
