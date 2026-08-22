@@ -104,7 +104,8 @@ frontend/src/
 │   └── Tasks.vue
 ├── components/tasks/
 │   ├── TaskTree.vue
-│   └── TaskCalendar.vue
+│   ├── TaskCalendar.vue
+│   └── SubtaskDrawer.vue
 ├── stores/
 │   └── tasks.ts
 ├── api/
@@ -112,7 +113,8 @@ frontend/src/
 └── utils/
     ├── taskDates.ts
     ├── taskHierarchy.ts
-    └── taskPayloads.ts
+    ├── taskPayloads.ts
+    └── taskActivity.ts
 ```
 
 路由增加 `/tasks`，桌面端详情选中态使用查询参数 `?task=<uuid>`，视图使用 `?view=list|calendar`。手机端仍保持相同 URL，使浏览器前进/后退可恢复上下文。
@@ -648,7 +650,14 @@ eachDayOfInterval(start: string, end: string): string[]
 
 内部以 `{year, month, day}` 或 Temporal polyfill 表示日历日期；只有显示 RFC 3339 时间戳时才转换为 `Date`。
 
-### 11.3 路由状态
+### 11.3 详情交互与子任务抽屉
+
+- 详情面板恒渲染根任务（总览、拆解树、聚合活动流）；`Tasks.vue` 以 `drawerNodeId` ref 驱动子任务抽屉，不再有整面板切换。
+- `utils/taskActivity.ts` 的 `buildTaskActivity(nodes, progress, audit, scopeTaskId?)` 负责全树聚合（省略 scope）与单任务过滤（传入 scope，供抽屉），条目携带 `taskTitle` 归因；`taskStatusLabel`/`taskImportanceLabel`/`formatTimestamp` 一并从视图层下沉到 utils。
+- `SubtaskDrawer.vue` 常驻挂载：桌面端（≥1150px）以 flex 定宽 slot 实现 push 压缩；<1150px 转为 fixed 浮层 + 遮罩；≤768px 宽度 min(88vw, 400px)。z-index 2300/2301，低于 MotionModal 的 2400。
+- 抽屉操作全部 emit 回 `Tasks.vue` 复用 sheet 表单体系；写入成功后子任务目标自动打开其抽屉，根任务目标回到总览。
+
+### 11.4 路由状态
 
 - `view`、`task`、`date` 写入 URL。
 - 搜索关键词和筛选可写入 query，便于刷新恢复；临时表单内容不进入 URL。
