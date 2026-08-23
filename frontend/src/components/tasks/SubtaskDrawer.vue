@@ -291,12 +291,15 @@ defineExpose({ revealActivity })
   .drawer-backdrop { display: block; position: fixed; inset: 0; z-index: 2300; background: color-mix(in srgb, #0f121a 32%, transparent); opacity: 0; pointer-events: none; transition: opacity var(--motion-normal) ease; }
   .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
   .subtask-drawer-slot { position: fixed; top: 0; right: 0; bottom: 0; z-index: 2301; width: min(400px, 92vw); margin: 0; overflow: visible; transform: translateX(100%); transition: transform var(--motion-normal) var(--ease-emphasized); }
-  .subtask-drawer-slot.open { transform: translateX(0); }
+  /* .open must restate the width: the desktop push rule (0,2,0) would otherwise
+     beat this media query's single-class rule (0,1,0) — media queries add no
+     specificity — collapsing the mobile drawer to a 30vw sliver. */
+  .subtask-drawer-slot.open { width: min(400px, 92vw); transform: translateX(0); }
   .subtask-drawer { width: 100%; height: 100%; border-radius: 22px 0 0 22px; }
 }
 
 @media (max-width: 768px) {
-  .subtask-drawer-slot { width: min(88vw, 400px); }
+  .subtask-drawer-slot, .subtask-drawer-slot.open { width: min(88vw, 400px); }
   .drawer-header, .drawer-scroll { padding-left: 16px; padding-right: 16px; }
   .drawer-corner .corner-button { width: 38px; height: 38px; }
   .drawer-collapse .drawer-collapse-bar { opacity: 0; }
