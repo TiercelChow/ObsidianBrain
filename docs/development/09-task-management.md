@@ -653,12 +653,12 @@ eachDayOfInterval(start: string, end: string): string[]
 ### 11.3 详情交互与子任务抽屉
 
 - 详情面板恒渲染根任务（总览、拆解树、聚合活动流）；`Tasks.vue` 以 `drawerNodeId` ref 驱动子任务抽屉，不再有整面板切换。
-- `utils/taskActivity.ts` 的 `buildTaskActivity(nodes, progress, audit, scopeTaskId?)` 负责全树聚合（省略 scope）与单任务过滤（传入 scope，供抽屉）；条目 `title` 为名词式类型标签（进展/状态变更/移动…），`detail` 携带具体变化（完成度 X%、状态 A → B），`taskTitle` 归因；`taskStatusLabel`/`taskImportanceLabel`/`formatTimestamp` 一并从视图层下沉到 utils。活动条目头行为 类型胶囊 + 任务名 + 时间，明细/备注单行省略；点击条目（抽屉经 emit `inspect`）由 `Tasks.vue` 的 MotionModal 详情弹窗展示全文。
+- `utils/taskActivity.ts` 的 `buildTaskActivity(nodes, progress, audit, scopeTaskId?)` 负责全树聚合（省略 scope）与单任务过滤（传入 scope，供抽屉）；条目 `title` 为名词式类型标签（进展/状态变更/移动…），`detail` 携带具体变化（完成度 X%、状态 A → B），`taskTitle` 归因；`taskStatusLabel`/`taskImportanceLabel`/`formatTimestamp` 一并从视图层下沉到 utils。活动条目头行为 类型胶囊 + 任务名 + 时间（抽屉专属流省略任务名），明细/备注单行省略；点击条目（抽屉经 emit `inspect`）由 `Tasks.vue` 的 MotionModal 详情弹窗展示全文。
 - `SubtaskDrawer.vue` 常驻挂载：桌面端（≥1150px）以 flex 定宽 slot 实现 push 压缩（slot 总宽 `min(400px, 30vw)`）；<1150px 转为 fixed 浮层 + 遮罩；≤768px 宽度 min(88vw, 400px)。z-index 2300/2301，低于 MotionModal 的 2400。
-- 抽屉结构：头部「‹ {父任务名}」返回行（emit `select`，父级绑 `focusTask`）+ 右上角唯一编辑图标按钮（EditPen，emit `edit`）；正文为「子任务」栏目（直属子任务列表，行 = 状态圆点 + 标题 + 重要性胶囊，点击下钻）与「进展与记录」栏目；左缘内侧竖条收起把手（静止 4px，悬浮/移动端加宽至 24px 显 ›，打开时键盘焦点落于把手）。
+- 抽屉结构：头部「‹ {父任务名}」返回行（emit `select`，父级绑 `focusTask`）+ 标题下属性胶囊行（`.drawer-pills`，状态/重要性）+ 右上角唯一编辑图标按钮（EditPen，emit `edit`）；正文为「子任务」栏目（直属子任务列表，行 = 状态圆点 + 标题 + 重要性胶囊，点击下钻）与「进展与记录」栏目；左缘内侧垂直居中短竖条收起把手（4px × 40px，悬浮/聚焦渐隐为 border 绘制的 › 形折线，移动端常显折线，打开时键盘焦点落于把手）。
 - 抽屉操作 emit 回 `Tasks.vue` 复用 sheet 表单体系（emits 为 close/select/edit/inspect）；写入成功后子任务目标自动打开其抽屉，根任务目标回到总览。
 - 编辑表单整合：编辑模式新增「状态」（沿用 statusSheetOptions 过滤；终态显示关闭说明，根任务另显示级联勾选）与「父任务」（仅子任务，候选沿用 moveCandidates）字段；保存依次执行 更新字段 → 改状态（仅变化时）→ 移动（仅变化时），版本号由 store 写后自动刷新衔接。
-- 布局锁定：`.tasks-page.view-tasks` 为 `calc(100dvh - 64px)` 的 flex 列（移动端 `calc(100dvh - 96px - safe-top - safe-bottom)`），workspace `flex: 1 1 auto; min-height: 0`，仅面板内部滚动；属性胶囊 `.task-pill`（status-*/importance-*/type-*）定义于 App.vue 全局样式块，主面板与抽屉共用，置于头部事实行最前（「优先级」事实卡已移除）。
+- 布局锁定：`.tasks-page.view-tasks` 为 `calc(100dvh - 64px)` 的 flex 列（移动端 `calc(100dvh - 96px - safe-top - safe-bottom)`），workspace `flex: 1 1 auto; min-height: 0`，仅面板内部滚动；属性胶囊 `.task-pill`（status-*/importance-*/type-*）定义于 App.vue 全局样式块，主面板与抽屉共用；状态/重要性胶囊置于标题与描述之间独立一行（`.detail-pills`/`.drawer-pills`），事实行仅剩两张等宽日期卡（「优先级」事实卡已移除）。
 - 活动条目支持键盘操作：条目可聚焦（tabindex），Enter/Space 打开详情弹窗，focus-visible 使用全局 focus-ring 样式。
 
 ### 11.4 路由状态
