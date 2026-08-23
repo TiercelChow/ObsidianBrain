@@ -210,11 +210,7 @@
           :parent="drawerParent"
           @close="closeDrawer"
           @select="focusTask"
-          @progress="openProgress"
-          @add="openSubtask"
-          @status="openStatus"
           @edit="openEdit"
-          @move="openMove"
         />
       </div>
     </div>

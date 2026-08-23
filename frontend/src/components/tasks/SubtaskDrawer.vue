@@ -13,8 +13,6 @@
           </div>
           <div class="drawer-corner">
             <button type="button" class="corner-button" aria-label="编辑任务" title="编辑" @click="emit('edit', node)"><el-icon><EditPen /></el-icon></button>
-            <button type="button" class="corner-button" aria-label="更改状态" title="更改状态" @click="emit('status', node)"><el-icon><Refresh /></el-icon></button>
-            <button type="button" class="corner-button" aria-label="移动任务" title="移动" @click="emit('move', node)"><el-icon><Rank /></el-icon></button>
           </div>
         </div>
       </header>
@@ -32,7 +30,6 @@
         <section class="drawer-section">
           <div class="drawer-section-heading">
             <div><span>子任务</span><strong>{{ children.length }} 个</strong></div>
-            <button type="button" class="drawer-add" aria-label="添加子任务" title="添加子任务" @click="emit('add', node)">＋</button>
           </div>
           <div v-if="children.length" class="drawer-children">
             <button
@@ -54,7 +51,6 @@
         <section ref="activityRef" class="drawer-section">
           <div class="drawer-section-heading">
             <div><span>进展与记录</span><strong>{{ activity.length }} 条</strong></div>
-            <button type="button" class="drawer-add" aria-label="记录进展" title="记录进展" @click="emit('progress', node)">＋</button>
           </div>
           <div v-if="activity.length" class="drawer-activity">
             <article v-for="item in activity" :key="item.id" class="drawer-activity-item">
@@ -73,14 +69,14 @@
         </section>
       </div>
 
-      <button ref="collapseRef" type="button" class="drawer-collapse" aria-label="收起子任务详情" title="收起" @click="emit('close')">‹</button>
+      <button ref="collapseRef" type="button" class="drawer-collapse" aria-label="收起子任务详情" title="收起" @click="emit('close')"><span aria-hidden="true">›</span></button>
     </aside>
   </div>
 </template>
 
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
-import { EditPen, Rank, Refresh } from '@element-plus/icons-vue'
+import { EditPen } from '@element-plus/icons-vue'
 import type { TaskNode } from '@/api/tasks'
 import { taskImportanceLabel, taskStatusLabel, type TaskActivityEntry } from '@/utils/taskActivity'
 import { formatTimestamp } from '@/utils/taskDates'
@@ -95,11 +91,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   select: [taskId: string]
-  progress: [task: TaskNode]
-  add: [task: TaskNode]
-  status: [task: TaskNode]
   edit: [task: TaskNode]
-  move: [task: TaskNode]
 }>()
 
 const activityRef = ref<HTMLElement | null>(null)
@@ -121,16 +113,14 @@ defineExpose({ revealActivity })
 <style scoped>
 .drawer-backdrop { display: none; }
 
-/* Desktop (>=1150px): in-flow push — the slot is a flex item of .task-detail-zone.
-   The 24px padding strip left of the drawer hosts the collapse handle. */
+/* Desktop (>=1150px): in-flow push — the slot is a flex item of .task-detail-zone. */
 .subtask-drawer-slot {
   flex: 0 0 auto;
   width: 0;
-  padding-left: 0;
   overflow: hidden;
-  transition: width var(--motion-normal) var(--ease-emphasized), padding-left var(--motion-normal) var(--ease-emphasized);
+  transition: width var(--motion-normal) var(--ease-emphasized);
 }
-.subtask-drawer-slot.open { width: calc(min(400px, 30vw) + 24px); padding-left: 24px; }
+.subtask-drawer-slot.open { width: min(400px, 30vw); }
 .subtask-drawer {
   position: relative;
   width: min(400px, 30vw);
@@ -196,22 +186,6 @@ defineExpose({ revealActivity })
 .drawer-section-heading > div { display: flex; align-items: baseline; gap: 8px; }
 .drawer-section-heading span { font-size: 12px; font-weight: 650; }
 .drawer-section-heading strong { color: var(--text-faint); font-size: 11px; font-weight: 600; }
-.drawer-add {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  background: var(--bg-glass);
-  color: var(--accent);
-  font-size: 17px;
-  line-height: 1;
-  cursor: pointer;
-  transition: background var(--motion-fast) ease;
-}
-.drawer-add:hover { background: var(--bg-glass-strong); }
 .drawer-section-empty { margin: 2px 0 0; color: var(--text-faint); font-size: 12px; }
 
 .drawer-children { display: grid; gap: 6px; }
@@ -253,37 +227,34 @@ defineExpose({ revealActivity })
 .drawer-activity-detail { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
 .drawer-activity-note { margin: 5px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
 
-/* Collapse handle: rides the drawer's left edge, vertically centered. */
+/* Collapse handle: a thin bar on the drawer's inner left edge; hover widens it into a › tab. */
 .drawer-collapse {
   position: absolute;
-  left: -24px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 24px;
-  height: 64px;
-  display: grid;
-  place-items: center;
+  left: 0;
+  top: 22px;
+  bottom: 22px;
+  width: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
-  border: 1px solid var(--border-glass);
-  border-right: 0;
-  border-radius: 12px 0 0 12px;
-  background: var(--bg-glass);
-  box-shadow: var(--shadow-sm), var(--inset-highlight);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 0;
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
   color: var(--text-muted);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1;
   cursor: pointer;
-  transition: color var(--motion-fast) ease, background var(--motion-fast) ease;
+  transition: width var(--motion-fast) ease, background var(--motion-fast) ease;
 }
-.drawer-collapse:hover { color: var(--text-primary); background: var(--bg-glass-strong); }
+.drawer-collapse > span { opacity: 0; transition: opacity var(--motion-fast) ease; }
+.drawer-collapse:hover, .drawer-collapse:focus-visible { width: 24px; background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
+.drawer-collapse:hover > span, .drawer-collapse:focus-visible > span { opacity: 1; }
 
 /* Below 1150px: no room to push — overlay from the right with a backdrop. */
 @media (max-width: 1149px) {
   .drawer-backdrop { display: block; position: fixed; inset: 0; z-index: 2300; background: color-mix(in srgb, #0f121a 32%, transparent); opacity: 0; pointer-events: none; transition: opacity var(--motion-normal) ease; }
   .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
-  .subtask-drawer-slot { position: fixed; top: 0; right: 0; bottom: 0; z-index: 2301; width: min(400px, 92vw); margin: 0; padding: 0; overflow: visible; transform: translateX(100%); transition: transform var(--motion-normal) var(--ease-emphasized); }
+  .subtask-drawer-slot { position: fixed; top: 0; right: 0; bottom: 0; z-index: 2301; width: min(400px, 92vw); margin: 0; overflow: visible; transform: translateX(100%); transition: transform var(--motion-normal) var(--ease-emphasized); }
   .subtask-drawer-slot.open { transform: translateX(0); }
   .subtask-drawer { width: 100%; height: 100%; border-radius: 22px 0 0 22px; }
 }
@@ -292,10 +263,11 @@ defineExpose({ revealActivity })
   .subtask-drawer-slot { width: min(88vw, 400px); }
   .drawer-header, .drawer-scroll { padding-left: 16px; padding-right: 16px; }
   .drawer-corner .corner-button { width: 38px; height: 38px; }
-  .drawer-add { width: 36px; height: 36px; }
+  .drawer-collapse { width: 24px; background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
+  .drawer-collapse > span { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .subtask-drawer-slot, .drawer-backdrop { transition-duration: 1ms !important; }
+  .subtask-drawer-slot, .drawer-backdrop, .drawer-collapse, .drawer-collapse > span { transition-duration: 1ms !important; }
 }
 </style>
