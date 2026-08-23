@@ -178,7 +178,15 @@
               <button type="button" @click="openProgress(detail.root)">＋ 添加进展</button>
             </div>
             <div v-if="activity.length" class="activity-list">
-              <article v-for="item in activity" :key="item.id" class="activity-item" @click="activityDetail = item">
+              <article
+                v-for="item in activity"
+                :key="item.id"
+                class="activity-item"
+                tabindex="0"
+                :aria-label="`查看记录详情：${item.taskTitle} ${item.title}`"
+                @click="activityDetail = item"
+                @keydown="onActivityKeydown($event, item)"
+              >
                 <span class="activity-dot" :class="item.type"></span>
                 <div class="activity-copy">
                   <div class="activity-head">
@@ -620,6 +628,15 @@ function openActivityDetail(entry: TaskActivityEntry) {
   activityDetail.value = entry
 }
 
+// Keyboard path into the activity detail modal; the target guard keeps the
+// nested task-name button's own Enter activation from also opening the modal.
+function onActivityKeydown(event: KeyboardEvent, item: TaskActivityEntry) {
+  if (event.target !== event.currentTarget) return
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  activityDetail.value = item
+}
+
 function openEdit(task: TaskNode) {
   sheetMode.value = 'edit'
   targetNode.value = task
@@ -895,11 +912,12 @@ onMounted(async () => {
 .activity-list { display: grid; gap: 0; }
 /* Dividers breathe on both sides: the next entry carries the top border plus its own padding. */
 .activity-item { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 9px; padding: 14px 0; border-radius: 12px; cursor: pointer; transition: background var(--motion-fast) ease; }
-.activity-item:hover { background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+.activity-item:hover, .activity-item:focus-visible { background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+.activity-item:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
 .activity-item + .activity-item { border-top: 1px solid var(--border-subtle); }
 .activity-copy { min-width: 0; }
 .activity-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
-.activity-head strong { min-width: 0; display: flex; align-items: center; }
+.activity-head strong { min-width: 0; display: flex; align-items: center; gap: 7px; }
 .activity-head strong .task-pill { flex: none; }
 .activity-task { min-width: 0; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 650; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .activity-task:hover { text-decoration: underline; }

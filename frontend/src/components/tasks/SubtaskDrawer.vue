@@ -53,7 +53,15 @@
             <div><span>进展与记录</span><strong>{{ activity.length }} 条</strong></div>
           </div>
           <div v-if="activity.length" class="drawer-activity">
-            <article v-for="item in activity" :key="item.id" class="drawer-activity-item" @click="emit('inspect', item)">
+            <article
+              v-for="item in activity"
+              :key="item.id"
+              class="drawer-activity-item"
+              tabindex="0"
+              :aria-label="`查看记录详情：${item.title}`"
+              @click="emit('inspect', item)"
+              @keydown="onActivityKeydown($event, item)"
+            >
               <span class="activity-dot" :class="item.type"></span>
               <div class="drawer-activity-copy">
                 <div class="drawer-activity-head">
@@ -103,6 +111,14 @@ watch(() => props.node?.id, async (id) => {
   await nextTick()
   if (id) collapseRef.value?.focus()
 })
+
+// Keyboard path into the activity detail modal (emit inspect → parent modal).
+function onActivityKeydown(event: KeyboardEvent, item: TaskActivityEntry) {
+  if (event.target !== event.currentTarget) return
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  emit('inspect', item)
+}
 
 function revealActivity() {
   activityRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -218,7 +234,8 @@ defineExpose({ revealActivity })
 .drawer-activity { display: grid; gap: 0; }
 /* Dividers breathe on both sides: the next entry carries the top border plus its own padding. */
 .drawer-activity-item { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 9px; padding: 12px 0; border-radius: 12px; cursor: pointer; transition: background var(--motion-fast) ease; }
-.drawer-activity-item:hover { background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+.drawer-activity-item:hover, .drawer-activity-item:focus-visible { background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+.drawer-activity-item:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
 .drawer-activity-item + .drawer-activity-item { border-top: 1px solid var(--border-subtle); }
 .drawer-activity-copy { min-width: 0; }
 .drawer-activity-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
