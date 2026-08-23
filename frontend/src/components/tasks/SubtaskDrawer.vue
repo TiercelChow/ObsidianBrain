@@ -10,6 +10,10 @@
         <div class="drawer-row">
           <div class="drawer-title-group">
             <h3>{{ node.title }}</h3>
+            <div class="drawer-pills">
+              <span class="task-pill" :class="`status-${node.status}`">{{ taskStatusLabel(node.status) }}</span>
+              <span class="task-pill" :class="`importance-${node.importance}`">{{ taskImportanceLabel(node.importance) }}</span>
+            </div>
           </div>
           <div class="drawer-corner">
             <button type="button" class="corner-button" aria-label="编辑任务" title="编辑" @click="emit('edit', node)"><el-icon><EditPen /></el-icon></button>
@@ -21,8 +25,6 @@
         <p v-if="node.description" class="drawer-description">{{ node.description }}</p>
 
         <div class="drawer-facts">
-          <span class="task-pill" :class="`status-${node.status}`">{{ taskStatusLabel(node.status) }}</span>
-          <span class="task-pill" :class="`importance-${node.importance}`">{{ taskImportanceLabel(node.importance) }}</span>
           <div><span>开始</span><strong>{{ node.start_date }}</strong></div>
           <div><span>结束</span><strong>{{ node.end_date }}</strong></div>
         </div>
@@ -77,7 +79,10 @@
         </section>
       </div>
 
-      <button ref="collapseRef" type="button" class="drawer-collapse" aria-label="收起子任务详情" title="收起" @click="emit('close')"><span aria-hidden="true">›</span></button>
+      <button ref="collapseRef" type="button" class="drawer-collapse" aria-label="收起子任务详情" title="收起" @click="emit('close')">
+        <span class="drawer-collapse-bar" aria-hidden="true"></span>
+        <span class="drawer-collapse-chevron" aria-hidden="true"></span>
+      </button>
     </aside>
   </div>
 </template>
@@ -173,6 +178,7 @@ defineExpose({ revealActivity })
 .drawer-row { display: flex; align-items: flex-start; gap: 10px; }
 .drawer-title-group { min-width: 0; flex: 1; }
 .drawer-title-group h3 { margin: 0; font-size: 20px; line-height: 1.25; letter-spacing: var(--tracking-tight); }
+.drawer-pills { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
 .drawer-corner { flex: none; display: flex; gap: 5px; }
 .corner-button {
   width: 34px;
@@ -192,9 +198,8 @@ defineExpose({ revealActivity })
 
 .drawer-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 18px max(18px, env(safe-area-inset-bottom)); }
 .drawer-description { margin: 16px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
-.drawer-facts { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
-.drawer-facts .task-pill { flex: none; }
-.drawer-facts div { min-width: 0; display: grid; gap: 5px; padding: 10px 12px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 3%, transparent); }
+.drawer-facts { display: flex; gap: 8px; margin: 18px 0 0; }
+.drawer-facts div { flex: 1 1 0; min-width: 0; display: grid; gap: 5px; padding: 10px 12px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 3%, transparent); }
 .drawer-facts div span { color: var(--text-faint); font-size: 10px; }
 .drawer-facts strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 570; }
 
@@ -246,28 +251,40 @@ defineExpose({ revealActivity })
 .drawer-activity-detail { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-activity-note { margin: 4px 0 0; color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Collapse handle: a thin bar on the drawer's inner left edge; hover widens it into a › tab. */
+/* Collapse handle: a short vertical bar on the drawer's inner left edge;
+   hover/focus crossfades it into a ›-shaped chevron drawn with borders. */
 .drawer-collapse {
   position: absolute;
   left: 0;
-  top: 22px;
-  bottom: 22px;
-  width: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   border: 0;
-  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
-  color: var(--text-muted);
-  font-size: 14px;
-  line-height: 1;
+  background: transparent;
   cursor: pointer;
-  transition: width var(--motion-fast) ease, background var(--motion-fast) ease;
 }
-.drawer-collapse > span { opacity: 0; transition: opacity var(--motion-fast) ease; }
-.drawer-collapse:hover, .drawer-collapse:focus-visible { width: 24px; background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
-.drawer-collapse:hover > span, .drawer-collapse:focus-visible > span { opacity: 1; }
+.drawer-collapse-bar, .drawer-collapse-chevron { position: absolute; transition: opacity var(--motion-fast) ease; }
+.drawer-collapse-bar {
+  width: 4px;
+  height: 40px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-primary) 16%, transparent);
+}
+.drawer-collapse-chevron {
+  width: 10px;
+  height: 10px;
+  border-top: 2px solid var(--text-muted);
+  border-right: 2px solid var(--text-muted);
+  transform: rotate(45deg);
+  opacity: 0;
+}
+.drawer-collapse:hover .drawer-collapse-bar, .drawer-collapse:focus-visible .drawer-collapse-bar { opacity: 0; }
+.drawer-collapse:hover .drawer-collapse-chevron, .drawer-collapse:focus-visible .drawer-collapse-chevron { opacity: 1; }
 
 /* Below 1150px: no room to push — overlay from the right with a backdrop. */
 @media (max-width: 1149px) {
@@ -282,11 +299,11 @@ defineExpose({ revealActivity })
   .subtask-drawer-slot { width: min(88vw, 400px); }
   .drawer-header, .drawer-scroll { padding-left: 16px; padding-right: 16px; }
   .drawer-corner .corner-button { width: 38px; height: 38px; }
-  .drawer-collapse { width: 24px; background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
-  .drawer-collapse > span { opacity: 1; }
+  .drawer-collapse .drawer-collapse-bar { opacity: 0; }
+  .drawer-collapse .drawer-collapse-chevron { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .subtask-drawer-slot, .drawer-backdrop, .drawer-collapse, .drawer-collapse > span { transition-duration: 1ms !important; }
+  .subtask-drawer-slot, .drawer-backdrop, .drawer-collapse-bar, .drawer-collapse-chevron { transition-duration: 1ms !important; }
 }
 </style>

@@ -128,6 +128,10 @@
           <header ref="detailHeaderRef" class="detail-header">
             <div class="detail-title-group">
               <h2>{{ detail.root.title }}</h2>
+              <div class="detail-pills">
+                <span class="task-pill" :class="`status-${detail.root.status}`">{{ taskStatusLabel(detail.root.status) }}</span>
+                <span class="task-pill" :class="`importance-${detail.root.importance}`">{{ taskImportanceLabel(detail.root.importance) }}</span>
+              </div>
               <p>{{ detail.root.description || '这个任务还没有描述。' }}</p>
             </div>
             <div class="detail-actions">
@@ -138,8 +142,6 @@
           </header>
 
           <div class="detail-facts">
-            <span class="task-pill" :class="`status-${detail.root.status}`">{{ taskStatusLabel(detail.root.status) }}</span>
-            <span class="task-pill" :class="`importance-${detail.root.importance}`">{{ taskImportanceLabel(detail.root.importance) }}</span>
             <div><span>开始</span><strong>{{ detail.root.start_date }}</strong></div>
             <div><span>结束</span><strong>{{ detail.root.end_date }}</strong></div>
           </div>
@@ -936,14 +938,14 @@ onMounted(async () => {
 /* Keep scrollIntoView() reveals clear of the fixed mobile global header. */
 .detail-header, .activity-section { scroll-margin-top: calc(var(--mobile-header-height) + var(--safe-top) + 12px); }
 .detail-title-group { min-width: 0; }
-.detail-title-group h2 { margin: 0 0 5px; font-size: clamp(22px, 3vw, 30px); line-height: 1.18; letter-spacing: var(--tracking-tight); }
-.detail-title-group p { max-width: 720px; margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.detail-title-group h2 { margin: 0; font-size: clamp(22px, 3vw, 30px); line-height: 1.18; letter-spacing: var(--tracking-tight); }
+.detail-pills { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.detail-title-group p { max-width: 720px; margin: 8px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 .detail-actions { display: flex; gap: 7px; flex: none; }
 .detail-actions button, .section-heading button { min-height: 38px; padding: 0 11px; border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-glass); color: var(--text-secondary); cursor: pointer; }
 .detail-actions .more-button { width: 40px; padding: 0; }
-.detail-facts { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 26px 0; }
-.detail-facts .task-pill { flex: none; }
-.detail-facts div { min-width: 0; display: grid; gap: 5px; padding: 10px 12px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 3%, transparent); }
+.detail-facts { display: flex; gap: 8px; margin: 26px 0; }
+.detail-facts div { flex: 1 1 0; min-width: 0; display: grid; gap: 5px; padding: 10px 12px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 3%, transparent); }
 .detail-facts div span { color: var(--text-faint); font-size: 10px; }
 .detail-facts strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 570; }
 .progress-overview, .detail-section { padding: 18px; border: 1px solid var(--border-subtle); border-radius: 17px; background: color-mix(in srgb, var(--bg-glass) 72%, transparent); }
