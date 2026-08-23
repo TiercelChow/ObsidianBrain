@@ -111,6 +111,7 @@
                 :key="day.date"
                 class="day-link"
                 :class="{ active: selectedDate === day.date }"
+                :data-date="day.date"
                 @click="scrollToDate(day.date)"
               >
                 <span class="day-dot"></span>
@@ -124,7 +125,7 @@
       </aside>
 
       <!-- Right Memo List -->
-      <div class="memo-scroll" @scroll="onMemoScroll">
+      <div class="memo-scroll" ref="memoScrollRef" @scroll="onMemoScroll">
         <!-- Filter hint -->
         <Transition name="hint">
           <div v-if="hasActiveFilter && !loading && filteredMemos.length > 0" class="filter-hint glass-surface">
@@ -338,7 +339,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Minus, Search, PriceTag, Loading, Picture, Refresh, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import hljs from 'highlight.js/lib/common'
@@ -346,6 +347,7 @@ import 'highlight.js/styles/github-dark.css'
 import panzoom, { type PanZoom } from 'panzoom'
 import { createMemo, browseTimeline, searchMemos, uploadImages, syncMemos } from '@/api'
 import MotionModal from '@/components/motion/MotionModal.vue'
+import { pickActiveDate, type SpyHeader } from '@/utils/timelineSpy'
 
 // ── Types ──
 interface Memo {
@@ -386,6 +388,10 @@ const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => windowWidth.value <= 768)
 function onResize() { windowWidth.value = window.innerWidth }
 const selectedDate = ref('')
+const memoScrollRef = ref<HTMLElement | null>(null)
+// Scroll-spy: left-nav highlight follows the day group at the top of the memo list.
+const SPY_THRESHOLD = 90
+let spyRafId: number | null = null
 const hasMore = ref(true)
 const showCreateDialog = ref(false)
 const tagsInput = ref('')
@@ -481,6 +487,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('keydown', onViewerKeydown)
   window.removeEventListener('resize', onResize)
+  if (spyRafId !== null) cancelAnimationFrame(spyRafId)
   if (searchTimer) clearTimeout(searchTimer)
   pendingImages.value.forEach((image) => URL.revokeObjectURL(image.preview))
   viewerPz?.dispose()
@@ -852,9 +859,43 @@ function scrollToDate(date: string) {
   document.getElementById('date-' + date)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
+function updateActiveFromScroll() {
+  spyRafId = null
+  const container = memoScrollRef.value
+  if (!container || isMobile.value) return
+  const baseTop = container.getBoundingClientRect().top
+  const headers: SpyHeader[] = []
+  for (const group of groupedMemos.value) {
+    const el = document.getElementById('date-' + group.date)
+    if (!el) continue
+    const top = el.getBoundingClientRect().top - baseTop
+    headers.push({ date: group.date, top })
+    if (top > SPY_THRESHOLD) break
+  }
+  const next = pickActiveDate(headers, SPY_THRESHOLD)
+  if (next === null) {
+    selectedDate.value = ''
+    return
+  }
+  if (next !== selectedDate.value) {
+    selectedDate.value = next
+    document.querySelector(`.day-link[data-date="${next}"]`)?.scrollIntoView({ block: 'nearest' })
+  }
+}
+
+function requestSpyUpdate() {
+  if (spyRafId !== null) return
+  spyRafId = requestAnimationFrame(updateActiveFromScroll)
+}
+
+// Re-sync after data changes (load / load-more / filter / create) so the
+// highlight never points at a date that left the list.
+watch(groupedMemos, () => { nextTick(requestSpyUpdate) })
+
 function onMemoScroll(e: Event) {
   const el = e.target as HTMLElement
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) loadMore()
+  requestSpyUpdate()
 }
 
 onMounted(() => { loadMemos() })

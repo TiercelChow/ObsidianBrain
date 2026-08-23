@@ -417,7 +417,7 @@ pub async fn search_memos(&self, query: MemoQuery) -> Result<Vec<Memo>, BrainErr
 ### 6.2 组件设计
 
 **TimeMachine.vue**：
-- 左侧时间线：年月日树形结构
+- 左侧时间线：年月日树形结构；高亮为 scroll-spy——右侧列表滚动（rAF 节流）时取视口顶部最后一个越过 90px 阈值的日期分组头（`pickActiveDate`，utils/timelineSpy.ts），初次加载与数据变化后自动重同步，高亮日移出左轴时 `scrollIntoView({ block: 'nearest' })` 跟随；移动端左轴隐藏、联动跳过
 - 右侧内容区：小记列表（无限滚动）
 - 顶部工具栏：创建按钮、搜索框、筛选器
 
