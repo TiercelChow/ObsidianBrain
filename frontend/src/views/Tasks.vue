@@ -127,10 +127,6 @@
 
           <header ref="detailHeaderRef" class="detail-header">
             <div class="detail-title-group">
-              <div class="detail-kicker">
-                <span class="task-pill" :class="`status-${detail.root.status}`">{{ taskStatusLabel(detail.root.status) }}</span>
-                <span class="task-pill" :class="`importance-${detail.root.importance}`">{{ taskImportanceLabel(detail.root.importance) }}</span>
-              </div>
               <h2>{{ detail.root.title }}</h2>
               <p>{{ detail.root.description || '这个任务还没有描述。' }}</p>
             </div>
@@ -142,9 +138,10 @@
           </header>
 
           <div class="detail-facts">
+            <span class="task-pill" :class="`status-${detail.root.status}`">{{ taskStatusLabel(detail.root.status) }}</span>
+            <span class="task-pill" :class="`importance-${detail.root.importance}`">{{ taskImportanceLabel(detail.root.importance) }}</span>
             <div><span>开始</span><strong>{{ detail.root.start_date }}</strong></div>
             <div><span>结束</span><strong>{{ detail.root.end_date }}</strong></div>
-            <div><span>优先级</span><strong>{{ taskImportanceLabel(detail.root.importance) }}</strong></div>
           </div>
 
           <section v-if="detail.root.kind === 'long'" class="progress-overview">
@@ -858,15 +855,15 @@ onMounted(async () => {
 /* Keep scrollIntoView() reveals clear of the fixed mobile global header. */
 .detail-header, .activity-section { scroll-margin-top: calc(var(--mobile-header-height) + var(--safe-top) + 12px); }
 .detail-title-group { min-width: 0; }
-.detail-kicker { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.detail-title-group h2 { margin: 7px 0 5px; font-size: clamp(22px, 3vw, 30px); line-height: 1.18; letter-spacing: var(--tracking-tight); }
+.detail-title-group h2 { margin: 0 0 5px; font-size: clamp(22px, 3vw, 30px); line-height: 1.18; letter-spacing: var(--tracking-tight); }
 .detail-title-group p { max-width: 720px; margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 .detail-actions { display: flex; gap: 7px; flex: none; }
 .detail-actions button, .section-heading button { min-height: 38px; padding: 0 11px; border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-glass); color: var(--text-secondary); cursor: pointer; }
 .detail-actions .more-button { width: 40px; padding: 0; }
-.detail-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 26px 0; }
+.detail-facts { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 26px 0; }
+.detail-facts .task-pill { flex: none; }
 .detail-facts div { min-width: 0; display: grid; gap: 5px; padding: 10px 12px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 3%, transparent); }
-.detail-facts span { color: var(--text-faint); font-size: 10px; }
+.detail-facts div span { color: var(--text-faint); font-size: 10px; }
 .detail-facts strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 570; }
 .progress-overview, .detail-section { padding: 18px; border: 1px solid var(--border-subtle); border-radius: 17px; background: color-mix(in srgb, var(--bg-glass) 72%, transparent); }
 .detail-section { margin-top: 18px; }
@@ -919,8 +916,8 @@ onMounted(async () => {
 .empty-list p, .empty-detail p { font-size: 13px; }
 .detail-title-group p { font-size: 14px; line-height: 1.65; }
 .detail-actions button, .section-heading button { font-size: 13px; }
-.detail-facts span { font-size: 11px; }
-.detail-facts strong { font-size: 13px; }
+.detail-facts div span { font-size: 11px; }
+.detail-facts div strong { font-size: 13px; }
 .section-heading span { font-size: 13px; }
 .section-heading small { font-size: 11px; }
 .activity-meta, .activity-note { font-size: 13px; }
@@ -970,11 +967,11 @@ onMounted(async () => {
 :global(.el-message) { z-index: 2600 !important; }
 
 @media (max-width: 1050px) {
-  .task-workspace { grid-template-columns: 290px minmax(0, 1fr); }.detail-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }.detail-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .task-workspace { grid-template-columns: 290px minmax(0, 1fr); }.detail-actions { flex-wrap: wrap; justify-content: flex-end; }
 }
 
 @media (max-width: 768px) {
-  .glass-button { min-height: 44px; }.task-toolbar { flex-wrap: wrap; padding: 7px; }.view-switch { width: 100%; }.view-switch button { min-height: 38px; }.task-search { order: 2; min-width: 0; max-width: none; flex: 1; min-height: 44px; }.filters { order: 3; width: 100%; }.filters :deep(.el-select) { flex: 1; width: auto; min-width: 0; }.filters :deep(.el-select__wrapper) { min-height: 44px; }.tasks-page.view-tasks { height: calc(100dvh - 96px - var(--safe-top) - var(--safe-bottom)); }.task-workspace { flex: 1 1 auto; min-height: 0; height: auto; display: block; }.task-list-panel, .task-detail-panel { height: 100%; min-height: 0; border-radius: 20px; }.task-detail-panel { display: none; padding: 12px; }.task-workspace.detail-open .task-list-panel { display: none; }.task-workspace.detail-open .task-detail-panel { display: block; }.mobile-detail-nav { height: 45px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }.mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font-weight: 600; }.mobile-detail-nav span { color: var(--text-faint); font-size: 11px; }.detail-header { display: block; }.detail-title-group h2 { font-size: 23px; }.detail-actions { display: grid; grid-template-columns: 1fr 1fr 44px; margin-top: 14px; }.detail-actions button { min-height: 44px; }.detail-facts { grid-template-columns: 1fr 1fr; margin: 14px 0; }.detail-facts div:last-child { grid-column: 1 / -1; }.progress-overview, .detail-section { padding: 13px; }.section-heading button { min-height: 44px; }.task-card { min-height: 110px; }.panel-heading button { min-width: 44px; min-height: 44px; }.task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }.sheet-header { padding: 34px 20px 16px; }.sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }.form-grid { grid-template-columns: 1fr; }.field.full { grid-column: auto; }.field input, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; }.sheet-footer { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }.sheet-footer button { min-height: 48px; }
+  .glass-button { min-height: 44px; }.task-toolbar { flex-wrap: wrap; padding: 7px; }.view-switch { width: 100%; }.view-switch button { min-height: 38px; }.task-search { order: 2; min-width: 0; max-width: none; flex: 1; min-height: 44px; }.filters { order: 3; width: 100%; }.filters :deep(.el-select) { flex: 1; width: auto; min-width: 0; }.filters :deep(.el-select__wrapper) { min-height: 44px; }.tasks-page.view-tasks { height: calc(100dvh - 96px - var(--safe-top) - var(--safe-bottom)); }.task-workspace { flex: 1 1 auto; min-height: 0; height: auto; display: block; }.task-list-panel, .task-detail-panel { height: 100%; min-height: 0; border-radius: 20px; }.task-detail-panel { display: none; padding: 12px; }.task-workspace.detail-open .task-list-panel { display: none; }.task-workspace.detail-open .task-detail-panel { display: block; }.mobile-detail-nav { height: 45px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }.mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font-weight: 600; }.mobile-detail-nav span { color: var(--text-faint); font-size: 11px; }.detail-header { display: block; }.detail-title-group h2 { font-size: 23px; }.detail-actions { display: grid; grid-template-columns: 1fr 1fr 44px; margin-top: 14px; }.detail-actions button { min-height: 44px; }.detail-facts { margin: 14px 0; }.progress-overview, .detail-section { padding: 13px; }.section-heading button { min-height: 44px; }.task-card { min-height: 110px; }.panel-heading button { min-width: 44px; min-height: 44px; }.task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }.sheet-header { padding: 34px 20px 16px; }.sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }.form-grid { grid-template-columns: 1fr; }.field.full { grid-column: auto; }.field input, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; }.sheet-footer { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }.sheet-footer button { min-height: 48px; }
   .task-detail-zone { display: block; }
 }
 

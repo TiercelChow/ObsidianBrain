@@ -9,10 +9,6 @@
         </button>
         <div class="drawer-row">
           <div class="drawer-title-group">
-            <div class="drawer-kicker">
-              <span class="task-pill" :class="`status-${node.status}`">{{ taskStatusLabel(node.status) }}</span>
-              <span class="task-pill" :class="`importance-${node.importance}`">{{ taskImportanceLabel(node.importance) }}</span>
-            </div>
             <h3>{{ node.title }}</h3>
           </div>
           <div class="drawer-corner">
@@ -27,9 +23,10 @@
         <p v-if="node.description" class="drawer-description">{{ node.description }}</p>
 
         <div class="drawer-facts">
+          <span class="task-pill" :class="`status-${node.status}`">{{ taskStatusLabel(node.status) }}</span>
+          <span class="task-pill" :class="`importance-${node.importance}`">{{ taskImportanceLabel(node.importance) }}</span>
           <div><span>开始</span><strong>{{ node.start_date }}</strong></div>
           <div><span>结束</span><strong>{{ node.end_date }}</strong></div>
-          <div><span>优先级</span><strong>{{ taskImportanceLabel(node.importance) }}</strong></div>
         </div>
 
         <section class="drawer-section">
@@ -47,6 +44,7 @@
             >
               <span class="status-dot" :class="`status-${child.status}`"></span>
               <strong>{{ child.title }}</strong>
+              <span class="task-pill" :class="`importance-${child.importance}`">{{ taskImportanceLabel(child.importance) }}</span>
               <span class="drawer-child-chevron" aria-hidden="true">›</span>
             </button>
           </div>
@@ -167,8 +165,7 @@ defineExpose({ revealActivity })
 .drawer-back-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-row { display: flex; align-items: flex-start; gap: 10px; }
 .drawer-title-group { min-width: 0; flex: 1; }
-.drawer-kicker { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.drawer-title-group h3 { margin: 8px 0 0; font-size: 20px; line-height: 1.25; letter-spacing: var(--tracking-tight); }
+.drawer-title-group h3 { margin: 0; font-size: 20px; line-height: 1.25; letter-spacing: var(--tracking-tight); }
 .drawer-corner { flex: none; display: flex; gap: 5px; }
 .corner-button {
   width: 34px;
@@ -188,9 +185,10 @@ defineExpose({ revealActivity })
 
 .drawer-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 18px max(18px, env(safe-area-inset-bottom)); }
 .drawer-description { margin: 16px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
-.drawer-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 18px 0 0; }
+.drawer-facts { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+.drawer-facts .task-pill { flex: none; }
 .drawer-facts div { min-width: 0; display: grid; gap: 5px; padding: 10px 12px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 3%, transparent); }
-.drawer-facts span { color: var(--text-faint); font-size: 10px; }
+.drawer-facts div span { color: var(--text-faint); font-size: 10px; }
 .drawer-facts strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 570; }
 
 .drawer-section { margin: 20px 0 0; padding: 18px; border: 1px solid var(--border-subtle); border-radius: 17px; background: color-mix(in srgb, var(--bg-glass) 72%, transparent); }
@@ -219,7 +217,7 @@ defineExpose({ revealActivity })
 .drawer-children { display: grid; gap: 6px; }
 .drawer-child {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) 16px;
+  grid-template-columns: 10px minmax(0, 1fr) auto 16px;
   align-items: center;
   gap: 9px;
   min-height: 42px;
@@ -295,8 +293,6 @@ defineExpose({ revealActivity })
   .drawer-header, .drawer-scroll { padding-left: 16px; padding-right: 16px; }
   .drawer-corner .corner-button { width: 38px; height: 38px; }
   .drawer-add { width: 36px; height: 36px; }
-  .drawer-facts { grid-template-columns: 1fr 1fr; }
-  .drawer-facts div:last-child { grid-column: 1 / -1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
