@@ -53,7 +53,7 @@
             <div><span>进展与记录</span><strong>{{ activity.length }} 条</strong></div>
           </div>
           <div v-if="activity.length" class="drawer-activity">
-            <article v-for="item in activity" :key="item.id" class="drawer-activity-item">
+            <article v-for="item in activity" :key="item.id" class="drawer-activity-item" @click="emit('inspect', item)">
               <span class="activity-dot" :class="item.type"></span>
               <div class="drawer-activity-copy">
                 <div class="drawer-activity-head">
@@ -92,6 +92,7 @@ const emit = defineEmits<{
   close: []
   select: [taskId: string]
   edit: [task: TaskNode]
+  inspect: [entry: TaskActivityEntry]
 }>()
 
 const activityRef = ref<HTMLElement | null>(null)
@@ -216,7 +217,8 @@ defineExpose({ revealActivity })
 
 .drawer-activity { display: grid; gap: 0; }
 /* Dividers breathe on both sides: the next entry carries the top border plus its own padding. */
-.drawer-activity-item { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 9px; padding: 12px 0; }
+.drawer-activity-item { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 9px; padding: 12px 0; border-radius: 12px; cursor: pointer; transition: background var(--motion-fast) ease; }
+.drawer-activity-item:hover { background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
 .drawer-activity-item + .drawer-activity-item { border-top: 1px solid var(--border-subtle); }
 .drawer-activity-copy { min-width: 0; }
 .drawer-activity-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -224,8 +226,8 @@ defineExpose({ revealActivity })
 .drawer-activity-head time { flex: none; padding-top: 1px; text-align: right; color: var(--text-faint); font-size: 10px; font-variant-numeric: tabular-nums; }
 .drawer-activity-item .activity-dot { width: 9px; height: 9px; margin-top: 5px; border: 2px solid var(--accent); border-radius: 50%; background: var(--bg-base); }
 .drawer-activity-item .activity-dot.audit { border-color: var(--text-faint); }
-.drawer-activity-detail { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
-.drawer-activity-note { margin: 5px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
+.drawer-activity-detail { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-activity-note { margin: 4px 0 0; color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Collapse handle: a thin bar on the drawer's inner left edge; hover widens it into a › tab. */
 .drawer-collapse {

@@ -178,17 +178,17 @@
               <button type="button" @click="openProgress(detail.root)">＋ 添加进展</button>
             </div>
             <div v-if="activity.length" class="activity-list">
-              <article v-for="item in activity" :key="item.id" class="activity-item">
+              <article v-for="item in activity" :key="item.id" class="activity-item" @click="activityDetail = item">
                 <span class="activity-dot" :class="item.type"></span>
                 <div class="activity-copy">
                   <div class="activity-head">
-                    <strong><span class="task-pill" :class="`type-${item.type}`">{{ item.title }}</span></strong>
+                    <strong>
+                      <span class="task-pill" :class="`type-${item.type}`">{{ item.title }}</span>
+                      <button type="button" class="activity-task" :title="item.taskTitle" @click.stop="focusTask(item.taskId)">{{ item.taskTitle }}</button>
+                    </strong>
                     <time>{{ formatTimestamp(item.time) }}</time>
                   </div>
-                  <p class="activity-meta">
-                    <button type="button" class="activity-task" :title="item.taskTitle" @click="focusTask(item.taskId)">{{ item.taskTitle }}</button>
-                    <span v-if="item.detail" class="activity-detail">{{ item.detail }}</span>
-                  </p>
+                  <p v-if="item.detail" class="activity-detail">{{ item.detail }}</p>
                   <p v-if="item.note" class="activity-note">{{ item.note }}</p>
                 </div>
               </article>
@@ -211,6 +211,7 @@
           @close="closeDrawer"
           @select="focusTask"
           @edit="openEdit"
+          @inspect="openActivityDetail"
         />
       </div>
     </div>
@@ -379,6 +380,19 @@
         </footer>
       </section>
     </MotionModal>
+
+    <MotionModal v-model="activityDetailOpen" aria-label="记录详情">
+      <section v-if="activityDetail" class="activity-dialog glass-surface-heavy">
+        <div class="activity-dialog-head">
+          <span class="task-pill" :class="`type-${activityDetail.type}`">{{ activityDetail.title }}</span>
+          <strong>{{ activityDetail.taskTitle }}</strong>
+        </div>
+        <time>{{ formatTimestamp(activityDetail.time) }}</time>
+        <p v-if="activityDetail.detail">{{ activityDetail.detail }}</p>
+        <p v-if="activityDetail.note">{{ activityDetail.note }}</p>
+        <p v-else class="activity-dialog-empty">这条记录没有备注。</p>
+      </section>
+    </MotionModal>
   </div>
 </template>
 
@@ -408,7 +422,7 @@ import {
   shiftMonth,
   todayLocal,
 } from '@/utils/taskDates'
-import { buildTaskActivity, taskImportanceLabel, taskStatusLabel } from '@/utils/taskActivity'
+import { buildTaskActivity, taskImportanceLabel, taskStatusLabel, type TaskActivityEntry } from '@/utils/taskActivity'
 import { taskFieldsPayload } from '@/utils/taskPayloads'
 
 type ViewMode = 'tasks' | 'calendar'
@@ -431,6 +445,11 @@ const detailHeaderRef = ref<HTMLElement | null>(null)
 const activitySectionRef = ref<HTMLElement | null>(null)
 const sheetOpen = ref(false)
 const archiveConfirmOpen = ref(false)
+const activityDetail = ref<TaskActivityEntry | null>(null)
+const activityDetailOpen = computed({
+  get: () => activityDetail.value !== null,
+  set: (open: boolean) => { if (!open) activityDetail.value = null },
+})
 const sheetMode = ref<SheetMode>('create')
 const targetNode = ref<TaskNode | null>(null)
 const form = ref<TaskFields & { kind: TaskKind }>({
@@ -595,6 +614,10 @@ function openCreate(date = today) {
   targetNode.value = null
   resetForm(date)
   sheetOpen.value = true
+}
+
+function openActivityDetail(entry: TaskActivityEntry) {
+  activityDetail.value = entry
 }
 
 function openEdit(task: TaskNode) {
@@ -871,20 +894,27 @@ onMounted(async () => {
 .progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 65%, #34c759)); transition: width var(--motion-slow) var(--ease-spring-gentle); }
 .activity-list { display: grid; gap: 0; }
 /* Dividers breathe on both sides: the next entry carries the top border plus its own padding. */
-.activity-item { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 9px; padding: 14px 0; }
+.activity-item { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 9px; padding: 14px 0; border-radius: 12px; cursor: pointer; transition: background var(--motion-fast) ease; }
+.activity-item:hover { background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
 .activity-item + .activity-item { border-top: 1px solid var(--border-subtle); }
 .activity-copy { min-width: 0; }
 .activity-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .activity-head strong { min-width: 0; display: flex; align-items: center; }
-.activity-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px; margin: 7px 0 0; }
-.activity-task { display: inline-block; max-width: 11em; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 650; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-head strong .task-pill { flex: none; }
+.activity-task { min-width: 0; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 650; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .activity-task:hover { text-decoration: underline; }
-.activity-detail { color: var(--text-secondary); }
-.activity-note { margin: 5px 0 0; color: var(--text-muted); line-height: 1.5; white-space: pre-wrap; }
+.activity-detail { margin: 6px 0 0; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-note { margin: 4px 0 0; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .activity-head time { flex: none; padding-top: 1px; text-align: right; font-variant-numeric: tabular-nums; }
 .activity-dot { width: 9px; height: 9px; margin-top: 5px; border: 2px solid var(--accent); border-radius: 50%; background: var(--bg-base); }
 .activity-dot.audit { border-color: var(--text-faint); }
 .activity-item time { color: var(--text-faint); font-size: 10px; }
+.activity-dialog { display: grid; gap: 10px; min-width: min(420px, 86vw); max-width: 86vw; padding: 22px; border-radius: 20px; }
+.activity-dialog-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.activity-dialog-head strong { font-size: 15px; }
+.activity-dialog time { color: var(--text-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.activity-dialog p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.activity-dialog p.activity-dialog-empty { color: var(--text-faint); }
 .detail-loading { height: 100%; display: flex; align-items: center; justify-content: center; gap: 5px; }.detail-loading span { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite alternate; }.detail-loading span:nth-child(2) { animation-delay: .15s; }.detail-loading span:nth-child(3) { animation-delay: .3s; }
 @keyframes pulse { to { opacity: .25; transform: translateY(-4px); } }
 .detail-illustration { position: relative; width: 78px; height: 64px; margin-bottom: 13px; }.detail-illustration span, .detail-illustration i { position: absolute; display: block; border: 1px solid var(--border-subtle); border-radius: 17px; background: var(--bg-glass); box-shadow: var(--shadow-sm); }.detail-illustration span { inset: 0 13px 8px 0; transform: rotate(-6deg); }.detail-illustration i { inset: 8px 0 0 13px; transform: rotate(5deg); }
@@ -916,7 +946,7 @@ onMounted(async () => {
 .detail-facts div strong { font-size: 13px; }
 .section-heading span { font-size: 13px; }
 .section-heading small { font-size: 11px; }
-.activity-meta, .activity-note { font-size: 13px; }
+.activity-detail, .activity-note { font-size: 13px; }
 .activity-item time { font-size: 11px; }
 .field > span:first-child { font-size: 12px; }
 .sheet-hint, .mobile-detail-nav span { font-size: 12px; }
