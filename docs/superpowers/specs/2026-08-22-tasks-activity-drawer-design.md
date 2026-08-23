@@ -182,7 +182,7 @@ expose: { revealActivity(): void }   // 供父级在操作成功后滚动到进�
 
 - 留白：详情面板下半部分（事实行、拆解、进展记录）节奏放宽——facts 上下边距 26px、区块 `margin-top` 18px、区块 padding 18px、面板底部 padding 34px，对齐阅境轩（Reader.vue）的疏朗节奏。
 - 页面锁定：任务视图下整页不滚动——`.tasks-page.view-tasks` 锁定为 `calc(100dvh - 64px)`（桌面 = app-main 上下 padding 之和）的 flex 列，workspace 为 `flex: 1 1 auto; min-height: 0`；只有左侧列表、详情面板、抽屉内部各自滚动。移动端锁定高度 `calc(100dvh - 96px - var(--safe-top) - var(--safe-bottom))`，列表/详情二选一占满剩余高度。日历视图不受影响（锁定类仅在任务视图分支挂载）。
-- 抽屉 push 布局微调：slot 打开总宽 = `min(400px, 30vw) + 26px`（`padding-left: 26px` 把手槽），`margin-left` 移除；<1150px 浮层形态不变（把手绝对定位 `left: -24px` 悬于遮罩上）。
+- 抽屉 push 布局微调：slot 打开总宽 = `min(400px, 30vw) + 24px`（`padding-left: 24px` 把手槽），`margin-left` 移除；<1150px 浮层形态不变（把手绝对定位 `left: -24px` 悬于遮罩上）。
 
 ### 12.5 组件契约变更（修订 §5 props/emits）
 
