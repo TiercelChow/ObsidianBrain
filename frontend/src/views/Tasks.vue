@@ -360,6 +360,39 @@
               <el-option v-for="option in importanceOptions" :key="option.value" :value="option.value" :label="option.label" />
             </el-select>
           </label>
+          <label v-if="sheetMode === 'edit'" class="field full">
+            <span>状态</span>
+            <el-select
+              v-model="statusForm.status"
+              popper-class="task-select-popper"
+              placement="bottom-start"
+              :offset="0"
+              :fit-input-width="true"
+            >
+              <el-option v-for="option in statusSheetOptions" :key="option.value" :value="option.value" :label="option.label" />
+            </el-select>
+          </label>
+          <label v-if="sheetMode === 'edit' && isTerminalStatus" class="field full">
+            <span>关闭说明（可选）</span>
+            <textarea v-model="statusForm.note" rows="4" placeholder="总结结果、原因或后续安排…"></textarea>
+          </label>
+          <label v-if="sheetMode === 'edit' && targetNode?.role === 'subtask'" class="field full">
+            <span>父任务</span>
+            <el-select
+              v-model="moveForm.parentId"
+              popper-class="task-select-popper"
+              placement="bottom-start"
+              :offset="0"
+              :fit-input-width="true"
+              required
+            >
+              <el-option v-for="candidate in moveCandidates" :key="candidate.id" :value="candidate.id" :label="candidate.title" />
+            </el-select>
+          </label>
+          <label v-if="sheetMode === 'edit' && targetNode?.role === 'root' && isTerminalStatus" class="check-field">
+            <input v-model="statusForm.cascade" type="checkbox" aria-label="同时关闭所有未完成的子任务" />
+            <span>同时关闭所有未完成的子任务</span>
+          </label>
         </div>
 
         <footer class="sheet-footer">
@@ -641,6 +674,8 @@ function openEdit(task: TaskNode) {
   sheetMode.value = 'edit'
   targetNode.value = task
   form.value = { kind: task.kind, title: task.title, description: task.description, start_date: task.start_date, end_date: task.end_date, importance: task.importance }
+  statusForm.value = { status: task.status, note: '', cascade: false }
+  moveForm.value.parentId = task.parent_id || ''
   sheetOpen.value = true
 }
 
@@ -722,7 +757,17 @@ async function submitSheet() {
     const mode = sheetMode.value
     const writeTarget = targetNode.value
     if (mode === 'create') await store.create(form.value.kind, fields)
-    else if (mode === 'edit' && writeTarget) await store.update(writeTarget.id, fields)
+    else if (mode === 'edit' && writeTarget) {
+      await store.update(writeTarget.id, fields)
+      // Each store write refreshes selectedDetail (and its version), so chained
+      // calls pick up the fresh version automatically.
+      if (statusForm.value.status !== writeTarget.status) {
+        await store.setStatus(writeTarget.id, statusForm.value.status, statusForm.value.note || undefined, statusForm.value.cascade)
+      }
+      if (writeTarget.role === 'subtask' && moveForm.value.parentId && moveForm.value.parentId !== writeTarget.parent_id) {
+        await store.moveSubtask(writeTarget.id, moveForm.value.parentId, 9999)
+      }
+    }
     else if (mode === 'subtask' && writeTarget) await store.addSubtask(writeTarget.id, fields)
     else if (mode === 'progress' && writeTarget) await store.addProgress(writeTarget.id, progressForm.value.note, progressForm.value.includePercent ? progressForm.value.percent : undefined)
     else if (mode === 'status' && writeTarget) await store.setStatus(writeTarget.id, statusForm.value.status, statusForm.value.note || undefined, statusForm.value.cascade)
