@@ -112,9 +112,11 @@ const activityRef = ref<HTMLElement | null>(null)
 const collapseRef = ref<HTMLButtonElement | null>(null)
 
 // Move focus into the drawer when it opens so keyboard users land on the collapse affordance.
+// preventScroll: without it mobile Safari scrolls an ancestor to "reveal" the focused
+// button — the drawer overlays a fixed layer, so that scroll shows up as a page twitch.
 watch(() => props.node?.id, async (id) => {
   await nextTick()
-  if (id) collapseRef.value?.focus()
+  if (id) collapseRef.value?.focus({ preventScroll: true })
 })
 
 // Keyboard path into the activity detail modal (emit inspect → parent modal).
