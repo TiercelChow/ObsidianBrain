@@ -81,7 +81,6 @@
 
       <button ref="collapseRef" type="button" class="drawer-collapse" aria-label="收起子任务详情" title="收起" @click="emit('close')">
         <span class="drawer-collapse-bar" aria-hidden="true"></span>
-        <span class="drawer-collapse-chevron" aria-hidden="true"></span>
       </button>
     </aside>
   </div>
@@ -254,7 +253,8 @@ defineExpose({ revealActivity })
 .drawer-activity-note { margin: 4px 0 0; color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Collapse handle: a short vertical bar on the drawer's inner left edge;
-   hover/focus crossfades it into a ›-shaped chevron drawn with borders. */
+   hover/focus bends that same bar into a shallow rightward arc — the fold
+   direction the drawer closes toward. No glyph swap: the stroke itself flexes. */
 .drawer-collapse {
   position: absolute;
   left: 0;
@@ -270,23 +270,18 @@ defineExpose({ revealActivity })
   background: transparent;
   cursor: pointer;
 }
-.drawer-collapse-bar, .drawer-collapse-chevron { position: absolute; transition: opacity var(--motion-fast) ease; }
+/* The bend is the bar's right border tracing rounded right corners: growing
+   the corner radii bows the stroke while it stays one continuous 4px line. */
 .drawer-collapse-bar {
-  width: 4px;
+  width: 12px;
   height: 40px;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--text-primary) 16%, transparent);
+  transform: translateX(-4px); /* keep the visible 4px stroke centered at rest */
+  border-right: 4px solid color-mix(in srgb, var(--text-primary) 16%, transparent);
+  border-radius: 0 3px 3px 0;
+  transition: border-radius var(--motion-normal) var(--ease-emphasized);
 }
-.drawer-collapse-chevron {
-  width: 10px;
-  height: 10px;
-  border-top: 2px solid var(--text-muted);
-  border-right: 2px solid var(--text-muted);
-  transform: rotate(45deg);
-  opacity: 0;
-}
-.drawer-collapse:hover .drawer-collapse-bar, .drawer-collapse:focus-visible .drawer-collapse-bar { opacity: 0; }
-.drawer-collapse:hover .drawer-collapse-chevron, .drawer-collapse:focus-visible .drawer-collapse-chevron { opacity: 1; }
+.drawer-collapse:hover .drawer-collapse-bar,
+.drawer-collapse:focus-visible .drawer-collapse-bar { border-radius: 0 9px 9px 0; }
 
 /* Below 1150px: no room to push — overlay from the right with a backdrop. */
 @media (max-width: 1149px) {
@@ -304,11 +299,10 @@ defineExpose({ revealActivity })
   .subtask-drawer-slot, .subtask-drawer-slot.open { width: min(88vw, 400px); }
   .drawer-header, .drawer-scroll { padding-left: 16px; padding-right: 16px; }
   .drawer-corner .corner-button { width: 38px; height: 38px; }
-  .drawer-collapse .drawer-collapse-bar { opacity: 0; }
-  .drawer-collapse .drawer-collapse-chevron { opacity: 1; }
+  .drawer-collapse-bar { border-radius: 0 9px 9px 0; } /* no hover on touch: keep the bent affordance */
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .subtask-drawer-slot, .drawer-backdrop, .drawer-collapse-bar, .drawer-collapse-chevron { transition-duration: 1ms !important; }
+  .subtask-drawer-slot, .drawer-backdrop, .drawer-collapse-bar { transition-duration: 1ms !important; }
 }
 </style>

@@ -880,7 +880,7 @@ onMounted(async () => {
 .task-search input::placeholder { color: var(--text-faint); }
 .task-search-clear { width: 22px; height: 22px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--border-faint); color: var(--text-muted); font-size: 13px; line-height: 1; cursor: pointer; transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-instant) ease; }
 .task-search-clear:active { transform: scale(.9); }
-.filters { display: flex; gap: 7px; }
+.filters { display: flex; gap: 7px; margin-left: auto; }
 .filters :deep(.el-select) { width: 132px; }
 .filters :deep(.el-select__wrapper) { min-height: 40px; border-radius: 12px !important; }
 .field input, .field textarea { border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-glass); color: var(--text-primary); font: inherit; outline: none; }

@@ -6,6 +6,7 @@ import {
   buildMonthGrid,
   dateInRange,
   formatLunarDate,
+  formatTaskDateRangeCompact,
   formatLocalDate,
   formatTimestamp,
   parseLocalDate,
@@ -43,4 +44,10 @@ test('formatTimestamp keeps unparseable values verbatim', () => {
 
 test('formatTimestamp renders month/day and hh:mm', () => {
   assert.match(formatTimestamp('2026-08-21T09:52:16Z'), /^\d{1,2}\/\d{1,2},? \d{2}:\d{2}$/)
+})
+
+test('compact task date range drops the year within a year, keeps 2-digit years across', () => {
+  assert.equal(formatTaskDateRangeCompact('2026-08-18', '2026-08-29'), '08-18 – 08-29')
+  assert.equal(formatTaskDateRangeCompact('2026-12-28', '2027-01-05'), '26-12-28 – 27-01-05')
+  assert.equal(formatTaskDateRangeCompact('2026-08-18', '2026-08-18'), '08-18')
 })

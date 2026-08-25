@@ -45,9 +45,12 @@
       <div class="tree-copy">
         <div class="tree-title">{{ item.node.title }}</div>
         <div class="tree-meta">
-          <span>{{ item.node.start_date }} – {{ item.node.end_date }}</span>
           <span class="importance" :class="`importance-${item.node.importance}`">
             {{ importanceLabel(item.node.importance) }}
+          </span>
+          <span class="tree-dates">
+            <span class="dates-full">{{ item.node.start_date }} – {{ item.node.end_date }}</span>
+            <span class="dates-compact">{{ formatTaskDateRangeCompact(item.node.start_date, item.node.end_date) }}</span>
           </span>
         </div>
       </div>
@@ -72,6 +75,7 @@
 import { computed, ref, watch } from 'vue'
 import type { TaskImportance, TaskNode, TaskStatus } from '@/api/tasks'
 import { flattenVisibleSubtasks } from '@/utils/taskHierarchy'
+import { formatTaskDateRangeCompact } from '@/utils/taskDates'
 
 const props = defineProps<{
   tasks: TaskNode[]
@@ -193,8 +197,12 @@ function importanceLabel(importance: TaskImportance) {
 .status-blocked { border-color: #ff9500; }
 .tree-copy { min-width: 0; }
 .tree-title { color: var(--text-primary); font-size: 15px; font-weight: 580; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree-meta { display: flex; gap: 8px; margin-top: 3px; color: var(--text-faint); font-size: 12px; }
-.importance { font-weight: 600; }
+.tree-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 3px; color: var(--text-faint); font-size: 12px; }
+.importance { flex: none; font-weight: 600; }
+/* Both range renderings exist; the media queries below pick one so the meta
+   line stays single-row on phones without shipping a resize listener. */
+.tree-dates { min-width: 0; }
+.dates-compact { display: none; }
 .importance-high { color: #ff9500; }
 .importance-urgent { color: #ff3b30; }
 .tree-actions { display: flex; opacity: 0; transform: translateX(4px); transition: opacity var(--motion-fast) ease, transform var(--motion-fast) ease; }
@@ -209,8 +217,8 @@ function importanceLabel(importance: TaskImportance) {
   .tree-actions { opacity: 1; transform: none; }
   .tree-actions button { min-width: 44px; min-height: 44px; }
   .tree-actions button:first-child { display: none; }
-  .tree-meta { display: block; }
-  .importance { margin-left: 6px; }
+  .dates-full { display: none; }
+  .dates-compact { display: inline; }
 }
 
 @media (prefers-reduced-motion: reduce) {

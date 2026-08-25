@@ -104,6 +104,18 @@ export function formatTaskDateRange(start: string, end: string): string {
   return `${formatShortDate(start)} – ${formatShortDate(end)}`
 }
 
+/** Compact range for narrow (mobile) tree rows: same-year ranges drop the year,
+ *  cross-year ranges keep 2-digit years so both endpoints stay unambiguous. */
+export function formatTaskDateRangeCompact(start: string, end: string): string {
+  const startParts = parseLocalDate(start)
+  const endParts = parseLocalDate(end)
+  const monthDay = (parts: LocalDateParts) => `${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`
+  if (start === end) return monthDay(startParts)
+  if (startParts.year === endParts.year) return `${monthDay(startParts)} – ${monthDay(endParts)}`
+  const short = (parts: LocalDateParts) => `${String(parts.year % 100).padStart(2, '0')}-${monthDay(parts)}`
+  return `${short(startParts)} – ${short(endParts)}`
+}
+
 export function formatShortDate(value: string): string {
   const parts = parseLocalDate(value)
   return `${parts.month}月${parts.day}日`
