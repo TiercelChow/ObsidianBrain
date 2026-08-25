@@ -314,6 +314,41 @@ code, pre, .code-block { font-family: var(--font-mono); }
 }
 .header-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
+/* Header action buttons share one glass treatment on every view (Tasks' 新建任务
+   set the bar): 42px tap size, 13px radius, glass fill, accent fill for primary
+   actions. Colors ride Element Plus's button vars so hover/active/loading stay
+   native; only radius/weight need !important to beat the global .el-button rules
+   below. Placed before the mobile and dark blocks so those can still override:
+   mobile raises the tap size to 44px, dark steers its own glass palette. */
+.header-actions .el-button {
+  --el-button-bg-color: var(--bg-glass);
+  --el-button-text-color: var(--text-primary);
+  --el-button-border-color: var(--border-subtle);
+  --el-button-hover-bg-color: var(--bg-glass-strong);
+  --el-button-hover-text-color: var(--text-primary);
+  --el-button-hover-border-color: var(--border-subtle);
+  --el-button-active-bg-color: var(--bg-glass-strong);
+  --el-button-active-text-color: var(--text-primary);
+  --el-button-active-border-color: var(--border-subtle);
+  min-height: 42px;
+  padding: 0 15px;
+  border-radius: 13px !important;
+  box-shadow: var(--shadow-sm), var(--inset-highlight);
+  font-weight: 580 !important;
+}
+.header-actions .el-button--primary {
+  --el-button-bg-color: var(--accent);
+  --el-button-text-color: #fff;
+  --el-button-border-color: transparent;
+  --el-button-hover-bg-color: color-mix(in srgb, var(--accent) 86%, white);
+  --el-button-hover-text-color: #fff;
+  --el-button-hover-border-color: transparent;
+  --el-button-active-bg-color: var(--accent);
+  --el-button-active-text-color: #fff;
+  --el-button-active-border-color: transparent;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
 /* ── Task attribute pills (shared by Tasks view + subtask drawer) ── */
 .task-pill {
   display: inline-flex;

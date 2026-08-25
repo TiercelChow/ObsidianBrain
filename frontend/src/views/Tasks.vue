@@ -6,10 +6,10 @@
         <p class="page-subtitle">让临期待办轻巧落地，让长期目标稳步生长</p>
       </div>
       <div class="header-actions">
-        <button class="glass-button primary" type="button" @click="openCreate()">
+        <el-button type="primary" @click="openCreate()">
           <el-icon><Plus /></el-icon>
           新建任务
-        </button>
+        </el-button>
       </div>
     </header>
 
@@ -859,11 +859,6 @@ onMounted(async () => {
 /* Task view locks the page: only the list/detail/drawer panes scroll (Reader.vue pattern). */
 .tasks-page.view-tasks { display: flex; flex-direction: column; height: calc(100vh - 64px); height: calc(100dvh - 64px); overflow: hidden; }
 .tasks-page.view-tasks > :not(.task-workspace) { flex-shrink: 0; }
-.glass-button { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 15px; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); box-shadow: var(--shadow-sm), var(--inset-highlight); color: var(--text-primary); font-weight: 580; cursor: pointer; transition: transform var(--motion-instant) ease, background var(--motion-fast) ease, box-shadow var(--motion-fast) ease; }
-.glass-button .el-icon { width: 1em; height: 1em; font-size: 14px; }
-.glass-button:active { transform: scale(.97); }
-.glass-button.primary { background: var(--accent); border-color: transparent; color: white; box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 25%, transparent); }
-.glass-button:disabled { opacity: .55; cursor: wait; }
 .glass-surface { background: var(--bg-glass); border: 1px solid var(--border-glass); box-shadow: var(--shadow-sm), var(--inset-highlight); backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)); }
 .task-toolbar { min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 8px 10px; margin-bottom: 14px; border-radius: 18px; }
 .view-switch { position: relative; display: grid; grid-template-columns: 1fr 1fr; width: 174px; padding: 3px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 5%, transparent); isolation: isolate; }
@@ -1067,7 +1062,7 @@ onMounted(async () => {
 }
 
 @media (max-width: 768px) {
-  .glass-button { min-height: 44px; }.task-toolbar { flex-wrap: wrap; padding: 7px; }.view-switch { width: 100%; }.view-switch button { min-height: 38px; }.task-search { order: 2; min-width: 0; max-width: none; flex: 1; min-height: 44px; }.filters { order: 3; width: 100%; }.filters :deep(.el-select) { flex: 1; width: auto; min-width: 0; }.filters :deep(.el-select__wrapper) { min-height: 44px; }.tasks-page.view-tasks { height: calc(100dvh - 96px - var(--safe-top) - var(--safe-bottom)); }.task-workspace { flex: 1 1 auto; min-height: 0; height: auto; display: block; }.task-list-panel, .task-detail-panel { height: 100%; min-height: 0; border-radius: 20px; }.task-detail-panel { display: none; padding: 12px; }.task-workspace.detail-open .task-list-panel { display: none; }.task-workspace.detail-open .task-detail-panel { display: block; }.mobile-detail-nav { height: 45px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }.mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font-weight: 600; }.mobile-detail-nav span { color: var(--text-faint); font-size: 11px; }.detail-header { display: block; }.detail-title-group h2 { font-size: 23px; }.detail-actions { display: grid; grid-template-columns: 1fr 1fr 44px; margin-top: 14px; }.detail-actions button { min-height: 44px; }.detail-facts { margin: 14px 0; }.progress-overview, .detail-section { padding: 13px; }.section-heading button { min-height: 44px; }.task-card { min-height: 110px; }.panel-heading button { min-width: 44px; min-height: 44px; }.task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }.sheet-header { padding: 34px 20px 16px; }.sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }.form-grid { grid-template-columns: 1fr; }.field.full { grid-column: auto; }.field input, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; }.sheet-footer { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }.sheet-footer button { min-height: 48px; }
+  .task-toolbar { flex-wrap: wrap; padding: 7px; }.view-switch { width: 100%; }.view-switch button { min-height: 38px; }.task-search { order: 2; min-width: 0; max-width: none; flex: 1; min-height: 44px; }.filters { order: 3; width: 100%; }.filters :deep(.el-select) { flex: 1; width: auto; min-width: 0; }.filters :deep(.el-select__wrapper) { min-height: 44px; }.tasks-page.view-tasks { height: calc(100dvh - 96px - var(--safe-top) - var(--safe-bottom)); }.task-workspace { flex: 1 1 auto; min-height: 0; height: auto; display: block; }.task-list-panel, .task-detail-panel { height: 100%; min-height: 0; border-radius: 20px; }.task-detail-panel { display: none; padding: 12px; }.task-workspace.detail-open .task-list-panel { display: none; }.task-workspace.detail-open .task-detail-panel { display: block; }.mobile-detail-nav { height: 45px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }.mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font-weight: 600; }.mobile-detail-nav span { color: var(--text-faint); font-size: 11px; }.detail-header { display: block; }.detail-title-group h2 { font-size: 23px; }.detail-actions { display: grid; grid-template-columns: 1fr 1fr 44px; margin-top: 14px; }.detail-actions button { min-height: 44px; }.detail-facts { margin: 14px 0; }.progress-overview, .detail-section { padding: 13px; }.section-heading button { min-height: 44px; }.task-card { min-height: 110px; }.panel-heading button { min-width: 44px; min-height: 44px; }.task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }.sheet-header { padding: 34px 20px 16px; }.sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }.form-grid { grid-template-columns: 1fr; }.field.full { grid-column: auto; }.field input, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; }.sheet-footer { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }.sheet-footer button { min-height: 48px; }
   /* The zone must be height:100%: as a plain block child of the (flex-constrained)
      workspace its auto height would make the panel's height:100% unresolvable —
      the panel would grow to content height and get clipped by the page's
