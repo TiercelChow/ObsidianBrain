@@ -871,7 +871,7 @@ onMounted(async () => {
 .switch-indicator.calendar { transform: translateX(100%); }
 .view-switch button { min-height: 36px; border: 0; background: transparent; color: var(--text-muted); font-weight: 570; cursor: pointer; }
 .view-switch button.active { color: var(--text-primary); }
-.task-search { flex: 1; min-width: 170px; max-width: 320px; height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-radius: 12px; color: var(--text-faint); transition: background-color var(--motion-fast) var(--ease-emphasized), border-color var(--motion-fast) var(--ease-emphasized), box-shadow var(--motion-fast) var(--ease-emphasized), transform var(--motion-normal) var(--ease-spring-gentle); }
+.task-search { flex: 1; min-width: 170px; height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-radius: 12px; color: var(--text-faint); transition: background-color var(--motion-fast) var(--ease-emphasized), border-color var(--motion-fast) var(--ease-emphasized), box-shadow var(--motion-fast) var(--ease-emphasized), transform var(--motion-normal) var(--ease-spring-gentle); }
 .task-search:focus-within { background: var(--bg-glass-strong); box-shadow: 0 4px 16px rgba(0, 0, 0, .06), inset 0 1px 0 rgba(255, 255, 255, .03); }
 .task-search-icon { flex: none; color: var(--text-faint); transition: color var(--motion-fast) var(--ease-emphasized); }
 .task-search:focus-within .task-search-icon { color: var(--accent); }
@@ -881,8 +881,9 @@ onMounted(async () => {
 .task-search-clear { width: 22px; height: 22px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--border-faint); color: var(--text-muted); font-size: 13px; line-height: 1; cursor: pointer; transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-instant) ease; }
 .task-search-clear:active { transform: scale(.9); }
 .filters { display: flex; gap: 7px; margin-left: auto; }
-.filters :deep(.el-select) { width: 132px; }
+.filters :deep(.el-select) { width: 150px; }
 .filters :deep(.el-select__wrapper) { min-height: 40px; border-radius: 12px !important; }
+.filters :deep(.el-select__selection) { text-align: center; }
 .field input, .field textarea { border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-glass); color: var(--text-primary); font: inherit; outline: none; }
 .error-banner { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; padding: 10px 13px; border: 1px solid color-mix(in srgb, #ff3b30 28%, transparent); border-radius: 13px; background: color-mix(in srgb, #ff3b30 8%, var(--bg-glass)); color: var(--text-secondary); font-size: 13px; }
 .error-banner button { border: 0; background: transparent; color: #ff3b30; cursor: pointer; }
