@@ -28,7 +28,7 @@
         <el-select
           v-model="kindFilter"
           aria-label="任务类型"
-          popper-class="task-select-popper"
+          popper-class="task-select-popper task-toolbar-popper"
           placement="bottom-start"
           :offset="0"
           :fit-input-width="true"
@@ -40,7 +40,7 @@
         <el-select
           v-model="statusFilter"
           aria-label="任务状态"
-          popper-class="task-select-popper"
+          popper-class="task-select-popper task-toolbar-popper"
           placement="bottom-start"
           :offset="0"
           :fit-input-width="true"
@@ -1054,6 +1054,10 @@ onMounted(async () => {
 :global(.task-select-popper .el-popper__arrow) { display: none !important; }
 :global(.task-select-popper .el-select-dropdown__list) { padding: 5px !important; }
 :global(.task-select-popper .el-select-dropdown__item) { min-height: 38px; display: flex; align-items: center; border-radius: 9px; padding: 0 10px; }
+/* Toolbar popper: center each option on the trigger's text axis (which stops
+   short of the caret) so the selected label's left edge lines up exactly with
+   the closed trigger's text. Extra right padding cancels the caret zone. */
+:global(.task-toolbar-popper .el-select-dropdown__item) { justify-content: center; padding: 0 28px 0 10px; }
 :global(.task-select-popper .el-select-dropdown__item.selected) { background: color-mix(in srgb, var(--accent) 10%, transparent) !important; }
 :global(.task-date-popper.el-popper) { z-index: 2501 !important; }
 :global(.el-message) { z-index: 2600 !important; }
