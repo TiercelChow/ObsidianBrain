@@ -238,8 +238,10 @@ defineExpose({ revealActivity })
 .status-dot.status-cancelled { background: #8e8e93; }
 
 .drawer-activity { display: grid; gap: 0; }
-/* Dividers breathe on both sides: the next entry carries the top border plus its own padding. */
-.drawer-activity-item { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 9px; padding: 12px 0; border-radius: 12px; cursor: pointer; transition: background var(--motion-fast) ease; }
+/* Dividers breathe on both sides: the next entry carries the top border plus its own
+   padding. Negative margins bleed the hover highlight 10px past the text column so
+   the box gets breathing room on the left/right; content keeps its alignment. */
+.drawer-activity-item { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 9px; padding: 12px 10px; margin: 0 -10px; border-radius: 12px; cursor: pointer; transition: background var(--motion-fast) ease; }
 .drawer-activity-item:hover, .drawer-activity-item:focus-visible { background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
 .drawer-activity-item:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
 .drawer-activity-item + .drawer-activity-item { border-top: 1px solid var(--border-subtle); }

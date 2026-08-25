@@ -954,7 +954,9 @@ onMounted(async () => {
 .progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 65%, #34c759)); transition: width var(--motion-slow) var(--ease-spring-gentle); }
 .activity-list { display: grid; gap: 0; }
 /* Dividers breathe on both sides: the next entry carries the top border plus its own padding. */
-.activity-item { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 9px; padding: 14px 0; border-radius: 12px; cursor: pointer; transition: background var(--motion-fast) ease; }
+/* Negative margins bleed the hover/focus highlight 10px past the text column so
+   the box has breathing room on both sides; content keeps its alignment. */
+.activity-item { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 9px; padding: 14px 10px; margin: 0 -10px; border-radius: 12px; cursor: pointer; transition: background var(--motion-fast) ease; }
 .activity-item:hover, .activity-item:focus-visible { background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
 .activity-item:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
 .activity-item + .activity-item { border-top: 1px solid var(--border-subtle); }
