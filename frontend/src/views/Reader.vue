@@ -1818,12 +1818,15 @@ onBeforeUnmount(() => {
 .markdown-body tbody tr + tr td { border-top: 1px solid var(--border-faint); }
 .markdown-body tr:nth-child(even) td { background: var(--bg-glass-subtle); }
 
+/* Photos arrive at camera resolution — cap them at a reading-comfortable size
+   (never upscale small images) and center; the click-to-zoom viewer still
+   shows full resolution. */
 .markdown-body img {
   display: block;
-  max-width: 100%;
+  max-width: min(80%, 480px);
   height: auto;
   border-radius: 10px;
-  margin: 0.5em 0;
+  margin: 0.75em auto;
 }
 .markdown-body video,
 .markdown-body iframe,
@@ -1883,6 +1886,8 @@ onBeforeUnmount(() => {
   }
   .markdown-body ul,
   .markdown-body ol { padding-left: 1.35em; }
+  /* 80% of a phone column is too small for photos — use the full width. */
+  .markdown-body img { max-width: 100%; }
 }
 .markdown-body .mermaid-clickable { cursor: zoom-in; transition: box-shadow var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out); }
 .markdown-body .mermaid-clickable:hover { box-shadow: var(--shadow-lg); transform: translateY(-1px); }
