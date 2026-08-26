@@ -1,5 +1,9 @@
 .PHONY: build frontend backend clean install uninstall build-windows
 
+# User-local install prefix (~/.local/bin is on PATH, so install needs no sudo —
+# running make under sudo is what used to leave dist_new root-owned).
+PREFIX ?= $(HOME)/.local
+
 # Build everything — frontend first (rust-embed needs the dist at compile time).
 build: frontend backend
 
@@ -11,15 +15,16 @@ frontend:
 backend:
 	cd backend && cargo build --release
 
-# Install the binary to /usr/local/bin.
+# Install the binary to the user-local bin (no sudo needed).
 install: build
-	cp backend/target/release/obsidian-brain /usr/local/bin/
-	@echo "Installed: obsidian-brain"
+	@mkdir -p $(PREFIX)/bin
+	cp backend/target/release/obsidian-brain $(PREFIX)/bin/
+	@echo "Installed: $(PREFIX)/bin/obsidian-brain"
 	@echo "Run 'obsidian-brain start' to start the server."
 
 # Remove the installed binary.
 uninstall:
-	rm -f /usr/local/bin/obsidian-brain
+	rm -f $(PREFIX)/bin/obsidian-brain
 	@echo "Uninstalled."
 
 # Cross-compile for Windows x86_64 (requires: rustup target add x86_64-pc-windows-gnu; brew install mingw-w64).
