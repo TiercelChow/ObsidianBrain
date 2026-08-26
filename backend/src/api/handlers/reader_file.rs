@@ -47,10 +47,18 @@ fn validate_path(raw: &str) -> Result<PathBuf, (StatusCode, String)> {
     Ok(p)
 }
 
-/// Content-Type by extension (only PDF is special-cased; others octet-stream).
+/// Content-Type by extension (PDF and common image formats; others octet-stream).
 fn content_type_for(ext: &str) -> &'static str {
     match ext.to_ascii_lowercase().as_str() {
         "pdf" => "application/pdf",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "avif" => "image/avif",
+        "ico" => "image/x-icon",
         _ => "application/octet-stream",
     }
 }
@@ -198,6 +206,22 @@ mod tests {
         assert_eq!(content_type_for("pdf"), "application/pdf");
         assert_eq!(content_type_for("PDF"), "application/pdf");
         assert_eq!(content_type_for("txt"), "application/octet-stream");
+    }
+
+    #[test]
+    fn test_content_type_images() {
+        // Markdown-rendered local images load through this endpoint; without a
+        // real image/* Content-Type browsers (esp. for svg) refuse to decode.
+        assert_eq!(content_type_for("png"), "image/png");
+        assert_eq!(content_type_for("jpg"), "image/jpeg");
+        assert_eq!(content_type_for("JPG"), "image/jpeg");
+        assert_eq!(content_type_for("jpeg"), "image/jpeg");
+        assert_eq!(content_type_for("gif"), "image/gif");
+        assert_eq!(content_type_for("webp"), "image/webp");
+        assert_eq!(content_type_for("svg"), "image/svg+xml");
+        assert_eq!(content_type_for("bmp"), "image/bmp");
+        assert_eq!(content_type_for("avif"), "image/avif");
+        assert_eq!(content_type_for("ico"), "image/x-icon");
     }
 
     #[test]

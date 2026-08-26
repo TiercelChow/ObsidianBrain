@@ -57,6 +57,8 @@ import {
   type DirEntry, type PathStat,
 } from '@/api/reader'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
+import { makeReaderImageResolvers } from '@/utils/readerImages'
+import { resolveRelativePath } from '@/utils/markdownImages'
 import FileTree from './FileTree.vue'
 import MermaidViewer from './MermaidViewer.vue'
 import { useModalEnvironment } from '@/composables/useModalEnvironment'
@@ -100,16 +102,6 @@ function isUnderRoot(p: string): boolean {
   return p === root || p.startsWith(r)
 }
 
-function resolveRelative(baseDir: string, rel: string): string {
-  const parts = baseDir ? baseDir.split('/') : []
-  for (const seg of rel.replace(/^\.\//, '').split('/')) {
-    if (seg === '' || seg === '.') continue
-    if (seg === '..') parts.pop()
-    else parts.push(seg)
-  }
-  return parts.join('/')
-}
-
 function onMermaidClick(svg: SVGElement, source: string) {
   mermaidSource.value = source
   mermaidSvg.value = svg.outerHTML
@@ -118,7 +110,7 @@ function onMermaidClick(svg: SVGElement, source: string) {
 function onLinkClick(href: string) {
   const baseDir = currentPath.value.substring(0, currentPath.value.lastIndexOf('/'))
   const [pathPartRaw, anchor] = href.split('#')
-  const resolved = resolveRelative(baseDir, decodeURIComponent(pathPartRaw))
+  const resolved = resolveRelativePath(baseDir, decodeURIComponent(pathPartRaw))
   if (!resolved) return
   pendingAnchor.value = anchor ? decodeURIComponent(anchor) : ''
   if (/\.(md|markdown|pdf)$/i.test(resolved) && isUnderRoot(resolved)) {
@@ -162,7 +154,10 @@ async function load() {
     } else if (kind.value === 'md') {
       const rres = await readLocalFile(currentPath.value)
       if (rres.status === 'success' && rres.result) {
-        mdHtml.value = renderMarkdown(rres.result.content)
+        mdHtml.value = renderMarkdown(
+          rres.result.content,
+          makeReaderImageResolvers(currentPath.value, props.root),
+        )
       } else {
         error.value = rres.error?.message || '读取失败'
       }

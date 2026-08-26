@@ -266,6 +266,8 @@ import {
   listLocalDir, readLocalFile, getReaderHistory, saveReaderHistory,
   type DirEntry, type HistoryItem,
 } from '@/api/reader'
+import { makeReaderImageResolvers } from '@/utils/readerImages'
+import { resolveRelativePath } from '@/utils/markdownImages'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { useAppStore } from '@/stores/app'
 import FileTree from '@/components/reader/FileTree.vue'
@@ -530,15 +532,6 @@ function handleImageClick(src: string, alt: string) {
 const pendingAnchor = ref('')
 
 /** Resolve a relative href against the current file's directory. */
-function resolveRelative(baseDir: string, rel: string): string {
-  const parts = baseDir ? baseDir.split('/') : []
-  for (const seg of rel.replace(/^\.\//, '').split('/')) {
-    if (seg === '' || seg === '.') continue
-    if (seg === '..') parts.pop()
-    else parts.push(seg)
-  }
-  return parts.join('/')
-}
 
 /** Whether a path is inside the currently opened folder. */
 function isUnderRoot(p: string): boolean {
@@ -554,7 +547,7 @@ function handleLinkClick(href: string) {
   if (!base) return
   const baseDir = base.substring(0, base.lastIndexOf('/'))
   const [pathPartRaw, anchor] = href.split('#')
-  const resolved = resolveRelative(baseDir, decodeURIComponent(pathPartRaw))
+  const resolved = resolveRelativePath(baseDir, decodeURIComponent(pathPartRaw))
   if (!resolved) return
 
   // Markdown / PDF under the opened folder → jump in the reader (page-turn).
@@ -780,7 +773,10 @@ async function onSelectFile(path: string) {
       // Render new content, then swap the transition key in the SAME tick so the leaving
       // <article> stays frozen on the OLD content while the new one slides in.
       fileKind.value = 'md'
-      renderedHtml.value = renderMarkdown(res.result.content)
+      renderedHtml.value = renderMarkdown(
+        res.result.content,
+        makeReaderImageResolvers(path, rootPath.value),
+      )
       displayedFile.value = path
       localStorage.setItem(LAST_FILE_KEY, path)
       // enhance() + buildToc() run in the transition's @enter hook (onArticleEnter).

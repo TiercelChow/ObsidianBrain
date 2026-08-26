@@ -3,6 +3,7 @@ import markedKatex from 'marked-katex-extension'
 import 'katex/dist/katex.min.css'
 import { onScopeDispose, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { convertObsidianImageEmbeds, isLocalHref } from '@/utils/markdownImages'
 
 // ── helpers ────────────────────────────────────────────────────────────
 
@@ -50,7 +51,28 @@ function uniqueSlug(text: string): string {
 
 // ── marked instance (configured once) ──────────────────────────────────
 
+/** Optional per-render hooks that map local image references to servable URLs
+ *  (the Reader wires them to /v1/reader/raw). Omitted → hrefs pass through. */
+export interface MarkdownImageResolvers {
+  /** Obsidian wiki embed target (`![[a.jpg]]`) → URL; null leaves the embed as text. */
+  resolveEmbed?: (target: string) => string | null
+  /** Standard markdown image href → URL; null keeps the href unchanged. */
+  resolveImage?: (href: string) => string | null
+}
+
+/** Per-call image resolver (see renderMarkdown's options). Set only for the
+ *  duration of the synchronous md.parse() below, which makes a module-level
+ *  slot safe: no other render can interleave. */
+let activeImageResolver: ((href: string) => string | null) | null = null
+
 const renderer = {
+  image({ href, title, text }: Tokens.Image): string {
+    // Local filesystem hrefs get rewritten to a servable URL by the resolver
+    // (e.g. the Reader's /v1/reader/raw endpoint); everything else passes through.
+    const src = (isLocalHref(href) && activeImageResolver?.(href)) || href
+    const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
+    return `<img src="${escapeHtml(src)}" alt="${escapeHtml(text)}"${titleAttr}>`
+  },
   code({ text, lang }: Tokens.Code): string {
     const language = (lang || '').trim().split(/\s+/)[0].toLowerCase()
     if (language === 'mermaid') {
@@ -206,7 +228,7 @@ export function useMarkdownRender(
 
   onScopeDispose(cleanup)
 
-  function renderMarkdown(src: string): string {
+  function renderMarkdown(src: string, resolvers?: MarkdownImageResolvers): string {
     usedIds.clear()
     let text = stripFrontmatter(src)
 
@@ -233,10 +255,23 @@ export function useMarkdownRender(
       return ` $${collapsed}$ `
     })
 
+    // Obsidian wiki image embeds → markdown images, while code blocks are stashed
+    // so embed syntax inside code samples is never rewritten.
+    if (resolvers?.resolveEmbed) {
+      text = convertObsidianImageEmbeds(text, resolvers.resolveEmbed)
+    }
+
     // Restore code blocks.
     text = text.replace(/\x00CB(\d+)\x00/g, (_, i) => codeBlocks[parseInt(i, 10)])
 
-    return md.parse(text) as string
+    // The image renderer reads this slot during the synchronous md.parse()
+    // below; clear it again so later resolver-less renders pass hrefs through.
+    activeImageResolver = resolvers?.resolveImage ?? null
+    try {
+      return md.parse(text) as string
+    } finally {
+      activeImageResolver = null
+    }
   }
 
   function onContainerClick(event: Event) {
