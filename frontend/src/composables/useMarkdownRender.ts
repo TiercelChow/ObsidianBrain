@@ -193,11 +193,18 @@ async function rerenderMermaid(container: HTMLElement, theme: AppTheme) {
  * @param onLinkClick called when a relative (in-vault) link is clicked,
  *   receiving the raw href (may include a `#anchor`). External links open in
  *   a new tab; `#anchor` links scroll within the document — neither calls this.
+ * @param onImageClick called when a rendered image is clicked, receiving the
+ *   resolved `src` and the alt text.
+ * @param onAnchorJump called when an in-document `#anchor` link is clicked,
+ *   receiving the decoded anchor id. When omitted the default smooth
+ *   `scrollIntoView` runs; the Reader passes its own handler so anchor jumps
+ *   share its programmatic-scroll behavior.
  */
 export function useMarkdownRender(
   onMermaidClick: (svg: SVGElement, source: string) => void,
   onLinkClick?: (href: string) => void,
   onImageClick?: (src: string, alt: string) => void,
+  onAnchorJump?: (id: string) => void,
 ) {
   const appStore = useAppStore()
   let currentContainer: HTMLElement | null = null
@@ -293,7 +300,8 @@ export function useMarkdownRender(
       event.preventDefault()
       if (href.startsWith('#')) {
         const id = decodeURIComponent(href.slice(1))
-        document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        if (onAnchorJump) onAnchorJump(id)
+        else document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       } else {
         onLinkClick?.(href)
       }

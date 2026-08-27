@@ -578,7 +578,7 @@ const {
   renderMarkdown,
   enhance,
   cleanup: cleanupMarkdown,
-} = useMarkdownRender(handleMermaidClick, handleLinkClick, handleImageClick)
+} = useMarkdownRender(handleMermaidClick, handleLinkClick, handleImageClick, scrollToHeading)
 
 // ── history (server-stored, shared across all users) ──────────────────
 async function loadHistory() {
@@ -823,6 +823,9 @@ function onPdfOutline(items: { text: string; level: number; page: number }[]) {
 /** TOC click: jump to a PDF page (if pdf) or a markdown heading (if md). */
 function onTocClick(t: TocItem) {
   if (t.page !== undefined && fileKind.value === 'pdf') {
+    // PDF pages flow in pane-center too, so the jump scrolls the same
+    // container — hold the header state before PdfViewer scrolls it.
+    holdHeaderForJump()
     pdfViewerRef.value?.scrollToPage(t.page)
   } else {
     scrollToHeading(t.id)
@@ -868,6 +871,18 @@ watch(displayedFile, (file, previousFile) => {
 })
 
 let contentScrollFrame: number | null = null
+// Programmatic jumps (TOC click, in-note anchor, PDF page jump) scroll
+// pane-center, whose scroll handler also drives the app's mobile header
+// collapse. Toggling the header mid-jump shifts the layout ~100px — the
+// whole page visibly floats up — so jumps freeze the header state for a
+// window that outlasts the smooth scroll; user scrolls afterwards resume
+// driving the collapse.
+let headerHoldUntil = 0
+
+function holdHeaderForJump() {
+  headerHoldUntil = performance.now() + 1600
+}
+
 function onContentScroll() {
   if (contentScrollFrame !== null) return
   contentScrollFrame = window.requestAnimationFrame(processContentScroll)
@@ -877,8 +892,11 @@ function processContentScroll() {
   contentScrollFrame = null
   revealMobileToolbar()
   // Drive the app's mobile header + page-header collapse from the pane-center
-  // scroll (app-main doesn't scroll on the Reader page).
-  if (contentRef.value) appStore.setScrolled(contentRef.value.scrollTop > 20)
+  // scroll (app-main doesn't scroll on the Reader page) — unless a
+  // programmatic jump is currently scrolling (see holdHeaderForJump).
+  if (contentRef.value && performance.now() > headerHoldUntil) {
+    appStore.setScrolled(contentRef.value.scrollTop > 20)
+  }
   if (!contentRef.value || fileKind.value === 'pdf' || !toc.value.length) return
   const containerTop = contentRef.value.getBoundingClientRect().top
   let current = ''
@@ -909,6 +927,7 @@ function scrollTocToActive() {
 
 function scrollToHeading(id: string) {
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  holdHeaderForJump()
   document.getElementById(id)?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
 }
 

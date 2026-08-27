@@ -520,6 +520,23 @@ onBeforeUnmount(() => {
 })
 </script>
 
+<style>
+/* pdf.js (raw API) appends a measurement canvas with this class directly to
+   <body> and expects the viewer CSS to hide it. Without pdf_viewer.css the
+   300×150 canvas sits in normal flow just below the viewport, inflating the
+   document by ~156px — enough for scrollIntoView (TOC page jumps) to scroll
+   the whole app shell and for touch scrolls to drag the page. Mirror the
+   official pdf_viewer.css rule. */
+.hiddenCanvasElement {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  display: none;
+}
+</style>
+
 <style scoped>
 .pdf-viewer {
   /* NOT its own scroll container — flows in .pane-center so onContentScroll
