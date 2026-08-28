@@ -134,8 +134,8 @@
             :key="displayedFile"
             :src="displayedFile"
             @outline="onPdfOutline"
-            @pagechange="pdfCurrentPage = $event"
-            @pagecount="pdfPageCount = $event"
+            @pagechange="onPdfPageChange"
+            @pagecount="onPdfPageCount"
           />
           <article
             v-else-if="renderedHtml"
@@ -278,6 +278,8 @@ import {
 import { makeReaderImageResolvers } from '@/utils/readerImages'
 import { resolveRelativePath } from '@/utils/markdownImages'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
+import { useBookshelf } from '@/composables/useBookshelf'
+import { scrollRatio } from '@/utils/readerBooks'
 import { useAppStore } from '@/stores/app'
 import FileTree from '@/components/reader/FileTree.vue'
 import MotionDrawer from '@/components/motion/MotionDrawer.vue'
@@ -340,6 +342,8 @@ function initialViewMode(): ReaderView {
 const viewMode = ref<ReaderView>(initialViewMode())
 
 function changeView(mode: ReaderView) {
+  // Leaving the reading view flushes any debounced progress first (FR-16).
+  if (viewMode.value === 'read' && mode === 'shelf') flushProgressNow()
   viewMode.value = mode
   localStorage.setItem(VIEW_STORAGE_KEY, mode)
   void router.replace({ query: { ...route.query, view: mode } })
@@ -353,6 +357,59 @@ function changeView(mode: ReaderView) {
 /** Open a shelf book and restore its progress — implemented with progress restore. */
 async function openBook(_book: ReaderBook) {
   changeView('read')
+}
+
+// ── bookshelf progress tracking ──────────────────────────────────────
+// md books record lastFile + scroll ratio (debounced); pdf books record the
+// page on every pagechange. A book is matched by rootPath (folder) or the
+// displayed pdf path, so reading outside any book simply records nothing.
+const shelf = useBookshelf()
+
+const currentShelfBookId = computed<string | null>(() => {
+  const books = shelf.books.value
+  if (fileKind.value === 'pdf') {
+    return books.find((b) => b.kind === 'pdf' && b.path === displayedFile.value)?.id ?? null
+  }
+  return books.find((b) => b.kind === 'folder' && b.path === rootPath.value)?.id ?? null
+})
+
+// Pending restore target consumed after the file finishes rendering (set by
+// openBook in the restore flow); while set, onSelectFile must not overwrite
+// the saved progress it is about to restore.
+let pendingRestoreRatio: number | null = null
+
+const PROGRESS_DEBOUNCE_MS = 1500
+let progressTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Debounced capture of the md scroll ratio (FR-15). */
+function scheduleProgressCapture() {
+  if (fileKind.value === 'pdf') return
+  if (progressTimer) clearTimeout(progressTimer)
+  progressTimer = setTimeout(() => {
+    progressTimer = null
+    captureProgressNow()
+  }, PROGRESS_DEBOUNCE_MS)
+}
+
+/** Immediate capture — used by the debounce expiry and the flush points. */
+function captureProgressNow() {
+  if (fileKind.value === 'pdf') return
+  const bookId = currentShelfBookId.value
+  const el = contentRef.value
+  if (!bookId || !el || !displayedFile.value) return
+  shelf.updateProgress(bookId, {
+    lastFile: displayedFile.value,
+    position: scrollRatio(el.scrollTop, el.scrollHeight, el.clientHeight),
+  })
+}
+
+/** Flush pending debounced progress (view switch / unmount) without waiting. */
+function flushProgressNow() {
+  if (progressTimer) {
+    clearTimeout(progressTimer)
+    progressTimer = null
+    captureProgressNow()
+  }
 }
 const viewerSvg = ref('')
 const viewerTitle = ref('Mermaid 图')
@@ -821,6 +878,12 @@ async function onSelectFile(path: string) {
       )
       displayedFile.value = path
       localStorage.setItem(LAST_FILE_KEY, path)
+      // Folder-book progress: a fresh file starts from the top (FR-15 lastFile).
+      // Skip while restoring a saved position — the restore owns the next write.
+      const bookId = currentShelfBookId.value
+      if (bookId && pendingRestoreRatio === null) {
+        shelf.updateProgress(bookId, { lastFile: path, position: 0 })
+      }
       // enhance() + buildToc() run in the transition's @enter hook (onArticleEnter).
     }
   } catch (e) {
@@ -853,6 +916,23 @@ function onContentAfterLeave(el: Element) {
 }
 
 /** PdfViewer emits its outline after load; populate the TOC. */
+function onPdfPageChange(page: number) {
+  pdfCurrentPage.value = page
+  const bookId = currentShelfBookId.value
+  if (bookId) {
+    shelf.updateProgress(bookId, {
+      position: page,
+      ...(pdfPageCount.value ? { pageCount: pdfPageCount.value } : {}),
+    })
+  }
+}
+
+function onPdfPageCount(count: number) {
+  pdfPageCount.value = count
+  const bookId = currentShelfBookId.value
+  if (bookId) shelf.updateProgress(bookId, { pageCount: count })
+}
+
 function onPdfOutline(items: { text: string; level: number; page: number }[]) {
   toc.value = items.map((it, i) => ({
     id: `pdf-outline-${i}`,
@@ -933,6 +1013,7 @@ function onContentScroll() {
 function processContentScroll() {
   contentScrollFrame = null
   revealMobileToolbar()
+  scheduleProgressCapture()
   // Drive the app's mobile header + page-header collapse from the pane-center
   // scroll (app-main doesn't scroll on the Reader page) — unless a
   // programmatic jump is currently scrolling (see holdHeaderForJump).
@@ -976,6 +1057,7 @@ function scrollToHeading(id: string) {
 onMounted(async () => {
   document.addEventListener('fullscreenchange', onFullscreenChange)
   document.addEventListener('keydown', onReaderKeydown)
+  void shelf.ensureLoaded()
   await loadHistory()
   // Restore last opened folder + file (per-browser).
   const lastFolder = localStorage.getItem(LAST_FOLDER_KEY)
@@ -988,6 +1070,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   leaveMobileImmersive()
+  flushProgressNow() // route-leave flush point (FR-16)
   cancelPendingFileSelection()
   cleanupMarkdown()
   document.removeEventListener('fullscreenchange', onFullscreenChange)
