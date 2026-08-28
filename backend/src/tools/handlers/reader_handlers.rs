@@ -349,6 +349,150 @@ impl ToolHandler for SaveReaderHistoryHandler {
     }
 }
 
+// ── Reader bookshelf (server-stored, shared across all users) ──────────
+
+/// SQLite `app_state` key holding the bookshelf JSON array.
+const BOOKS_KEY: &str = "reader_books";
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Debug)]
+#[serde(rename_all = "lowercase")]
+enum BookKind {
+    Folder,
+    Pdf,
+}
+
+/// Reading progress: folder books store lastFile + scroll ratio (0..1);
+/// pdf books store the page number (+ pageCount for display).
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct BookProgress {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_file: Option<String>,
+    position: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    page_count: Option<i64>,
+    updated_at: i64,
+}
+
+/// A bookshelf entry: a local folder (md collection) or a pdf file.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct ReaderBook {
+    id: String,
+    path: String,
+    kind: BookKind,
+    name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    category: String,
+    added_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    progress: Option<BookProgress>,
+}
+
+/// Read the bookshelf from SQLite. Returns an empty vec if unset or unparseable.
+fn get_books(db: &SqliteStore) -> Result<Vec<ReaderBook>, BrainError> {
+    match db.get_state(BOOKS_KEY)? {
+        Some(json) => Ok(serde_json::from_str(&json).unwrap_or_default()),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Validate + persist the full book list (whole-list replace). Returns the count.
+fn save_books(db: &SqliteStore, json: &Value) -> Result<usize, BrainError> {
+    let books: Vec<ReaderBook> = serde_json::from_value(json.clone())
+        .map_err(|e| BrainError::Internal(format!("books 格式错误: {e}")))?;
+    let serialized = serde_json::to_string(&books)
+        .map_err(|e| BrainError::Internal(format!("序列化失败: {e}")))?;
+    db.set_state(BOOKS_KEY, &serialized)?;
+    Ok(books.len())
+}
+
+/// Get the bookshelf.
+pub struct GetReaderBooksHandler;
+
+#[async_trait]
+impl ToolHandler for GetReaderBooksHandler {
+    fn name(&self) -> &str {
+        "get_reader_books"
+    }
+    fn description(&self) -> &str {
+        "获取阅读器书架（服务端存储，所有用户共享）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({ "type": "object", "properties": {} })
+    }
+    fn module(&self) -> &str {
+        "reader"
+    }
+
+    async fn handle(&self, _args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let books = get_books(&ctx.db)?;
+        let books_json = serde_json::to_value(&books)
+            .map_err(|e| BrainError::Internal(format!("序列化失败: {e}")))?;
+        Ok(json!({ "books": books_json }))
+    }
+}
+
+/// Save the full bookshelf list (replaces the existing list).
+pub struct SaveReaderBooksHandler;
+
+#[async_trait]
+impl ToolHandler for SaveReaderBooksHandler {
+    fn name(&self) -> &str {
+        "save_reader_books"
+    }
+    fn description(&self) -> &str {
+        "保存阅读器书架（整体替换，服务端共享）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "books": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "string" },
+                            "path": { "type": "string" },
+                            "kind": { "type": "string", "enum": ["folder", "pdf"] },
+                            "name": { "type": "string" },
+                            "description": { "type": "string" },
+                            "category": { "type": "string" },
+                            "addedAt": { "type": "number" },
+                            "progress": {
+                                "type": "object",
+                                "properties": {
+                                    "lastFile": { "type": ["string", "null"] },
+                                    "position": { "type": "number" },
+                                    "pageCount": { "type": "number" },
+                                    "updatedAt": { "type": "number" }
+                                },
+                                "required": ["position", "updatedAt"]
+                            }
+                        },
+                        "required": ["id", "path", "kind", "name", "addedAt"]
+                    }
+                }
+            },
+            "required": ["books"]
+        })
+    }
+    fn module(&self) -> &str {
+        "reader"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let books_arg = args
+            .get("books")
+            .ok_or_else(|| BrainError::Internal("缺少必需参数 'books'".to_string()))?;
+        let count = save_books(&ctx.db, books_arg)?;
+        Ok(json!({ "ok": true, "count": count }))
+    }
+}
+
 /// Stat a local path — returns whether it exists, is a dir/file, name, ext, size.
 /// Used by the reader to decide how to preview a link target (md / folder / code).
 pub struct StatLocalPathHandler;
@@ -614,6 +758,82 @@ mod tests {
         let wire = serde_json::to_value(&items).unwrap();
         assert!(wire[0].get("lastUsed").is_some());
         assert!(wire[0].get("last_used").is_none());
+    }
+
+    // ── reader_books ──────────────────────────────────────────────────
+
+    fn books_payload() -> Value {
+        json!([
+            {
+                "id": "b1", "path": "/tmp/docs", "kind": "folder",
+                "name": "文档集", "addedAt": 1700000000000i64,
+                "description": "", "category": "技术",
+                "progress": { "lastFile": "/tmp/docs/a.md", "position": 0.42, "updatedAt": 1700000001000i64 }
+            },
+            {
+                "id": "b2", "path": "/tmp/book.pdf", "kind": "pdf",
+                "name": "book", "addedAt": 1700000000001i64,
+                "progress": { "position": 12, "pageCount": 180, "updatedAt": 1700000000002i64 }
+            }
+        ])
+    }
+
+    #[test]
+    fn test_books_roundtrip_through_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = SqliteStore::new(&tmp.path().join("books.db")).unwrap();
+
+        // Empty initially.
+        assert!(get_books(&db).unwrap().is_empty());
+
+        // Save and read back, preserving fields and camelCase wire format.
+        let n = save_books(&db, &books_payload()).unwrap();
+        assert_eq!(n, 2);
+        let books = get_books(&db).unwrap();
+        assert_eq!(books.len(), 2);
+        assert_eq!(books[0].id, "b1");
+        assert!(matches!(books[0].kind, BookKind::Folder));
+        assert_eq!(books[0].category, "技术");
+        assert_eq!(
+            books[0].progress.as_ref().unwrap().last_file.as_deref(),
+            Some("/tmp/docs/a.md")
+        );
+        assert!((books[0].progress.as_ref().unwrap().position - 0.42).abs() < f64::EPSILON);
+        assert_eq!(books[1].progress.as_ref().unwrap().page_count, Some(180));
+
+        // Optional fields are omitted on the wire when absent.
+        let wire = serde_json::to_value(&books).unwrap();
+        assert!(wire[1].get("description").is_some()); // String defaults serialize
+        assert!(wire[0]["progress"].get("pageCount").is_none()); // skipped when None
+    }
+
+    #[test]
+    fn test_books_corrupted_json_yields_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = SqliteStore::new(&tmp.path().join("books.db")).unwrap();
+        db.set_state(BOOKS_KEY, "{not json").unwrap();
+        assert!(get_books(&db).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_save_books_rejects_missing_required_field() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = SqliteStore::new(&tmp.path().join("books.db")).unwrap();
+        let bad = json!([{ "id": "x", "path": "/tmp/a" }]); // missing kind/name/addedAt
+        let err = save_books(&db, &bad).unwrap_err();
+        assert!(matches!(err, BrainError::Internal(_)));
+        // Nothing was persisted.
+        assert!(get_books(&db).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_save_books_rejects_bad_kind() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = SqliteStore::new(&tmp.path().join("books.db")).unwrap();
+        let bad =
+            json!([{ "id": "x", "path": "/tmp/a", "kind": "video", "name": "n", "addedAt": 1 }]);
+        assert!(save_books(&db, &bad).is_err());
+        assert!(get_books(&db).unwrap().is_empty());
     }
 
     #[tokio::test]

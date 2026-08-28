@@ -3,7 +3,7 @@
 //! This module contains all tool handlers organized by module:
 //! - `search_handlers` — search_notes, get_note, list_recent_notes
 //! - `memory_handlers` — get_memory_stats
-//! - `reader_handlers` — list_local_dir, read_local_file, stat_local_path, get/save_reader_history (Markdown Reader)
+//! - `reader_handlers` — list_local_dir, read_local_file, stat_local_path, get/save_reader_history, get/save_reader_books (Markdown Reader)
 //! - `code_repo_handlers` — add_code_repo, list_code_repos, get_repo_detail, link_note_to_repo, get_linked_notes, open_in_vscode
 //! - `timeline_handlers` — get_timeline
 //! - `inspiration_handlers` — get_inspiration
@@ -115,5 +115,7 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     registry.register(Arc::new(ReadLocalFileHandler)).await;
     registry.register(Arc::new(GetReaderHistoryHandler)).await;
     registry.register(Arc::new(SaveReaderHistoryHandler)).await;
+    registry.register(Arc::new(GetReaderBooksHandler)).await;
+    registry.register(Arc::new(SaveReaderBooksHandler)).await;
     registry.register(Arc::new(StatLocalPathHandler)).await;
 }
