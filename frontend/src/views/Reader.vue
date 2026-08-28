@@ -279,7 +279,7 @@ import { makeReaderImageResolvers } from '@/utils/readerImages'
 import { resolveRelativePath } from '@/utils/markdownImages'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { useBookshelf } from '@/composables/useBookshelf'
-import { scrollRatio } from '@/utils/readerBooks'
+import { clampPdfPage, scrollRatio } from '@/utils/readerBooks'
 import { useAppStore } from '@/stores/app'
 import FileTree from '@/components/reader/FileTree.vue'
 import MotionDrawer from '@/components/motion/MotionDrawer.vue'
@@ -354,9 +354,29 @@ function changeView(mode: ReaderView) {
   }
 }
 
-/** Open a shelf book and restore its progress — implemented with progress restore. */
-async function openBook(_book: ReaderBook) {
+/**
+ * Open a shelf book and restore its progress (FR-12..14): folder books reopen
+ * progress.lastFile and scroll to the saved ratio; pdf books jump to the saved
+ * page (clamped). Stale/missing lastFile silently falls back to the first file.
+ */
+async function openBook(book: ReaderBook) {
   changeView('read')
+  if (book.kind === 'pdf') {
+    const dir = book.path.substring(0, book.path.lastIndexOf('/'))
+    await openPath(dir)
+    pendingPdfPage = book.progress ? clampPdfPage(book.progress.position, book.progress.pageCount ?? 0) : null
+    await onSelectFile(book.path)
+    return
+  }
+  await openPath(book.path)
+  const p = book.progress
+  if (p?.lastFile && flatFiles.value.includes(p.lastFile)) {
+    pendingRestoreRatio = p.position
+    await onSelectFile(p.lastFile)
+  } else if (flatFiles.value.length) {
+    // Fallback (FR-13): stale/missing lastFile → first file, from the top.
+    await onSelectFile(flatFiles.value[0])
+  }
 }
 
 // ── bookshelf progress tracking ──────────────────────────────────────
@@ -373,10 +393,43 @@ const currentShelfBookId = computed<string | null>(() => {
   return books.find((b) => b.kind === 'folder' && b.path === rootPath.value)?.id ?? null
 })
 
-// Pending restore target consumed after the file finishes rendering (set by
+// Pending restore targets consumed after the file finishes rendering (set by
 // openBook in the restore flow); while set, onSelectFile must not overwrite
 // the saved progress it is about to restore.
 let pendingRestoreRatio: number | null = null
+let pendingPdfPage: number | null = null
+
+/**
+ * Keep a restored scroll ratio on target while the article's layout settles.
+ * After the initial jump, late image loads and mermaid/code blocks above the
+ * restore point (enhanced on intersection) keep changing scrollHeight, which
+ * would silently drift the ratio (measured 0.5 → 0.37 on an image-heavy
+ * note). Re-assert the ratio for a short window; any real user input
+ * (wheel/touch/key) cancels the correction so it never fights the reader.
+ */
+let restoreCorrectionTimer: ReturnType<typeof setInterval> | null = null
+function stopRestoreCorrection() {
+  if (restoreCorrectionTimer !== null) {
+    clearInterval(restoreCorrectionTimer)
+    restoreCorrectionTimer = null
+  }
+}
+
+function holdRatioForRestore(ratio: number, pane: HTMLElement) {
+  stopRestoreCorrection()
+  const cancel = () => stopRestoreCorrection()
+  pane.addEventListener('wheel', cancel, { capture: true, passive: true, once: true })
+  pane.addEventListener('touchstart', cancel, { capture: true, passive: true, once: true })
+  pane.addEventListener('keydown', cancel, { capture: true, passive: true, once: true })
+  const startedAt = performance.now()
+  restoreCorrectionTimer = setInterval(() => {
+    if (performance.now() - startedAt > 1800) {
+      stopRestoreCorrection()
+      return
+    }
+    pane.scrollTop = Math.round(ratio * (pane.scrollHeight - pane.clientHeight))
+  }, 120)
+}
 
 const PROGRESS_DEBOUNCE_MS = 1500
 let progressTimer: ReturnType<typeof setTimeout> | null = null
@@ -909,6 +962,23 @@ async function onArticleEnter(el: Element) {
     scrollToHeading(pendingAnchor.value)
     pendingAnchor.value = ''
   }
+  // Book progress restore (FR-13): scroll to the saved ratio after enhance,
+  // so images/code highlighting have settled into the layout — then keep the
+  // ratio on target while late layout shifts settle (holdRatioForRestore).
+  if (pendingRestoreRatio !== null) {
+    const ratio = pendingRestoreRatio
+    pendingRestoreRatio = null
+    await nextTick()
+    const pane = contentRef.value
+    if (pane) {
+      pane.scrollTop = Math.round(ratio * (pane.scrollHeight - pane.clientHeight))
+      // Skip one debounce cycle: the restore scroll fires onContentScroll,
+      // which would re-capture (and re-save) the exact ratio we just restored.
+      if (progressTimer) clearTimeout(progressTimer)
+      progressTimer = null
+      holdRatioForRestore(ratio, pane)
+    }
+  }
 }
 
 function onContentAfterLeave(el: Element) {
@@ -931,6 +1001,18 @@ function onPdfPageCount(count: number) {
   pdfPageCount.value = count
   const bookId = currentShelfBookId.value
   if (bookId) shelf.updateProgress(bookId, { pageCount: count })
+  // Book-open restore (FR-14): page wraps mount with pageMetas as the pdf
+  // loads, so one rAF after the count arrives the target wrap is addressable.
+  if (pendingPdfPage !== null) {
+    const target = clampPdfPage(pendingPdfPage, count)
+    pendingPdfPage = null
+    requestAnimationFrame(() => {
+      // Same programmatic-scroll family as TOC jumps — don't let the mobile
+      // header collapse mid-restore (see holdHeaderForJump).
+      holdHeaderForJump()
+      pdfViewerRef.value?.scrollToPage(target)
+    })
+  }
 }
 
 function onPdfOutline(items: { text: string; level: number; page: number }[]) {
@@ -1071,6 +1153,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   leaveMobileImmersive()
   flushProgressNow() // route-leave flush point (FR-16)
+  stopRestoreCorrection()
   cancelPendingFileSelection()
   cleanupMarkdown()
   document.removeEventListener('fullscreenchange', onFullscreenChange)
