@@ -84,6 +84,41 @@ export function saveReaderHistory(
   >
 }
 
+/** A bookshelf entry (server-stored, shared across all users). */
+export interface BookProgress {
+  lastFile?: string | null
+  position: number
+  pageCount?: number
+  updatedAt: number
+}
+
+export interface ReaderBook {
+  id: string
+  path: string
+  kind: 'folder' | 'pdf'
+  name: string
+  description: string
+  category: string
+  addedAt: number
+  progress?: BookProgress
+}
+
+/** Get the bookshelf from the server. */
+export function getReaderBooks(): Promise<ToolEnvelope<{ books: ReaderBook[] }>> {
+  return callTool('get_reader_books', {}) as unknown as Promise<
+    ToolEnvelope<{ books: ReaderBook[] }>
+  >
+}
+
+/** Save the full bookshelf to the server (replaces existing). */
+export function saveReaderBooks(
+  books: ReaderBook[],
+): Promise<ToolEnvelope<{ ok: boolean; count: number }>> {
+  return callTool('save_reader_books', { books }) as unknown as Promise<
+    ToolEnvelope<{ ok: boolean; count: number }>
+  >
+}
+
 /** Build the binary file URL for the reader endpoint (used by pdf.js). */
 export function localFileUrl(path: string): string {
   return `/v1/reader/raw?path=${encodeURIComponent(path)}`
