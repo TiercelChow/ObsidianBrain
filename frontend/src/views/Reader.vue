@@ -14,10 +14,18 @@
         <h1 class="page-title">阅境轩</h1>
         <p class="page-subtitle">浏览本地 Markdown 与 PDF，沉浸阅读</p>
       </div>
+      <div class="view-switch" aria-label="视图切换">
+        <span class="switch-indicator" :class="{ read: viewMode === 'read' }"></span>
+        <button type="button" :class="{ active: viewMode === 'shelf' }" @click="changeView('shelf')">书架</button>
+        <button type="button" :class="{ active: viewMode === 'read' }" @click="changeView('read')">阅读</button>
+      </div>
     </header>
 
+    <!-- Bookshelf view (kept alive via v-show alongside the reading panes) -->
+    <BookshelfView v-show="viewMode === 'shelf'" class="bookshelf-root" @open="openBook" />
+
     <!-- Compact trigger bar -->
-    <div class="reader-topbar">
+    <div v-show="viewMode === 'read'" class="reader-topbar">
       <button class="path-trigger" @click="openHistoryOverlay">
         <el-icon><FolderOpened /></el-icon>
         <span v-if="currentFolderName" class="pt-name">{{ currentFolderName }}</span>
@@ -93,7 +101,7 @@
     </transition>
 
     <!-- Body: 3 panes -->
-    <div ref="readerBodyRef" class="reader-body">
+    <div v-show="viewMode === 'read'" ref="readerBodyRef" class="reader-body">
       <!-- Left: file tree -->
       <aside class="pane pane-left">
         <div class="pane-title-bar">
@@ -166,7 +174,7 @@
     </div>
 
     <div
-      v-if="mobileToolbarState.rendered"
+      v-if="viewMode === 'read' && mobileToolbarState.rendered"
       class="reader-mobile-toolbar"
       :class="{
         'is-visible': mobileToolbarState.visible,
@@ -258,13 +266,14 @@
 import {
   computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch,
 } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   FolderOpened, Star, StarFilled, Delete, Menu, Document, FullScreen, EditPen, Refresh, Minus, Plus,
 } from '@element-plus/icons-vue'
 import {
   listLocalDir, readLocalFile, getReaderHistory, saveReaderHistory,
-  type DirEntry, type HistoryItem,
+  type DirEntry, type HistoryItem, type ReaderBook,
 } from '@/api/reader'
 import { makeReaderImageResolvers } from '@/utils/readerImages'
 import { resolveRelativePath } from '@/utils/markdownImages'
@@ -272,6 +281,7 @@ import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { useAppStore } from '@/stores/app'
 import FileTree from '@/components/reader/FileTree.vue'
 import MotionDrawer from '@/components/motion/MotionDrawer.vue'
+import BookshelfView from '@/components/reader/BookshelfView.vue'
 import { getMobileReaderToolbarState, isPhoneViewport } from '@/utils/mobileLayoutPolicy'
 import { useModalEnvironment } from '@/composables/useModalEnvironment'
 
@@ -312,6 +322,38 @@ useModalEnvironment(() => showHistory.value, pathCardRef, () => { showHistory.va
 const history = ref<HistoryItem[]>([])
 const treeDrawer = ref(false)
 const tocDrawer = ref(false)
+
+// ── view switch (shelf ↔ read), Tasks-style slider ───────────────────
+// The shelf is the new default landing view; the choice persists in
+// localStorage and syncs to ?view= so it survives reloads and links.
+const route = useRoute()
+const router = useRouter()
+const VIEW_STORAGE_KEY = 'reader.view'
+type ReaderView = 'shelf' | 'read'
+
+function initialViewMode(): ReaderView {
+  const q = route.query.view
+  if (q === 'shelf' || q === 'read') return q
+  return localStorage.getItem(VIEW_STORAGE_KEY) === 'read' ? 'read' : 'shelf'
+}
+
+const viewMode = ref<ReaderView>(initialViewMode())
+
+function changeView(mode: ReaderView) {
+  viewMode.value = mode
+  localStorage.setItem(VIEW_STORAGE_KEY, mode)
+  void router.replace({ query: { ...route.query, view: mode } })
+  // Entering the shelf from an immersive/fullscreen reading session restores the shell.
+  if (mode === 'shelf') {
+    if (isFullscreen.value && document.fullscreenElement) void document.exitFullscreen()
+    leaveMobileImmersive()
+  }
+}
+
+/** Open a shelf book and restore its progress — implemented with progress restore. */
+async function openBook(_book: ReaderBook) {
+  changeView('read')
+}
 const viewerSvg = ref('')
 const viewerTitle = ref('Mermaid 图')
 const previewPath = ref('')        // non-md / out-of-folder link target → popup
@@ -971,6 +1013,47 @@ onBeforeUnmount(() => {
 }
 /* Tighter page-header spacing — the Reader is a tool page, not a content page. */
 .reader-page .page-header { margin-bottom: 6px; }
+
+/* Tasks-style view switch (shelf ↔ read) */
+.view-switch {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 174px;
+  padding: 3px;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  isolation: isolate;
+  align-self: flex-start;
+  flex-shrink: 0;
+}
+.switch-indicator {
+  position: absolute;
+  inset: 3px auto 3px 3px;
+  width: calc(50% - 3px);
+  border-radius: 10px;
+  background: var(--bg-glass-strong);
+  box-shadow: var(--shadow-sm), var(--inset-highlight);
+  transition: transform var(--motion-normal) var(--ease-spring-gentle);
+  z-index: -1;
+}
+.switch-indicator.read { transform: translateX(100%); }
+.view-switch button {
+  min-height: 36px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 570;
+  cursor: pointer;
+}
+.view-switch button.active { color: var(--text-primary); }
+
+/* Bookshelf fills the body area like reader-body does */
+.bookshelf-root {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
 /* Fullscreen reading mode — immersive: hide app chrome (title/input), keep file
    tree + TOC. The article's H1 sticks to the top with a frosted glass bar. */
 .reader-page:fullscreen {
@@ -1430,6 +1513,8 @@ onBeforeUnmount(() => {
     height: calc(100dvh - var(--mobile-header-height) - var(--safe-top) - 40px);
     gap: 6px;
   }
+  .view-switch { width: 150px; }
+  .view-switch button { min-height: 34px; }
   .path-trigger { min-height: var(--tap-target); padding-block: 8px; }
   .pane-left, .pane-right { display: none; }
   .pane-center {
