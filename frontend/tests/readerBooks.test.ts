@@ -3,7 +3,9 @@ import test from 'node:test'
 
 import {
   bookProgressLabel,
+  bookProgressRatio,
   clampPdfPage,
+  coverTone,
   defaultBookName,
   deriveKind,
   findBookByPath,
@@ -104,6 +106,33 @@ test('sortBooks orders by last activity (progress.updatedAt ?? addedAt) descendi
 })
 
 // ── findBookByPath / validateBookForm ──────────────────────────────────────
+
+// ── bookProgressRatio / coverTone ──────────────────────────────────────────
+
+test('bookProgressRatio maps md ratio and pdf page fraction; unread is 0', () => {
+  assert.equal(bookProgressRatio(folderBook()), 0)
+  assert.equal(bookProgressRatio(folderBook({ position: 0.424 })), 0.424)
+  const pdf: ReaderBook = {
+    id: 'b',
+    path: '/x.pdf',
+    kind: 'pdf',
+    name: 'n',
+    description: '',
+    category: '',
+    addedAt: 1,
+    progress: { position: 60, pageCount: 180, updatedAt: 2 },
+  }
+  assert.equal(bookProgressRatio(pdf), 60 / 180)
+  assert.equal(bookProgressRatio({ ...pdf, progress: { position: 12, updatedAt: 2 } }), 0) // pageCount unknown
+})
+
+test('coverTone is deterministic, in range, and spreads across books', () => {
+  const names = ['VLLM', '深度学习', '学习笔记', 'AI System', '博客', '论文集', '小说', '手册']
+  const tones = names.map((n) => coverTone(n))
+  assert.ok(tones.every((t) => Number.isInteger(t) && t >= 0 && t < 8))
+  assert.deepEqual(tones, names.map((n) => coverTone(n))) // stable across calls
+  assert.ok(new Set(tones).size >= 4, 'palette should spread, not collapse')
+})
 
 // ── matchesBookQuery ───────────────────────────────────────────────────────
 

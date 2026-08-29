@@ -31,29 +31,29 @@
       <div
         v-for="b in visibleBooks"
         :key="b.id"
-        class="book-card glass-surface"
-        :title="b.path"
+        class="book-cover"
+        :class="`tone-${coverTone(b.name)}`"
+        :title="coverTooltip(b)"
         @click="emit('open', b)"
       >
-        <div class="bc-head">
-          <el-icon class="bc-kind-icon">
-            <FolderOpened v-if="b.kind === 'folder'" />
-            <Document v-else />
-          </el-icon>
-          <span class="bc-name">{{ b.name }}</span>
-        </div>
-        <span v-if="b.category" class="bc-category">{{ b.category }}</span>
-        <p class="bc-desc">{{ b.description || '　' }}</p>
-        <div class="bc-foot">
-          <span class="bc-progress">{{ progressLabel(b) }}</span>
-          <span class="bc-actions" @click.stop>
-            <button type="button" title="编辑" aria-label="编辑" @click="openEdit(b)">
-              <el-icon><EditPen /></el-icon>
-            </button>
-            <button type="button" title="删除" aria-label="删除" @click="confirmRemove(b)">
-              <el-icon><Delete /></el-icon>
-            </button>
+        <span class="bc-kind">
+          <el-icon><FolderOpened v-if="b.kind === 'folder'" /><Document v-else /></el-icon>
+        </span>
+        <span class="bc-actions" @click.stop>
+          <button type="button" title="编辑" aria-label="编辑" @click="openEdit(b)">
+            <el-icon><EditPen /></el-icon>
+          </button>
+          <button type="button" title="删除" aria-label="删除" @click="confirmRemove(b)">
+            <el-icon><Delete /></el-icon>
+          </button>
+        </span>
+        <h3 class="bc-title">{{ b.name }}</h3>
+        <div class="bc-meta">
+          <span v-if="b.category" class="bc-cat">{{ b.category }}</span>
+          <span class="bc-track">
+            <span class="bc-fill" :style="{ width: `${Math.round(bookProgressRatio(b) * 100)}%` }"></span>
           </span>
+          <span class="bc-label" :class="{ dim: !b.progress }">{{ progressLabel(b) }}</span>
         </div>
       </div>
     </div>
@@ -95,6 +95,8 @@ import { statLocalPath, type PathStat, type ReaderBook } from '@/api/reader'
 import { useBookshelf } from '@/composables/useBookshelf'
 import {
   bookProgressLabel,
+  bookProgressRatio,
+  coverTone,
   defaultBookName,
   deriveKind,
   makeBookId,
@@ -125,6 +127,11 @@ const visibleBooks = computed(() =>
 
 function progressLabel(b: ReaderBook) {
   return bookProgressLabel(b)
+}
+
+/** Native tooltip: description + path live here — covers show only name/category/progress. */
+function coverTooltip(b: ReaderBook) {
+  return `${b.name}${b.description ? `\n${b.description}` : ''}\n${b.path}`
 }
 
 // ── add / edit dialog ────────────────────────────────────────────────
@@ -244,14 +251,6 @@ async function confirmRemove(b: ReaderBook) {
 </script>
 
 <style scoped>
-.glass-surface {
-  background: var(--bg-glass);
-  border: 1px solid var(--border-glass);
-  box-shadow: var(--shadow-sm), var(--inset-highlight);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-}
-
 .bookshelf {
   min-height: 100%;
   display: flex;
@@ -316,113 +315,175 @@ async function confirmRemove(b: ReaderBook) {
   font-size: 13px;
 }
 
+/* ── Book wall: covers on glass shelf boards ──
+   Rows are a fixed pitch (cover height + row gap) so one repeating
+   gradient paints a board under every row, including the last. */
 .shelf-grid {
+  --cover-h: 210px;
+  --board: 10px;
+  --row-gap: 26px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-auto-rows: var(--cover-h);
+  gap: var(--row-gap) 14px;
+  padding-bottom: calc(var(--board) + 4px);
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0 calc(var(--cover-h) + 1px),
+    rgba(255, 255, 255, 0.55) calc(var(--cover-h) + 1px) calc(var(--cover-h) + 2px),
+    var(--bg-glass) calc(var(--cover-h) + 2px) calc(var(--cover-h) + var(--board)),
+    rgba(15, 18, 25, 0.12) calc(var(--cover-h) + var(--board)) calc(var(--cover-h) + var(--board) + 3px),
+    transparent calc(var(--cover-h) + var(--board) + 3px) calc(var(--cover-h) + var(--row-gap))
+  );
 }
-.book-card {
+
+.book-cover {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 16px;
-  border-radius: 16px;
+  border-radius: 4px 8px 8px 4px;
+  background: linear-gradient(155deg, var(--cover-b) 0%, var(--cover-a) 100%);
   cursor: pointer;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.18);
   transition: transform var(--motion-normal) var(--ease-spring-gentle),
     box-shadow var(--motion-normal) var(--ease-emphasized);
 }
-.book-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+/* Bound spine edge + a soft sheen on the fore-edge. */
+.book-cover::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.38) 0, rgba(0, 0, 0, 0.14) 7px, transparent 16px),
+    radial-gradient(ellipse 120% 60% at 85% -10%, rgba(255, 255, 255, 0.22), transparent 55%);
+  pointer-events: none;
 }
-.bc-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
+.book-cover:hover {
+  transform: translateY(-6px);
+  box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
-.bc-kind-icon {
-  flex: none;
-  color: var(--accent);
-  font-size: 18px;
-}
-.bc-name {
-  font-weight: 620;
+
+/* Cover tones — deterministic per book name (coverTone). Deep, bookish. */
+.tone-0 { --cover-a: #4338ca; --cover-b: #6366f1; } /* indigo */
+.tone-1 { --cover-a: #115e59; --cover-b: #0d9488; } /* teal */
+.tone-2 { --cover-a: #9f1239; --cover-b: #be123c; } /* rose */
+.tone-3 { --cover-a: #92400e; --cover-b: #b45309; } /* amber */
+.tone-4 { --cover-a: #1e3a5f; --cover-b: #2d5b8e; } /* navy */
+.tone-5 { --cover-a: #166534; --cover-b: #15803d; } /* forest */
+.tone-6 { --cover-a: #701a75; --cover-b: #86198f; } /* plum */
+.tone-7 { --cover-a: #374151; --cover-b: #4b5563; } /* slate */
+
+.bc-kind {
+  position: absolute;
+  top: 9px;
+  left: 10px;
+  color: rgba(255, 255, 255, 0.72);
   font-size: 15px;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.bc-category {
-  align-self: flex-start;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  font-weight: 560;
-  padding: 2px 9px;
-  border-radius: 999px;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-.bc-desc {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  min-height: 2.9em;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.bc-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: auto;
-}
-.bc-progress {
-  font-size: 12px;
-  color: var(--text-faint);
 }
 .bc-actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
   display: flex;
-  gap: 2px;
-  opacity: 0.75;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-emphasized);
+}
+.book-cover:hover .bc-actions,
+.book-cover:focus-within .bc-actions {
+  opacity: 1;
 }
 .bc-actions button {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-muted);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.32);
+  color: rgba(255, 255, 255, 0.92);
   cursor: pointer;
-  transition: color var(--motion-fast) var(--ease-emphasized),
-    background-color var(--motion-fast) var(--ease-emphasized);
+  transition: background-color var(--motion-fast) var(--ease-emphasized),
+    transform var(--motion-fast) var(--ease-emphasized);
 }
 .bc-actions button:hover {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: rgba(0, 0, 0, 0.5);
+}
+.bc-actions button:active {
+  transform: scale(0.92);
+}
+
+.bc-title {
+  margin: 36px 0 0;
+  padding: 0 12px 0 14px;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.4;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.bc-meta {
+  margin-top: auto;
+  padding: 0 12px 11px 14px;
+}
+.bc-cat {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.78);
+  margin-bottom: 6px;
+}
+.bc-track {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+.bc-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.95));
+  transition: width var(--motion-normal) var(--ease-emphasized);
+}
+.bc-label {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+.bc-label.dim {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Touch devices have no hover — keep the actions reachable. */
+@media (hover: none) {
+  .bc-actions {
+    opacity: 0.92;
+  }
 }
 
 @media (max-width: 768px) {
   .shelf-grid {
     grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
+    gap: var(--row-gap) 10px;
   }
-  .book-card {
-    padding: 12px;
-    border-radius: 14px;
-  }
-  .bc-desc {
-    font-size: 12px;
+  .bc-title {
+    font-size: 13.5px;
+    margin-top: 32px;
   }
   .shelf-add {
     min-height: var(--tap-target);

@@ -42,6 +42,28 @@ export function bookProgressLabel(book: ReaderBook): string {
   return `读到 ${Math.round(p.position * 100)}%`
 }
 
+/** Reading progress as a 0..1 ratio for the cover bar; unread → 0. */
+export function bookProgressRatio(book: ReaderBook): number {
+  const p = book.progress
+  if (!p) return 0
+  if (book.kind === 'pdf') {
+    return p.pageCount && p.pageCount > 0 ? Math.min(1, p.position / p.pageCount) : 0
+  }
+  return Math.min(1, Math.max(0, p.position))
+}
+
+/** Number of cover palette tones (BookshelfView .tone-N classes). */
+export const COVER_TONES = 8
+
+/** Deterministic cover tone index for a book (hash of its name). */
+export function coverTone(name: string): number {
+  let h = 5381
+  for (let i = 0; i < name.length; i++) {
+    h = ((h << 5) + h + name.charCodeAt(i)) >>> 0
+  }
+  return h % COVER_TONES
+}
+
 /** Most recently read (or added) first. Returns a new array. */
 export function sortBooks(books: ReaderBook[]): ReaderBook[] {
   return [...books].sort((a, b) => (b.progress?.updatedAt ?? b.addedAt) - (a.progress?.updatedAt ?? a.addedAt))
