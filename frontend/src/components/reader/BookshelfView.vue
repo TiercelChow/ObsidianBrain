@@ -23,6 +23,10 @@
       <p class="ss-hint">把一个 Markdown 文件夹或 PDF 登记为书，点击即回到上次读到的位置</p>
       <el-button type="primary" @click="openAdd">添加第一本书</el-button>
     </div>
+    <div v-else-if="!visibleBooks.length" class="shelf-state">
+      <p>没有匹配的书籍</p>
+      <p class="ss-hint">换个关键词，或清空搜索看看全部</p>
+    </div>
     <div v-else class="shelf-grid">
       <div
         v-for="b in visibleBooks"
@@ -94,11 +98,13 @@ import {
   defaultBookName,
   deriveKind,
   makeBookId,
+  matchesBookQuery,
   sortBooks,
   validateBookForm,
 } from '@/utils/readerBooks'
 
 const emit = defineEmits<{ open: [book: ReaderBook] }>()
+const props = defineProps<{ query?: string }>()
 
 const shelf = useBookshelf()
 const books = computed(() => sortBooks(shelf.books.value))
@@ -110,9 +116,11 @@ const categories = computed(() => [
   ...new Set(shelf.books.value.map((b) => b.category).filter(Boolean)),
 ])
 const visibleBooks = computed(() =>
-  activeCategory.value === '全部'
-    ? books.value
-    : books.value.filter((b) => b.category === activeCategory.value),
+  books.value.filter(
+    (b) =>
+      (activeCategory.value === '全部' || b.category === activeCategory.value) &&
+      matchesBookQuery(b, props.query ?? ''),
+  ),
 )
 
 function progressLabel(b: ReaderBook) {

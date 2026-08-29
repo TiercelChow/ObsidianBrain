@@ -51,6 +51,15 @@ export function findBookByPath(books: ReaderBook[], path: string): ReaderBook | 
   return books.find((b) => b.path === path)
 }
 
+/** Case-insensitive substring match over name/description/category/path. Blank query matches all. */
+export function matchesBookQuery(book: ReaderBook, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  return [book.name, book.description, book.category, book.path].some(
+    (f) => f && f.toLowerCase().includes(q),
+  )
+}
+
 /**
  * Form validation for add/edit (FR-7/FR-8). `stat` is the stat_local_path
  * result (null while pending → no path-kind errors, caller gates submit).

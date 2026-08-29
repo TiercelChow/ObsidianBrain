@@ -24,6 +24,11 @@
         <button type="button" :class="{ active: viewMode === 'shelf' }" @click="changeView('shelf')">书架</button>
         <button type="button" :class="{ active: viewMode === 'read' }" @click="changeView('read')">阅读</button>
       </div>
+      <div v-show="viewMode === 'shelf'" class="shelf-search glass-surface" role="search">
+        <el-icon class="shelf-search-icon"><Search /></el-icon>
+        <input v-model="shelfQuery" type="search" aria-label="搜索书籍" placeholder="搜索书名、描述或类别" />
+        <button v-if="shelfQuery" type="button" class="shelf-search-clear" aria-label="清除搜索" @click="shelfQuery = ''">×</button>
+      </div>
       <button v-show="viewMode === 'read'" class="path-trigger" @click="openHistoryOverlay">
         <el-icon><FolderOpened /></el-icon>
         <span v-if="currentFolderName" class="pt-name">{{ currentFolderName }}</span>
@@ -36,7 +41,7 @@
     </div>
 
     <!-- Bookshelf view (kept alive via v-show alongside the reading panes) -->
-    <BookshelfView v-show="viewMode === 'shelf'" class="bookshelf-root" @open="openBook" />
+    <BookshelfView v-show="viewMode === 'shelf'" class="bookshelf-root" :query="shelfQuery" @open="openBook" />
 
     <!-- Floating path overlay (command-palette style) -->
     <transition name="overlay-fade">
@@ -270,7 +275,7 @@ import {
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  FolderOpened, Star, StarFilled, Delete, Menu, Document, FullScreen, EditPen, Refresh, Minus, Plus,
+  FolderOpened, Star, StarFilled, Delete, Menu, Document, FullScreen, EditPen, Refresh, Minus, Plus, Search,
 } from '@element-plus/icons-vue'
 import {
   listLocalDir, readLocalFile, getReaderHistory, saveReaderHistory,
@@ -341,6 +346,7 @@ function initialViewMode(): ReaderView {
 }
 
 const viewMode = ref<ReaderView>(initialViewMode())
+const shelfQuery = ref('')
 
 function changeView(mode: ReaderView) {
   // Leaving the reading view flushes any debounced progress first (FR-16).
@@ -1409,6 +1415,64 @@ onBeforeUnmount(() => {
   padding: 8px 10px;
   border-radius: 18px;
 }
+/* Book search pill — task-search metrics (nested glass inside the toolbar). */
+.shelf-search {
+  flex: 1;
+  min-width: 170px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border-radius: 12px;
+  color: var(--text-faint);
+  transition: background-color var(--motion-fast) var(--ease-emphasized),
+    border-color var(--motion-fast) var(--ease-emphasized),
+    box-shadow var(--motion-fast) var(--ease-emphasized);
+}
+.shelf-search:focus-within {
+  background: var(--bg-glass-strong);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+.shelf-search-icon {
+  flex: none;
+  color: var(--text-faint);
+  transition: color var(--motion-fast) var(--ease-emphasized);
+}
+.shelf-search:focus-within .shelf-search-icon { color: var(--accent); }
+.shelf-search input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+}
+.shelf-search input::-webkit-search-cancel-button { display: none; }
+.shelf-search input::placeholder { color: var(--text-faint); }
+.shelf-search-clear {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--border-faint);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--motion-fast) ease, background var(--motion-fast) ease,
+    transform var(--motion-instant) ease;
+}
+.shelf-search-clear:active { transform: scale(0.9); }
 .path-trigger {
   flex: 1; display: flex; align-items: center; gap: 8px;
   min-height: 40px; padding: 0 14px; border-radius: 12px;
@@ -1696,6 +1760,7 @@ onBeforeUnmount(() => {
   .reader-topbar { flex-wrap: wrap; padding: 7px; }
   .view-switch { width: 100%; }
   .view-switch button { min-height: 34px; }
+  .shelf-search { order: 2; min-width: 0; flex: 1; min-height: 44px; }
   .path-trigger { min-height: var(--tap-target); padding-block: 8px; }
   .pane-left, .pane-right { display: none; }
   .pane-center {

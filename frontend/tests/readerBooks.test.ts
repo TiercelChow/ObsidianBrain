@@ -8,6 +8,7 @@ import {
   deriveKind,
   findBookByPath,
   makeBookId,
+  matchesBookQuery,
   scrollRatio,
   sortBooks,
   validateBookForm,
@@ -100,6 +101,34 @@ test('sortBooks orders by last activity (progress.updatedAt ?? addedAt) descendi
     sortBooks([b('a', 50), b('b', 10, 0.5), b('c', 200)]).map((x) => x.id),
     ['c', 'b', 'a'],
   )
+})
+
+// ── findBookByPath / validateBookForm ──────────────────────────────────────
+
+// ── matchesBookQuery ───────────────────────────────────────────────────────
+
+test('matchesBookQuery matches name/description/category/path, case-insensitive', () => {
+  const b: ReaderBook = {
+    id: 'a',
+    path: '/docs/Deep-Learning.pdf',
+    kind: 'pdf',
+    name: '深度学习',
+    description: '花书经典教材',
+    category: '技术',
+    addedAt: 1,
+  }
+  assert.equal(matchesBookQuery(b, '深度'), true) // name
+  assert.equal(matchesBookQuery(b, '教材'), true) // description
+  assert.equal(matchesBookQuery(b, '技术'), true) // category
+  assert.equal(matchesBookQuery(b, 'deep'), true) // path, case-insensitive
+  assert.equal(matchesBookQuery(b, 'DEEP-LEARNING'), true)
+  assert.equal(matchesBookQuery(b, '机器学习'), false)
+})
+
+test('matchesBookQuery treats blank query as match-all', () => {
+  const b = folderBook()
+  assert.equal(matchesBookQuery(b, ''), true)
+  assert.equal(matchesBookQuery(b, '   '), true)
 })
 
 // ── findBookByPath / validateBookForm ──────────────────────────────────────
