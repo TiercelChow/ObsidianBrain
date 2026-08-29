@@ -338,7 +338,7 @@ async function confirmRemove(b: ReaderBook) {
    Rows are a fixed pitch (cover height + row gap) so one repeating
    gradient paints a board under every row, including the last. */
 .shelf-grid {
-  --cover-h: 230px;
+  --cover-h: 265px;
   --board: 10px;
   --row-gap: 26px;
   display: grid;
@@ -536,13 +536,16 @@ async function confirmRemove(b: ReaderBook) {
 
 @media (max-width: 768px) {
   .shelf-grid {
-    --cover-h: 240px;
-    grid-template-columns: repeat(2, 1fr);
-    gap: var(--row-gap) 10px;
+    /* Paperback proportions: cap the column width (centered) instead of
+       stretching covers to half the viewport. */
+    --cover-h: 260px;
+    grid-template-columns: repeat(2, minmax(0, 165px));
+    justify-content: center;
+    gap: var(--row-gap) 12px;
   }
   .bc-title {
     font-size: 13.5px;
-    margin-top: 32px;
+    margin-top: 40px;
   }
   .shelf-add {
     min-height: var(--tap-target);
