@@ -18,7 +18,7 @@
 
     <!-- Compact trigger bar — always visible; the view switch leads it like
          the Tasks toolbar, reading controls join in read view. -->
-    <div class="reader-topbar">
+    <div class="reader-topbar glass-surface">
       <div class="view-switch" aria-label="视图切换">
         <span class="switch-indicator" :class="{ read: viewMode === 'read' }"></span>
         <button type="button" :class="{ active: viewMode === 'shelf' }" @click="changeView('shelf')">书架</button>
@@ -1392,16 +1392,26 @@ onBeforeUnmount(() => {
     radial-gradient(ellipse at 50% 50%, rgba(253, 230, 138, 0.12), transparent 50%),
     var(--bg-base);
 }
-/* ── Top bar ── */
+/* ── Top bar — glass container like the Tasks toolbar ── */
+.glass-surface {
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  box-shadow: var(--shadow-sm), var(--inset-highlight);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
 .reader-topbar {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
   flex-shrink: 0;
+  min-height: 58px;
+  padding: 8px 10px;
+  border-radius: 18px;
 }
 .path-trigger {
   flex: 1; display: flex; align-items: center; gap: 8px;
-  padding: 10px 16px; border-radius: 14px;
+  min-height: 40px; padding: 0 14px; border-radius: 12px;
   border: 1px solid var(--border-glass);
   background: var(--bg-glass);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
@@ -1683,7 +1693,7 @@ onBeforeUnmount(() => {
     gap: 6px;
   }
   /* Tasks-Hub mobile pattern: the toolbar wraps and the switch takes its own row. */
-  .reader-topbar { flex-wrap: wrap; }
+  .reader-topbar { flex-wrap: wrap; padding: 7px; }
   .view-switch { width: 100%; }
   .view-switch button { min-height: 34px; }
   .path-trigger { min-height: var(--tap-target); padding-block: 8px; }
