@@ -14,28 +14,29 @@
         <h1 class="page-title">阅境轩</h1>
         <p class="page-subtitle">浏览本地 Markdown 与 PDF，沉浸阅读</p>
       </div>
+    </header>
+
+    <!-- Compact trigger bar — always visible; the view switch leads it like
+         the Tasks toolbar, reading controls join in read view. -->
+    <div class="reader-topbar">
       <div class="view-switch" aria-label="视图切换">
         <span class="switch-indicator" :class="{ read: viewMode === 'read' }"></span>
         <button type="button" :class="{ active: viewMode === 'shelf' }" @click="changeView('shelf')">书架</button>
         <button type="button" :class="{ active: viewMode === 'read' }" @click="changeView('read')">阅读</button>
       </div>
-    </header>
-
-    <!-- Bookshelf view (kept alive via v-show alongside the reading panes) -->
-    <BookshelfView v-show="viewMode === 'shelf'" class="bookshelf-root" @open="openBook" />
-
-    <!-- Compact trigger bar -->
-    <div v-show="viewMode === 'read'" class="reader-topbar">
-      <button class="path-trigger" @click="openHistoryOverlay">
+      <button v-show="viewMode === 'read'" class="path-trigger" @click="openHistoryOverlay">
         <el-icon><FolderOpened /></el-icon>
         <span v-if="currentFolderName" class="pt-name">{{ currentFolderName }}</span>
         <span v-if="rootPath" class="pt-path">{{ rootPath }}</span>
         <span v-if="!rootPath" class="pt-hint">输入本地文件夹路径</span>
       </button>
-      <el-button class="icon-btn" :title="isImmersive ? '退出沉浸阅读' : '沉浸阅读'" @click="toggleFullscreen">
+      <el-button v-show="viewMode === 'read'" class="icon-btn" :title="isImmersive ? '退出沉浸阅读' : '沉浸阅读'" @click="toggleFullscreen">
         <el-icon><FullScreen /></el-icon>
       </el-button>
     </div>
+
+    <!-- Bookshelf view (kept alive via v-show alongside the reading panes) -->
+    <BookshelfView v-show="viewMode === 'shelf'" class="bookshelf-root" @open="openBook" />
 
     <!-- Floating path overlay (command-palette style) -->
     <transition name="overlay-fade">
@@ -351,6 +352,9 @@ function changeView(mode: ReaderView) {
   if (mode === 'shelf') {
     if (isFullscreen.value && document.fullscreenElement) void document.exitFullscreen()
     leaveMobileImmersive()
+    // The shelf scrolls in its own container and never drives setScrolled, so a
+    // topbar collapsed by reading-scroll would strand the view switch — re-expand.
+    appStore.setScrolled(false)
   }
 }
 
@@ -1190,7 +1194,6 @@ onBeforeUnmount(() => {
   border-radius: 13px;
   background: color-mix(in srgb, var(--text-primary) 5%, transparent);
   isolation: isolate;
-  align-self: flex-start;
   flex-shrink: 0;
 }
 .switch-indicator {
@@ -1679,7 +1682,9 @@ onBeforeUnmount(() => {
     height: calc(100dvh - var(--mobile-header-height) - var(--safe-top) - 40px);
     gap: 6px;
   }
-  .view-switch { width: 150px; }
+  /* Tasks-Hub mobile pattern: the toolbar wraps and the switch takes its own row. */
+  .reader-topbar { flex-wrap: wrap; }
+  .view-switch { width: 100%; }
   .view-switch button { min-height: 34px; }
   .path-trigger { min-height: var(--tap-target); padding-block: 8px; }
   .pane-left, .pane-right { display: none; }
@@ -1780,8 +1785,9 @@ onBeforeUnmount(() => {
   .reader-page.is-mobile-immersive .reader-topbar { display: none !important; }
   .reader-page.is-mobile-immersive .reader-body { min-height: 0; }
   .reader-page.is-mobile-immersive .pane-center { border: 0; border-radius: 0; }
-  /* Collapse the topbar trigger on scroll, same as the page-header. */
-  .reader-topbar { max-height: 60px; transition: max-height var(--duration-slow) var(--ease-standard), opacity var(--duration-normal) var(--ease-out), margin var(--duration-slow); }
+  /* Collapse the topbar trigger on scroll, same as the page-header. The base
+     max-height covers the wrapped switch + trigger rows (~100px). */
+  .reader-topbar { max-height: 120px; transition: max-height var(--duration-slow) var(--ease-standard), opacity var(--duration-normal) var(--ease-out), margin var(--duration-slow); }
   .app-main.mobile-scrolled .reader-topbar {
     max-height: 0; opacity: 0; margin: 0; overflow: hidden; pointer-events: none;
   }
