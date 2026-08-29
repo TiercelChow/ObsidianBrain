@@ -39,6 +39,9 @@
         <span class="bc-kind">
           <el-icon><FolderOpened v-if="b.kind === 'folder'" /><Document v-else /></el-icon>
         </span>
+        <button type="button" class="bc-more" title="书籍操作" aria-label="书籍操作" @click.stop="openEdit(b)">
+          <el-icon><MoreFilled /></el-icon>
+        </button>
         <span class="bc-actions" @click.stop>
           <button type="button" title="编辑" aria-label="编辑" @click="openEdit(b)">
             <el-icon><EditPen /></el-icon>
@@ -80,8 +83,14 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="formVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
+        <div class="form-footer">
+          <el-button v-if="editingId" class="danger" @click="removeFromDialog">删除</el-button>
+          <span v-else></span>
+          <span class="form-footer-main">
+            <el-button @click="formVisible = false">取消</el-button>
+            <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
+          </span>
+        </div>
       </template>
     </el-dialog>
   </div>
@@ -90,7 +99,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Collection, Delete, Document, EditPen, FolderOpened } from '@element-plus/icons-vue'
+import { Collection, Delete, Document, EditPen, FolderOpened, MoreFilled } from '@element-plus/icons-vue'
 import { statLocalPath, type PathStat, type ReaderBook } from '@/api/reader'
 import { useBookshelf } from '@/composables/useBookshelf'
 import {
@@ -138,12 +147,14 @@ function coverTooltip(b: ReaderBook) {
 const formVisible = ref(false)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
+const editingBook = ref<ReaderBook | null>(null)
 const form = reactive({ path: '', name: '', description: '', category: '' })
 const formError = ref('')
 const pathStat = ref<PathStat | null>(null)
 
 function resetForm() {
   editingId.value = null
+  editingBook.value = null
   form.path = ''
   form.name = ''
   form.description = ''
@@ -160,12 +171,20 @@ function openAdd() {
 function openEdit(b: ReaderBook) {
   resetForm()
   editingId.value = b.id
+  editingBook.value = b
   form.path = b.path
   form.name = b.name
   form.description = b.description
   form.category = b.category
   formVisible.value = true
   void refreshStat()
+}
+
+/** Delete from the edit sheet — the mobile ⋯ entry lands here too. */
+function removeFromDialog() {
+  const b = editingBook.value
+  formVisible.value = false
+  if (b) void confirmRemove(b)
 }
 
 async function refreshStat() {
@@ -319,7 +338,7 @@ async function confirmRemove(b: ReaderBook) {
    Rows are a fixed pitch (cover height + row gap) so one repeating
    gradient paints a board under every row, including the last. */
 .shelf-grid {
-  --cover-h: 210px;
+  --cover-h: 230px;
   --board: 10px;
   --row-gap: 26px;
   display: grid;
@@ -469,15 +488,55 @@ async function confirmRemove(b: ReaderBook) {
   color: rgba(255, 255, 255, 0.6);
 }
 
-/* Touch devices have no hover — keep the actions reachable. */
+/* Touch devices: one subtle ⋯ instead of the hover action pair; the
+   edit sheet it opens carries delete in its footer. */
+.bc-more {
+  display: none;
+}
 @media (hover: none) {
   .bc-actions {
-    opacity: 0.92;
+    display: none;
   }
+  .bc-more {
+    display: grid;
+    place-items: center;
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 24px;
+    height: 24px;
+    border: 0;
+    border-radius: 7px;
+    background: rgba(0, 0, 0, 0.22);
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .bc-more:active {
+    transform: scale(0.92);
+  }
+  .bc-title {
+    padding-right: 38px;
+  }
+}
+
+.form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.form-footer-main {
+  display: flex;
+  gap: 10px;
+}
+.form-footer .danger {
+  color: #ef4444;
 }
 
 @media (max-width: 768px) {
   .shelf-grid {
+    --cover-h: 240px;
     grid-template-columns: repeat(2, 1fr);
     gap: var(--row-gap) 10px;
   }
