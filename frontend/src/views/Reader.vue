@@ -1494,7 +1494,25 @@ onBeforeUnmount(() => {
 .pt-path { color: var(--text-faint); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
 .pt-hint { color: var(--text-faint); }
 .path-trigger:hover { background: var(--bg-hover); color: var(--text-secondary); border-color: var(--accent-border); }
-.icon-btn { flex-shrink: 0; }
+/* Fullscreen tile — 40px glass square matching the path pill beside it
+   (colors ride Element Plus button vars so hover/active stay native). */
+.reader-topbar .icon-btn {
+  --el-button-bg-color: var(--bg-glass);
+  --el-button-text-color: var(--text-muted);
+  --el-button-border-color: var(--border-glass);
+  --el-button-hover-bg-color: var(--bg-glass-strong);
+  --el-button-hover-text-color: var(--accent);
+  --el-button-hover-border-color: var(--accent-border);
+  --el-button-active-bg-color: var(--bg-glass-strong);
+  --el-button-active-text-color: var(--accent);
+  --el-button-active-border-color: var(--accent-border);
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 12px !important;
+  flex-shrink: 0;
+}
+.reader-topbar .icon-btn .el-icon { font-size: 17px; }
 
 /* ── Floating path overlay (command-palette style) ── */
 .path-overlay {
@@ -1762,6 +1780,7 @@ onBeforeUnmount(() => {
   .view-switch button { min-height: 34px; }
   .shelf-search { order: 2; min-width: 0; flex: 1; min-height: 44px; }
   .path-trigger { min-height: var(--tap-target); padding-block: 8px; }
+  .reader-topbar .icon-btn { width: 44px; height: 44px; }
   .pane-left, .pane-right { display: none; }
   .pane-center {
     width: 100%;
