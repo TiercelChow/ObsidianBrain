@@ -338,7 +338,7 @@ async function confirmRemove(b: ReaderBook) {
    Rows are a fixed pitch (cover height + row gap) so one repeating
    gradient paints a board under every row, including the last. */
 .shelf-grid {
-  --cover-h: 265px;
+  --cover-h: 230px;
   --board: 10px;
   --row-gap: 26px;
   display: grid;
