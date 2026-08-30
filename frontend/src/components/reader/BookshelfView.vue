@@ -536,16 +536,16 @@ async function confirmRemove(b: ReaderBook) {
 
 @media (max-width: 768px) {
   .shelf-grid {
-    /* Paperback proportions: cap the column width (centered) instead of
-       stretching covers to half the viewport. */
-    --cover-h: 260px;
+    /* Same height/width ratio as desktop (230/177): 165px columns capped
+       and centered, instead of stretching covers to half the viewport. */
+    --cover-h: 214px;
     grid-template-columns: repeat(2, minmax(0, 165px));
     justify-content: center;
     gap: var(--row-gap) 12px;
   }
   .bc-title {
     font-size: 13.5px;
-    margin-top: 40px;
+    margin-top: 36px;
   }
   .shelf-add {
     min-height: var(--tap-target);
