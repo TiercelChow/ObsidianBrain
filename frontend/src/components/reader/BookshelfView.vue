@@ -63,6 +63,8 @@
 
     <el-dialog
       v-model="formVisible"
+      class="book-form-dialog"
+      modal-class="book-form-overlay"
       :title="editingId ? '编辑书籍' : '添加书籍'"
       width="min(480px, 92vw)"
       :close-on-click-modal="false"
@@ -549,6 +551,40 @@ async function confirmRemove(b: ReaderBook) {
   }
   .shelf-add {
     min-height: var(--tap-target);
+  }
+}
+</style>
+
+<style>
+/* 添加/编辑书籍弹窗 — 遮罩与入场动画对齐应用的自定义弹窗（PathPreviewModal 等）：
+   暗色磨砂遮罩 + 弹簧缩放入场。面板玻璃样式由 index.html 的 Glass Dialog 全局
+   规则提供，此处不重复覆盖。
+   全局作用域：弹窗 teleport 到 body，scoped 样式够不到；!important 是为了压过
+   index.html 的 .el-overlay 覆盖（浅色主题 --el-mask-color 为白色 0.9，不适合
+   做弹窗遮罩）。 */
+.el-overlay.book-form-overlay {
+  background-color: rgba(0, 0, 0, 0.45) !important;
+  backdrop-filter: blur(12px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(150%) !important;
+}
+/* 深色/护眼主题的遮罩底色由 App.vue 的主题规则接管（优先级更高）。 */
+
+/* 入场/离场：借 EP 的 dialog-fade transition 给面板加缩放；时长与曲线由
+   motion.css 的 .el-dialog 过渡（transform/opacity, spring-gentle）接管。 */
+.dialog-fade-enter-from .book-form-dialog {
+  transform: scale(0.95) translateY(10px);
+  opacity: 0;
+}
+.dialog-fade-leave-to .book-form-dialog {
+  transform: scale(0.98) translateY(6px);
+  opacity: 0;
+}
+
+/* 移动端：保持 App.vue 的顶贴弹层造型（顶部圆角、底部直角）；更高优先级
+   压过 index.html 的 20px 全局圆角（后者会盖过 App.vue 的同优先级规则）。 */
+@media (max-width: 768px) {
+  .el-dialog.book-form-dialog {
+    border-radius: 22px 22px 0 0 !important;
   }
 }
 </style>
