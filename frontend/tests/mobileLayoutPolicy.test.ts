@@ -19,6 +19,7 @@ test('getPdfRenderPolicy reduces mobile pre-render work', () => {
     renderMarginPx: 420,
     maxConcurrentRenders: 1,
     maxRenderDpr: 3,
+    maxCanvasPixels: 4_000_000,
   })
 })
 
@@ -27,6 +28,7 @@ test('getPdfRenderPolicy keeps desktop rendering responsive', () => {
     renderMarginPx: 700,
     maxConcurrentRenders: 2,
     maxRenderDpr: 2,
+    maxCanvasPixels: 16_000_000,
   })
 })
 

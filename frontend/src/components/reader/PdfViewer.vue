@@ -27,7 +27,6 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { useAppStore } from '@/stores/app'
 import { localFileUrl } from '@/api/reader'
 import {
-  MAX_CANVAS_PIXELS,
   computePdfZoomScale,
   computeRenderDpr,
   isWithinRenderWindow,
@@ -194,6 +193,7 @@ async function renderPage(num: number, work: PageWork) {
       viewport.width,
       viewport.height,
       Math.min(window.devicePixelRatio || 1, renderPolicy.maxRenderDpr),
+      renderPolicy.maxCanvasPixels,
     )
     canvas.width = Math.max(1, Math.floor(viewport.width * dpr))
     canvas.height = Math.max(1, Math.floor(viewport.height * dpr))
@@ -331,7 +331,7 @@ async function load() {
       rangeChunkSize: RANGE_CHUNK_SIZE,
       disableStream: true,
       disableAutoFetch: true,
-      canvasMaxAreaInBytes: MAX_CANVAS_PIXELS * 4,
+      canvasMaxAreaInBytes: renderPolicy.maxCanvasPixels * 4,
     })
     loadingTask = task
     const doc = await task.promise

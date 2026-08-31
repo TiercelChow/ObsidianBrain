@@ -10,14 +10,19 @@ export const MAX_RENDER_DPR = 3
 export const MAX_CANVAS_PIXELS = 4_000_000
 
 /**
- * Pick a device-pixel ratio that balances text sharpness with a strict canvas
+ * Pick a device-pixel ratio that balances text sharpness with a per-canvas
  * memory ceiling. The CSS viewport size is unchanged; only the backing buffer
  * is reduced for unusually large pages or very dense displays.
+ *
+ * `maxCanvasPixels` is the per-device budget (phone ~4M, desktop ~16M) so a
+ * large page on a wide desktop window still renders at native retina instead
+ * of being throttled to ~1× — text stays crisp.
  */
 export function computeRenderDpr(
   viewportWidth: number,
   viewportHeight: number,
   devicePixelRatio: number,
+  maxCanvasPixels: number,
 ): number {
   if (
     !Number.isFinite(viewportWidth)
@@ -31,7 +36,10 @@ export function computeRenderDpr(
   const safeDeviceDpr = Number.isFinite(devicePixelRatio) && devicePixelRatio > 0
     ? devicePixelRatio
     : 1
-  const budgetDpr = Math.sqrt(MAX_CANVAS_PIXELS / (viewportWidth * viewportHeight))
+  const budget = Number.isFinite(maxCanvasPixels) && maxCanvasPixels > 0
+    ? maxCanvasPixels
+    : MAX_CANVAS_PIXELS
+  const budgetDpr = Math.sqrt(budget / (viewportWidth * viewportHeight))
 
   return Math.max(Number.EPSILON, Math.min(safeDeviceDpr, MAX_RENDER_DPR, budgetDpr))
 }
