@@ -72,7 +72,17 @@
     >
       <el-form label-position="top" @submit.prevent>
         <el-form-item label="路径（文件夹或 PDF 文件）" :error="formError || undefined">
-          <el-input v-model="form.path" placeholder="/Users/you/Documents/book.pdf" @blur="onPathBlur" />
+          <el-input
+            v-model="form.path"
+            placeholder="/Users/you/Documents/book.pdf"
+            @blur="onPathBlur"
+          >
+            <template #append>
+              <el-button title="打开文件管理器选择" aria-label="浏览" @click="openPicker">
+                <el-icon><FolderOpened /></el-icon>&nbsp;浏览
+              </el-button>
+            </template>
+          </el-input>
         </el-form-item>
         <el-form-item label="书名">
           <el-input v-model="form.name" placeholder="留空则使用文件名" />
@@ -95,6 +105,12 @@
         </div>
       </template>
     </el-dialog>
+
+    <PathPickerModal
+      v-model="pickerVisible"
+      :initial-path="pickerInitialPath"
+      @select="onPickPath"
+    />
   </div>
 </template>
 
@@ -104,6 +120,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Collection, Delete, Document, EditPen, FolderOpened, MoreFilled } from '@element-plus/icons-vue'
 import { statLocalPath, type PathStat, type ReaderBook } from '@/api/reader'
 import { useBookshelf } from '@/composables/useBookshelf'
+import PathPickerModal from './PathPickerModal.vue'
 import {
   bookProgressLabel,
   bookProgressRatio,
@@ -115,6 +132,7 @@ import {
   sortBooks,
   validateBookForm,
 } from '@/utils/readerBooks'
+import { parentPath } from '@/utils/pathPicker'
 
 const emit = defineEmits<{ open: [book: ReaderBook] }>()
 const props = defineProps<{ query?: string }>()
@@ -179,6 +197,28 @@ function openEdit(b: ReaderBook) {
   form.description = b.description
   form.category = b.category
   formVisible.value = true
+  void refreshStat()
+}
+
+// ── path picker ───────────────────────────────────────────────────────
+const pickerVisible = ref(false)
+/** Start the picker where it's most useful: the form's path (edit), the
+ *  parent of the most recent book (add, shelf non-empty), or /Users. */
+const pickerInitialPath = computed(() => {
+  if (form.path.trim()) return form.path.trim()
+  const first = books.value[0]
+  if (first) return parentPath(first.path)
+  return '/Users'
+})
+
+function openPicker() {
+  pickerVisible.value = true
+}
+
+/** Filled by the picker — then validate as if the user blurred the input. */
+function onPickPath(path: string) {
+  form.path = path
+  if (!editingId.value && !form.name.trim()) form.name = defaultBookName(path)
   void refreshStat()
 }
 
