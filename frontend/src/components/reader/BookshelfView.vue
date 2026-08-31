@@ -72,17 +72,21 @@
     >
       <el-form label-position="top" @submit.prevent>
         <el-form-item label="路径（文件夹或 PDF 文件）" :error="formError || undefined">
-          <el-input
-            v-model="form.path"
-            placeholder="/Users/you/Documents/book.pdf"
-            @blur="onPathBlur"
-          >
-            <template #append>
-              <el-button title="打开文件管理器选择" aria-label="浏览" @click="openPicker">
-                <el-icon><FolderOpened /></el-icon>&nbsp;浏览
-              </el-button>
-            </template>
-          </el-input>
+          <div class="path-field">
+            <el-input
+              v-model="form.path"
+              placeholder="/Users/you/Documents/book.pdf"
+              @blur="onPathBlur"
+            />
+            <el-button
+              class="browse-btn"
+              title="打开文件管理器选择"
+              aria-label="浏览"
+              @click="openPicker"
+            >
+              <el-icon><FolderOpened /></el-icon>&nbsp;浏览
+            </el-button>
+          </div>
         </el-form-item>
         <el-form-item label="书名">
           <el-input v-model="form.name" placeholder="留空则使用文件名" />
@@ -574,6 +578,22 @@ async function confirmRemove(b: ReaderBook) {
 }
 .form-footer .danger {
   color: #ef4444;
+}
+
+/* Path input + standalone browse button (no input-group wrapper frame). */
+.path-field {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+}
+.path-field :deep(.el-input) {
+  flex: 1;
+  min-width: 0;
+}
+.path-field :deep(.browse-btn) {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 @media (max-width: 768px) {
