@@ -35,3 +35,6 @@ Thumbs.db
 
 # cargo-mutants
 **/mutants.out*/
+
+# Superpowers brainstorm/plan scratch
+.superpowers/
