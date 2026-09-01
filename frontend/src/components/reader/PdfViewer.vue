@@ -88,9 +88,13 @@ const zoomMode = ref<'fit' | number>('fit') // 'fit' = fit-width; number = expli
 
 function setCanvasRef(num: number, el: HTMLCanvasElement | null) {
   canvasRefs[num] = el
-  if (el && pageWork.get(num)?.status !== 'rendered') {
-    // A new canvas defaults to 300x150. Reset immediately so a very long PDF
-    // never has a large one-frame allocation before IntersectionObserver runs.
+  // A fresh canvas defaults to 300x150; reset it immediately so a very long
+  // PDF never has a large one-frame allocation before IntersectionObserver
+  // runs. Never touch a canvas that already shows pixels: Vue re-binds this
+  // inline :ref on every pageMetas patch, and after invalidateAllPages
+  // cleared pageWork during a fit-width resize the old status check would
+  // see "not rendered" and blank an is-rendered canvas — flashing the page.
+  if (el && !el.classList.contains('is-rendered')) {
     el.width = 1
     el.height = 1
   }
@@ -149,6 +153,29 @@ function releaseAllPages() {
   visiblePages.clear()
 }
 
+/**
+ * Drop render state for every page so they re-queue on the next observer pass,
+ * but leave the visible canvas pixels in place. A subsequent renderPage then
+ * swaps the new pixels in double-buffered (see renderPage) — so a fit-width
+ * resize never blanks the page the user is reading. Used by rerenderAll, where
+ * releaseAllPages (which resets each canvas to 1x1) would flash the whole view.
+ */
+function invalidateAllPages() {
+  for (const num of [...pageWork.keys()]) {
+    const work = pageWork.get(num)
+    if (work) {
+      if (work.textTimer !== undefined) window.clearTimeout(work.textTimer)
+      work.renderTask?.cancel()
+      work.textLayer?.cancel()
+      work.page?.cleanup()
+    }
+  }
+  pageWork.clear()
+  renderQueue = []
+  nearbyPages.clear()
+  visiblePages.clear()
+}
+
 function queuePage(num: number, priority = false) {
   if (!pdfDoc || pageWork.has(num) || !nearbyPages.has(num)) return
   pageWork.set(num, {
@@ -195,17 +222,32 @@ async function renderPage(num: number, work: PageWork) {
       Math.min(window.devicePixelRatio || 1, renderPolicy.maxRenderDpr),
       renderPolicy.maxCanvasPixels,
     )
-    canvas.width = Math.max(1, Math.floor(viewport.width * dpr))
-    canvas.height = Math.max(1, Math.floor(viewport.height * dpr))
+    const backingW = Math.max(1, Math.floor(viewport.width * dpr))
+    const backingH = Math.max(1, Math.floor(viewport.height * dpr))
+    const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined
+    // Double-buffer: render into an offscreen canvas, then swap the result
+    // onto the visible canvas in one synchronous step. Setting canvas.width
+    // clears its pixels, so doing it only after the render resolves means the
+    // display is never painted blank mid-render — the flash that used to show
+    // on resize/zoom/fullscreen toggles is gone.
+    const off = document.createElement('canvas')
+    off.width = backingW
+    off.height = backingH
+    const offCtx = off.getContext('2d', { alpha: false })
+    if (!offCtx) throw new Error('无法创建 PDF canvas 上下文')
+    work.renderTask = page.render({ canvasContext: offCtx, viewport, transform })
+    await work.renderTask.promise
+    if (pageWork.get(num) !== work || work.generation !== loadGeneration) return
+    work.renderTask = undefined
+    // Synchronous swap: the width-reset and the pixel copy happen in the same
+    // task, so the next paint sees the new pixels, never an empty canvas.
+    canvas.width = backingW
+    canvas.height = backingH
     canvas.style.width = `${viewport.width}px`
     canvas.style.height = `${viewport.height}px`
     const ctx = canvas.getContext('2d', { alpha: false })
     if (!ctx) throw new Error('无法创建 PDF canvas 上下文')
-    const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined
-    work.renderTask = page.render({ canvasContext: ctx, viewport, transform })
-    await work.renderTask.promise
-    if (pageWork.get(num) !== work || work.generation !== loadGeneration) return
-    work.renderTask = undefined
+    ctx.drawImage(off, 0, 0)
     work.status = 'rendered'
     canvas.classList.add('is-rendered')
     if (visiblePages.has(num)) scheduleTextLayer(num, work)
@@ -443,7 +485,9 @@ async function rerenderAll() {
   const s = zoomMode.value === 'fit' ? fitScale : zoomMode.value
   const vp = page1.getViewport({ scale: s })
   pageMetas.value = pageMetas.value.map((p) => ({ ...p, width: vp.width, height: vp.height }))
-  releaseAllPages()
+  // Drop render state but keep the old canvas pixels; renderPage swaps the
+  // new pixels in double-buffered, so the visible page never flashes blank.
+  invalidateAllPages()
   await nextTick()
   if (generation !== loadGeneration) return
   // Restore the proportional reading position for the new layout. The
