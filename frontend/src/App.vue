@@ -32,6 +32,19 @@
       <div class="mobile-header-spacer"></div>
     </div>
 
+    <!-- Mobile collapsing toolbar grip: click to re-expand the scrolled-away toolbar -->
+    <button
+      v-if="isMobile"
+      class="mobile-toolbar-grip"
+      :class="{ visible: isScrolled && !appStore.toolbarPinned && !appStore.immersiveHidden }"
+      type="button"
+      aria-label="展开工具栏"
+      @click="appStore.togglePin()"
+    >
+      <span class="grip-line"></span>
+      <span class="grip-line"></span>
+    </button>
+
     <!-- Mobile sidebar overlay backdrop -->
     <transition name="scrim-fade">
       <div
@@ -62,6 +75,7 @@
         :class="{
           'mobile-full': isMobile,
           'mobile-scrolled': isMobile && isScrolled,
+          'toolbar-pinned': isMobile && appStore.toolbarPinned,
           'reader-scroll-locked': lockMobileReaderOuterScroll,
         }"
         @scroll="onMainScroll"
@@ -1005,18 +1019,63 @@ code, pre, .code-block { font-family: var(--font-mono); }
   color: var(--accent) !important;
 }
 
-/* ── Mobile scroll: hide page headers globally ── */
-.app-main.mobile-scrolled .page-header {
-  max-height: 0 !important;
-  overflow: hidden !important;
-  opacity: 0 !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  pointer-events: none !important;
-  transition: max-height var(--motion-slow) var(--ease-spring-gentle),
-              opacity var(--motion-fast) var(--ease-emphasized),
-              padding var(--motion-slow) var(--ease-spring-gentle),
-              margin var(--motion-slow) var(--ease-spring-gentle);
+/* ── Mobile scroll: collapse page header + toolbar into the grip (unless pinned) ── */
+.app-main.mobile-scrolled:not(.toolbar-pinned) .page-header,
+.app-main.mobile-scrolled:not(.toolbar-pinned) .reader-topbar,
+.app-main.mobile-scrolled:not(.toolbar-pinned) .toolbar,
+.app-main.mobile-scrolled:not(.toolbar-pinned) .task-toolbar {
+  max-height: 0;
+  min-height: 0;
+  opacity: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.page-header,
+.reader-topbar,
+.toolbar,
+.task-toolbar {
+  transition: max-height var(--duration-slow) var(--ease-standard),
+              opacity var(--duration-fast) var(--ease-out),
+              margin var(--duration-slow) var(--ease-standard),
+              padding var(--duration-slow) var(--ease-standard);
+}
+
+/* ── Mobile toolbar grip: thin floating handle to re-expand the toolbar ── */
+.mobile-toolbar-grip {
+  position: fixed;
+  top: calc(var(--mobile-header-height) + var(--safe-top) + 4px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-6px);
+  width: 44px;
+  height: 14px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  border-radius: 7px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out);
+  z-index: 1001;
+}
+.mobile-toolbar-grip.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+.grip-line {
+  width: 22px;
+  height: 1.5px;
+  background: var(--text-muted);
+  border-radius: 1px;
 }
 
 /* ── Global mobile title size ── */
