@@ -1880,10 +1880,15 @@ onBeforeUnmount(() => {
   .reader-page.is-mobile-immersive .reader-body { min-height: 0; }
   .reader-page.is-mobile-immersive .pane-center { border: 0; border-radius: 0; }
   /* Collapse the topbar trigger on scroll, same as the page-header. The base
-     max-height covers the wrapped switch + trigger rows (~100px). */
+     max-height covers the wrapped switch + trigger rows (~100px). The base
+     .reader-topbar also sets min-height: 58px (desktop metrics), and per CSS
+     spec min-height beats max-height — so without resetting it here the box
+     stayed 58px tall while opacity:0 hid it, leaving a blank band above the
+     reading content on mobile. min-height: 0 lets max-height actually clamp
+     the height to 0. */
   .reader-topbar { max-height: 120px; transition: max-height var(--duration-slow) var(--ease-standard), opacity var(--duration-normal) var(--ease-out), margin var(--duration-slow); }
   .app-main.mobile-scrolled .reader-topbar {
-    max-height: 0; opacity: 0; margin: 0; overflow: hidden; pointer-events: none;
+    max-height: 0; min-height: 0; opacity: 0; margin: 0; padding: 0; border: 0; overflow: hidden; pointer-events: none;
   }
 }
 
