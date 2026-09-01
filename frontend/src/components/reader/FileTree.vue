@@ -1,5 +1,5 @@
 <template>
-  <div class="file-tree">
+  <div ref="rootEl" class="file-tree">
     <div v-if="!entries.length" class="ft-empty">暂无文件</div>
     <div v-for="entry in entries" :key="entry.path" class="ft-node">
       <!-- Directory -->
@@ -47,7 +47,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import { CaretBottom, CaretRight, Folder, FolderOpened, Document, Files } from '@element-plus/icons-vue'
 import type { DirEntry } from '@/api/reader'
 
@@ -57,11 +57,12 @@ const props = withDefaults(
 )
 const emit = defineEmits<{ select: [path: string] }>()
 
-// Expand top-level directories by default for a useful initial view.
+// Only the directories along the path to the active file are expanded — not
+// every top-level dir. Opening a folder used to expand everything, burying
+// the file being read under unrelated branches; now the tree stays compact
+// and just the active file's ancestors unfold.
 const expanded = ref<Set<string>>(new Set())
-if (props.level === 0) {
-  props.entries.filter((e) => e.is_dir).forEach((e) => expanded.value.add(e.path))
-}
+const rootEl = ref<HTMLElement | null>(null)
 
 // Auto-expand all ancestor directories of the active file so it's visible.
 function expandPathToActive(entries: DirEntry[], active: string) {
@@ -75,7 +76,60 @@ function expandPathToActive(entries: DirEntry[], active: string) {
     }
   }
 }
-watch(() => props.activePath, (p) => { if (p) expandPathToActive(props.entries, p) }, { immediate: true })
+
+/** Nearest scrollable ancestor (the sidebar pane-scroll or the mobile drawer). */
+function scrollableAncestorOf(el: HTMLElement | null): HTMLElement | null {
+  let node = el?.parentElement ?? null
+  while (node) {
+    const style = getComputedStyle(node)
+    if (node.scrollHeight > node.clientHeight && /auto|scroll/.test(style.overflowY)) {
+      return node
+    }
+    node = node.parentElement
+  }
+  return null
+}
+
+/** Bring the active file row into view, centered — only if it's off-screen. */
+function scrollToActive() {
+  const root = rootEl.value
+  if (!root) return
+  const active = root.querySelector<HTMLElement>('.ft-file.active')
+  if (!active) return
+  const scroller = scrollableAncestorOf(active)
+  if (!scroller) return
+  const sc = scroller.getBoundingClientRect()
+  const ac = active.getBoundingClientRect()
+  const margin = 40
+  // Already visible — don't jump, so navigating within the tree stays calm.
+  if (ac.top >= sc.top + margin && ac.bottom <= sc.bottom - margin) return
+  const delta = (ac.top + ac.height / 2) - (sc.top + sc.height / 2)
+  scroller.scrollBy({ top: delta, behavior: 'smooth' })
+}
+
+function scheduleScrollToActive() {
+  // nextTick lets the cascade of nested-instance expansions mount the active
+  // row; rAF ensures layout has settled before measuring its position.
+  nextTick(() => requestAnimationFrame(() => scrollToActive()))
+}
+
+watch(
+  () => props.activePath,
+  (p, old) => {
+    if (!p) return
+    expandPathToActive(props.entries, p)
+    // Skip the immediate (pre-mount) pass — onMounted handles the initial
+    // scroll once the root element exists.
+    if (props.level === 0 && old !== undefined) scheduleScrollToActive()
+  },
+  { immediate: true },
+)
+
+onMounted(() => {
+  if (props.level === 0 && props.activePath) scheduleScrollToActive()
+})
+
+defineExpose({ scrollToActive })
 
 const indent = `${10 + props.level * 14}px`
 

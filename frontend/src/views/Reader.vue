@@ -217,6 +217,7 @@
         <div class="pane-title">文件</div>
         <FileTree
           v-if="tree.length"
+          ref="drawerTreeRef"
           :entries="tree"
           :active-path="activeFile"
           @select="(p) => { onSelectFile(p); treeDrawer = false }"
@@ -330,6 +331,15 @@ useModalEnvironment(() => showHistory.value, pathCardRef, () => { showHistory.va
 const history = ref<HistoryItem[]>([])
 const treeDrawer = ref(false)
 const tocDrawer = ref(false)
+// Ref to the mobile drawer's FileTree so we can scroll it to the active file
+// when the drawer opens — the tree's own on-activePath scroll can't fire then
+// (the drawer is hidden while activeFile changes), so Reader triggers it here.
+const drawerTreeRef = ref<InstanceType<typeof FileTree> | null>(null)
+watch(treeDrawer, (open) => {
+  if (open && activeFile.value) {
+    void nextTick(() => requestAnimationFrame(() => drawerTreeRef.value?.scrollToActive()))
+  }
+})
 
 // ── view switch (shelf ↔ read), Tasks-style slider ───────────────────
 // The shelf is the new default landing view; the choice persists in
