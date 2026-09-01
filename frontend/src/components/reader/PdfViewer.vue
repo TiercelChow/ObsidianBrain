@@ -428,6 +428,15 @@ async function rerenderAll() {
   const doc = pdfDoc
   if (!doc) return
   const generation = loadGeneration
+  // A fit-width resize changes every page's height, so the total document
+  // height changes too. Without preserving the proportional scroll position,
+  // the same absolute scrollTop points at different content — that is the
+  // jump the user sees when toggling fullscreen (or any width change).
+  const root = scrollRoot()
+  const prevMax = root ? root.scrollHeight - root.clientHeight : 0
+  const fraction = prevMax > 0
+    ? Math.min(1, Math.max(0, root!.scrollTop / prevMax))
+    : 0
   // Recompute placeholder sizes for the new scale.
   const page1 = await doc.getPage(1)
   if (zoomMode.value === 'fit') fitScale = computeFitScale(page1)
@@ -437,6 +446,13 @@ async function rerenderAll() {
   releaseAllPages()
   await nextTick()
   if (generation !== loadGeneration) return
+  // Restore the proportional reading position for the new layout. The
+  // placeholder heights are bound to pageMetas and already live in the DOM
+  // after nextTick, so scrollHeight reflects the new document height.
+  if (root && prevMax > 0) {
+    const newMax = root.scrollHeight - root.clientHeight
+    root.scrollTop = fraction * newMax
+  }
   setupObservers()
   const rootRect = scrollRoot()?.getBoundingClientRect()
   if (!rootRect) return
