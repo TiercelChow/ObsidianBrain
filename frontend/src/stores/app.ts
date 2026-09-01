@@ -20,6 +20,9 @@ export const useAppStore = defineStore('app', () => {
   const pinScrollTop = ref(0)
   // Reader immersive/fullscreen hides the grip even when scrolled.
   const immersiveHidden = ref(false)
+  // Brief grace window after a pin during which the layout shift from the
+  // toolbar re-expanding is absorbed (see toolbarCollapsePolicy).
+  const pinGraceUntil = ref(0)
 
   // Theme: 'light' | 'dark' | 'eye-care'
   const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | 'eye-care' | null
@@ -50,6 +53,7 @@ export const useAppStore = defineStore('app', () => {
         pinScrollTop: pinScrollTop.value,
       },
       st,
+      { inPinGrace: performance.now() < pinGraceUntil.value },
     )
     isScrolled.value = next.isScrolled
     toolbarPinned.value = next.toolbarPinned
@@ -67,6 +71,13 @@ export const useAppStore = defineStore('app', () => {
     )
     toolbarPinned.value = next.toolbarPinned
     pinScrollTop.value = next.pinScrollTop
+    // Give the re-expand a moment to settle before allowing scroll-driven
+    // recollapse. The toolbar's max-height transition (--duration-slow ≈ 450ms)
+    // continuously shifts .app-main.scrollTop while animating; without this
+    // grace the shift trips the recollapse delta and instantly re-collapses
+    // the toolbar we just opened (notably on Timeline where .app-main is the
+    // scroller). Must exceed the transition duration.
+    if (next.toolbarPinned) pinGraceUntil.value = performance.now() + 700
   }
 
   function setImmersive(v: boolean) {

@@ -21,17 +21,32 @@ export interface ScrollState {
   pinScrollTop: number
 }
 
-/** Transition for a scroll event. */
-export function computeScrollState(prev: ScrollState, scrollTop: number): ScrollState {
+/** Transition for a scroll event.
+ *  `inPinGrace` absorbs the layout shift that fires immediately after a pin:
+ *  expanding the toolbar pushes content down and inflates scrollTop, which
+ *  would otherwise instantly exceed pinScrollTop+RECOLLAPSE_DELTA and recollapse
+ *  the toolbar we just opened. During grace, the baseline tracks scrollTop up
+ *  (never down) so the shift is absorbed; real downward scroll after grace then
+ *  recollapses. */
+export function computeScrollState(
+  prev: ScrollState,
+  scrollTop: number,
+  opts: { inPinGrace?: boolean } = {},
+): ScrollState {
+  const inGrace = opts.inPinGrace ?? false
   const isScrolled = scrollTop > SCROLL_THRESHOLD
   let toolbarPinned = prev.toolbarPinned
-  const pinScrollTop = prev.pinScrollTop
+  let pinScrollTop = prev.pinScrollTop
 
   if (scrollTop <= SCROLL_THRESHOLD) {
     // Back to top → natural full expand, pin cleared.
     toolbarPinned = false
+  } else if (inGrace && toolbarPinned) {
+    // Absorb the post-pin layout shift: raise the baseline with scrollTop
+    // (never lower it) so the shift doesn't trip the recollapse delta.
+    pinScrollTop = Math.max(pinScrollTop, scrollTop)
   } else if (toolbarPinned && scrollTop > pinScrollTop + RECOLLAPSE_DELTA) {
-    // Continued scrolling down → re-collapse to the grip.
+    // Continued scrolling down after grace → re-collapse to the grip.
     toolbarPinned = false
   }
   // Scrolling up while pinned, or jitter < delta, keeps it expanded.

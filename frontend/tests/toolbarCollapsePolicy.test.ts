@@ -51,3 +51,32 @@ test('pin then unpin (safety branch) clears pinned', () => {
   assert.equal(r.toolbarPinned, false)
   assert.equal(r.pinScrollTop, 100)
 })
+
+test('inPinGrace: layout shift after pin is absorbed (baseline tracks up)', () => {
+  const pinned = { isScrolled: true, toolbarPinned: true, pinScrollTop: 100 }
+  // Expanding the toolbar shifts scrollTop up by ~168 (layout shift), in grace.
+  const r = computeScrollState(pinned, 268, { inPinGrace: true })
+  assert.equal(r.toolbarPinned, true)            // not recollapsed
+  assert.equal(r.pinScrollTop, 268)             // baseline absorbed the shift
+})
+
+test('after grace expires, scroll past absorbed baseline recollapses', () => {
+  // Baseline was absorbed to 268 during grace. Now grace is over; scroll down.
+  const absorbed = { isScrolled: true, toolbarPinned: true, pinScrollTop: 268 }
+  assert.equal(computeScrollState(absorbed, 272).toolbarPinned, true) // < delta
+  assert.equal(computeScrollState(absorbed, 273).toolbarPinned, false) // > delta
+})
+
+test('inPinGrace: scrolling up during grace lowers no baseline', () => {
+  const pinned = { isScrolled: true, toolbarPinned: true, pinScrollTop: 100 }
+  const r = computeScrollState(pinned, 60, { inPinGrace: true })
+  assert.equal(r.pinScrollTop, 100) // baseline never lowered
+  assert.equal(r.toolbarPinned, true)
+})
+
+test('inPinGrace: scroll back to top still clears pin', () => {
+  const pinned = { isScrolled: true, toolbarPinned: true, pinScrollTop: 100 }
+  const r = computeScrollState(pinned, 0, { inPinGrace: true })
+  assert.equal(r.isScrolled, false)
+  assert.equal(r.toolbarPinned, false)
+})
