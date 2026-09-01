@@ -89,7 +89,7 @@ import { useModalEnvironment } from './composables/useModalEnvironment'
 
 const route = useRoute()
 // Reset scroll state when navigating between pages.
-watch(() => route.path, () => appStore.setScrolled(false))
+watch(() => route.path, () => appStore.handleScroll(0))
 const appStore = useAppStore()
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
 const currentTitle = computed(() => (route.meta?.title as string) || '')
@@ -236,7 +236,7 @@ function onSidebarPointerCancel(event: PointerEvent) {
 const isScrolled = computed(() => appStore.isScrolled)
 function onMainScroll(e: Event) {
   const el = e.target as HTMLElement
-  appStore.setScrolled(el.scrollTop > 20)
+  appStore.handleScroll(el.scrollTop)
 }
 
 function onResize() {

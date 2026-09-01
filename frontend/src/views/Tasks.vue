@@ -713,7 +713,7 @@ function closeDrawer() {
 // header still collapses exactly like Reader does (App.vue: onMainScroll).
 function onPanelScroll(event: Event) {
   const el = event.target as HTMLElement
-  appStore.setScrolled(el.scrollTop > 20)
+  appStore.handleScroll(el.scrollTop)
 }
 
 // Switching to another task in the list must not keep a stale drawer open.

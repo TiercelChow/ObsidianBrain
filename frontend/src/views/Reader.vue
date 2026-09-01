@@ -368,9 +368,9 @@ function changeView(mode: ReaderView) {
   if (mode === 'shelf') {
     if (isFullscreen.value && document.fullscreenElement) void document.exitFullscreen()
     leaveMobileImmersive()
-    // The shelf scrolls in its own container and never drives setScrolled, so a
-    // topbar collapsed by reading-scroll would strand the view switch — re-expand.
-    appStore.setScrolled(false)
+    // The shelf scrolls in its own container and never drives handleScroll, so
+    // a topbar collapsed by reading-scroll would strand the view switch — re-expand.
+    appStore.handleScroll(0)
   }
 }
 
@@ -1120,7 +1120,7 @@ function processContentScroll() {
   // scroll (app-main doesn't scroll on the Reader page) — unless a
   // programmatic jump is currently scrolling (see holdHeaderForJump).
   if (contentRef.value && performance.now() > headerHoldUntil) {
-    appStore.setScrolled(contentRef.value.scrollTop > 20)
+    appStore.handleScroll(contentRef.value.scrollTop)
   }
   if (!contentRef.value || fileKind.value === 'pdf' || !toc.value.length) return
   const containerTop = contentRef.value.getBoundingClientRect().top
