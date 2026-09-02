@@ -39,7 +39,7 @@
       :class="{ visible: isScrolled && !appStore.toolbarPinned && !appStore.immersiveHidden }"
       type="button"
       aria-label="展开工具栏"
-      @click="appStore.togglePin()"
+      @click="onGripClick"
     >
       <span class="grip-pill">
         <span class="grip-line"></span>
@@ -253,6 +253,26 @@ const isScrolled = computed(() => appStore.isScrolled)
 function onMainScroll(e: Event) {
   const el = e.target as HTMLElement
   appStore.handleScroll(el.scrollTop)
+}
+
+function onGripClick() {
+  appStore.togglePin()
+  if (appStore.toolbarPinned) {
+    // After the toolbar's max-height transition settles, re-baseline
+    // pinScrollTop to the live DOM scrollTop. iOS Safari throttles scroll
+    // events during the transition, so the store's scrollTop ref is stale and
+    // the grace-window absorption never runs — without this, iOS delivers the
+    // final settled scroll position after the grace window and instantly
+    // re-collapses the toolbar we just opened. Reads .app-main directly: on
+    // Timeline that IS the scroller (the only page with a layout-shift
+    // recollapse problem); on Reader/Tasks .app-main doesn't scroll (inner
+    // panes do), so the read is 0 and rebaselinePin is a no-op there.
+    setTimeout(() => {
+      if (!appStore.toolbarPinned) return
+      const el = document.querySelector('.app-main') as HTMLElement | null
+      if (el) appStore.rebasePinScrollTop(el.scrollTop)
+    }, 700)
+  }
 }
 
 function onResize() {

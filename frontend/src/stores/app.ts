@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
-import { applyPin, computeScrollState } from '@/utils/toolbarCollapsePolicy'
+import { applyPin, computeScrollState, rebaselinePin } from '@/utils/toolbarCollapsePolicy'
 
 export interface HealthStatus {
   status: string
@@ -76,8 +76,26 @@ export const useAppStore = defineStore('app', () => {
     // continuously shifts .app-main.scrollTop while animating; without this
     // grace the shift trips the recollapse delta and instantly re-collapses
     // the toolbar we just opened (notably on Timeline where .app-main is the
-    // scroller). Must exceed the transition duration.
-    if (next.toolbarPinned) pinGraceUntil.value = performance.now() + 700
+    // scroller). Must exceed the transition duration. Extended to 800ms to
+    // cover iOS Safari's throttled end-of-transition scroll event arriving
+    // just before the rebaselinePin call (see rebasePinScrollTop).
+    if (next.toolbarPinned) pinGraceUntil.value = performance.now() + 800
+  }
+
+  /** Re-baseline pinScrollTop to the live DOM scrollTop after the toolbar's
+   *  max-height transition settles. iOS Safari throttles scroll events during
+   *  the transition, so the inPinGrace absorption (which depends on
+   *  intermediate scroll events arriving) never runs — iOS only delivers the
+   *  final settled position after the grace window, which would otherwise
+   *  trip the recollapse delta and instantly close the toolbar. The caller
+   *  reads the live DOM scrollTop (not this store's ref, which is stale on
+   *  iOS because the throttled events never updated it) and passes it here. */
+  function rebasePinScrollTop(liveScrollTop: number) {
+    const next = rebaselinePin(
+      { isScrolled: isScrolled.value, toolbarPinned: toolbarPinned.value, pinScrollTop: pinScrollTop.value },
+      liveScrollTop,
+    )
+    pinScrollTop.value = next.pinScrollTop
   }
 
   function setImmersive(v: boolean) {
@@ -114,6 +132,7 @@ export const useAppStore = defineStore('app', () => {
     setTheme,
     handleScroll,
     togglePin,
+    rebasePinScrollTop,
     setImmersive,
     fetchHealth,
   }

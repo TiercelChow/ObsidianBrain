@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { computeScrollState, applyPin } from '../src/utils/toolbarCollapsePolicy.ts'
+import { computeScrollState, applyPin, rebaselinePin } from '../src/utils/toolbarCollapsePolicy.ts'
 
 const base = { isScrolled: false, toolbarPinned: false, pinScrollTop: 0 }
 
@@ -79,4 +79,37 @@ test('inPinGrace: scroll back to top still clears pin', () => {
   const r = computeScrollState(pinned, 0, { inPinGrace: true })
   assert.equal(r.isScrolled, false)
   assert.equal(r.toolbarPinned, false)
+})
+
+// rebaselinePin: closes the iOS scroll-throttle gap. After the toolbar's
+// max-height transition settles, the live scrollTop has shifted up (the
+// expanding toolbar pushes content). iOS never delivered the intermediate
+// positions as events, so pinScrollTop is still the click-time value and the
+// first (post-grace) scroll event would recollapse. rebaselinePin raises the
+// baseline to the live settled scrollTop.
+test('rebaselinePin: raises baseline to live settled scrollTop', () => {
+  // Clicked grip at scrollTop=544; transition shifted live scrollTop to 825.
+  const pinned = { isScrolled: true, toolbarPinned: true, pinScrollTop: 544 }
+  const r = rebaselinePin(pinned, 825)
+  assert.equal(r.pinScrollTop, 825)
+  assert.equal(r.toolbarPinned, true)
+})
+
+test('rebaselinePin: after rebase, a scroll event at the settled value does not recollapse', () => {
+  const rebased = { isScrolled: true, toolbarPinned: true, pinScrollTop: 825 }
+  // iOS delivers the throttled event at the settled position, now within delta.
+  assert.equal(computeScrollState(rebased, 825).toolbarPinned, true)
+})
+
+test('rebaselinePin: never lowers the baseline', () => {
+  const pinned = { isScrolled: true, toolbarPinned: true, pinScrollTop: 825 }
+  // Live scrollTop read came back lower (e.g. user scrolled up); keep 825.
+  assert.equal(rebaselinePin(pinned, 400).pinScrollTop, 825)
+})
+
+test('rebaselinePin: no-op when not pinned', () => {
+  const notPinned = { isScrolled: true, toolbarPinned: false, pinScrollTop: 0 }
+  const r = rebaselinePin(notPinned, 825)
+  assert.equal(r.toolbarPinned, false)
+  assert.equal(r.pinScrollTop, 0)
 })

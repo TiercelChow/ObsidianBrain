@@ -54,6 +54,21 @@ export function computeScrollState(
   return { isScrolled, toolbarPinned, pinScrollTop }
 }
 
+/** Re-baseline pinScrollTop to the live scrollTop after the toolbar's
+ *  max-height transition settles. iOS Safari throttles scroll events during
+ *  the transition, so the inPinGrace absorption above (which depends on
+ *  intermediate scroll events arriving during the grace window) may never
+ *  run — iOS only delivers the final settled position, after grace, which
+ *  would then trip the recollapse delta and instantly close the toolbar we
+ *  just opened. The caller reads the live DOM scrollTop after the transition
+ *  (not the store ref, which is stale on iOS because the throttled events
+ *  never updated it) and raises the baseline here. Only raises, never lowers;
+ *  no-op when not pinned. */
+export function rebaselinePin(prev: ScrollState, liveScrollTop: number): ScrollState {
+  if (!prev.toolbarPinned) return prev
+  return { ...prev, pinScrollTop: Math.max(prev.pinScrollTop, liveScrollTop) }
+}
+
 /** Transition for a grip click (expand while scrolled). */
 export function applyPin(prev: ScrollState, currentScrollTop: number): ScrollState {
   if (prev.toolbarPinned) {
