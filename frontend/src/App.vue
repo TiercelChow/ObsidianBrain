@@ -107,11 +107,12 @@ const route = useRoute()
 // Reset scroll state when navigating between pages.
 watch(() => route.path, () => appStore.handleScroll(0))
 const appStore = useAppStore()
-// The collapsing-to-grip toolbar is only for the three pages whose top
-// toolbar should collapse on scroll: Reader, Timeline, Tasks. Other pages
-// (Home, Memory, …) keep a static header and must not show the grip.
+// The collapsing-to-grip toolbar is only for pages whose top toolbar
+// should collapse on scroll: Reader and Tasks. Timeline keeps a static
+// toolbar (no grip, no collapse) — the grip interaction never worked
+// reliably there and the user prefers it plain.
 const gripRoute = computed(() =>
-  route.name === 'Reader' || route.name === 'Timeline' || route.name === 'Tasks',
+  route.name === 'Reader' || route.name === 'Tasks',
 )
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
 const currentTitle = computed(() => (route.meta?.title as string) || '')
