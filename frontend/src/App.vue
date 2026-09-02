@@ -36,7 +36,7 @@
     <button
       v-if="isMobile"
       class="mobile-toolbar-grip"
-      :class="{ visible: isScrolled && !appStore.toolbarPinned && !appStore.immersiveHidden }"
+      :class="{ visible: gripRoute && isScrolled && !appStore.toolbarPinned && !appStore.immersiveHidden }"
       type="button"
       aria-label="展开工具栏"
       @click="onGripClick"
@@ -76,7 +76,7 @@
         class="app-main"
         :class="{
           'mobile-full': isMobile,
-          'mobile-scrolled': isMobile && isScrolled,
+          'mobile-scrolled': isMobile && gripRoute && isScrolled,
           'toolbar-pinned': isMobile && appStore.toolbarPinned,
           'reader-scroll-locked': lockMobileReaderOuterScroll,
         }"
@@ -107,6 +107,12 @@ const route = useRoute()
 // Reset scroll state when navigating between pages.
 watch(() => route.path, () => appStore.handleScroll(0))
 const appStore = useAppStore()
+// The collapsing-to-grip toolbar is only for the three pages whose top
+// toolbar should collapse on scroll: Reader, Timeline, Tasks. Other pages
+// (Home, Memory, …) keep a static header and must not show the grip.
+const gripRoute = computed(() =>
+  route.name === 'Reader' || route.name === 'Timeline' || route.name === 'Tasks',
+)
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
 const currentTitle = computed(() => (route.meta?.title as string) || '')
 const appShellRef = ref<HTMLElement | null>(null)
