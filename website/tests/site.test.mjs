@@ -64,3 +64,16 @@ test('motion choreography progressively reveals groups and respects reduced moti
   assert.match(styles, /filter:\s*blur\(var\(--reveal-blur/)
   assert.match(styles, /@media \(prefers-reduced-motion:\s*reduce\)/)
 })
+
+test('scroll reveals reset offscreen and feature cards use a surface glow', async () => {
+  const [script, styles] = await Promise.all([
+    read('src/main.js'),
+    read('src/style.css'),
+  ])
+
+  assert.match(script, /entry\.intersectionRatio\s*===\s*0/)
+  assert.match(script, /dataset\.visible\s*=\s*String\(visible\)/)
+  assert.doesNotMatch(script, /observer\.unobserve/)
+  assert.match(styles, /\.feature-card\s*\{[^}]*radial-gradient/s)
+  assert.doesNotMatch(styles, /\.feature-card::after\s*\{/)
+})

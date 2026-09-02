@@ -252,9 +252,8 @@ code, pre { font-family: var(--font-mono); }
 .workflow-track p { margin: 0; color: var(--text-muted); font-size: .72rem; }
 
 .feature-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
-.feature-card { position: relative; min-height: 24rem; padding: 1.5rem; overflow: hidden; transition: transform .28s var(--ease-out), border-color .28s, box-shadow .28s; }
+.feature-card { position: relative; min-height: 24rem; padding: 1.5rem; overflow: hidden; background: radial-gradient(ellipse 160% 90% at 112% -28%, color-mix(in srgb, var(--card-color, var(--accent)) 8%, transparent), transparent 58%), var(--bg-glass); transition: transform .28s var(--ease-out), border-color .28s, box-shadow .28s; }
 .feature-card:hover { transform: translateY(-4px); border-color: var(--accent-border); box-shadow: var(--shadow-lg), var(--inset-highlight); }
-.feature-card::after { content: ''; position: absolute; width: 9rem; height: 9rem; top: -5rem; right: -4rem; border-radius: 50%; background: color-mix(in srgb, var(--card-color, var(--accent)) 18%, transparent); filter: blur(10px); }
 .feature-icon { width: 3.2rem; height: 3.2rem; margin-bottom: 3.7rem; border-radius: 1rem; display: grid; place-items: center; color: var(--card-color, var(--accent)); background: color-mix(in srgb, var(--card-color, var(--accent)) 12%, transparent); }
 .feature-state { color: var(--card-color, var(--accent)); font-size: .68rem; font-weight: 740; letter-spacing: .08em; }
 .feature-card h3 { margin: .35rem 0 .7rem; font-size: 1.35rem; letter-spacing: -.035em; }

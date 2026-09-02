@@ -138,26 +138,30 @@ const revealItems = document.querySelectorAll('[data-reveal]')
 if (reducedMotion || !('IntersectionObserver' in window)) {
   revealItems.forEach((item) => item.dataset.visible = 'true')
 } else {
-  const pendingReveals = new Set()
+  const pendingVisibility = new Map()
   let revealFrame = 0
 
-  function queueReveal(item) {
-    pendingReveals.add(item)
+  function queueVisibility(item, visible) {
+    pendingVisibility.set(item, visible)
     if (revealFrame) return
     revealFrame = requestAnimationFrame(() => {
-      pendingReveals.forEach((pending) => pending.dataset.visible = 'true')
-      pendingReveals.clear()
+      pendingVisibility.forEach((visible, pending) => {
+        pending.dataset.visible = String(visible)
+      })
+      pendingVisibility.clear()
       revealFrame = 0
     })
   }
 
   const observer = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
-      if (!entry.isIntersecting) return
-      queueReveal(entry.target)
-      observer.unobserve(entry.target)
+      if (entry.intersectionRatio >= 0.08) {
+        queueVisibility(entry.target, true)
+      } else if (entry.intersectionRatio === 0) {
+        queueVisibility(entry.target, false)
+      }
     })
-  }, { rootMargin: '0px 0px -10% 0px', threshold: 0.08 })
+  }, { rootMargin: '0px 0px -10% 0px', threshold: [0, 0.08] })
   revealItems.forEach((item) => observer.observe(item))
 }
 
