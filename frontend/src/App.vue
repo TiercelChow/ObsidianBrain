@@ -263,22 +263,30 @@ function onMainScroll(e: Event) {
 
 function onGripClick() {
   appStore.togglePin()
-  if (appStore.toolbarPinned) {
-    // After the toolbar's max-height transition settles, re-baseline
-    // pinScrollTop to the live DOM scrollTop. iOS Safari throttles scroll
-    // events during the transition, so the store's scrollTop ref is stale and
-    // the grace-window absorption never runs — without this, iOS delivers the
-    // final settled scroll position after the grace window and instantly
-    // re-collapses the toolbar we just opened. Reads .app-main directly: on
-    // Timeline that IS the scroller (the only page with a layout-shift
-    // recollapse problem); on Reader/Tasks .app-main doesn't scroll (inner
-    // panes do), so the read is 0 and rebaselinePin is a no-op there.
-    setTimeout(() => {
-      if (!appStore.toolbarPinned) return
-      const el = document.querySelector('.app-main') as HTMLElement | null
-      if (el) appStore.rebasePinScrollTop(el.scrollTop)
-    }, 700)
+  if (!appStore.toolbarPinned) return
+  // While the toolbar's max-height transition animates (~450ms), expanding
+  // it shifts .app-main.scrollTop upward (Timeline is the one page where
+  // .app-main itself is the scroller). iOS Safari throttles scroll events —
+  // the intermediate positions never arrive as events, so the grace-window
+  // absorption (which depends on those events) never runs, and a single
+  // post-transition read can land mid-shift on a slow device, leaving the
+  // baseline too low — the final settled shift then exceeds it and instantly
+  // re-collapses the toolbar we just opened. Poll the LIVE DOM scrollTop
+  // (not the throttled store ref) and keep raising the baseline throughout
+  // the transition so it tracks the rising shift to its settled value,
+  // regardless of device speed or iOS event delivery. On Reader/Tasks
+  // .app-main doesn't scroll (inner panes do), so reads are 0 and
+  // rebaselinePin is a no-op there.
+  const startedAt = performance.now()
+  const rebaseline = () => {
+    if (!appStore.toolbarPinned) return
+    const el = document.querySelector('.app-main') as HTMLElement | null
+    if (el) appStore.rebasePinScrollTop(el.scrollTop)
+    if (performance.now() - startedAt < 900) {
+      requestAnimationFrame(rebaseline)
+    }
   }
+  requestAnimationFrame(rebaseline)
 }
 
 function onResize() {
