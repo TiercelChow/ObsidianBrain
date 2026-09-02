@@ -1033,6 +1033,17 @@ code, pre, .code-block { font-family: var(--font-mono); }
   overflow: hidden;
   pointer-events: none;
 }
+/* Timeline's .toolbar-row is position: sticky, which escapes its parent's
+   max-height:0/overflow:hidden clip and stays pinned under the global header
+   — so the toolbar never visually disappears. Neutralize the stickiness (and
+   hide) when collapsed; restore sticky when pinned/expanded. */
+.app-main.mobile-scrolled:not(.toolbar-pinned) .toolbar-row {
+  position: static !important;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
 .page-header,
 .reader-topbar,
 .toolbar,
