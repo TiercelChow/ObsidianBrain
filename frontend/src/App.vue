@@ -41,8 +41,10 @@
       aria-label="展开工具栏"
       @click="appStore.togglePin()"
     >
-      <span class="grip-line"></span>
-      <span class="grip-line"></span>
+      <span class="grip-pill">
+        <span class="grip-line"></span>
+        <span class="grip-line"></span>
+      </span>
     </button>
 
     <!-- Mobile sidebar overlay backdrop -->
@@ -1054,12 +1056,37 @@ code, pre, .code-block { font-family: var(--font-mono); }
               padding var(--duration-slow) var(--ease-standard);
 }
 
-/* ── Mobile toolbar grip: thin floating handle to re-expand the toolbar ── */
+/* ── Mobile toolbar grip: thin floating handle to re-expand the toolbar ──
+   The button is a 60×32 transparent hit area (easy to tap on a phone, easy
+   to click with a mouse in DevTools emulation); the visible .grip-pill
+   (44×14) is centered inside it, so a slightly off-center click still
+   lands on the grip instead of scrolling the page beneath. */
 .mobile-toolbar-grip {
   position: fixed;
-  top: calc(var(--mobile-header-height) + var(--safe-top) + 4px);
+  top: calc(var(--mobile-header-height) + var(--safe-top) - 9px);
   left: 50%;
   transform: translateX(-50%) translateY(-6px);
+  width: 60px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out);
+  z-index: 1001;
+  cursor: pointer;
+}
+.mobile-toolbar-grip.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+.grip-pill {
   width: 44px;
   height: 14px;
   background: var(--bg-glass);
@@ -1071,16 +1098,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
   justify-content: center;
   align-items: center;
   gap: 2px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--duration-fast) var(--ease-out),
-              transform var(--duration-fast) var(--ease-out);
-  z-index: 1001;
-}
-.mobile-toolbar-grip.visible {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateX(-50%) translateY(0);
+  pointer-events: none; /* the button handles the click, not the pill */
 }
 .grip-line {
   width: 22px;
