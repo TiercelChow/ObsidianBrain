@@ -14,6 +14,8 @@ backend/frontend/
 frontend/dist/
 frontend/dist_new/
 frontend/dist.stale-root-owned/
+website/node_modules/
+website/dist/
 
 # Data (runtime — ~/.obsidian-brain/ is outside the repo, but local data/ too)
 data/

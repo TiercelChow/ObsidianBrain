@@ -2,6 +2,8 @@
 
 本地 Rust 知识引擎，围绕 Obsidian 笔记库提供 LLM Tool API、Markdown 阅读、时光机小记、Wiki 知识库等功能。
 
+**[访问产品官网与完整使用指南](https://tiercelchow.github.io/ObsidianBrain/)**
+
 ## 功能
 
 ### 阅境轩（Markdown 阅读器）
@@ -103,6 +105,18 @@ cd frontend && npm run dev
 ```
 
 访问 `http://localhost:5173`（Vite dev server，自动代理 `/v1` 到后端）。
+
+### 产品官网
+
+产品介绍与使用指南位于独立的 `website/` 静态站中，不连接本地 `/v1` API：
+
+```bash
+cd website
+npm install
+npm run dev
+```
+
+官网由 `.github/workflows/deploy-pages.yml` 自动构建并发布到 GitHub Pages。首次发布前需在仓库的 **Settings → Pages** 中将 Source 设置为 **GitHub Actions**。
 
 ## 配置
 
