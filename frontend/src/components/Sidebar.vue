@@ -2,13 +2,7 @@
   <div class="sidebar" :class="{ collapsed: isCollapsed }">
     <!-- Logo -->
     <div class="logo-section">
-      <div class="logo-mark">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-          <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="currentColor" opacity="0.9"/>
-          <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
-          <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
-        </svg>
-      </div>
+      <img class="logo-mark" src="/favicon.svg" alt="" aria-hidden="true" />
       <transition name="logo-text">
         <span v-show="!isCollapsed" class="logo-name">ObsidianBrain</span>
       </transition>
@@ -189,11 +183,11 @@ function isActive(path: string) {
 .logo-mark {
   width: 32px;
   height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-primary);
+  display: block;
   flex-shrink: 0;
+  border-radius: 9px;
+  object-fit: cover;
+  box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .logo-name {

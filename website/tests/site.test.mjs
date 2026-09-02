@@ -47,3 +47,20 @@ test('Vite and Pages workflow publish the website subproject', async () => {
   assert.match(workflow, /pages:\s*write/)
   assert.match(workflow, /id-token:\s*write/)
 })
+
+test('motion choreography progressively reveals groups and respects reduced motion', async () => {
+  const [html, script, styles] = await Promise.all([
+    read('index.html'),
+    read('src/main.js'),
+    read('src/style.css'),
+  ])
+
+  assert.match(html, /data-reveal-sequence/)
+  assert.match(html, /data-reveal-group/)
+  assert.match(script, /--reveal-delay/)
+  assert.match(script, /requestAnimationFrame/)
+  assert.match(script, /prefers-reduced-motion:\s*reduce/)
+  assert.match(styles, /transition-delay:\s*var\(--reveal-delay/)
+  assert.match(styles, /filter:\s*blur\(var\(--reveal-blur/)
+  assert.match(styles, /@media \(prefers-reduced-motion:\s*reduce\)/)
+})

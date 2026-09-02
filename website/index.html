@@ -87,7 +87,7 @@
 
     <main id="main-content">
       <section class="hero section-shell" id="top">
-        <div class="hero-copy" data-reveal>
+        <div class="hero-copy" data-reveal data-reveal-sequence>
           <div class="eyebrow"><span class="status-dot"></span> 本地知识工作台</div>
           <h1>让知识不止被收藏，<br /><span>而是持续发生连接。</span></h1>
           <p class="hero-lead">ObsidianBrain 运行在你自己的设备上，把 Obsidian 中的阅读、记录、任务、代码和灵感组织成一个连贯的工作空间。</p>
@@ -102,7 +102,7 @@
           </div>
         </div>
 
-        <div class="hero-product" data-reveal>
+        <div class="hero-product" data-reveal data-reveal-sequence>
           <div class="ambient-orb orb-one"></div>
           <div class="ambient-orb orb-two"></div>
           <div class="app-window hero-window">
@@ -154,7 +154,7 @@
         </div>
       </section>
 
-      <section class="trust-strip section-shell" aria-label="技术特性" data-reveal>
+      <section class="trust-strip section-shell" aria-label="技术特性" data-reveal data-reveal-sequence>
         <span>Rust + Axum</span><i></i><span>Vue 3</span><i></i><span>Obsidian REST API</span><i></i><span>MCP / Tool API</span><i></i><span>Local-first</span>
       </section>
 
@@ -164,7 +164,7 @@
           <h2>在你已有的知识之上，<br />建立更完整的工作流。</h2>
           <p>Obsidian 继续负责文件、链接和长期保存；ObsidianBrain 负责把内容变成可以阅读、检索、回顾、拆解和被 AI 调用的能力。</p>
         </div>
-        <div class="principle-grid">
+        <div class="principle-grid" data-reveal-group>
           <article class="principle-card featured" data-reveal>
             <div class="principle-visual local-visual">
               <div class="vault-node"><svg><use href="#icon-folder" /></svg><span>你的 Vault</span></div>
@@ -190,12 +190,12 @@
             <div><span class="section-label">完整闭环</span><h2>知识从进入到产生价值，<br />每一步都有落点。</h2></div>
             <p>不是把功能堆在一起，而是围绕真实使用顺序，让上一阶段的结果自然成为下一阶段的输入。</p>
           </div>
-          <div class="workflow-track" data-reveal>
-            <article><span>01</span><div class="workflow-icon"><svg><use href="#icon-book" /></svg></div><h3>阅读</h3><p>Markdown、PDF、公式与图表</p></article>
-            <article><span>02</span><div class="workflow-icon"><svg><use href="#icon-clock" /></svg></div><h3>记录</h3><p>捕捉此刻的想法和图片</p></article>
-            <article><span>03</span><div class="workflow-icon"><svg><use href="#icon-wiki" /></svg></div><h3>组织</h3><p>把资料编译为结构化知识</p></article>
-            <article><span>04</span><div class="workflow-icon"><svg><use href="#icon-task" /></svg></div><h3>执行</h3><p>拆解长期目标并持续推进</p></article>
-            <article><span>05</span><div class="workflow-icon"><svg><use href="#icon-radar" /></svg></div><h3>回顾</h3><p>重新发现知识之间的联系</p></article>
+          <div class="workflow-track" data-reveal-group>
+            <article data-reveal><span>01</span><div class="workflow-icon"><svg><use href="#icon-book" /></svg></div><h3>阅读</h3><p>Markdown、PDF、公式与图表</p></article>
+            <article data-reveal><span>02</span><div class="workflow-icon"><svg><use href="#icon-clock" /></svg></div><h3>记录</h3><p>捕捉此刻的想法和图片</p></article>
+            <article data-reveal><span>03</span><div class="workflow-icon"><svg><use href="#icon-wiki" /></svg></div><h3>组织</h3><p>把资料编译为结构化知识</p></article>
+            <article data-reveal><span>04</span><div class="workflow-icon"><svg><use href="#icon-task" /></svg></div><h3>执行</h3><p>拆解长期目标并持续推进</p></article>
+            <article data-reveal><span>05</span><div class="workflow-icon"><svg><use href="#icon-radar" /></svg></div><h3>回顾</h3><p>重新发现知识之间的联系</p></article>
           </div>
         </div>
       </section>
@@ -206,7 +206,7 @@
           <h2>一套系统，容纳知识工作的不同侧面。</h2>
           <p>每个模块都可以独立使用，也能共享同一个本地知识环境。</p>
         </div>
-        <div class="feature-grid">
+        <div class="feature-grid" data-reveal-group>
           <article class="feature-card reader-card" data-reveal><div class="feature-icon"><svg><use href="#icon-book" /></svg></div><span class="feature-state">阅读</span><h3>阅境轩</h3><p>把本地 Markdown 文集与 PDF 变成可持续阅读的书架。支持 Mermaid、KaTeX、代码高亮、全屏阅读和进度恢复。</p><ul><li>文件夹与 PDF 书架</li><li>阅读历史和位置同步</li><li>手机端触控阅读</li></ul></article>
           <article class="feature-card timeline-card" data-reveal><div class="feature-icon"><svg><use href="#icon-clock" /></svg></div><span class="feature-state">记录</span><h3>时光机</h3><p>用低负担的小记留下此刻。按时间、关键词和标签重新浏览，让零散想法在未来仍然可以被找回。</p><ul><li>Markdown 与图片</li><li>时间筛选和全文搜索</li><li>与 Obsidian 内容协同</li></ul></article>
           <article class="feature-card tasks-card" data-reveal><div class="feature-icon"><svg><use href="#icon-task" /></svg></div><span class="feature-state">执行</span><h3>任务中枢</h3><p>短期待办保持轻量，长期任务支持任意层级拆解、进展记录与日历视图，让目标始终可行动。</p><ul><li>短期与长期任务</li><li>多级子任务和进展</li><li>任务与日历双视图</li></ul></article>
@@ -244,7 +244,7 @@
       </section>
 
       <section class="section-shell quick-start-section" id="quick-start">
-        <div class="quick-start-layout">
+        <div class="quick-start-layout" data-reveal-group>
           <div class="quick-start-copy" data-reveal><span class="section-label">开始使用</span><h2>一个二进制，<br />启动整个工作台。</h2><p>从源码构建后，Vue 前端会嵌入 Rust 可执行文件。正式运行不再需要 Node.js，也不需要额外启动前端服务。</p><div class="requirements"><span><b>Node.js</b> 18+</span><span><b>Rust</b> 1.75+</span><span><b>Obsidian</b> 推荐</span></div></div>
           <div class="terminal-card" data-reveal>
             <div class="terminal-head"><div><i></i><i></i><i></i></div><span>安装 ObsidianBrain</span><button type="button" data-copy="#install-command"><svg><use href="#icon-copy" /></svg><span>复制</span></button></div>
@@ -255,7 +255,7 @@
             <div class="terminal-result"><span class="prompt">$</span><span>obsidian-brain version</span><i>obsidian-brain 0.1.0</i></div>
           </div>
         </div>
-        <div class="start-steps">
+        <div class="start-steps" data-reveal-group>
           <article data-reveal><span class="step-number">1</span><div><h3>构建与安装</h3><p>运行 <code>make build</code> 构建前后端，再运行 <code>make install</code> 安装到系统路径。</p></div></article>
           <article data-reveal><span class="step-number">2</span><div><h3>启动服务</h3><p>执行 <code>obsidian-brain start</code>，然后访问 <code>http://localhost:9876</code>。</p></div></article>
           <article data-reveal><span class="step-number">3</span><div><h3>连接 Obsidian</h3><p>安装 Obsidian Local REST API 插件，在控制面板填写 Vault 路径、服务地址和 API Key。</p></div></article>
@@ -266,7 +266,7 @@
       <section class="guide-section" id="guide">
         <div class="section-shell">
           <div class="section-heading split" data-reveal><div><span class="section-label">使用指南</span><h2>从第一次启动，<br />到形成自己的使用节奏。</h2></div><p>下面覆盖最常用的配置与操作。更细的接口和开发设计保留在仓库的 README 与 docs 中。</p></div>
-          <div class="guide-grid">
+          <div class="guide-grid" data-reveal-group>
             <article class="guide-card wide" data-reveal><div class="guide-card-head"><span>01</span><div><h3>首次配置</h3><p>先让系统知道知识在哪里，以及需要使用哪个模型。</p></div></div><div class="settings-preview"><div class="settings-group"><span>Obsidian Vault</span><div class="setting-row">Vault 路径 <i>/Users/you/Documents/MyVault</i></div><div class="setting-row">REST API <i>https://127.0.0.1:27124</i></div><div class="setting-row">API Key <i>••••••••••••••••</i></div></div><div class="settings-group"><span>LLM 配置</span><div class="setting-row">提供商 <i>OpenAI 兼容</i></div><div class="setting-row">模型 <i>gpt-4o-mini</i></div><div class="setting-row">Base URL <i>使用官方默认</i></div></div></div><p class="guide-tip"><svg><use href="#icon-shield" /></svg>API Key 会保存到本地数据目录，不会由产品官网或 GitHub Pages 接收。</p></article>
             <article class="guide-card" data-reveal><div class="guide-card-head"><span>02</span><div><h3>开始阅读</h3><p>进入阅境轩，添加一个文件夹或 PDF 到书架。</p></div></div><ol><li>选择“添加书籍”并填写本地路径。</li><li>补充书名、描述与自由类别。</li><li>点击封面开始阅读，系统自动记录位置。</li><li>长表格、代码和图表可在内容区内独立浏览。</li></ol></article>
             <article class="guide-card" data-reveal><div class="guide-card-head"><span>03</span><div><h3>留下小记</h3><p>进入时光机，快速记录还不需要整理的内容。</p></div></div><ol><li>创建小记，支持 Markdown 与图片。</li><li>使用标签标记主题或上下文。</li><li>通过关键词和日期返回历史记录。</li><li>在桌面端滚动内容区，手机端自然整页浏览。</li></ol></article>
@@ -286,13 +286,13 @@
 
       <section class="section-shell privacy-section" id="privacy">
         <div class="section-heading centered" data-reveal><span class="section-label">本地与隐私</span><h2>你的知识，没有离开你的工作空间。</h2><p>官网只是静态介绍页；真正的 ObsidianBrain 运行在自己的设备上。</p></div>
-        <div class="architecture" data-reveal>
+        <div class="architecture" data-reveal data-reveal-sequence>
           <article><div class="architecture-icon browser-icon"><i></i><i></i><i></i></div><span>界面层</span><h3>浏览器</h3><p>访问本地 Web UI</p></article><i class="architecture-arrow">→</i>
           <article><div class="architecture-icon"><svg><use href="#icon-terminal" /></svg></div><span>执行层</span><h3>Rust 引擎</h3><p>默认端口 9876</p></article><i class="architecture-arrow">→</i>
           <article><div class="architecture-icon"><svg><use href="#icon-wiki" /></svg></div><span>连接层</span><h3>Obsidian API</h3><p>本地 REST 插件</p></article><i class="architecture-arrow">→</i>
           <article><div class="architecture-icon"><svg><use href="#icon-folder" /></svg></div><span>数据层</span><h3>你的 Vault</h3><p>Markdown 与附件</p></article>
         </div>
-        <div class="privacy-grid">
+        <div class="privacy-grid" data-reveal-group>
           <article data-reveal><svg><use href="#icon-shield" /></svg><div><h3>数据归你所有</h3><p>Vault 文件仍可被任何兼容 Markdown 的工具读取，不被锁定在专有云格式里。</p></div></article>
           <article data-reveal><svg><use href="#icon-terminal" /></svg><div><h3>本地服务边界清晰</h3><p>可绑定 `127.0.0.1` 仅供本机使用，也可以主动开启局域网访问。</p></div></article>
           <article data-reveal><svg><use href="#icon-spark" /></svg><div><h3>模型由你选择</h3><p>支持 OpenAI 兼容服务和 Ollama。只有你主动调用的内容会按照所选提供商配置发送。</p></div></article>
@@ -313,7 +313,7 @@
         </div>
       </section>
 
-      <section class="section-shell final-cta" data-reveal>
+      <section class="section-shell final-cta" data-reveal data-reveal-sequence>
         <div class="cta-orb"></div><div class="cta-copy"><span class="section-label">属于你的第二大脑</span><h2>让下一次阅读、记录和行动，<br />从同一个地方开始。</h2><p>ObsidianBrain 仍在持续生长。现在就从源码构建，或者先浏览项目设计。</p><div><a class="button button-primary" href="https://github.com/TiercelChow/ObsidianBrain" target="_blank" rel="noreferrer"><svg><use href="#icon-github" /></svg>在 GitHub 查看</a><a class="button button-secondary" href="https://github.com/TiercelChow/ObsidianBrain/tree/main/docs" target="_blank" rel="noreferrer">阅读设计文档</a></div></div>
         <div class="cta-mark" aria-hidden="true"><span class="brand-mark giant"><span></span><span></span></span></div>
       </section>

@@ -8,6 +8,13 @@ const navigation = document.querySelector('[data-navigation]')
 const themes = ['light', 'dark', 'eye-care']
 const themeNames = { light: '浅色', dark: '深色', 'eye-care': '护眼' }
 const themeColors = { light: '#f0f0f3', dark: '#000000', 'eye-care': '#c5d5b8' }
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+if (reducedMotion) {
+  root.classList.add('motion-ready')
+} else {
+  requestAnimationFrame(() => root.classList.add('motion-ready'))
+}
 
 function preferredTheme() {
   const stored = localStorage.getItem('ob-website-theme')
@@ -53,6 +60,18 @@ document.addEventListener('keydown', (event) => {
 const featureButtons = [...document.querySelectorAll('[data-feature-target]')]
 const featurePanels = [...document.querySelectorAll('[data-feature-panel]')]
 
+function animateFeaturePanel(panel) {
+  if (reducedMotion || typeof panel.animate !== 'function') return
+  panel.getAnimations().forEach((animation) => animation.cancel())
+  panel.animate([
+    { opacity: 0, transform: 'translate3d(0, 18px, 0) scale(.985)', filter: 'blur(8px)' },
+    { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1)', filter: 'blur(0)' },
+  ], {
+    duration: 560,
+    easing: 'cubic-bezier(.32, .72, 0, 1)',
+  })
+}
+
 function selectFeature(id, focus = false) {
   featureButtons.forEach((button) => {
     const selected = button.dataset.featureTarget === id
@@ -61,7 +80,10 @@ function selectFeature(id, focus = false) {
     if (selected && focus) button.focus()
   })
   featurePanels.forEach((panel) => {
-    panel.hidden = panel.dataset.featurePanel !== id
+    const selected = panel.dataset.featurePanel === id
+    const wasHidden = panel.hidden
+    panel.hidden = !selected
+    if (selected && wasHidden) animateFeaturePanel(panel)
   })
 }
 
@@ -98,19 +120,44 @@ document.querySelectorAll('[data-copy]').forEach((button) => {
   })
 })
 
-const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+document.querySelectorAll('[data-reveal-group]').forEach((group) => {
+  const items = [...group.children].filter((item) => item.matches('[data-reveal]'))
+  items.forEach((item, index) => {
+    item.style.setProperty('--reveal-delay', `${Math.min(index * 75, 300)}ms`)
+  })
+})
+
+document.querySelectorAll('[data-reveal-sequence]').forEach((sequence) => {
+  Array.from(sequence.children).forEach((item, index) => {
+    item.style.setProperty('--sequence-delay', `${60 + Math.min(index * 78, 390)}ms`)
+  })
+})
+
 const revealItems = document.querySelectorAll('[data-reveal]')
 
 if (reducedMotion || !('IntersectionObserver' in window)) {
   revealItems.forEach((item) => item.dataset.visible = 'true')
 } else {
+  const pendingReveals = new Set()
+  let revealFrame = 0
+
+  function queueReveal(item) {
+    pendingReveals.add(item)
+    if (revealFrame) return
+    revealFrame = requestAnimationFrame(() => {
+      pendingReveals.forEach((pending) => pending.dataset.visible = 'true')
+      pendingReveals.clear()
+      revealFrame = 0
+    })
+  }
+
   const observer = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
       if (!entry.isIntersecting) return
-      entry.target.dataset.visible = 'true'
+      queueReveal(entry.target)
       observer.unobserve(entry.target)
     })
-  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 })
+  }, { rootMargin: '0px 0px -10% 0px', threshold: 0.08 })
   revealItems.forEach((item) => observer.observe(item))
 }
 
