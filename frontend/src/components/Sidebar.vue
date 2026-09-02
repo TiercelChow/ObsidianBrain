@@ -360,7 +360,11 @@ function isActive(path: string) {
 /* ── Mobile ── */
 @media (max-width: 768px) {
   .sidebar {
-    padding: 0 12px;
+    /* Clear the fixed mobile global header (hamburger + title) so the logo
+       and nav start below it instead of sitting behind the hamburger button. */
+    padding-top: calc(var(--mobile-header-height) + var(--safe-top));
+    padding-left: 12px;
+    padding-right: 12px;
     border-right: none;
     box-shadow: none;
     background: var(--bg-glass-strong);
