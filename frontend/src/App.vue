@@ -1060,31 +1060,34 @@ code, pre, .code-block { font-family: var(--font-mono); }
    The button is a 60×32 transparent hit area (easy to tap on a phone, easy
    to click with a mouse in DevTools emulation); the visible .grip-pill
    (44×14) is centered inside it, so a slightly off-center click still
-   lands on the grip instead of scrolling the page beneath. */
+   lands on the grip instead of scrolling the page beneath.
+   IMPORTANT: no `transform` for positioning — iOS Safari mis-hit-tests
+   transformed fixed elements (the touch rect uses the pre-transform
+   layout box), so taps at the visible spot missed. Center with left calc. */
 .mobile-toolbar-grip {
   position: fixed;
-  top: calc(var(--mobile-header-height) + var(--safe-top) - 9px);
-  left: 50%;
-  transform: translateX(-50%) translateY(-6px);
+  top: calc(var(--mobile-header-height) + var(--safe-top) + 2px);
+  left: calc(50% - 30px);
   width: 60px;
   height: 32px;
   background: transparent;
   border: none;
   padding: 0;
+  margin: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--duration-fast) var(--ease-out),
-              transform var(--duration-fast) var(--ease-out);
-  z-index: 1001;
+  transition: opacity var(--duration-fast) var(--ease-out);
+  z-index: 1002;
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 .mobile-toolbar-grip.visible {
   opacity: 1;
   pointer-events: auto;
-  transform: translateX(-50%) translateY(0);
 }
 .grip-pill {
   width: 44px;
