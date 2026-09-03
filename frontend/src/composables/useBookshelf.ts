@@ -1,18 +1,37 @@
 /**
  * Shared bookshelf state (see docs/requirement/10-reader-bookshelf.md).
  *
- * createBookshelf takes injectable load/persist for node tests; useBookshelf
- * is the app-wide singleton wired to the real tool API, shared by Reader.vue
- * and BookshelfView.vue. The API is imported dynamically inside the wiring
- * closures so this module's static import graph stays alias-free — that keeps
- * `node --test --experimental-strip-types` able to load it directly.
+ * Book METADATA (id/path/kind/name/category/addedAt) is server-stored via the
+ * tool API (load/persist). Reading PROGRESS is per-file and lives in the
+ * browser (localStorage) — a folder book can mix .md (scroll ratio) and .pdf
+ * (page) files, so progress is stored as a per-file map keyed by book id; the
+ * pure transforms are in utils/readerProgress.ts. `createBookshelf` takes
+ * injectable load/persist/loadProgress/saveProgress for node tests; useBookshelf
+ * is the app-wide singleton wired to the real tool API + localStorage. The API
+ * is imported dynamically inside the wiring closures so this module's static
+ * import graph stays alias-free — that keeps `node --test --experimental-strip-types`
+ * able to load it directly.
  */
 import { ref, type Ref } from 'vue'
-import type { BookProgress, ReaderBook } from '@/api/reader'
+import type { ReaderBook } from '@/api/reader'
+// Relative + .ts so the static import graph stays alias-free — keeps
+// `node --test --experimental-strip-types` able to load this module directly.
+import {
+  getDisplayProgress,
+  mergeBookState,
+  migrateFromLegacy,
+  parseProgressMap,
+  serializeProgressMap,
+  setLastFile,
+  type BookProgressState,
+  type FileProgress,
+} from '../utils/readerProgress.ts'
 
 export interface BookshelfDeps {
   load: () => Promise<ReaderBook[]>
   persist: (books: ReaderBook[]) => Promise<void>
+  loadProgress: () => Record<string, BookProgressState>
+  saveProgress: (map: Record<string, BookProgressState>) => void
 }
 
 export interface Bookshelf {
@@ -23,7 +42,12 @@ export interface Bookshelf {
   addBook: (book: ReaderBook) => Promise<boolean>
   updateBook: (book: ReaderBook) => Promise<boolean>
   removeBook: (id: string) => Promise<boolean>
-  updateProgress: (id: string, patch: Partial<BookProgress>) => void
+  /** Per-file progress write (localStorage only; never hits the backend). */
+  saveFileProgress: (id: string, file: string, progress: FileProgress) => void
+  /** Set the lastFile pointer, seeding a fresh entry only if the file is new. */
+  openFile: (id: string, file: string, kind: 'md' | 'pdf') => void
+  /** Full per-file state for restore (null if none). */
+  getFileProgressState: (id: string) => BookProgressState | null
   findBook: (path: string) => ReaderBook | undefined
 }
 
@@ -31,11 +55,27 @@ export function createBookshelf(deps: BookshelfDeps): Bookshelf {
   const books = ref<ReaderBook[]>([])
   const loaded = ref(false)
   const loadError = ref('')
+  let progressMap: Record<string, BookProgressState> = {}
 
   async function ensureLoaded() {
     if (loaded.value) return
     try {
       const list = await deps.load()
+      progressMap = deps.loadProgress()
+      // Attach display progress; one-time-migrate legacy backend progress into
+      // localStorage where the local map has no entry for that book.
+      let migrated = false
+      for (const b of list) {
+        if (!progressMap[b.id] && b.progress) {
+          const m = migrateFromLegacy(b.progress, b.path, b.kind)
+          if (m) {
+            progressMap[b.id] = m
+            migrated = true
+          }
+        }
+        b.progress = progressMap[b.id] ? getDisplayProgress(progressMap[b.id]) ?? undefined : undefined
+      }
+      if (migrated) deps.saveProgress(progressMap)
       books.value = list
       loaded.value = true
       loadError.value = ''
@@ -49,7 +89,10 @@ export function createBookshelf(deps: BookshelfDeps): Bookshelf {
     const prev = books.value
     books.value = next
     try {
-      await deps.persist(next)
+      // Backend stores metadata only; progress lives in localStorage. Strip it
+      // so a stale server blob can never overwrite the local source of truth.
+      const meta = next.map((b) => ({ ...b, progress: undefined }))
+      await deps.persist(meta)
       return true
     } catch (e) {
       books.value = prev
@@ -70,23 +113,31 @@ export function createBookshelf(deps: BookshelfDeps): Bookshelf {
     return mutate(books.value.filter((b) => b.id !== id))
   }
 
-  /** Progress: optimistic + fire-and-forget. Never rolls back or throws. */
-  function updateProgress(id: string, patch: Partial<BookProgress>) {
-    const idx = books.value.findIndex((b) => b.id === id)
-    if (idx < 0) return
-    const book = books.value[idx]
-    const next: ReaderBook = {
-      ...book,
-      progress: {
-        lastFile: null,
-        position: 0,
-        ...(book.progress ?? {}),
-        ...patch,
-        updatedAt: Date.now(),
-      },
-    }
-    books.value = books.value.map((b, i) => (i === idx ? next : b))
-    void deps.persist(books.value).catch((e) => console.warn('进度保存失败:', e))
+  function refreshDisplay(id: string) {
+    const display = progressMap[id] ? getDisplayProgress(progressMap[id]) : null
+    books.value = books.value.map((b) =>
+      b.id === id ? { ...b, progress: display ?? undefined } : b,
+    )
+  }
+
+  /** Per-file progress write — localStorage only, fire-and-forget. */
+  function saveFileProgress(id: string, file: string, progress: FileProgress) {
+    if (!books.value.some((b) => b.id === id)) return
+    progressMap[id] = mergeBookState(progressMap[id] ?? null, file, progress)
+    deps.saveProgress(progressMap)
+    refreshDisplay(id)
+  }
+
+  /** Set the lastFile pointer (seeds a fresh entry only for a brand-new file). */
+  function openFile(id: string, file: string, kind: 'md' | 'pdf') {
+    if (!books.value.some((b) => b.id === id)) return
+    progressMap[id] = setLastFile(progressMap[id] ?? null, file, kind, Date.now())
+    deps.saveProgress(progressMap)
+    refreshDisplay(id)
+  }
+
+  function getFileProgressState(id: string): BookProgressState | null {
+    return progressMap[id] ?? null
   }
 
   function findBook(path: string) {
@@ -101,12 +152,16 @@ export function createBookshelf(deps: BookshelfDeps): Bookshelf {
     addBook,
     updateBook,
     removeBook,
-    updateProgress,
+    saveFileProgress,
+    openFile,
+    getFileProgressState,
     findBook,
   }
 }
 
 // ── app-wide singleton ────────────────────────────────────────────────
+
+const PROGRESS_KEY = 'obsidian-brain:reader-progress'
 
 let singleton: Bookshelf | null = null
 
@@ -125,6 +180,14 @@ export function useBookshelf(): Bookshelf {
       const res = await saveReaderBooks(list)
       if (res.status !== 'success') {
         throw new Error(res.error?.message || '书架保存失败')
+      }
+    },
+    loadProgress: () => parseProgressMap(localStorage.getItem(PROGRESS_KEY)),
+    saveProgress: (map) => {
+      try {
+        localStorage.setItem(PROGRESS_KEY, serializeProgressMap(map))
+      } catch (e) {
+        console.warn('进度本地存储失败:', e)
       }
     },
   })

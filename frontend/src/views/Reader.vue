@@ -286,7 +286,12 @@ import { makeReaderImageResolvers } from '@/utils/readerImages'
 import { resolveRelativePath } from '@/utils/markdownImages'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { useBookshelf } from '@/composables/useBookshelf'
-import { clampPdfPage, scrollRatio } from '@/utils/readerBooks'
+import { clampPdfPage } from '@/utils/readerBooks'
+import {
+  captureMdFileProgress,
+  capturePdfFileProgress,
+  deriveFileKind,
+} from '@/utils/readerProgress'
 import { useAppStore } from '@/stores/app'
 import FileTree from '@/components/reader/FileTree.vue'
 import MotionDrawer from '@/components/motion/MotionDrawer.vue'
@@ -376,23 +381,33 @@ function changeView(mode: ReaderView) {
 
 /**
  * Open a shelf book and restore its progress (FR-12..14): folder books reopen
- * progress.lastFile and scroll to the saved ratio; pdf books jump to the saved
- * page (clamped). Stale/missing lastFile silently falls back to the first file.
+ * lastFile and scroll to the saved ratio (md) or jump to the saved page (pdf);
+ * single-pdf books jump to the saved page (clamped). Stale/missing lastFile
+ * silently falls back to the first file. Progress is per-file (see
+ * utils/readerProgress.ts): a folder's lastFile may be .md (ratio) or .pdf
+ * (page), disambiguated by the file's own `kind`.
  */
 async function openBook(book: ReaderBook) {
   changeView('read')
+  const state = shelf.getFileProgressState(book.id)
   if (book.kind === 'pdf') {
     const dir = book.path.substring(0, book.path.lastIndexOf('/'))
     await openPath(dir)
-    pendingPdfPage = book.progress ? clampPdfPage(book.progress.position, book.progress.pageCount ?? 0) : null
+    const fp = state?.byFile[book.path]
+    pendingPdfPage = fp ? clampPdfPage(fp.position, fp.pageCount ?? 0) : null
     await onSelectFile(book.path)
     return
   }
   await openPath(book.path)
-  const p = book.progress
-  if (p?.lastFile && flatFiles.value.includes(p.lastFile)) {
-    pendingRestoreRatio = p.position
-    await onSelectFile(p.lastFile)
+  const lastFile = state?.lastFile
+  const fp = lastFile ? state?.byFile[lastFile] : undefined
+  if (lastFile && fp && flatFiles.value.includes(lastFile)) {
+    if (fp.kind === 'pdf') {
+      pendingPdfPage = clampPdfPage(fp.position, fp.pageCount ?? 0)
+    } else {
+      pendingRestoreRatio = fp.position
+    }
+    await onSelectFile(lastFile)
   } else if (flatFiles.value.length) {
     // Fallback (FR-13): stale/missing lastFile → first file, from the top.
     await onSelectFile(flatFiles.value[0])
@@ -470,10 +485,11 @@ function captureProgressNow() {
   const bookId = currentShelfBookId.value
   const el = contentRef.value
   if (!bookId || !el || !displayedFile.value) return
-  shelf.updateProgress(bookId, {
-    lastFile: displayedFile.value,
-    position: scrollRatio(el.scrollTop, el.scrollHeight, el.clientHeight),
-  })
+  shelf.saveFileProgress(
+    bookId,
+    displayedFile.value,
+    captureMdFileProgress(displayedFile.value, el.scrollTop, el.scrollHeight, el.clientHeight, Date.now()),
+  )
 }
 
 /** Flush pending debounced progress (view switch / unmount) without waiting. */
@@ -483,6 +499,16 @@ function flushProgressNow() {
     progressTimer = null
     captureProgressNow()
   }
+}
+/** App backgrounded (visibilitychange) — flush the md debounce so the position
+ *  survives without a route-leave. localStorage writes synchronously. */
+function onVisibilityHidden() {
+  if (document.visibilityState === 'hidden') flushProgressNow()
+}
+/** Tab close (pagehide) — same flush for browsers that fire pagehide without
+ *  a prior visibilitychange hidden (or in addition to it). */
+function onPageHide() {
+  flushProgressNow()
 }
 const viewerSvg = ref('')
 const viewerTitle = ref('Mermaid 图')
@@ -956,9 +982,11 @@ async function onSelectFile(path: string) {
       localStorage.setItem(LAST_FILE_KEY, path)
       // Folder-book progress: a fresh file starts from the top (FR-15 lastFile).
       // Skip while restoring a saved position — the restore owns the next write.
+      // openFile only seeds a new file's entry (position 0); an existing file's
+      // saved progress is never clobbered here.
       const bookId = currentShelfBookId.value
-      if (bookId && pendingRestoreRatio === null) {
-        shelf.updateProgress(bookId, { lastFile: path, position: 0 })
+      if (bookId && pendingRestoreRatio === null && pendingPdfPage === null) {
+        shelf.openFile(bookId, path, deriveFileKind(path))
       }
       // enhance() + buildToc() run in the transition's @enter hook (onArticleEnter).
     }
@@ -1011,19 +1039,22 @@ function onContentAfterLeave(el: Element) {
 /** PdfViewer emits its outline after load; populate the TOC. */
 function onPdfPageChange(page: number) {
   pdfCurrentPage.value = page
+  // Skip capturing during a restore jump — pdf.js fires intermediate page
+  // events as it renders toward the target page; the restore owns the position.
+  if (pendingPdfPage !== null) return
   const bookId = currentShelfBookId.value
-  if (bookId) {
-    shelf.updateProgress(bookId, {
-      position: page,
-      ...(pdfPageCount.value ? { pageCount: pdfPageCount.value } : {}),
-    })
+  const file = displayedFile.value
+  if (bookId && file) {
+    shelf.saveFileProgress(
+      bookId,
+      file,
+      capturePdfFileProgress(file, page, pdfPageCount.value || undefined, Date.now()),
+    )
   }
 }
 
 function onPdfPageCount(count: number) {
   pdfPageCount.value = count
-  const bookId = currentShelfBookId.value
-  if (bookId) shelf.updateProgress(bookId, { pageCount: count })
   // Book-open restore (FR-14): page wraps mount with pageMetas as the pdf
   // loads, so one rAF after the count arrives the target wrap is addressable.
   if (pendingPdfPage !== null) {
@@ -1162,6 +1193,13 @@ function scrollToHeading(id: string) {
 onMounted(async () => {
   document.addEventListener('fullscreenchange', onFullscreenChange)
   document.addEventListener('keydown', onReaderKeydown)
+  // Flush pending md progress when the app is backgrounded or the tab is
+  // closing — on mobile, route-leave (onBeforeUnmount) doesn't fire on tab
+  // close / app switch, and pagehide clears the debounce timer. localStorage
+  // writes synchronously, so the position survives. (PDF saves on every page
+  // change, so it's already current — this only covers the md debounce.)
+  document.addEventListener('visibilitychange', onVisibilityHidden)
+  window.addEventListener('pagehide', onPageHide)
   void shelf.ensureLoaded()
   await loadHistory()
   // Restore last opened folder + file (per-browser).
@@ -1181,6 +1219,8 @@ onBeforeUnmount(() => {
   cleanupMarkdown()
   document.removeEventListener('fullscreenchange', onFullscreenChange)
   document.removeEventListener('keydown', onReaderKeydown)
+  document.removeEventListener('visibilitychange', onVisibilityHidden)
+  window.removeEventListener('pagehide', onPageHide)
   document.removeEventListener('mousemove', onFsActivity)
   document.removeEventListener('touchstart', onFsActivity)
   cancelFullscreenAnimation()
