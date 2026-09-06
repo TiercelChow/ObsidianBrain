@@ -452,6 +452,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
   --bg-base: #f0f0f3;
   --bg-glass: rgba(255, 255, 255, 0.45);
   --bg-glass-strong: rgba(255, 255, 255, 0.65);
+  --bg-card: #f7f7f8;
   --bg-glass-subtle: rgba(255, 255, 255, 0.3);
   --bg-hover: rgba(255, 255, 255, 0.4);
   --border-glass: rgba(255, 255, 255, 0.7);
@@ -505,6 +506,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
   --bg-base: #000000;
   --bg-glass: rgba(20, 20, 25, 0.4);
   --bg-glass-strong: rgba(25, 25, 30, 0.6);
+  --bg-card: #08080a;
   --bg-glass-subtle: rgba(30, 30, 35, 0.25);
   --bg-hover: rgba(40, 40, 45, 0.4);
   --border-glass: rgba(255, 255, 255, 0.08);
@@ -541,6 +543,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
   --bg-base: #c5d5b8;
   --bg-glass: rgba(180, 215, 165, 0.55);
   --bg-glass-strong: rgba(165, 205, 150, 0.72);
+  --bg-card: #bcd6ae;
   --bg-glass-subtle: rgba(150, 195, 135, 0.38);
   --bg-hover: rgba(135, 185, 120, 0.5);
   --border-glass: rgba(100, 155, 85, 0.55);

@@ -167,6 +167,10 @@
                 <span class="task-pill" :class="`kind-${detail.root.kind}`">{{ detail.root.kind === 'short' ? '待办' : '长期' }}</span>
                 <span class="task-pill" :class="`status-${detail.root.status}`">{{ taskStatusLabel(detail.root.status) }}</span>
                 <span class="task-pill" :class="`importance-${detail.root.importance}`">{{ taskImportanceLabel(detail.root.importance) }}</span>
+                <div class="detail-facts">
+                  <span>{{ detail.root.start_date }} <span aria-label="至">→</span> {{ detail.root.end_date }}</span>
+                  <strong :class="taskTiming(detail.root, today).tone">{{ taskTiming(detail.root, today).label }}</strong>
+                </div>
               </div>
             </div>
             <div class="detail-actions">
@@ -175,11 +179,6 @@
           </header>
 
           <div class="detail-context">
-          <div class="detail-facts">
-            <span>{{ detail.root.start_date }} <span aria-label="至">→</span> {{ detail.root.end_date }}</span>
-            <strong :class="taskTiming(detail.root, today).tone">{{ taskTiming(detail.root, today).label }}</strong>
-          </div>
-
           <p v-if="detail.root.description" class="task-description">{{ detail.root.description }}</p>
           </div>
 
@@ -190,11 +189,12 @@
         </div>
 
         <div class="detail-columns" :class="{ split: detail.root.kind === 'long' }">
-          <section v-if="detail.root.kind === 'long'" class="detail-section task-breakdown" @scroll="onPanelScroll">
+          <section v-if="detail.root.kind === 'long'" class="detail-section task-breakdown">
             <div class="column-heading">
               <div><span>任务拆解</span><strong>{{ detail.completed_leaf_count }}/{{ detail.effective_leaf_count }}</strong></div>
               <button type="button" aria-label="添加子任务" @click="openSubtask(detail.root)">＋</button>
             </div>
+            <div class="column-scroll" @scroll="onPanelScroll">
             <TaskTree
               :tasks="detail.tasks"
               :selected-id="drawerNodeId || detail.root.id"
@@ -202,14 +202,15 @@
               @edit="openEdit"
               @reorder="quickMove"
             />
+            </div>
           </section>
 
-        <aside ref="activitySectionRef" class="task-progress-panel" @scroll="onPanelScroll">
+        <aside ref="activitySectionRef" class="task-progress-panel">
           <div class="progress-column-header">
             <div><span>进展</span><strong>{{ activity.length }} 条记录</strong></div>
             <button v-if="detail.root.kind === 'long' && !isTaskClosed(detail.root)" type="button" aria-label="记录进展" @click="openProgress(detail.root)">＋</button>
           </div>
-          <div class="progress-body">
+          <div class="progress-body" @scroll="onPanelScroll">
             <div v-if="activity.length" class="activity-list">
               <article
                 v-for="item in activity"
@@ -980,16 +981,17 @@ onMounted(async () => {
 .empty-list p, .empty-detail p { margin: 7px 0 15px; color: var(--text-faint); font-size: 12px; }
 .empty-list button, .activity-empty { min-height: 40px; padding: 0 13px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-glass); color: var(--accent); cursor: pointer; }
 .empty-orb { width: 54px; height: 54px; display: grid; place-items: center; margin-bottom: 13px; border-radius: 18px; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); font-size: 25px; }
-.detail-section, .task-progress-panel, .task-detail-placeholder { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.detail-section, .task-progress-panel, .task-detail-placeholder { min-width: 0; min-height: 0; }
 .detail-summary { flex: none; padding: 24px 24px 0; min-width: 0; }
 .detail-columns { flex: 1 1 auto; min-width: 0; min-height: 0; display: grid; grid-template-columns: 1fr; gap: 0; }
 .detail-columns.split { grid-template-columns: minmax(0, 1.12fr) minmax(310px, .88fr); }
 .detail-columns.split .task-progress-panel { border-left: 1px solid var(--border-subtle); }
-.task-progress-panel { padding: 0; }
-.progress-body { padding: 0 24px 28px; }
+.task-progress-panel { padding: 0; border-radius: 0 22px 0 0; display: flex; flex-direction: column; overflow: hidden; }
+.progress-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 28px; }
+.column-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .task-detail-placeholder, .empty-detail { flex: 1; min-height: 0; }
-.progress-column-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 78px; margin: 0; padding: 12px 24px; background: color-mix(in srgb, var(--bg-glass-strong) 88%, transparent); backdrop-filter: blur(18px) saturate(150%); -webkit-backdrop-filter: blur(18px) saturate(150%); }
-.progress-column-header > div { display: grid; gap: 4px; }
+.progress-column-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; padding: 8px 24px 0; }
+.progress-column-header > div { display: flex; align-items: baseline; gap: 8px; }
 .progress-column-header span { color: var(--text-primary); font-size: 18px; font-weight: 700; letter-spacing: -.015em; }
 .progress-column-header strong { color: var(--text-faint); font-size: 11px; font-weight: 520; }
 .progress-column-header button, .column-heading button { min-height: 40px; padding: 0 12px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-glass-strong); color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; }
@@ -997,6 +999,7 @@ onMounted(async () => {
 .column-heading > div { display: flex; align-items: baseline; gap: 8px; }
 .column-heading span { font-size: 17px; font-weight: 680; }
 .column-heading strong { color: var(--text-faint); font-size: 12px; }
+.task-breakdown .column-heading { margin: 0 -24px; padding: 8px 24px 0; }
 .mobile-detail-nav { display: none; }
 .detail-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 18px; }
 /* Keep scrollIntoView() reveals clear of the fixed mobile global header. */
@@ -1010,8 +1013,8 @@ onMounted(async () => {
 .detail-actions .primary-action { background: var(--accent); color: white; border-color: transparent; font-weight: 600; padding-inline: 16px; }
 .detail-actions .archive-action { color: var(--text-muted); }
 .detail-actions .edit-action { display: grid; place-items: center; min-width: 38px; width: 38px; padding: 0; background: var(--bg-glass-strong); font-size: 16px; }
-.detail-context { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 12px 0; }
-.detail-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0; color: var(--text-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.detail-context { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 12px 0 0; }
+.detail-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-left: auto; color: var(--text-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .detail-facts strong { font-size: 12px; font-weight: 570; }
 .detail-facts > span > span { margin: 0 4px; color: var(--text-faint); }
 .task-description { flex-basis: 100%; margin: 4px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -1024,7 +1027,7 @@ onMounted(async () => {
 .detail-switch button { flex: 1; min-height: 40px; padding: 8px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); font: inherit; font-size: 14px; cursor: pointer; }
 .detail-switch button.active { color: var(--text-primary); font-weight: 600; background: var(--bg-glass-strong); box-shadow: var(--shadow-sm); }
 .detail-switch button span { margin-left: 6px; color: var(--text-faint); font-size: 12px; font-variant-numeric: tabular-nums; }
-.detail-section { margin-top: 0; padding: 12px 24px 34px; }
+.detail-section { margin-top: 0; padding: 0 24px 34px; border-radius: 22px 0 0 0; display: flex; flex-direction: column; overflow: hidden; }
 .activity-empty-copy { color: var(--text-faint); font-size: 13px; line-height: 1.7; }
 .progress-track { height: 8px; border-radius: 8px; background: color-mix(in srgb, var(--text-primary) 6%, transparent); overflow: hidden; }
 .progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 65%, #34c759)); transition: width var(--motion-slow) var(--ease-spring-gentle); }
@@ -1174,7 +1177,7 @@ onMounted(async () => {
 }
 
 @media (max-width: 768px) {
-  .task-toolbar { flex-wrap: wrap; padding: 7px; }.view-switch { width: 100%; }.view-switch button { min-height: 38px; }.task-search { order: 2; min-width: 0; max-width: none; flex: 1; min-height: 44px; }.filters { order: 3; width: 100%; }.filters :deep(.el-select) { flex: 1; width: auto; min-width: 0; }.filters :deep(.el-select__wrapper) { min-height: 44px; }.tasks-page.view-tasks { height: calc(100dvh - 96px - var(--safe-top) - var(--safe-bottom)); }.task-workspace { flex: 1 1 auto; min-height: 0; height: auto; display: block; }.task-list-panel, .task-detail-panel { height: 100%; min-height: 0; border-radius: 20px; }.task-detail-panel { display: none; padding: 12px; }.task-workspace.detail-open .task-list-panel { display: none; }.task-workspace.detail-open .task-detail-panel { display: block; }.mobile-detail-nav { height: 45px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }.mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font-weight: 600; }.mobile-detail-nav span { color: var(--text-faint); font-size: 11px; }.detail-header { display: block; }.detail-title-group h2 { font-size: 23px; }.detail-actions { display: grid; grid-template-columns: 1fr 1fr 44px; margin-top: 14px; }.detail-actions button { min-height: 44px; }.detail-facts { margin: 14px 0; }.progress-overview, .detail-section { padding: 13px; }.section-heading button { min-height: 44px; }.task-card { min-height: 110px; }.panel-heading button { min-width: 44px; min-height: 44px; }.task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }.sheet-header { padding: 34px 20px 16px; }.sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }.form-grid { grid-template-columns: 1fr; }.field.full { grid-column: auto; }.field input, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; }.sheet-footer { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }.sheet-footer button { min-height: 48px; }
+  .task-toolbar { flex-wrap: wrap; padding: 7px; }.view-switch { width: 100%; }.view-switch button { min-height: 38px; }.task-search { order: 2; min-width: 0; max-width: none; flex: 1; min-height: 44px; }.filters { order: 3; width: 100%; }.filters :deep(.el-select) { flex: 1; width: auto; min-width: 0; }.filters :deep(.el-select__wrapper) { min-height: 44px; }.tasks-page.view-tasks { height: calc(100dvh - 96px - var(--safe-top) - var(--safe-bottom)); }.task-workspace { flex: 1 1 auto; min-height: 0; height: auto; display: block; }.task-list-panel, .task-detail-panel { height: 100%; min-height: 0; border-radius: 20px; }.task-detail-panel { display: none; padding: 12px; }.task-workspace.detail-open .task-list-panel { display: none; }.task-workspace.detail-open .task-detail-panel { display: block; }.mobile-detail-nav { height: 45px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }.mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font-weight: 600; }.mobile-detail-nav span { color: var(--text-faint); font-size: 11px; }.detail-header { display: block; }.detail-title-group h2 { font-size: 23px; }.detail-actions { display: grid; grid-template-columns: 1fr 1fr 44px; margin-top: 14px; }.detail-actions button { min-height: 44px; }.detail-facts { margin-left: auto; }.progress-overview, .detail-section { padding: 13px; }.section-heading button { min-height: 44px; }.task-card { min-height: 110px; }.panel-heading button { min-width: 44px; min-height: 44px; }.task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }.sheet-header { padding: 34px 20px 16px; }.sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }.form-grid { grid-template-columns: 1fr; }.field.full { grid-column: auto; }.field input, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; }.sheet-footer { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }.sheet-footer button { min-height: 48px; }
   /* The zone must be height:100%: as a plain block child of the (flex-constrained)
      workspace its auto height would make the panel's height:100% unresolvable —
      the panel would grow to content height and get clipped by the page's
@@ -1189,11 +1192,10 @@ onMounted(async () => {
   .task-toolbar .filters { order: 0; }
   .focus-filters button { min-height: 44px; }
   .task-card { min-height: 100px; }
-  .mobile-detail-nav { position: sticky; top: 0; z-index: 3; margin: 0 -4px 14px; background: var(--bg-glass-strong); border-bottom: 1px solid var(--border-subtle); }
+  .mobile-detail-nav { position: sticky; top: 0; z-index: 3; margin: 0 -16px 14px; padding: 0 16px; background: var(--bg-glass-strong); border-bottom: 1px solid var(--border-subtle); }
   .detail-actions { display: flex; margin: 16px 0; }
   .detail-actions button { padding-inline: 10px; }
   .detail-section { padding: 0 16px 24px; }
-  .detail-context .detail-facts { margin: 0; }
   .progress-overview { grid-template-columns: auto minmax(50px, 1fr); }
   .progress-overview > small { grid-column: 1 / -1; }
   .detail-switch button { min-height: 44px; padding-inline: 8px; }
@@ -1206,13 +1208,15 @@ onMounted(async () => {
   .task-workspace.list-collapsed { display: block; }
   .task-workspace.detail-open .task-list-panel { display: none; }
   .task-detail-zone { height: 100%; display: block; overflow-y: auto; overscroll-behavior: contain; border-radius: 20px; }
-  .detail-section, .task-progress-panel { height: auto; overflow: visible; }
+  .detail-section, .task-progress-panel { height: auto; display: block; overflow: visible; }
   .detail-summary { padding: 0 16px 22px; }
   .task-progress-panel { margin-top: 0; padding: 0; }
   .detail-columns { display: block; border-top: 1px solid var(--border-subtle); }
   .detail-columns.split .task-progress-panel { border-left: 0; }
-  .progress-body { padding: 0 16px 24px; }
-  .progress-column-header { min-height: 68px; padding: 12px 16px; }
+  .progress-body { padding: 0 16px 24px; overflow: visible; }
+  .column-scroll { overflow: visible; }
+  .progress-column-header { padding: 8px 16px 0; }
+  .task-breakdown .column-heading { margin: 0 -16px; padding: 8px 16px 0; }
   .detail-actions { display: flex; margin: 0; }
   .detail-actions .edit-action { min-height: 44px; }
   .column-heading button, .progress-column-header button { min-height: 44px; }
