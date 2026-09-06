@@ -221,12 +221,10 @@ select:focus-visible,
   .repo-card,
   .insight-card,
   .question-card,
-  .gap-card,
-  .manual-section {
+  .gap-card {
     content-visibility: auto;
     contain-intrinsic-size: auto 240px;
   }
 
   .memo-card { contain-intrinsic-size: auto 320px; }
-  .manual-section { contain-intrinsic-size: auto 600px; }
 }

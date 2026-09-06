@@ -17,15 +17,17 @@ if (reducedMotion) {
 }
 
 function preferredTheme() {
-  const stored = localStorage.getItem('ob-website-theme')
-  if (stored && themes.includes(stored)) return stored
+  try {
+    const stored = localStorage.getItem('ob-website-theme')
+    if (stored && themes.includes(stored)) return stored
+  } catch { /* Storage can be disabled; navigation and content still work. */ }
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
 function setTheme(theme) {
   root.dataset.theme = theme
   root.style.colorScheme = theme === 'dark' ? 'dark' : 'light'
-  localStorage.setItem('ob-website-theme', theme)
+  try { localStorage.setItem('ob-website-theme', theme) } catch { /* Session-only theme. */ }
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColors[theme])
   if (themeLabel) themeLabel.textContent = themeNames[theme]
   if (themeButton) themeButton.setAttribute('aria-label', `当前为${themeNames[theme]}主题，切换主题`)

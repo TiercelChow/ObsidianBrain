@@ -62,7 +62,6 @@ import {
   DataLine,
   Document,
   Connection,
-  Reading,
   Files,
   Finished,
   Expand,
@@ -134,7 +133,6 @@ const navGroups = [
     label: '管理',
     items: [
       { path: '/code-repo', label: '代码仓', icon: FolderOpened },
-      { path: '/manual', label: '使用手册', icon: Reading },
     ],
   },
 ]

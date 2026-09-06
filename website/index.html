@@ -30,7 +30,7 @@
       }
     </script>
   </head>
-  <body>
+  <body class="home-page">
     <a class="skip-link" href="#main-content">跳到主要内容</a>
 
     <svg class="svg-defs" aria-hidden="true">
@@ -57,15 +57,15 @@
     <header class="site-header">
       <div class="header-inner">
         <a class="brand" href="#top" aria-label="ObsidianBrain 首页">
-          <span class="brand-mark" aria-hidden="true"><span></span><span></span></span>
+          <img class="brand-mark" src="./favicon.svg" alt="" width="32" height="32" />
           <span>ObsidianBrain</span>
         </a>
 
         <nav class="site-nav" id="site-navigation" aria-label="主要导航" data-navigation>
-          <a href="#product">产品</a>
+          <a href="#tour">产品体验</a>
           <a href="#features">功能</a>
           <a href="#quick-start">开始使用</a>
-          <a href="#guide">使用指南</a>
+          <a href="./manual/">使用手册</a>
           <a href="#privacy">本地与隐私</a>
         </nav>
 
@@ -88,12 +88,12 @@
     <main id="main-content">
       <section class="hero section-shell" id="top">
         <div class="hero-copy" data-reveal data-reveal-sequence>
-          <div class="eyebrow"><span class="status-dot"></span> 本地知识工作台</div>
-          <h1>让知识不止被收藏，<br /><span>而是持续发生连接。</span></h1>
-          <p class="hero-lead">ObsidianBrain 运行在你自己的设备上，把 Obsidian 中的阅读、记录、任务、代码和灵感组织成一个连贯的工作空间。</p>
+          <div class="eyebrow"><span class="status-dot"></span> OBSIDIANBRAIN · 本地知识工作台</div>
+          <h1>把散落的知识，<br /><span>变成自己的力量。</span></h1>
+          <p class="hero-lead">阅读有归处，灵感被记住，计划向前走。<br class="desktop-break" />围绕你的 Obsidian，把知识与行动放回同一个工作空间。</p>
           <div class="hero-actions">
             <a class="button button-primary" href="#quick-start">开始使用 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a>
-            <a class="button button-secondary" href="https://github.com/TiercelChow/ObsidianBrain" target="_blank" rel="noreferrer"><svg aria-hidden="true"><use href="#icon-github" /></svg>查看源码</a>
+            <a class="button button-secondary" href="./manual/"><svg aria-hidden="true"><use href="#icon-book" /></svg>阅读使用手册</a>
           </div>
           <div class="hero-notes" aria-label="产品特点">
             <span><svg aria-hidden="true"><use href="#icon-check" /></svg>数据留在本地</span>
@@ -103,8 +103,6 @@
         </div>
 
         <div class="hero-product" data-reveal data-reveal-sequence>
-          <div class="ambient-orb orb-one"></div>
-          <div class="ambient-orb orb-two"></div>
           <div class="app-window hero-window">
             <div class="window-bar">
               <div class="traffic-lights"><i></i><i></i><i></i></div>
@@ -113,7 +111,7 @@
             </div>
             <div class="app-layout">
               <aside class="mock-sidebar">
-                <div class="mock-brand"><span class="brand-mark small"><span></span><span></span></span><b>ObsidianBrain</b></div>
+                <div class="mock-brand"><img class="brand-mark small" src="./favicon.svg" alt="" width="32" height="32" /><b>ObsidianBrain</b></div>
                 <div class="mock-nav">
                   <span><svg><use href="#icon-search" /></svg>知识库</span>
                   <span class="active"><svg><use href="#icon-book" /></svg>阅境轩</span>
@@ -149,13 +147,37 @@
               </div>
             </div>
           </div>
-          <div class="floating-note note-left"><span>今日进展</span><strong>长期任务拆解完成</strong><i>刚刚</i></div>
-          <div class="floating-note note-right"><span>阅读位置已保存</span><strong>第 42 / 180 页</strong></div>
+          <p class="preview-caption"><span class="status-dot"></span> 一个空间，连接阅读、记录与行动 <span>界面示意 · 非真实数据</span></p>
         </div>
       </section>
 
       <section class="trust-strip section-shell" aria-label="技术特性" data-reveal data-reveal-sequence>
         <span>Rust + Axum</span><i></i><span>Vue 3</span><i></i><span>Obsidian REST API</span><i></i><span>MCP / Tool API</span><i></i><span>Local-first</span>
+      </section>
+
+      <section class="showcase-section" id="tour">
+        <div class="section-shell">
+          <div class="section-heading centered" data-reveal><span class="section-label">真实场景</span><h2>在不同任务之间切换，视觉和操作始终一致。</h2><p>选择一个场景，看看它如何融入日常工作。</p></div>
+          <div class="showcase-tabs" role="tablist" aria-label="产品场景" data-reveal>
+            <button type="button" role="tab" aria-selected="true" data-feature-target="reader">沉浸阅读</button>
+            <button type="button" role="tab" aria-selected="false" data-feature-target="timeline" tabindex="-1">轻量记录</button>
+            <button type="button" role="tab" aria-selected="false" data-feature-target="tasks" tabindex="-1">目标推进</button>
+          </div>
+          <div class="showcase-stage" data-reveal>
+            <article class="showcase-panel" data-feature-panel="reader">
+              <div class="showcase-copy"><span class="panel-number">01 / 阅境轩</span><h3>打开一本书，回到上次停下的位置。</h3><p>将 Markdown 文件夹或 PDF 添加到书架。每本书分别记录文件、滚动比例或 PDF 页码；再次打开时自动恢复。</p><ul><li><svg><use href="#icon-check" /></svg>长表格和代码块可横向浏览</li><li><svg><use href="#icon-check" /></svg>Mermaid 图表支持缩放与拖动</li><li><svg><use href="#icon-check" /></svg>全屏模式减少界面干扰</li></ul></div>
+              <div class="showcase-ui reader-ui"><div class="ui-top"><span>阅境轩</span><div class="ui-toggle"><i>书架</i><i class="on">阅读</i></div></div><div class="book-row"><div class="book-cover purple"><i>KNOWLEDGE</i><b>知识系统<br />设计手册</b><span>42%</span></div><div class="book-cover green"><i>THINKING</i><b>深度工作<br />阅读札记</b><span>68%</span></div><div class="book-cover orange"><i>ENGINEERING</i><b>Rust<br />实践指南</b><span>12 / 180</span></div></div><div class="shelf-line"></div></div>
+            </article>
+            <article class="showcase-panel" data-feature-panel="timeline" hidden>
+              <div class="showcase-copy"><span class="panel-number">02 / 时光机</span><h3>先把想法留下，整理可以稍后发生。</h3><p>用 Markdown 写一条小记，附上图片或标签。桌面端专注浏览内容，手机端保持自然的整页滚动。</p><ul><li><svg><use href="#icon-check" /></svg>按关键词、日期和标签筛选</li><li><svg><use href="#icon-check" /></svg>图片自动生成轻量缩略图</li><li><svg><use href="#icon-check" /></svg>记录保留明确时间上下文</li></ul></div>
+              <div class="showcase-ui timeline-ui"><div class="timeline-date"><b>09</b><span>2026 · 九月</span></div><div class="memo-card"><div class="memo-meta"><span>今天 10:42</span><i>#产品思考</i></div><p>好的知识系统不是让人记住更多，而是在恰当的时候帮助人继续思考。</p><div class="memo-image"><span></span><span></span><span></span></div></div><div class="memo-card small"><div class="memo-meta"><span>昨天 22:18</span><i>#阅读</i></div><p>把输入转成下一步行动。</p></div></div>
+            </article>
+            <article class="showcase-panel" data-feature-panel="tasks" hidden>
+              <div class="showcase-copy"><span class="panel-number">03 / 任务中枢</span><h3>把长期目标拆到今天可以开始的程度。</h3><p>创建长期任务，逐层增加子任务并追加进展。日历只呈现顶层日程，展开明细后再查看完整拆解。</p><ul><li><svg><use href="#icon-check" /></svg>重要程度和日期范围清晰可见</li><li><svg><use href="#icon-check" /></svg>每个节点都能记录进展</li><li><svg><use href="#icon-check" /></svg>审计历史保留状态变化</li></ul></div>
+              <div class="showcase-ui tasks-ui"><div class="task-head"><div><span>长期任务</span><b>发布 ObsidianBrain 1.0</b></div><strong>64%</strong></div><div class="progress-bar"><i></i></div><div class="task-tree"><div class="done"><i>✓</i><span><b>完成核心架构</b><small>已完成</small></span></div><div class="active"><i></i><span><b>打磨移动端体验</b><small>进行中 · 72%</small></span></div><div><i></i><span><b>整理使用文档</b><small>计划中</small></span></div><div class="nested"><i></i><span><b>发布 GitHub Pages</b><small>今天截止</small></span></div></div></div>
+            </article>
+          </div>
+        </div>
       </section>
 
       <section class="section-shell intro-section" id="product">
@@ -218,30 +240,7 @@
         </div>
       </section>
 
-      <section class="showcase-section">
-        <div class="section-shell">
-          <div class="section-heading centered" data-reveal><span class="section-label">真实场景</span><h2>在不同任务之间切换，视觉和操作始终一致。</h2><p>选择一个场景，看看它如何融入日常工作。</p></div>
-          <div class="showcase-tabs" role="tablist" aria-label="产品场景" data-reveal>
-            <button type="button" role="tab" aria-selected="true" data-feature-target="reader">沉浸阅读</button>
-            <button type="button" role="tab" aria-selected="false" data-feature-target="timeline" tabindex="-1">轻量记录</button>
-            <button type="button" role="tab" aria-selected="false" data-feature-target="tasks" tabindex="-1">目标推进</button>
-          </div>
-          <div class="showcase-stage" data-reveal>
-            <article class="showcase-panel" data-feature-panel="reader">
-              <div class="showcase-copy"><span class="panel-number">01 / 阅境轩</span><h3>打开一本书，回到上次停下的位置。</h3><p>将 Markdown 文件夹或 PDF 添加到书架。每本书分别记录文件、滚动比例或 PDF 页码；再次打开时自动恢复。</p><ul><li><svg><use href="#icon-check" /></svg>长表格和代码块可横向浏览</li><li><svg><use href="#icon-check" /></svg>Mermaid 图表支持缩放与拖动</li><li><svg><use href="#icon-check" /></svg>全屏模式减少界面干扰</li></ul></div>
-              <div class="showcase-ui reader-ui"><div class="ui-top"><span>阅境轩</span><div class="ui-toggle"><i>书架</i><i class="on">阅读</i></div></div><div class="book-row"><div class="book-cover purple"><i>KNOWLEDGE</i><b>知识系统<br />设计手册</b><span>42%</span></div><div class="book-cover green"><i>THINKING</i><b>深度工作<br />阅读札记</b><span>68%</span></div><div class="book-cover orange"><i>ENGINEERING</i><b>Rust<br />实践指南</b><span>12 / 180</span></div></div><div class="shelf-line"></div></div>
-            </article>
-            <article class="showcase-panel" data-feature-panel="timeline" hidden>
-              <div class="showcase-copy"><span class="panel-number">02 / 时光机</span><h3>先把想法留下，整理可以稍后发生。</h3><p>用 Markdown 写一条小记，附上图片或标签。桌面端专注浏览内容，手机端保持自然的整页滚动。</p><ul><li><svg><use href="#icon-check" /></svg>按关键词、日期和标签筛选</li><li><svg><use href="#icon-check" /></svg>图片自动生成轻量缩略图</li><li><svg><use href="#icon-check" /></svg>记录保留明确时间上下文</li></ul></div>
-              <div class="showcase-ui timeline-ui"><div class="timeline-date"><b>09</b><span>2026 · 九月</span></div><div class="memo-card"><div class="memo-meta"><span>今天 10:42</span><i>#产品思考</i></div><p>好的知识系统不是让人记住更多，而是在恰当的时候帮助人继续思考。</p><div class="memo-image"><span></span><span></span><span></span></div></div><div class="memo-card small"><div class="memo-meta"><span>昨天 22:18</span><i>#阅读</i></div><p>把输入转成下一步行动。</p></div></div>
-            </article>
-            <article class="showcase-panel" data-feature-panel="tasks" hidden>
-              <div class="showcase-copy"><span class="panel-number">03 / 任务中枢</span><h3>把长期目标拆到今天可以开始的程度。</h3><p>创建长期任务，逐层增加子任务并追加进展。日历只呈现顶层日程，展开明细后再查看完整拆解。</p><ul><li><svg><use href="#icon-check" /></svg>重要程度和日期范围清晰可见</li><li><svg><use href="#icon-check" /></svg>每个节点都能记录进展</li><li><svg><use href="#icon-check" /></svg>审计历史保留状态变化</li></ul></div>
-              <div class="showcase-ui tasks-ui"><div class="task-head"><div><span>长期任务</span><b>发布 ObsidianBrain 1.0</b></div><strong>64%</strong></div><div class="progress-bar"><i></i></div><div class="task-tree"><div class="done"><i>✓</i><span><b>完成核心架构</b><small>已完成</small></span></div><div class="active"><i></i><span><b>打磨移动端体验</b><small>进行中 · 72%</small></span></div><div><i></i><span><b>整理使用文档</b><small>计划中</small></span></div><div class="nested"><i></i><span><b>发布 GitHub Pages</b><small>今天截止</small></span></div></div></div>
-            </article>
-          </div>
-        </div>
-      </section>
+
 
       <section class="section-shell quick-start-section" id="quick-start">
         <div class="quick-start-layout" data-reveal-group>
@@ -264,22 +263,24 @@
       </section>
 
       <section class="guide-section" id="guide">
-        <div class="section-shell">
-          <div class="section-heading split" data-reveal><div><span class="section-label">使用指南</span><h2>从第一次启动，<br />到形成自己的使用节奏。</h2></div><p>下面覆盖最常用的配置与操作。更细的接口和开发设计保留在仓库的 README 与 docs 中。</p></div>
-          <div class="guide-grid" data-reveal-group>
-            <article class="guide-card wide" data-reveal><div class="guide-card-head"><span>01</span><div><h3>首次配置</h3><p>先让系统知道知识在哪里，以及需要使用哪个模型。</p></div></div><div class="settings-preview"><div class="settings-group"><span>Obsidian Vault</span><div class="setting-row">Vault 路径 <i>/Users/you/Documents/MyVault</i></div><div class="setting-row">REST API <i>https://127.0.0.1:27124</i></div><div class="setting-row">API Key <i>••••••••••••••••</i></div></div><div class="settings-group"><span>LLM 配置</span><div class="setting-row">提供商 <i>OpenAI 兼容</i></div><div class="setting-row">模型 <i>gpt-4o-mini</i></div><div class="setting-row">Base URL <i>使用官方默认</i></div></div></div><p class="guide-tip"><svg><use href="#icon-shield" /></svg>API Key 会保存到本地数据目录，不会由产品官网或 GitHub Pages 接收。</p></article>
-            <article class="guide-card" data-reveal><div class="guide-card-head"><span>02</span><div><h3>开始阅读</h3><p>进入阅境轩，添加一个文件夹或 PDF 到书架。</p></div></div><ol><li>选择“添加书籍”并填写本地路径。</li><li>补充书名、描述与自由类别。</li><li>点击封面开始阅读，系统自动记录位置。</li><li>长表格、代码和图表可在内容区内独立浏览。</li></ol></article>
-            <article class="guide-card" data-reveal><div class="guide-card-head"><span>03</span><div><h3>留下小记</h3><p>进入时光机，快速记录还不需要整理的内容。</p></div></div><ol><li>创建小记，支持 Markdown 与图片。</li><li>使用标签标记主题或上下文。</li><li>通过关键词和日期返回历史记录。</li><li>在桌面端滚动内容区，手机端自然整页浏览。</li></ol></article>
-            <article class="guide-card" data-reveal><div class="guide-card-head"><span>04</span><div><h3>管理任务</h3><p>根据工作尺度选择短期待办或长期任务。</p></div></div><ol><li>短期待办只需标题、描述、日期和重要程度。</li><li>长期任务可以添加任意层级子任务。</li><li>在根任务或子任务上追加进展和百分比。</li><li>通过日历查看开始、结束和跨日安排。</li></ol></article>
-            <article class="guide-card" data-reveal><div class="guide-card-head"><span>05</span><div><h3>编译 Wiki</h3><p>把多份原始资料整理为可以继续维护的知识条目。</p></div></div><ol><li>选择主题和来源资料。</li><li>由 LLM 编译新页面或合并已有页面。</li><li>基于已编译 Wiki 进行带来源问答。</li><li>检查孤岛页、枢纽和缺失知识。</li></ol></article>
-            <article class="guide-card" data-reveal><div class="guide-card-head"><span>06</span><div><h3>接入 AI 工具</h3><p>让兼容 Tool API 或 MCP 的对话前端调用本地能力。</p></div></div><ol><li>启动 ObsidianBrain 本地服务。</li><li>通过工具发现接口获取可用工具。</li><li>让 LLM 搜索笔记、添加记忆或推进任务。</li><li>执行结果和错误以标准化结构返回。</li></ol></article>
+        <div class="section-shell manual-gateway" data-reveal>
+          <div class="handbook-cover" aria-hidden="true">
+            <span>OBSIDIANBRAIN</span>
+            <svg><use href="#icon-book" /></svg>
+            <strong>把工具，<br />用成习惯。</strong>
+            <small>THE HANDBOOK / 使用手册</small>
           </div>
-          <div class="command-shelf" data-reveal>
-            <div><span>常用 CLI</span><p>启动、停止、检查状态与修改配置。</p></div>
-            <div class="command-list">
-              <code>obsidian-brain start</code><code>obsidian-brain stop</code><code>obsidian-brain status</code><code>obsidian-brain config show</code>
+          <div class="gateway-copy">
+            <span class="section-label">随时查阅，不必打开应用</span>
+            <h2>开始容易，<br />深入也有迹可循。</h2>
+            <p>功能说明、配置和日常工作流，现在有了一个专属的阅读空间。按章节查找，也可以从头慢慢读。</p>
+            <div class="gateway-chapters">
+              <a href="./manual/#intro"><span>01</span><div><strong>先认识它</strong><small>理解知识工作台的工作方式</small></div><svg aria-hidden="true"><use href="#icon-arrow" /></svg></a>
+              <a href="./manual/#config"><span>02</span><div><strong>连接你的工具</strong><small>Vault、Obsidian API 与 LLM 配置</small></div><svg aria-hidden="true"><use href="#icon-arrow" /></svg></a>
+              <a href="./manual/#workflow"><span>03</span><div><strong>建立自己的节奏</strong><small>日常记录、阅读与知识积累</small></div><svg aria-hidden="true"><use href="#icon-arrow" /></svg></a>
             </div>
-            <a href="https://github.com/TiercelChow/ObsidianBrain#cli-%E5%91%BD%E4%BB%A4" target="_blank" rel="noreferrer">查看完整命令 <svg><use href="#icon-arrow" /></svg></a>
+            <a class="button button-primary" href="./manual/">打开使用手册 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a>
+            <p class="gateway-note">原手册已迁移 · 内容待核实</p>
           </div>
         </div>
       </section>
@@ -315,15 +316,16 @@
 
       <section class="section-shell final-cta" data-reveal data-reveal-sequence>
         <div class="cta-orb"></div><div class="cta-copy"><span class="section-label">属于你的第二大脑</span><h2>让下一次阅读、记录和行动，<br />从同一个地方开始。</h2><p>ObsidianBrain 仍在持续生长。现在就从源码构建，或者先浏览项目设计。</p><div><a class="button button-primary" href="https://github.com/TiercelChow/ObsidianBrain" target="_blank" rel="noreferrer"><svg><use href="#icon-github" /></svg>在 GitHub 查看</a><a class="button button-secondary" href="https://github.com/TiercelChow/ObsidianBrain/tree/main/docs" target="_blank" rel="noreferrer">阅读设计文档</a></div></div>
-        <div class="cta-mark" aria-hidden="true"><span class="brand-mark giant"><span></span><span></span></span></div>
+        <div class="cta-mark" aria-hidden="true"><img class="brand-mark giant" src="./favicon.svg" alt="" width="32" height="32" /></div>
       </section>
     </main>
 
     <footer class="site-footer">
-      <div class="section-shell footer-inner"><div><a class="brand" href="#top"><span class="brand-mark small"><span></span><span></span></span><span>ObsidianBrain</span></a><p>本地 Rust 知识引擎与个人知识工作台。</p></div><div class="footer-links"><div><span>项目</span><a href="https://github.com/TiercelChow/ObsidianBrain" target="_blank" rel="noreferrer">GitHub</a><a href="https://github.com/TiercelChow/ObsidianBrain#readme" target="_blank" rel="noreferrer">README</a><a href="https://github.com/TiercelChow/ObsidianBrain/issues" target="_blank" rel="noreferrer">Issues</a></div><div><span>页面</span><a href="#features">功能</a><a href="#guide">使用指南</a><a href="#privacy">隐私</a></div></div></div>
+      <div class="section-shell footer-inner"><div><a class="brand" href="#top"><img class="brand-mark small" src="./favicon.svg" alt="" width="32" height="32" /><span>ObsidianBrain</span></a><p>本地 Rust 知识引擎与个人知识工作台。</p></div><div class="footer-links"><div><span>项目</span><a href="https://github.com/TiercelChow/ObsidianBrain" target="_blank" rel="noreferrer">GitHub</a><a href="https://github.com/TiercelChow/ObsidianBrain#readme" target="_blank" rel="noreferrer">README</a><a href="https://github.com/TiercelChow/ObsidianBrain/issues" target="_blank" rel="noreferrer">Issues</a></div><div><span>页面</span><a href="#features">功能</a><a href="./manual/">使用手册</a><a href="#privacy">隐私</a></div></div></div>
       <div class="section-shell footer-bottom"><span>© <span data-year></span> ObsidianBrain</span><span>Built for knowledge that stays yours.</span></div>
     </footer>
 
     <script type="module" src="./src/main.js"></script>
+    <script type="module" src="./src/home.js"></script>
   </body>
 </html>

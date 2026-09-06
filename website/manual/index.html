@@ -1,40 +1,106 @@
-<template>
-  <div class="manual-page">
-    <header class="page-header">
-      <div>
-        <h1 class="page-title">使用手册</h1>
-        <p class="page-subtitle">ObsidianBrain 知识引擎使用指南</p>
+<!doctype html>
+<html lang="zh-CN" class="manual-document">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#f0f0f3" />
+    <meta name="description" content="ObsidianBrain 使用手册：功能说明、配置与典型工作流。应用内原手册迁移版，内容待核实。" />
+    <link rel="canonical" href="https://tiercelchow.github.io/ObsidianBrain/manual/" />
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+    <title>使用手册 · ObsidianBrain</title>
+    <script>document.documentElement.classList.add('js')</script>
+  </head>
+  <body class="manual-page">
+    <a class="skip-link" href="#main-content">跳到手册正文</a>
+    <svg class="svg-defs" aria-hidden="true">
+      <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5" /></symbol>
+      <symbol id="icon-github" viewBox="0 0 24 24"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3.3-.4 6.8-1.6 6.8-7A5.4 5.4 0 0 0 19.4 4 5 5 0 0 0 19.3.5S18.2.1 15 1.8a13.4 13.4 0 0 0-6 0C5.8.1 4.7.5 4.7.5A5 5 0 0 0 4.6 4a5.4 5.4 0 0 0-1.4 3.7c0 5.3 3.5 6.5 6.8 6.9A4.8 4.8 0 0 0 9 18v4M9 19c-3 .9-3-1.5-4.2-2" /></symbol>
+      <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" /></symbol>
+      <symbol id="icon-theme" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></symbol>
+      <symbol id="icon-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4H6.5A2.5 2.5 0 0 0 4 6.5v13Z" /><path d="M8 7h8M8 10h6" /></symbol>
+      <symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></symbol>
+      <symbol id="icon-task" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m7 9 2 2 4-4M14 10h3M7 15h10" /></symbol>
+      <symbol id="icon-wiki" viewBox="0 0 24 24"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H12v18H7.5A3.5 3.5 0 0 0 4 23V5.5ZM20 5.5A3.5 3.5 0 0 0 16.5 2H12v18h4.5A3.5 3.5 0 0 1 20 23V5.5Z" /></symbol>
+      <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></symbol>
+      <symbol id="icon-code" viewBox="0 0 24 24"><path d="m8 9-4 3 4 3m8-6 4 3-4 3m-3-9-2 12" /></symbol>
+      <symbol id="icon-spark" viewBox="0 0 24 24"><path d="m12 3 1.3 4.2L17 9l-3.7 1.8L12 15l-1.3-4.2L7 9l3.7-1.8L12 3ZM19 15l.7 2.3L22 18l-2.3.7L19 21l-.7-2.3L16 18l2.3-.7L19 15ZM5 13l.8 2.2L8 16l-2.2.8L5 19l-.8-2.2L2 16l2.2-.8L5 13Z" /></symbol>
+      <symbol id="icon-radar" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><path d="M12 12 18 6M12 3v2M3 12h2" /></symbol>
+      <symbol id="icon-shield" viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.8 3.2 8.2 7.5 9.5 4.3-1.3 7.5-4.7 7.5-9.5V6L12 3Z" /><path d="m9 12 2 2 4-5" /></symbol>
+      <symbol id="icon-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></symbol>
+      <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></symbol>
+      <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-10Z" /></symbol>
+      <symbol id="icon-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m7 9 3 3-3 3m5 0h5" /></symbol>
+      <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4" /></symbol>
+    </svg>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="../" aria-label="ObsidianBrain 首页">
+          <img class="brand-mark" src="../favicon.svg" alt="" width="32" height="32" />
+          <span>ObsidianBrain</span>
+        </a>
+
+        <nav class="site-nav" id="site-navigation" aria-label="主要导航" data-navigation>
+          <a href="../#tour">产品体验</a>
+          <a href="../#features">功能</a>
+          <a href="../#quick-start">开始使用</a>
+          <a href="./" aria-current="page">使用手册</a>
+          <a href="../#privacy">本地与隐私</a>
+        </nav>
+
+        <div class="header-actions">
+          <button class="theme-toggle" type="button" data-theme-toggle>
+            <svg aria-hidden="true"><use href="#icon-theme" /></svg>
+            <span data-theme-label>浅色</span>
+          </button>
+          <a class="github-button" href="https://github.com/TiercelChow/ObsidianBrain" target="_blank" rel="noreferrer">
+            <svg aria-hidden="true"><use href="#icon-github" /></svg>
+            <span>GitHub</span>
+          </a>
+          <button class="menu-toggle" type="button" aria-label="打开导航" aria-controls="site-navigation" aria-expanded="false" data-menu-toggle>
+            <svg aria-hidden="true"><use href="#icon-menu" /></svg>
+          </button>
+        </div>
       </div>
     </header>
-
-    <div class="mobile-toc" aria-label="手册章节">
-      <span class="mobile-toc-label">章节</span>
-      <select :value="activeSection" @change="scrollTo(($event.target as HTMLSelectElement).value)">
-        <option v-for="s in sections" :key="s.id" :value="s.id">{{ s.num }}. {{ s.title }}</option>
-      </select>
-    </div>
-
-    <div class="manual-layout">
-      <!-- 左侧目录 -->
-      <aside class="toc-sidebar">
-        <div class="toc-inner">
-          <div class="toc-header">📋 目录</div>
-          <a
-            v-for="s in sections"
-            :key="s.id"
-            :href="'#' + s.id"
-            class="toc-link"
-            :class="{ active: activeSection === s.id }"
-            @click.prevent="scrollTo(s.id)"
-          >
-            <span class="toc-num">{{ s.num }}</span>
-            <span class="toc-text">{{ s.title }}</span>
-          </a>
-        </div>
-      </aside>
-
-      <!-- 右侧内容 -->
-      <div class="manual-content">
+    <main id="main-content" class="section-shell docs-shell">
+      <header class="docs-intro" id="top">
+        <a class="docs-back" href="../">← 产品首页</a>
+        <div class="docs-title-row"><div><span class="section-label">OBSIDIANBRAIN / HANDBOOK</span><h1>使用手册</h1></div><img src="../favicon.svg" width="72" height="72" alt="" /></div>
+        <p class="docs-lead">从认识你的知识工作台，到建立日常使用的节奏。</p>
+        <div class="migration-notice"><span class="migration-badge">迁移版</span><p><strong>内容待核实</strong> · 本页保留应用内原手册的全部 10 个章节，以及官网原有的上手指南。正文尚未更新，部分说明可能与当前版本不一致。</p></div>
+      </header>
+      <details class="mobile-chapters">
+        <summary>浏览章节 <span data-current-chapter>认识 ObsidianBrain</span><svg aria-hidden="true"><use href="#icon-chevron" /></svg></summary>
+        <nav aria-label="手机章节目录"><a href="#intro" data-chapter-link><span>01</span>认识 ObsidianBrain</a>
+<a href="#timeline" data-chapter-link><span>02</span>时光机</a>
+<a href="#wiki-dashboard" data-chapter-link><span>03</span>Wiki 看板</a>
+<a href="#wiki-workbench" data-chapter-link><span>04</span>Wiki 工作台</a>
+<a href="#explore" data-chapter-link><span>05</span>知识探索</a>
+<a href="#ingest" data-chapter-link><span>06</span>外部摄入</a>
+<a href="#knowledge" data-chapter-link><span>07</span>知识库</a>
+<a href="#code-repo" data-chapter-link><span>08</span>代码仓</a>
+<a href="#config" data-chapter-link><span>09</span>首页配置</a>
+<a href="#workflow" data-chapter-link><span>10</span>典型工作流</a>
+<a href="#getting-started" data-chapter-link><span>↗</span>快速上手 · 原官网指南</a></nav>
+      </details>
+      <div class="docs-layout">
+        <aside class="docs-sidebar">
+          <span class="docs-nav-label">阅读目录</span>
+          <nav aria-label="章节目录"><a href="#intro" data-chapter-link><span>01</span>认识 ObsidianBrain</a>
+<a href="#timeline" data-chapter-link><span>02</span>时光机</a>
+<a href="#wiki-dashboard" data-chapter-link><span>03</span>Wiki 看板</a>
+<a href="#wiki-workbench" data-chapter-link><span>04</span>Wiki 工作台</a>
+<a href="#explore" data-chapter-link><span>05</span>知识探索</a>
+<a href="#ingest" data-chapter-link><span>06</span>外部摄入</a>
+<a href="#knowledge" data-chapter-link><span>07</span>知识库</a>
+<a href="#code-repo" data-chapter-link><span>08</span>代码仓</a>
+<a href="#config" data-chapter-link><span>09</span>首页配置</a>
+<a href="#workflow" data-chapter-link><span>10</span>典型工作流</a>
+<a href="#getting-started" data-chapter-link><span>↗</span>快速上手 · 原官网指南</a></nav>
+          <a class="docs-top-link" href="#top">返回顶部 ↑</a>
+        </aside>
+        <div class="manual-content">
+<!-- migrated-manual:start -->
         <!-- 1. 什么是 ObsidianBrain -->
         <section id="intro" class="manual-section">
           <h2>1. 什么是 ObsidianBrain</h2>
@@ -365,215 +431,33 @@
             <span class="callout-icon">🎯</span>
             <span>核心理念：你负责提供资料和提问，AI 负责摘要、分类、交叉引用。知识持续复利增长。</span>
           </div>
-        </section>
+        </section><!-- migrated-manual:end -->
+      <section class="manual-section website-start-guide" id="getting-started">
+        <div>
+          <div class="section-heading split"><div><span class="section-label">附录 · 原官网指南</span><h2>快速上手</h2></div><p>下面覆盖最常用的配置与操作。更细的接口和开发设计保留在仓库的 README 与 docs 中。</p></div>
+          <div class="guide-grid">
+            <article class="guide-card wide"><div class="guide-card-head"><span>01</span><div><h3>首次配置</h3><p>先让系统知道知识在哪里，以及需要使用哪个模型。</p></div></div><div class="settings-preview"><div class="settings-group"><span>Obsidian Vault</span><div class="setting-row">Vault 路径 <i>/Users/you/Documents/MyVault</i></div><div class="setting-row">REST API <i>https://127.0.0.1:27124</i></div><div class="setting-row">API Key <i>••••••••••••••••</i></div></div><div class="settings-group"><span>LLM 配置</span><div class="setting-row">提供商 <i>OpenAI 兼容</i></div><div class="setting-row">模型 <i>gpt-4o-mini</i></div><div class="setting-row">Base URL <i>使用官方默认</i></div></div></div><p class="guide-tip"><svg><use href="#icon-shield" /></svg>API Key 会保存到本地数据目录，不会由产品官网或 GitHub Pages 接收。</p></article>
+            <article class="guide-card"><div class="guide-card-head"><span>02</span><div><h3>开始阅读</h3><p>进入阅境轩，添加一个文件夹或 PDF 到书架。</p></div></div><ol><li>选择“添加书籍”并填写本地路径。</li><li>补充书名、描述与自由类别。</li><li>点击封面开始阅读，系统自动记录位置。</li><li>长表格、代码和图表可在内容区内独立浏览。</li></ol></article>
+            <article class="guide-card"><div class="guide-card-head"><span>03</span><div><h3>留下小记</h3><p>进入时光机，快速记录还不需要整理的内容。</p></div></div><ol><li>创建小记，支持 Markdown 与图片。</li><li>使用标签标记主题或上下文。</li><li>通过关键词和日期返回历史记录。</li><li>在桌面端滚动内容区，手机端自然整页浏览。</li></ol></article>
+            <article class="guide-card"><div class="guide-card-head"><span>04</span><div><h3>管理任务</h3><p>根据工作尺度选择短期待办或长期任务。</p></div></div><ol><li>短期待办只需标题、描述、日期和重要程度。</li><li>长期任务可以添加任意层级子任务。</li><li>在根任务或子任务上追加进展和百分比。</li><li>通过日历查看开始、结束和跨日安排。</li></ol></article>
+            <article class="guide-card"><div class="guide-card-head"><span>05</span><div><h3>编译 Wiki</h3><p>把多份原始资料整理为可以继续维护的知识条目。</p></div></div><ol><li>选择主题和来源资料。</li><li>由 LLM 编译新页面或合并已有页面。</li><li>基于已编译 Wiki 进行带来源问答。</li><li>检查孤岛页、枢纽和缺失知识。</li></ol></article>
+            <article class="guide-card"><div class="guide-card-head"><span>06</span><div><h3>接入 AI 工具</h3><p>让兼容 Tool API 或 MCP 的对话前端调用本地能力。</p></div></div><ol><li>启动 ObsidianBrain 本地服务。</li><li>通过工具发现接口获取可用工具。</li><li>让 LLM 搜索笔记、添加记忆或推进任务。</li><li>执行结果和错误以标准化结构返回。</li></ol></article>
+          </div>
+          <div class="command-shelf">
+            <div><span>常用 CLI</span><p>启动、停止、检查状态与修改配置。</p></div>
+            <div class="command-list">
+              <code>obsidian-brain start</code><code>obsidian-brain stop</code><code>obsidian-brain status</code><code>obsidian-brain config show</code>
+            </div>
+            <a href="https://github.com/TiercelChow/ObsidianBrain#cli-%E5%91%BD%E4%BB%A4" target="_blank" rel="noreferrer">查看完整命令 <svg><use href="#icon-arrow" /></svg></a>
+          </div>
+        </div>
+      </section>
+          <div class="docs-end"><span>你已读完全部章节</span><p>使用手册现已独立于应用，可在这里随时查阅。</p><a class="button button-secondary" href="../">返回产品首页 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div>
+        </div>
       </div>
-    </div>
-  </div>
-</template>
-
-<script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-
-const sections = [
-  { id: 'intro', num: 1, title: '什么是 ObsidianBrain' },
-  { id: 'timeline', num: 2, title: '时光机' },
-  { id: 'wiki-dashboard', num: 3, title: 'Wiki 看板' },
-  { id: 'wiki-workbench', num: 4, title: 'Wiki 工作台' },
-  { id: 'explore', num: 5, title: '知识探索' },
-  { id: 'ingest', num: 6, title: '外部摄入' },
-  { id: 'knowledge', num: 7, title: '知识库' },
-  { id: 'code-repo', num: 8, title: '代码仓' },
-  { id: 'config', num: 9, title: '首页配置' },
-  { id: 'workflow', num: 10, title: '典型工作流' },
-]
-
-const activeSection = ref('intro')
-let scrollHost: HTMLElement | null = null
-
-function scrollTo(id: string) {
-  const el = document.getElementById(id)
-  if (el) {
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    activeSection.value = id
-  }
-}
-
-function onScroll() {
-  const hostTop = scrollHost?.getBoundingClientRect().top ?? 0
-  const threshold = hostTop + 140
-  for (const s of sections) {
-    const el = document.getElementById(s.id)
-    if (el && el.getBoundingClientRect().top <= threshold) activeSection.value = s.id
-  }
-}
-
-onMounted(() => {
-  scrollHost = document.querySelector(
-    window.matchMedia('(max-width: 768px)').matches ? '.app-main' : '.manual-content',
-  ) as HTMLElement | null
-  scrollHost?.addEventListener('scroll', onScroll, { passive: true })
-  onScroll()
-})
-onUnmounted(() => {
-  scrollHost?.removeEventListener('scroll', onScroll)
-  scrollHost = null
-})
-</script>
-
-<style scoped>
-.manual-page { max-width: 100%; min-height: 100%; }
-
-.manual-layout { display: flex; gap: 24px; }
-.mobile-toc { display: none; }
-
-/* 左侧目录 */
-.toc-sidebar { width: 200px; flex-shrink: 0; position: sticky; top: 0; align-self: flex-start; max-height: calc(100vh - 100px); overflow-y: auto; }
-.toc-inner { padding: 16px 12px; border-radius: 14px; }
-.toc-header { font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 10px; padding-left: 8px; }
-.toc-link { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; text-decoration: none; font-size: 13px; color: var(--text-muted); transition: var(--transition-interactive); cursor: pointer; }
-.toc-link:hover { background: var(--bg-glass-subtle); color: var(--text-secondary); }
-.toc-link.active { background: var(--accent-light); color: var(--accent); font-weight: 600; }
-.toc-link:active { transform: scale(0.97); transition: transform 100ms ease-out; }
-.toc-num { width: 18px; text-align: center; font-weight: 600; }
-.toc-text { flex: 1; }
-
-/* 右侧内容 */
-.manual-content { flex: 1; min-width: 0; overflow-y: auto; max-height: calc(100vh - 100px); padding-right: 8px; }
-.manual-section { margin-bottom: 40px; scroll-margin-top: 20px; }
-.manual-section h2 { font-size: 18px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid var(--accent-light); }
-.manual-section h3 { font-size: 15px; font-weight: 600; color: var(--text-primary); margin: 16px 0 8px; }
-.manual-section p { font-size: 14px; color: var(--text-secondary); line-height: 1.75; margin-bottom: 12px; }
-.manual-section ul, .manual-section ol { padding-left: 22px; margin-bottom: 12px; }
-.manual-section li { font-size: 14px; color: var(--text-secondary); line-height: 1.75; margin-bottom: 4px; }
-.manual-section code { background: var(--bg-glass-subtle); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; color: var(--text-tertiary); }
-
-/* 流程图 */
-.flow-diagram { display: flex; align-items: stretch; gap: 0; margin: 20px 0; flex-wrap: wrap; }
-.flow-step { flex: 1; min-width: 120px; padding: 16px 12px; border-radius: 12px; text-align: center; background: var(--bg-glass); }
-.flow-icon { font-size: 28px; margin-bottom: 6px; }
-.flow-label { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
-.flow-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
-.flow-arrow { display: flex; align-items: center; padding: 0 8px; font-size: 18px; color: var(--text-faint); }
-
-/* 功能卡片网格 */
-.feature-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 16px 0; }
-.feature-card { padding: 16px; border-radius: 12px; }
-.feature-icon { font-size: 24px; margin-bottom: 8px; }
-.feature-card h3 { margin: 0 0 6px; font-size: 14px; }
-.feature-card p { font-size: 12px; margin: 0; color: var(--text-muted); }
-
-/* 仪表盘模拟 */
-.dashboard-mock { padding: 16px; border-radius: 14px; margin: 16px 0; }
-.mock-row { display: flex; gap: 8px; margin-bottom: 12px; }
-.mock-stat { flex: 1; padding: 10px; border-radius: 10px; text-align: center; background: var(--bg-glass-subtle); font-size: 18px; font-weight: 700; color: var(--text-primary); }
-.mock-stat small { display: block; font-size: 11px; font-weight: 400; color: var(--text-muted); margin-top: 2px; }
-.mock-section { margin-top: 8px; }
-.mock-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
-.mock-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; height: 24px; }
-.mock-bar-fill { height: 8px; border-radius: 4px; }
-.mock-bar-label { font-size: 12px; color: var(--text-muted); }
-
-/* 信息表格 */
-.info-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
-.info-table th { text-align: left; padding: 8px 12px; background: var(--bg-glass-subtle); color: var(--text-muted); font-weight: 600; border-bottom: 1px solid var(--border-faint); }
-.info-table td { padding: 8px 12px; color: var(--text-secondary); border-bottom: 1px solid var(--border-faint); }
-.info-table tr:last-child td { border-bottom: none; }
-
-/* 提示框 */
-.callout { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; border-radius: 10px; background: var(--accent-light); margin: 16px 0; font-size: 13px; color: var(--text-secondary); }
-.callout.success { background: rgba(74, 222, 128, 0.1); }
-.callout-icon { font-size: 16px; flex-shrink: 0; }
-
-/* Tab 流程 */
-.tab-flow { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 16px 0; }
-.tab-card { padding: 16px; border-radius: 12px; }
-.tab-icon { font-size: 24px; margin-bottom: 6px; }
-.tab-card h3 { margin: 0 0 10px; font-size: 14px; }
-.tab-steps { display: flex; flex-direction: column; gap: 4px; }
-.step { font-size: 12px; color: var(--text-secondary); padding: 4px 8px; border-radius: 6px; background: var(--bg-glass-subtle); }
-.step-arrow { text-align: center; color: var(--text-faint); font-size: 11px; }
-.tab-desc { font-size: 12px; color: var(--text-muted); margin: 0; }
-
-/* 探索网格 */
-.explore-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
-.explore-card { padding: 16px; border-radius: 12px; }
-.explore-icon { font-size: 24px; margin-bottom: 6px; }
-.explore-card h3 { margin: 0 0 6px; font-size: 14px; }
-.explore-card p { font-size: 12px; margin: 0 0 10px; color: var(--text-muted); }
-.explore-example { padding: 8px; border-radius: 8px; background: var(--bg-glass-subtle); }
-.concept-pair { display: block; font-size: 12px; margin-bottom: 4px; }
-.cp { padding: 2px 8px; border-radius: 6px; font-weight: 600; }
-.cp.a { background: rgba(99, 102, 241, 0.15); color: #818cf8; }
-.cp.b { background: rgba(236, 72, 153, 0.15); color: #f472b6; }
-.example-hint { font-size: 11px; color: var(--text-muted); }
-
-/* 管道图 */
-.pipeline { display: flex; align-items: stretch; gap: 0; margin: 20px 0; flex-wrap: wrap; }
-.pipe-stage { flex: 1; min-width: 100px; padding: 14px 10px; border-radius: 12px; text-align: center; background: var(--bg-glass); }
-.pipe-icon { font-size: 24px; margin-bottom: 4px; }
-.pipe-label { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-.pipe-desc { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
-.pipe-arrow { display: flex; align-items: center; padding: 0 6px; font-size: 16px; color: var(--text-faint); }
-
-/* 洞察网格 */
-.insight-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
-.insight-card { padding: 16px; border-radius: 12px; text-align: center; }
-.insight-emoji { font-size: 28px; margin-bottom: 6px; }
-.insight-card h3 { margin: 0 0 4px; font-size: 14px; }
-.insight-card p { font-size: 12px; margin: 0; color: var(--text-muted); }
-
-/* 配置网格 */
-.config-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 16px 0; }
-.config-item { padding: 16px; border-radius: 12px; }
-.config-emoji { font-size: 24px; margin-bottom: 6px; }
-.config-item h3 { margin: 0 0 4px; font-size: 14px; }
-.config-item p { font-size: 12px; margin: 0; color: var(--text-muted); }
-
-/* 工作流卡片 */
-.workflow-card { padding: 16px 20px; border-radius: 12px; margin-bottom: 12px; }
-.workflow-card h3 { margin: 0 0 10px; font-size: 14px; }
-.workflow-flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.wf-step { padding: 5px 12px; border-radius: 8px; background: var(--bg-glass-subtle); font-size: 12px; color: var(--text-secondary); }
-.wf-arrow { color: var(--text-faint); font-size: 14px; }
-
-@media (max-width: 768px) {
-  .toc-sidebar { display: none; }
-  .mobile-toc {
-    position: sticky;
-    top: calc(var(--mobile-header-height) + var(--safe-top));
-    z-index: 20;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-height: 52px;
-    margin-bottom: 16px;
-    padding: 6px 8px 6px 14px;
-    border: 1px solid var(--border-glass);
-    border-radius: 16px;
-    background: var(--bg-glass-strong);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-  }
-  .mobile-toc-label { color: var(--text-muted); font-size: 12px; font-weight: 700; }
-  .mobile-toc select {
-    flex: 1;
-    min-width: 0;
-    min-height: var(--tap-target);
-    padding: 0 10px;
-    border: 0;
-    border-radius: 12px;
-    background: var(--bg-glass-subtle);
-    color: var(--text-primary);
-  }
-  .manual-layout { display: block; }
-  .manual-content { max-height: none; overflow: visible; padding-right: 0; }
-  .manual-section { scroll-margin-top: calc(var(--mobile-header-height) + var(--safe-top) + 68px); }
-  .info-table { display: block; max-width: 100%; overflow-x: auto; white-space: nowrap; }
-  .mock-row { overflow-x: auto; }
-  .mock-stat { min-width: 86px; }
-  .feature-grid, .tab-flow, .config-grid { grid-template-columns: 1fr; }
-  .explore-grid, .insight-grid { grid-template-columns: 1fr; }
-  .flow-diagram, .pipeline { flex-direction: column; }
-  .flow-arrow, .pipe-arrow { transform: rotate(90deg); padding: 4px 0; }
-}
-</style>
+    </main>
+    <footer class="site-footer"><div class="section-shell docs-footer"><a class="brand" href="../"><img class="brand-mark small" src="../favicon.svg" alt="" width="24" height="24" />ObsidianBrain</a><span>你的知识，你的工作空间。</span><a href="https://github.com/TiercelChow/ObsidianBrain" target="_blank" rel="noreferrer">GitHub ↗</a></div></footer>
+    <script type="module" src="../src/main.js"></script>
+    <script type="module" src="../src/manual.js"></script>
+  </body>
+</html>

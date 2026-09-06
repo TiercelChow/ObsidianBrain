@@ -21,7 +21,7 @@ test('product site contains the complete introduction and onboarding journey', a
 })
 
 test('product site describes installation, configuration and module usage', async () => {
-  const html = await read('index.html')
+  const html = `${await read('index.html')}\n${await read('manual/index.html')}`
 
   for (const phrase of ['make build', 'obsidian-brain start', 'Obsidian Local REST API', 'LLM 配置', '局域网访问']) {
     assert.match(html, new RegExp(phrase), `missing usage phrase: ${phrase}`)
