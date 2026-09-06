@@ -158,6 +158,9 @@ export const useTasksStore = defineStore('tasks', () => {
   }
 
   function clearSelection() {
+    // Leaving a pending detail on mobile must not reopen it when its response arrives.
+    ++detailSequence
+    detailLoading.value = false
     selectedTaskId.value = null
   }
 

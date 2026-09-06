@@ -49,7 +49,7 @@ export function deriveFileKind(filePath: string): FileKind {
 
 /** Capture an md file's scroll position as a 0..1 ratio. */
 export function captureMdFileProgress(
-  filePath: string,
+  _filePath: string,
   scrollTop: number,
   scrollHeight: number,
   clientHeight: number,
@@ -64,7 +64,7 @@ export function captureMdFileProgress(
 
 /** Capture a pdf file's current page (+ pageCount for restore/display). */
 export function capturePdfFileProgress(
-  filePath: string,
+  _filePath: string,
   page: number,
   pageCount: number | undefined,
   updatedAt: number,

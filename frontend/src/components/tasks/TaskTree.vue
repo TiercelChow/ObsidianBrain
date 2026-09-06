@@ -36,15 +36,16 @@
         class="status-orb"
         :class="`status-${item.node.status}`"
         :aria-label="`${item.node.title}，${statusLabel(item.node.status)}`"
-        @click.stop="$emit('status', item.node)"
+        @click.stop="$emit('edit', item.node)"
       >
         <span v-if="item.node.status === 'completed'">✓</span>
         <span v-else-if="item.node.status === 'cancelled'">—</span>
       </button>
 
-      <div class="tree-copy">
-        <div class="tree-title">{{ item.node.title }}</div>
-        <div class="tree-meta">
+      <button type="button" class="tree-copy" :aria-label="`查看子任务：${item.node.title}`" :title="item.node.title" @click.stop="$emit('select', item.node.id)">
+        <span class="tree-title">{{ item.node.title }}</span>
+        <span class="tree-meta">
+          <span>{{ statusLabel(item.node.status) }}</span>
           <span class="importance" :class="`importance-${item.node.importance}`">
             {{ importanceLabel(item.node.importance) }}
           </span>
@@ -52,19 +53,9 @@
             <span class="dates-full">{{ item.node.start_date }} – {{ item.node.end_date }}</span>
             <span class="dates-compact">{{ formatTaskDateRangeCompact(item.node.start_date, item.node.end_date) }}</span>
           </span>
-        </div>
-      </div>
+        </span>
+      </button>
 
-      <div class="tree-actions">
-        <button type="button" title="添加进展" @click.stop="$emit('progress', item.node)">进展</button>
-        <button type="button" title="添加子任务" @click.stop="$emit('add', item.node)">＋</button>
-        <button
-          v-if="item.node.role === 'subtask'"
-          type="button"
-          title="移动任务"
-          @click.stop="$emit('move', item.node)"
-        >移动</button>
-      </div>
     </div>
 
     <div v-if="flattened.length === 0" class="tree-empty">还没有子任务</div>
@@ -84,10 +75,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [id: string]
-  add: [task: TaskNode]
-  progress: [task: TaskNode]
-  status: [task: TaskNode]
-  move: [task: TaskNode]
+  edit: [task: TaskNode]
   reorder: [taskId: string, parentId: string]
 }>()
 
@@ -154,7 +142,7 @@ function importanceLabel(importance: TaskImportance) {
   --indent: calc(var(--tree-depth) * 22px);
   min-height: 54px;
   display: grid;
-  grid-template-columns: 26px 28px minmax(0, 1fr) auto;
+  grid-template-columns: 26px 28px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
   padding: 7px 8px 7px calc(8px + var(--indent));
@@ -169,7 +157,7 @@ function importanceLabel(importance: TaskImportance) {
 .tree-row:active { transform: scale(.995); }
 .tree-row.dragging { opacity: .45; }
 .tree-row.closed .tree-title { color: var(--text-faint); text-decoration: line-through; }
-.disclosure, .status-orb, .tree-actions button {
+.disclosure, .status-orb {
   border: 0;
   background: transparent;
   color: var(--text-muted);
@@ -195,8 +183,9 @@ function importanceLabel(importance: TaskImportance) {
 .status-cancelled { background: color-mix(in srgb, var(--text-faint) 12%, transparent); }
 .status-in_progress { border-color: var(--accent); box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent); }
 .status-blocked { border-color: #ff9500; }
-.tree-copy { min-width: 0; }
-.tree-title { color: var(--text-primary); font-size: 15px; font-weight: 580; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-copy { min-width: 0; min-height: 44px; padding: 0; border: 0; background: transparent; text-align: left; font: inherit; cursor: pointer; border-radius: 6px; }
+.tree-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.tree-title { display: block; color: var(--text-primary); font-size: 15px; font-weight: 580; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 3px; color: var(--text-faint); font-size: 12px; }
 .importance { flex: none; font-weight: 600; }
 /* Both range renderings exist; the media queries below pick one so the meta
@@ -205,23 +194,16 @@ function importanceLabel(importance: TaskImportance) {
 .dates-compact { display: none; }
 .importance-high { color: #ff9500; }
 .importance-urgent { color: #ff3b30; }
-.tree-actions { display: flex; opacity: 0; transform: translateX(4px); transition: opacity var(--motion-fast) ease, transform var(--motion-fast) ease; }
-.tree-row:hover .tree-actions, .tree-row:focus-within .tree-actions { opacity: 1; transform: none; }
-.tree-actions button { min-height: 36px; padding: 0 8px; border-radius: 9px; font-size: 13px; }
-.tree-actions button:hover { color: var(--text-primary); background: var(--bg-glass-strong); }
 .tree-empty { padding: 28px; text-align: center; color: var(--text-faint); font-size: 14px; }
 
 @media (max-width: 768px) {
-  .tree-row { --indent: calc(var(--tree-depth) * 15px); grid-template-columns: 22px 30px minmax(0, 1fr) auto; padding-left: calc(3px + var(--indent)); }
+  .tree-row { --indent: min(calc(var(--tree-depth) * 15px), 45px); grid-template-columns: 22px 30px minmax(0, 1fr); padding-left: calc(3px + var(--indent)); }
   .disclosure, .disclosure-spacer { width: 22px; }
-  .tree-actions { opacity: 1; transform: none; }
-  .tree-actions button { min-width: 44px; min-height: 44px; }
-  .tree-actions button:first-child { display: none; }
   .dates-full { display: none; }
   .dates-compact { display: inline; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tree-row, .disclosure span, .status-orb, .tree-actions { transition-duration: 1ms !important; }
+  .tree-row, .disclosure span, .status-orb { transition-duration: 1ms !important; }
 }
 </style>

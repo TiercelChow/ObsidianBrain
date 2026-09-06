@@ -104,8 +104,7 @@ frontend/src/
 │   └── Tasks.vue
 ├── components/tasks/
 │   ├── TaskTree.vue
-│   ├── TaskCalendar.vue
-│   └── SubtaskDrawer.vue
+│   └── TaskCalendar.vue
 ├── stores/
 │   └── tasks.ts
 ├── api/
@@ -654,7 +653,7 @@ eachDayOfInterval(start: string, end: string): string[]
 
 - 详情面板恒渲染根任务（总览、拆解树、聚合活动流）；`Tasks.vue` 以 `drawerNodeId` ref 驱动子任务抽屉，不再有整面板切换。
 - `utils/taskActivity.ts` 的 `buildTaskActivity(nodes, progress, audit, scopeTaskId?)` 负责全树聚合（省略 scope）与单任务过滤（传入 scope，供抽屉）；条目 `title` 为名词式类型标签（进展/状态变更/移动…），`detail` 携带具体变化（完成度 X%、状态 A → B），`taskTitle` 归因；`taskStatusLabel`/`taskImportanceLabel`/`formatTimestamp` 一并从视图层下沉到 utils。活动条目头行为 类型胶囊 + 任务名 + 时间（抽屉专属流省略任务名），明细/备注单行省略；点击条目（抽屉经 emit `inspect`）由 `Tasks.vue` 的 MotionModal 详情弹窗展示全文。
-- `SubtaskDrawer.vue` 常驻挂载：桌面端（≥1150px）以 flex 定宽 slot 实现 push 压缩（slot 总宽 `min(400px, 30vw)`）；<1150px 转为 fixed 浮层 + 遮罩；≤768px 宽度 min(88vw, 400px)。z-index 2300/2301，低于 MotionModal 的 2400。
+- > 注：`SubtaskDrawer.vue` 已于本节移除，子任务详情改由 `Tasks.vue` 内联的 `child-task-dialog` MotionModal 承载（z-index 2400）；以下抽屉结构/emit 描述仅作历史参考。
 - 抽屉结构：头部「‹ {父任务名}」返回行（emit `select`，父级绑 `focusTask`）+ 标题下属性胶囊行（`.drawer-pills`，状态/重要性）+ 右上角唯一编辑图标按钮（EditPen，emit `edit`）；正文为「子任务」栏目（直属子任务列表，行 = 状态圆点 + 标题 + 重要性胶囊，点击下钻）与「进展与记录」栏目；左缘内侧垂直居中短竖条收起把手（4px × 40px，悬浮/聚焦渐隐为 border 绘制的 › 形折线，移动端常显折线，打开时键盘焦点落于把手）。
 - 抽屉操作 emit 回 `Tasks.vue` 复用 sheet 表单体系（emits 为 close/select/edit/inspect）；写入成功后子任务目标自动打开其抽屉，根任务目标回到总览。
 - 编辑表单整合：编辑模式新增「状态」（沿用 statusSheetOptions 过滤；终态显示关闭说明，根任务另显示级联勾选）与「父任务」（仅子任务，候选沿用 moveCandidates）字段；保存依次执行 更新字段 → 改状态（仅变化时）→ 移动（仅变化时），版本号由 store 写后自动刷新衔接。
@@ -670,6 +669,17 @@ eachDayOfInterval(start: string, end: string): string[]
 ---
 
 ## 12. 任务视图
+
+### 12.0 信息布局调整（2026-09-06）
+
+- `utils/taskWorkspace.ts` 统一实现活动/终态判断、快捷筛选、互斥紧迫程度分组和日历日截止提醒；分组不修改 store 原数组，跨日项目不再占满“今日”。单测覆盖关闭排除、交叉分组、七天边界、排序及跨年日期。
+- 列表面板改为固定筛选区 + 独立滚动列表。搜索、类型、状态继续请求服务端；快捷筛选只作用于已加载摘要，数量不是全库统计。
+- 桌面详情区为单容器（`.task-detail-zone`）：顶部 `.detail-summary` 全宽放置任务信息（标题/状态/日期/描述/进度概览/移动端切换条），下方 `.detail-columns` 为 拆解|进展 双列、同高、各自独立滚动，中间以 `.task-progress-panel` 的 `border-left` 竖线分隔，竖线不延伸到顶部信息区；短期待办无拆解、进展占满下方。仅 ≤768px 列堆叠时启用 `detailSection` + `.detail-switch` 切换条对“拆解/进展”互斥（在 `.task-detail-zone` 上挂 `mobile-section-*` 类用 CSS 隐藏对侧，非 v-show，桌面不受影响），堆叠时改用 `border-top` 横线分隔。切换根任务回到拆解，记录根任务进展成功后切到记录区。短期待办直接显示状态历史。
+- 原有独立日期卡收为一行，描述直接展示（不再折叠）；主要操作在详情头部，归档仍复用 MotionModal。手机详情隐藏列表工具栏及重复页头，返回行保持可见。
+- `TaskTree` 标题为可键盘激活的按钮，手机不再挤入行内操作，缩进上限 45px；原 `SubtaskDrawer` 组件已移除，子任务详情改由 `Tasks.vue` 内联的 `child-task-dialog` MotionModal 承载，底部固定 `progress` / `add` 操作复用父页面写入表单。
+- `clearSelection()` 使待完成详情请求失效，防止手机返回后旧响应把详情重新打开；`openTask()` 仅为仍被选中的响应更新路由。
+
+以下桌面/手机结构说明以本节信息层级调整为准，日历与存储模型不变。
 
 ### 12.1 桌面端
 

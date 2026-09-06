@@ -1,15 +1,9 @@
 <template>
-  <div class="tasks-page" :class="{ 'view-tasks': viewMode === 'tasks' }">
+  <div class="tasks-page" :class="{ 'view-tasks': viewMode === 'tasks', 'mobile-focused': viewMode === 'tasks' && !!store.selectedTaskId }">
     <header class="page-header">
       <div>
         <h1 class="page-title">任务中枢</h1>
         <p class="page-subtitle">让临期待办轻巧落地，让长期目标稳步生长</p>
-      </div>
-      <div class="header-actions">
-        <el-button type="primary" @click="openCreate()">
-          <el-icon><Plus /></el-icon>
-          新建任务
-        </el-button>
       </div>
     </header>
 
@@ -45,7 +39,7 @@
           :offset="0"
           :fit-input-width="true"
         >
-          <el-option value="active" label="进行中的" />
+          <el-option value="active" label="未关闭" />
           <el-option value="all" label="全部状态" />
           <el-option v-for="option in statusOptions" :key="option.value" :value="option.value" :label="option.label" />
         </el-select>
@@ -59,20 +53,34 @@
       </div>
     </Transition>
 
-    <div v-if="viewMode === 'tasks'" class="task-workspace" :class="{ 'detail-open': !!store.selectedDetail }">
-      <aside class="task-list-panel glass-surface" @scroll="onPanelScroll">
+    <div v-if="viewMode === 'tasks'" class="task-workspace" :class="{ 'detail-open': !!store.selectedTaskId, 'list-collapsed': !!detail && listCollapsed }">
+      <aside class="task-list-panel glass-surface">
+        <div class="list-controls">
         <div class="panel-heading">
           <div>
             <strong>我的任务</strong>
-            <span>{{ store.tasks.length }} 项</span>
+            <span>{{ visibleTasks.length }} 项</span>
           </div>
-          <button type="button" aria-label="新建任务" @click="openCreate()">＋</button>
+          <div class="panel-heading-actions">
+            <button v-if="detail" type="button" aria-label="收起任务列表" title="收起任务列表" @click="listCollapsed = true">‹</button>
+            <button type="button" aria-label="新建任务" @click="openCreate()">＋</button>
+          </div>
+        </div>
+        <div class="focus-filters" aria-label="快速筛选当前列表">
+          <button v-for="option in focusOptions" :key="option.value" type="button"
+            :class="{ active: focusFilter === option.value }" :aria-pressed="focusFilter === option.value"
+            @click="focusFilter = option.value">
+            {{ option.label }}<span>{{ focusCounts[option.value] }}</span>
+          </button>
+        </div>
+        <p class="list-order">按紧迫程度分组 · 组内重要任务优先</p>
         </div>
 
+        <div class="task-list-scroll" @scroll="onPanelScroll">
         <div v-if="store.loading" class="task-skeletons" aria-label="加载中">
           <span v-for="index in 5" :key="index"></span>
         </div>
-        <div v-else-if="store.tasks.length" class="task-list">
+        <div v-else-if="visibleTasks.length" class="task-list">
           <section v-for="group in groupedTasks" :key="group.key" class="task-group">
             <div class="task-group-title"><span>{{ group.label }}</span><small>{{ group.tasks.length }}</small></div>
             <TransitionGroup name="task-card" tag="div" class="task-group-items">
@@ -81,9 +89,10 @@
                 :key="task.id"
                 type="button"
                 class="task-card"
+                :aria-current="store.selectedTaskId === task.id ? 'true' : undefined"
                 :class="[
                   `importance-${task.importance}`,
-                  { selected: store.selectedTaskId === task.id, overdue: task.derived.overdue },
+                  { selected: store.selectedTaskId === task.id, overdue: taskTiming(task, today).tone === 'danger' },
                 ]"
                 @click="openTask(task.id)"
               >
@@ -93,9 +102,14 @@
                     <strong>{{ task.title }}</strong>
                     <span class="kind-badge">{{ task.kind === 'short' ? '待办' : '长期' }}</span>
                   </span>
+                  <span class="card-state">
+                    <span class="task-pill" :class="`status-${task.status}`">{{ taskStatusLabel(task.status) }}</span>
+                    <span class="priority-label">{{ taskImportanceLabel(task.importance) }}</span>
+                    <span v-if="task.kind === 'long'" class="card-percent">{{ task.progress_percent }}%</span>
+                  </span>
                   <span class="card-footer">
-                    <span :class="{ danger: task.derived.overdue }">{{ formatTaskDateRange(task.start_date, task.end_date) }}</span>
-                    <span>{{ taskStatusLabel(task.status) }}</span>
+                    <span :class="taskTiming(task, today).tone" :title="formatTaskDateRange(task.start_date, task.end_date)">{{ taskTiming(task, today).label }}</span>
+                    <span v-if="task.kind === 'long' && task.effective_leaf_count > 1">{{ task.completed_leaf_count }}/{{ task.effective_leaf_count }} 完成</span>
                   </span>
                   <span v-if="task.kind === 'long'" class="mini-progress">
                     <i :style="{ width: `${task.progress_percent}%` }"></i>
@@ -108,77 +122,94 @@
         </div>
         <div v-else class="empty-list">
           <div class="empty-orb">✓</div>
-          <strong>从一件小事开始</strong>
-          <p>新建短期待办，或拆解一个长期目标。</p>
-          <button type="button" @click="openCreate()">新建第一个任务</button>
+          <strong>{{ hasListFilters ? '没有符合条件的任务' : '从一件小事开始' }}</strong>
+          <p>{{ hasListFilters ? '试试其他筛选，或清除条件查看未关闭任务。' : '新建短期待办，或拆解一个长期目标。' }}</p>
+          <button v-if="hasListFilters" type="button" @click="resetListFilters">重置筛选</button>
+          <button v-else type="button" @click="openCreate()">新建第一个任务</button>
+        </div>
+        </div>
+
+        <div class="task-list-rail" aria-label="任务快速导航">
+          <button type="button" class="rail-expand" aria-label="展开任务列表" title="展开任务列表" @click="listCollapsed = false">›</button>
+          <div class="rail-items">
+            <button
+              v-for="task in visibleTasks"
+              :key="task.id"
+              type="button"
+              class="rail-task"
+              :class="[`importance-${task.importance}`, { selected: store.selectedTaskId === task.id }]"
+              :aria-label="task.title"
+              :title="task.title"
+              @click="openTask(task.id)"
+            >
+              <span>{{ task.title.trim().slice(0, 1) || '·' }}</span>
+              <i :class="`status-${task.status}`"></i>
+            </button>
+          </div>
+          <button type="button" class="rail-create" aria-label="新建任务" title="新建任务" @click="openCreate()">＋</button>
         </div>
       </aside>
 
-      <div class="task-detail-zone">
-        <main class="task-detail-panel glass-surface" @scroll="onPanelScroll">
-        <div v-if="store.detailLoading" class="detail-loading">
-          <span></span><span></span><span></span>
+      <div class="task-detail-zone glass-surface" :class="detail?.root.kind === 'long' ? 'mobile-section-' + detailSection : null" @scroll="onPanelScroll">
+        <div v-if="store.detailLoading" class="task-detail-placeholder">
+          <div class="detail-loading"><span></span><span></span><span></span></div>
         </div>
         <template v-else-if="detail">
-          <div class="mobile-detail-nav">
-            <button type="button" @click="closeMobileDetail">‹ 任务列表</button>
-            <span>{{ detail.root.kind === 'short' ? '短期待办' : '长期任务' }}</span>
-          </div>
-
+        <div class="detail-summary">
+        <div v-if="store.selectedTaskId" class="mobile-detail-nav">
+          <button type="button" @click="closeMobileDetail">‹ 任务列表</button>
+          <span>{{ detail.root.kind === 'short' ? '短期待办' : '长期任务' }}</span>
+        </div>
           <header ref="detailHeaderRef" class="detail-header">
             <div class="detail-title-group">
               <h2>{{ detail.root.title }}</h2>
               <div class="detail-pills">
+                <span class="task-pill" :class="`kind-${detail.root.kind}`">{{ detail.root.kind === 'short' ? '待办' : '长期' }}</span>
                 <span class="task-pill" :class="`status-${detail.root.status}`">{{ taskStatusLabel(detail.root.status) }}</span>
                 <span class="task-pill" :class="`importance-${detail.root.importance}`">{{ taskImportanceLabel(detail.root.importance) }}</span>
               </div>
-              <p>{{ detail.root.description || '这个任务还没有描述。' }}</p>
             </div>
             <div class="detail-actions">
-              <button type="button" @click="openStatus(detail.root)">更改状态</button>
-              <button type="button" @click="openEdit(detail.root)">编辑</button>
-              <button type="button" class="more-button" aria-label="归档任务" @click="openArchiveConfirm">···</button>
+              <button type="button" class="edit-action" aria-label="编辑任务" @click="openEdit(detail.root)"><el-icon><EditPen /></el-icon></button>
             </div>
           </header>
 
+          <div class="detail-context">
           <div class="detail-facts">
-            <div><span>开始</span><strong>{{ detail.root.start_date }}</strong></div>
-            <div><span>结束</span><strong>{{ detail.root.end_date }}</strong></div>
+            <span>{{ detail.root.start_date }} <span aria-label="至">→</span> {{ detail.root.end_date }}</span>
+            <strong :class="taskTiming(detail.root, today).tone">{{ taskTiming(detail.root, today).label }}</strong>
           </div>
 
-          <section v-if="detail.root.kind === 'long'" class="progress-overview">
-            <div class="section-heading">
-              <div>
-                <span>整体进展</span>
-                <strong>{{ detail.progress_percent }}%</strong>
-              </div>
-              <small>{{ detail.completed_leaf_count }} / {{ detail.effective_leaf_count }} 个叶子任务完成</small>
-            </div>
-            <div class="progress-track"><i :style="{ width: `${detail.progress_percent}%` }"></i></div>
-          </section>
+          <p v-if="detail.root.description" class="task-description">{{ detail.root.description }}</p>
+          </div>
 
-          <section v-if="detail.root.kind === 'long'" class="detail-section task-breakdown">
-            <div class="section-heading">
-              <div><span>任务拆解</span><strong>{{ subtaskCount }} 个子任务</strong></div>
-              <button type="button" @click="openSubtask(detail.root)">＋ 添加子任务</button>
+          <div v-if="detail.root.kind === 'long'" class="detail-switch" role="tablist" aria-label="切换拆解与进展">
+            <button type="button" role="tab" :aria-selected="detailSection === 'breakdown'" :class="{ active: detailSection === 'breakdown' }" @click="detailSection = 'breakdown'">任务拆解<span>{{ subtaskCount }}</span></button>
+            <button type="button" role="tab" :aria-selected="detailSection === 'progress'" :class="{ active: detailSection === 'progress' }" @click="detailSection = 'progress'">进展记录<span>{{ activity.length }}</span></button>
+          </div>
+        </div>
+
+        <div class="detail-columns" :class="{ split: detail.root.kind === 'long' }">
+          <section v-if="detail.root.kind === 'long'" class="detail-section task-breakdown" @scroll="onPanelScroll">
+            <div class="column-heading">
+              <div><span>任务拆解</span><strong>{{ detail.completed_leaf_count }}/{{ detail.effective_leaf_count }}</strong></div>
+              <button type="button" aria-label="添加子任务" @click="openSubtask(detail.root)">＋</button>
             </div>
             <TaskTree
               :tasks="detail.tasks"
               :selected-id="drawerNodeId || detail.root.id"
               @select="focusTask"
-              @add="openSubtask"
-              @progress="openProgress"
-              @status="openStatus"
-              @move="openMove"
+              @edit="openEdit"
               @reorder="quickMove"
             />
           </section>
 
-          <section ref="activitySectionRef" class="detail-section activity-section">
-            <div class="section-heading">
-              <div><span>进展与记录</span><strong>{{ detail.progress.length + detail.audit.length }} 条</strong></div>
-              <button type="button" @click="openProgress(detail.root)">＋ 添加进展</button>
-            </div>
+        <aside ref="activitySectionRef" class="task-progress-panel" @scroll="onPanelScroll">
+          <div class="progress-column-header">
+            <div><span>进展</span><strong>{{ activity.length }} 条记录</strong></div>
+            <button v-if="detail.root.kind === 'long' && !isTaskClosed(detail.root)" type="button" aria-label="记录进展" @click="openProgress(detail.root)">＋</button>
+          </div>
+          <div class="progress-body">
             <div v-if="activity.length" class="activity-list">
               <article
                 v-for="item in activity"
@@ -203,26 +234,30 @@
                 </div>
               </article>
             </div>
-            <button v-else type="button" class="activity-empty" @click="openProgress(detail.root)">记录第一条进展</button>
-          </section>
+            <p v-else class="activity-empty-copy">{{ detail.root.kind === 'long' ? '还没有记录，留下第一步进展。' : '状态变化与关闭说明会保留在这里。' }}</p>
+          </div>
+        </aside>
+        </div>
         </template>
         <div v-else class="empty-detail">
-          <div class="detail-illustration"><span></span><i></i></div>
-          <strong>选择一项任务</strong>
-          <p>在这里查看计划、拆解与每一步进展。</p>
+          <template v-if="store.selectedTaskId">
+            <strong>任务详情暂未加载</strong>
+            <p>可以重试，或返回列表选择其他任务。</p>
+            <button type="button" class="activity-empty" @click="openTask(store.selectedTaskId)">重新加载</button>
+          </template>
+          <template v-else>
+            <span class="overview-eyebrow">下一步，从这里开始</span>
+            <h2>把注意力留给重要的事</h2>
+            <p>{{ suggestedTasks.length ? '根据当前列表的紧迫程度排序，选择一项开始推进。' : '从左侧选择任务，或新建一件想完成的事。' }}</p>
+            <div v-if="suggestedTasks.length" class="suggested-tasks">
+              <button v-for="task in suggestedTasks" :key="task.id" type="button" @click="openTask(task.id)">
+                <span class="suggestion-copy"><strong>{{ task.title }}</strong><small>{{ taskStatusLabel(task.status) }} · {{ taskImportanceLabel(task.importance) }}</small></span>
+                <span class="suggestion-timing" :class="taskTiming(task, today).tone">{{ taskTiming(task, today).label }} <span aria-hidden="true">↗</span></span>
+              </button>
+            </div>
+            <small class="overview-note">选择后查看拆解与进展；任务数据不会因筛选改变。</small>
+          </template>
         </div>
-        </main>
-        <SubtaskDrawer
-          ref="drawerRef"
-          :node="drawerNode"
-          :activity="drawerActivity"
-          :children="drawerChildren"
-          :parent="drawerParent"
-          @close="closeDrawer"
-          @select="focusTask"
-          @edit="openEdit"
-          @inspect="openActivityDetail"
-        />
       </div>
     </div>
 
@@ -238,6 +273,59 @@
       @open-task="openFromCalendar"
       @create="openCreate"
     />
+
+    <MotionModal v-model="childDetailOpen" aria-label="子任务详情">
+      <section v-if="drawerNode" class="child-task-dialog glass-surface-heavy">
+        <header class="child-dialog-header">
+          <div>
+            <span>{{ drawerParent?.title || detail?.root.title }}</span>
+            <h3>{{ drawerNode.title }}</h3>
+            <div class="detail-pills">
+              <span class="task-pill" :class="`status-${drawerNode.status}`">{{ taskStatusLabel(drawerNode.status) }}</span>
+              <span class="task-pill" :class="`importance-${drawerNode.importance}`">{{ taskImportanceLabel(drawerNode.importance) }}</span>
+            </div>
+          </div>
+          <button type="button" class="child-edit" aria-label="编辑任务" @click="openEdit(drawerNode)"><el-icon><EditPen /></el-icon></button>
+        </header>
+        <div class="child-dialog-scroll">
+          <p v-if="drawerNode.description" class="child-description">{{ drawerNode.description }}</p>
+          <div class="child-facts">
+            <span>{{ drawerNode.start_date }} → {{ drawerNode.end_date }}</span>
+            <strong :class="taskTiming(drawerNode, today).tone">{{ taskTiming(drawerNode, today).label }}</strong>
+          </div>
+          <section v-if="drawerChildren.length" class="child-section">
+            <div class="column-heading"><div><span>子任务</span><strong>{{ drawerChildren.length }}</strong></div></div>
+            <div class="child-list">
+              <button v-for="child in drawerChildren" :key="child.id" type="button" @click="focusTask(child.id)">
+                <span class="child-status" :class="`status-${child.status}`"></span>
+                <strong>{{ child.title }}</strong>
+                <span class="task-pill" :class="`importance-${child.importance}`">{{ taskImportanceLabel(child.importance) }}</span>
+                <span>›</span>
+              </button>
+            </div>
+          </section>
+          <section class="child-section">
+            <div class="column-heading"><div><span>进展与记录</span><strong>{{ drawerActivity.length }}</strong></div></div>
+            <div v-if="drawerActivity.length" class="activity-list">
+              <article v-for="item in drawerActivity" :key="item.id" class="activity-item" tabindex="0"
+                :aria-label="`查看记录详情：${item.title}`" @click="openActivityDetail(item)" @keydown="onActivityKeydown($event, item)">
+                <span class="activity-dot" :class="item.type"></span>
+                <div class="activity-copy">
+                  <div class="activity-head"><strong><span class="task-pill" :class="`type-${item.type}`">{{ item.title }}</span></strong><time>{{ formatTimestamp(item.time) }}</time></div>
+                  <p v-if="item.detail" class="activity-detail">{{ item.detail }}</p>
+                  <p v-if="item.note" class="activity-note">{{ item.note }}</p>
+                </div>
+              </article>
+            </div>
+            <p v-else class="activity-empty-copy">暂无进展记录</p>
+          </section>
+        </div>
+        <footer v-if="!isTaskClosed(drawerNode)" class="child-dialog-actions">
+          <button type="button" @click="openSubtask(drawerNode)">＋ 添加子任务</button>
+          <button type="button" class="primary" @click="openProgress(drawerNode)">记录进展</button>
+        </footer>
+      </section>
+    </MotionModal>
 
     <MotionModal v-model="sheetOpen" :aria-label="sheetTitle">
       <form class="task-sheet glass-surface-heavy" @submit.prevent="submitSheet">
@@ -266,46 +354,6 @@
               <output>{{ progressForm.percent }}%</output>
             </div>
           </label>
-        </div>
-
-        <div v-else-if="sheetMode === 'status'" class="sheet-body">
-          <label class="field full">
-            <span>任务状态</span>
-            <el-select
-              v-model="statusForm.status"
-              popper-class="task-select-popper"
-              placement="bottom-start"
-              :offset="0"
-              :fit-input-width="true"
-            >
-              <el-option v-for="option in statusSheetOptions" :key="option.value" :value="option.value" :label="option.label" />
-            </el-select>
-          </label>
-          <label v-if="isTerminalStatus" class="field full">
-            <span>关闭说明（可选）</span>
-            <textarea v-model="statusForm.note" rows="4" placeholder="总结结果、原因或后续安排…"></textarea>
-          </label>
-          <label v-if="targetNode?.role === 'root' && isTerminalStatus" class="check-field">
-            <input v-model="statusForm.cascade" type="checkbox" aria-label="同时关闭所有未完成的子任务" />
-            <span>同时关闭所有未完成的子任务</span>
-          </label>
-        </div>
-
-        <div v-else-if="sheetMode === 'move'" class="sheet-body">
-          <label class="field full">
-            <span>新的上级任务</span>
-            <el-select
-              v-model="moveForm.parentId"
-              popper-class="task-select-popper"
-              placement="bottom-start"
-              :offset="0"
-              :fit-input-width="true"
-              required
-            >
-              <el-option v-for="candidate in moveCandidates" :key="candidate.id" :value="candidate.id" :label="candidate.title" />
-            </el-select>
-          </label>
-          <p class="sheet-hint">移动后，任务会排在新上级的子任务末尾。</p>
         </div>
 
         <div v-else class="sheet-body form-grid">
@@ -398,7 +446,8 @@
         </div>
 
         <footer class="sheet-footer">
-          <button type="button" class="cancel" @click="sheetOpen = false">取消</button>
+          <button v-if="sheetMode === 'edit' && targetNode?.role === 'root'" type="button" class="archive-from-edit" @click="openArchiveFromEditor">归档任务</button>
+          <button v-else type="button" class="cancel" @click="sheetOpen = false">取消</button>
           <button type="submit" class="confirm" :disabled="store.saving">{{ store.saving ? '保存中…' : sheetAction }}</button>
         </footer>
       </form>
@@ -441,11 +490,10 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { FolderChecked, Plus, Search } from '@element-plus/icons-vue'
+import { EditPen, FolderChecked, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import MotionModal from '@/components/motion/MotionModal.vue'
-import SubtaskDrawer from '@/components/tasks/SubtaskDrawer.vue'
 import TaskCalendar from '@/components/tasks/TaskCalendar.vue'
 import TaskTree from '@/components/tasks/TaskTree.vue'
 import {
@@ -458,7 +506,6 @@ import {
 import { useAppStore } from '@/stores/app'
 import { useTasksStore } from '@/stores/tasks'
 import {
-  addLocalDays,
   buildMonthGrid,
   formatTaskDateRange,
   formatTimestamp,
@@ -467,9 +514,10 @@ import {
 } from '@/utils/taskDates'
 import { buildTaskActivity, taskImportanceLabel, taskStatusLabel, type TaskActivityEntry } from '@/utils/taskActivity'
 import { taskFieldsPayload } from '@/utils/taskPayloads'
+import { groupWorkspaceTasks, isTaskClosed, matchesTaskFocus, taskTiming, type TaskFocus } from '@/utils/taskWorkspace'
 
 type ViewMode = 'tasks' | 'calendar'
-type SheetMode = 'create' | 'edit' | 'subtask' | 'progress' | 'status' | 'move'
+type SheetMode = 'create' | 'edit' | 'subtask' | 'progress'
 
 const route = useRoute()
 const router = useRouter()
@@ -479,11 +527,17 @@ const viewMode = ref<ViewMode>(route.query.view === 'calendar' ? 'calendar' : 't
 const searchQuery = ref('')
 const kindFilter = ref<'all' | TaskKind>('all')
 const statusFilter = ref<'active' | 'all' | TaskStatus>('active')
+const focusFilter = ref<TaskFocus>('all')
+const listCollapsed = ref(false)
+const detailSection = ref<'breakdown' | 'progress'>('breakdown')
+const focusOptions: Array<{ value: TaskFocus; label: string }> = [
+  { value: 'all', label: '全部' }, { value: 'overdue', label: '逾期' },
+  { value: 'today', label: '今日' }, { value: 'blocked', label: '受阻' },
+]
 const today = todayLocal()
 const calendarAnchor = ref(`${today.slice(0, 7)}-01`)
 const selectedDate = ref(typeof route.query.date === 'string' ? route.query.date : today)
 const drawerNodeId = ref<string | null>(null)
-const drawerRef = ref<InstanceType<typeof SubtaskDrawer> | null>(null)
 const detailHeaderRef = ref<HTMLElement | null>(null)
 const activitySectionRef = ref<HTMLElement | null>(null)
 const sheetOpen = ref(false)
@@ -492,6 +546,10 @@ const activityDetail = ref<TaskActivityEntry | null>(null)
 const activityDetailOpen = computed({
   get: () => activityDetail.value !== null,
   set: (open: boolean) => { if (!open) activityDetail.value = null },
+})
+const childDetailOpen = computed({
+  get: () => drawerNodeId.value !== null,
+  set: (open: boolean) => { if (!open) drawerNodeId.value = null },
 })
 const sheetMode = ref<SheetMode>('create')
 const targetNode = ref<TaskNode | null>(null)
@@ -537,28 +595,23 @@ const isTerminalStatus = computed(() => statusForm.value.status === 'completed' 
 const statusSheetOptions = computed(() => targetNode.value?.kind === 'short'
   ? statusOptions.filter((option) => ['open', 'completed', 'cancelled'].includes(option.value))
   : statusOptions.filter((option) => option.value !== 'open'))
-const groupedTasks = computed(() => {
-  const soon = addLocalDays(today, 7)
-  const closed = (status: TaskStatus) => status === 'completed' || status === 'cancelled'
-  const definitions = [
-    { key: 'overdue', label: '逾期', test: (task: typeof store.tasks[number]) => task.derived.overdue },
-    { key: 'today', label: '今天', test: (task: typeof store.tasks[number]) => !closed(task.status) && (task.derived.active_today || task.derived.due_today || task.start_date === today) },
-    { key: 'soon', label: '即将到期', test: (task: typeof store.tasks[number]) => !closed(task.status) && task.end_date > today && task.end_date <= soon },
-    { key: 'long', label: '长期任务', test: (task: typeof store.tasks[number]) => !closed(task.status) && task.kind === 'long' },
-    { key: 'later', label: '之后', test: (task: typeof store.tasks[number]) => !closed(task.status) },
-    { key: 'closed', label: '已关闭', test: (task: typeof store.tasks[number]) => closed(task.status) },
-  ]
-  const assigned = new Set<string>()
-  return definitions.map((definition) => ({
-    key: definition.key,
-    label: definition.label,
-    tasks: store.tasks.filter((task) => {
-      if (assigned.has(task.id) || !definition.test(task)) return false
-      assigned.add(task.id)
-      return true
-    }),
-  })).filter((group) => group.tasks.length > 0)
-})
+const focusCounts = computed(() => ({
+  all: store.tasks.length,
+  overdue: store.tasks.filter(task => matchesTaskFocus(task, 'overdue', today)).length,
+  today: store.tasks.filter(task => matchesTaskFocus(task, 'today', today)).length,
+  blocked: store.tasks.filter(task => matchesTaskFocus(task, 'blocked', today)).length,
+}))
+const visibleTasks = computed(() => store.tasks.filter(task => matchesTaskFocus(task, focusFilter.value, today)))
+const groupedTasks = computed(() => groupWorkspaceTasks(visibleTasks.value, today))
+const suggestedTasks = computed(() => groupedTasks.value.flatMap(group => group.tasks).filter(task => !isTaskClosed(task)).slice(0, 4))
+const hasListFilters = computed(() => !!searchQuery.value || kindFilter.value !== 'all' || statusFilter.value !== 'active' || focusFilter.value !== 'all')
+
+function resetListFilters() {
+  searchQuery.value = ''
+  kindFilter.value = 'all'
+  statusFilter.value = 'active'
+  focusFilter.value = 'all'
+}
 const moveCandidates = computed(() => {
   if (!detail.value || !targetNode.value) return []
   const blocked = descendantIds(targetNode.value.id, detail.value.tasks)
@@ -569,12 +622,12 @@ const moveCandidates = computed(() => {
 const activity = computed(() => buildTaskActivity(detail.value?.tasks ?? [], detail.value?.progress ?? [], detail.value?.audit ?? []))
 const drawerActivity = computed(() => (drawerNode.value ? buildTaskActivity(detail.value?.tasks ?? [], detail.value?.progress ?? [], detail.value?.audit ?? [], drawerNode.value.id) : []))
 const sheetTitle = computed(() => ({
-  create: '新建任务', edit: '编辑任务', subtask: '添加子任务', progress: '记录进展', status: '更改状态', move: '移动子任务',
+  create: '新建任务', edit: '编辑任务', subtask: '添加子任务', progress: '记录进展',
 })[sheetMode.value])
 const sheetEyebrow = computed(() => ({
-  create: '新的开始', edit: '调整计划', subtask: '拆解下一步', progress: '留下轨迹', status: '更新状态', move: '调整结构',
+  create: '新的开始', edit: '调整计划', subtask: '拆解下一步', progress: '留下轨迹',
 })[sheetMode.value])
-const sheetAction = computed(() => ({ create: '创建', edit: '保存', subtask: '添加', progress: '记录', status: '更新', move: '移动' })[sheetMode.value])
+const sheetAction = computed(() => ({ create: '创建', edit: '保存', subtask: '添加', progress: '记录' })[sheetMode.value])
 
 function taskFilters() {
   const activeStatuses: TaskStatus[] = ['open', 'planned', 'in_progress', 'blocked']
@@ -601,8 +654,9 @@ async function refreshCurrent() {
 
 async function openTask(id: string) {
   const loaded = await store.loadDetail(id).catch(() => null)
-  if (!loaded) return
+  if (!loaded || store.selectedTaskId !== loaded.root.id) return
   drawerNodeId.value = null
+  listCollapsed.value = true
   await router.replace({ query: { ...route.query, view: 'tasks', task: loaded.root.id } })
 }
 
@@ -614,6 +668,7 @@ async function openFromCalendar(id: string) {
 function closeMobileDetail() {
   store.clearSelection()
   drawerNodeId.value = null
+  listCollapsed.value = false
   const query = { ...route.query }
   delete query.task
   void router.replace({ query })
@@ -719,33 +774,13 @@ function onPanelScroll(event: Event) {
 // Switching to another task in the list must not keep a stale drawer open.
 watch(() => store.selectedDetail?.root.id, () => {
   drawerNodeId.value = null
+  detailSection.value = 'breakdown'
 })
-
-function onKeydown(event: KeyboardEvent) {
-  // useModalEnvironment (document level) preventDefaults the Esc it consumes; don't double-handle it.
-  if (event.defaultPrevented) return
-  if (event.key !== 'Escape' || !drawerNodeId.value || sheetOpen.value || archiveConfirmOpen.value) return
-  closeDrawer()
-}
 
 function openProgress(task: TaskNode) {
   sheetMode.value = 'progress'
   targetNode.value = task
   progressForm.value = { note: '', percent: task.status === 'completed' ? 100 : detail.value?.progress_percent || 0, includePercent: false }
-  sheetOpen.value = true
-}
-
-function openStatus(task: TaskNode) {
-  sheetMode.value = 'status'
-  targetNode.value = task
-  statusForm.value = { status: task.status, note: '', cascade: false }
-  sheetOpen.value = true
-}
-
-function openMove(task: TaskNode) {
-  sheetMode.value = 'move'
-  targetNode.value = task
-  moveForm.value.parentId = task.parent_id || detail.value?.root.id || ''
   sheetOpen.value = true
 }
 
@@ -772,20 +807,17 @@ async function submitSheet() {
     }
     else if (mode === 'subtask' && writeTarget) await store.addSubtask(writeTarget.id, fields)
     else if (mode === 'progress' && writeTarget) await store.addProgress(writeTarget.id, progressForm.value.note, progressForm.value.includePercent ? progressForm.value.percent : undefined)
-    else if (mode === 'status' && writeTarget) await store.setStatus(writeTarget.id, statusForm.value.status, statusForm.value.note || undefined, statusForm.value.cascade)
-    else if (mode === 'move' && writeTarget) await store.moveSubtask(writeTarget.id, moveForm.value.parentId, 9999)
     sheetOpen.value = false
     // Surface the affected task: subtask writes open its drawer, root writes stay on the overview.
     drawerNodeId.value = writeTarget && writeTarget.role === 'subtask' ? writeTarget.id : null
     await refreshCurrent()
+    if (mode === 'progress' && writeTarget?.role === 'root') detailSection.value = 'progress'
     ElMessage.success(`${sheetAction.value}成功`)
     // Show the user what changed: progress writes reveal the new entry (in the
     // drawer when one is open, otherwise the panel's activity section); other
     // writes reveal the refreshed header when no drawer is open.
-    if (mode === 'progress' && drawerNodeId.value) {
+    if (!drawerNodeId.value) {
       await nextTick()
-      drawerRef.value?.revealActivity()
-    } else if (!drawerNodeId.value) {
       await revealDetailEl(mode === 'progress' ? activitySectionRef.value : detailHeaderRef.value)
     }
   } catch {
@@ -800,7 +832,8 @@ async function quickMove(taskId: string, parentId: string) {
   } catch { /* shown by store */ }
 }
 
-function openArchiveConfirm() {
+function openArchiveFromEditor() {
+  sheetOpen.value = false
   archiveConfirmOpen.value = true
 }
 
@@ -832,6 +865,7 @@ function descendantIds(id: string, tasks: TaskNode[]) {
 
 let filterTimer: number | undefined
 watch([searchQuery, kindFilter, statusFilter], () => {
+  focusFilter.value = 'all'
   window.clearTimeout(filterTimer)
   filterTimer = window.setTimeout(() => {
     void loadList()
@@ -839,12 +873,8 @@ watch([searchQuery, kindFilter, statusFilter], () => {
   }, 220)
 })
 
-onMounted(() => {
-  window.addEventListener('keydown', onKeydown)
-})
-
 onUnmounted(() => {
-  window.removeEventListener('keydown', onKeydown)
+  window.clearTimeout(filterTimer)
 })
 
 onMounted(async () => {
@@ -884,11 +914,33 @@ onMounted(async () => {
 .error-banner button { border: 0; background: transparent; color: #ff3b30; cursor: pointer; }
 .error-banner-enter-active, .error-banner-leave-active { transition: opacity var(--motion-fast) ease, transform var(--motion-fast) ease; }
 .error-banner-enter-from, .error-banner-leave-to { opacity: 0; transform: translateY(-5px); }
-.task-workspace { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(270px, 340px) minmax(0, 1fr); gap: 14px; }
-.task-detail-zone { min-width: 0; min-height: 0; display: flex; }
-.task-detail-zone .task-detail-panel { flex: 1 1 0; }
-.task-list-panel, .task-detail-panel { border-radius: 22px; min-height: 0; overflow: auto; }
-.task-list-panel { padding: 10px; }
+.task-workspace { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(300px, 350px) minmax(0, 1fr); gap: 14px; transition: grid-template-columns 400ms var(--ease-spring-gentle); }
+.task-workspace.list-collapsed { grid-template-columns: 68px minmax(0, 1fr); }
+.task-detail-zone { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-radius: 22px; overflow: hidden; }
+.task-list-panel { border-radius: 22px; min-height: 0; overflow: auto; }
+.task-list-panel { position: relative; min-width: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.list-controls { flex: none; min-width: 300px; padding: 10px 12px 0; border-bottom: 1px solid var(--border-subtle); transition: opacity 140ms ease, transform 300ms var(--ease-spring-gentle); }
+.task-list-scroll { flex: 1; min-width: 300px; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 14px 10px; transition: opacity 120ms ease, transform 300ms var(--ease-spring-gentle); }
+.task-workspace.list-collapsed .list-controls, .task-workspace.list-collapsed .task-list-scroll { opacity: 0; pointer-events: none; transform: translateX(-12px); }
+.task-list-rail { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 10px 8px; opacity: 0; pointer-events: none; transform: translateX(10px); transition: opacity 140ms ease, transform 320ms var(--ease-spring-gentle); }
+.task-workspace.list-collapsed .task-list-rail { opacity: 1; pointer-events: auto; transform: none; transition-delay: 120ms; }
+.rail-expand, .rail-create, .rail-task { width: 46px; height: 46px; flex: none; display: grid; place-items: center; border: 0; border-radius: 14px; background: transparent; color: var(--text-muted); font: inherit; cursor: pointer; }
+.rail-expand { font-size: 24px; }
+.rail-create { margin-top: auto; color: var(--accent); font-size: 22px; }
+.rail-expand:hover, .rail-create:hover { background: var(--bg-glass-strong); }
+.rail-items { width: 100%; min-height: 0; display: grid; justify-items: center; gap: 8px; overflow-y: auto; scrollbar-width: none; }
+.rail-items::-webkit-scrollbar { display: none; }
+.rail-task { position: relative; background: color-mix(in srgb, var(--text-primary) 4%, transparent); font-weight: 650; }
+.rail-task:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.rail-task.selected { background: var(--accent); color: white; box-shadow: 0 7px 18px color-mix(in srgb, var(--accent) 25%, transparent); }
+.rail-task i { position: absolute; right: 5px; bottom: 5px; width: 7px; height: 7px; border: 2px solid var(--bg-glass-strong); border-radius: 50%; background: var(--text-faint); }
+.rail-task i.status-in_progress { background: var(--accent); }.rail-task i.status-blocked { background: #ff9500; }.rail-task i.status-completed { background: #34c759; }
+.panel-heading-actions { display: flex !important; align-items: center !important; gap: 2px !important; }
+.focus-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; padding: 3px; border-radius: 12px; background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+.focus-filters button { min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 5px; border: 0; border-radius: 9px; background: transparent; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.focus-filters button.active { background: var(--bg-glass-strong); color: var(--accent); box-shadow: var(--shadow-sm); }
+.focus-filters button span { font-size: 11px; font-variant-numeric: tabular-nums; opacity: .8; }
+.list-order { margin: 10px 5px 12px; color: var(--text-faint); font-size: 11px; }
 .panel-heading { height: 45px; display: flex; align-items: center; justify-content: space-between; padding: 0 7px 6px; }
 .panel-heading div { display: flex; align-items: baseline; gap: 7px; }
 .panel-heading strong { font-size: 14px; }
@@ -913,9 +965,9 @@ onMounted(async () => {
 .card-topline { min-width: 0; display: flex; align-items: center; gap: 7px; }
 .card-topline strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .kind-badge { flex: none; padding: 2px 6px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--text-muted); font-size: 9px; }
-.card-footer { display: flex; justify-content: space-between; margin-top: 8px; color: var(--text-faint); font-size: 10px; }
+.card-footer { display: flex; justify-content: space-between; gap: 6px; color: var(--text-faint); font-size: 12px; }
 .danger { color: #ff3b30; }
-.mini-progress { height: 3px; margin-top: 7px; border-radius: 3px; background: color-mix(in srgb, var(--text-primary) 7%, transparent); overflow: hidden; }
+.mini-progress { height: 3px; border-radius: 3px; background: color-mix(in srgb, var(--text-primary) 7%, transparent); overflow: hidden; }
 .mini-progress i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width var(--motion-slow) var(--ease-spring-gentle); }
 .card-chevron { align-self: center; color: var(--text-faint); font-size: 20px; }
 .task-card-enter-active, .task-card-leave-active { transition: opacity var(--motion-normal) ease, transform var(--motion-normal) var(--ease-spring-gentle); }
@@ -924,32 +976,56 @@ onMounted(async () => {
 .task-skeletons span { height: 96px; border-radius: 16px; background: linear-gradient(100deg, transparent 20%, color-mix(in srgb, var(--text-primary) 7%, transparent) 45%, transparent 70%); background-size: 220% 100%; animation: shimmer 1.4s infinite; }
 @keyframes shimmer { to { background-position: -220% 0; } }
 .empty-list, .empty-detail { height: 100%; display: grid; place-content: center; justify-items: center; text-align: center; color: var(--text-muted); }
-.empty-list { min-height: 420px; }
+.empty-list { min-height: 200px; padding: 20px 8px; }
 .empty-list p, .empty-detail p { margin: 7px 0 15px; color: var(--text-faint); font-size: 12px; }
 .empty-list button, .activity-empty { min-height: 40px; padding: 0 13px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-glass); color: var(--accent); cursor: pointer; }
 .empty-orb { width: 54px; height: 54px; display: grid; place-items: center; margin-bottom: 13px; border-radius: 18px; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); font-size: 25px; }
-.task-detail-panel { padding: 24px 26px 34px; }
+.detail-section, .task-progress-panel, .task-detail-placeholder { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.detail-summary { flex: none; padding: 24px 24px 0; min-width: 0; }
+.detail-columns { flex: 1 1 auto; min-width: 0; min-height: 0; display: grid; grid-template-columns: 1fr; gap: 0; }
+.detail-columns.split { grid-template-columns: minmax(0, 1.12fr) minmax(310px, .88fr); }
+.detail-columns.split .task-progress-panel { border-left: 1px solid var(--border-subtle); }
+.task-progress-panel { padding: 0; }
+.progress-body { padding: 0 24px 28px; }
+.task-detail-placeholder, .empty-detail { flex: 1; min-height: 0; }
+.progress-column-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 78px; margin: 0; padding: 12px 24px; background: color-mix(in srgb, var(--bg-glass-strong) 88%, transparent); backdrop-filter: blur(18px) saturate(150%); -webkit-backdrop-filter: blur(18px) saturate(150%); }
+.progress-column-header > div { display: grid; gap: 4px; }
+.progress-column-header span { color: var(--text-primary); font-size: 18px; font-weight: 700; letter-spacing: -.015em; }
+.progress-column-header strong { color: var(--text-faint); font-size: 11px; font-weight: 520; }
+.progress-column-header button, .column-heading button { min-height: 40px; padding: 0 12px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-glass-strong); color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; }
+.column-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.column-heading > div { display: flex; align-items: baseline; gap: 8px; }
+.column-heading span { font-size: 17px; font-weight: 680; }
+.column-heading strong { color: var(--text-faint); font-size: 12px; }
 .mobile-detail-nav { display: none; }
-.detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.detail-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 18px; }
 /* Keep scrollIntoView() reveals clear of the fixed mobile global header. */
 .detail-header, .activity-section { scroll-margin-top: calc(var(--mobile-header-height) + var(--safe-top) + 12px); }
-.detail-title-group { min-width: 0; }
-.detail-title-group h2 { margin: 0; font-size: clamp(22px, 3vw, 30px); line-height: 1.18; letter-spacing: var(--tracking-tight); }
+.detail-title-group { min-width: 0; flex: 1 1 180px; }
+.detail-title-group h2 { margin: 0; font-size: clamp(22px, 2.2vw, 28px); line-height: 1.35; letter-spacing: var(--tracking-tight); overflow-wrap: anywhere; }
 .detail-pills { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
 .detail-title-group p { max-width: 720px; margin: 8px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
-.detail-actions { display: flex; gap: 7px; flex: none; }
-.detail-actions button, .section-heading button { min-height: 38px; padding: 0 11px; border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-glass); color: var(--text-secondary); cursor: pointer; }
-.detail-actions .more-button { width: 40px; padding: 0; }
-.detail-facts { display: flex; gap: 8px; margin: 26px 0; }
-.detail-facts div { flex: 1 1 0; min-width: 0; display: grid; gap: 5px; padding: 10px 12px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 3%, transparent); }
-.detail-facts div span { color: var(--text-faint); font-size: 10px; }
-.detail-facts strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 570; }
-.progress-overview, .detail-section { padding: 18px; border: 1px solid var(--border-subtle); border-radius: 17px; background: color-mix(in srgb, var(--bg-glass) 72%, transparent); }
-.detail-section { margin-top: 18px; }
-.section-heading { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.section-heading div { display: flex; align-items: baseline; gap: 8px; }
-.section-heading span { color: var(--text-muted); font-size: 12px; }
-.section-heading strong { font-size: 17px; }.section-heading small { color: var(--text-faint); font-size: 10px; }
+.detail-actions { display: flex; gap: 6px; flex: none; }
+.detail-actions button { min-height: 38px; padding: 0 11px; border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-glass); color: var(--text-secondary); cursor: pointer; }
+.detail-actions .primary-action { background: var(--accent); color: white; border-color: transparent; font-weight: 600; padding-inline: 16px; }
+.detail-actions .archive-action { color: var(--text-muted); }
+.detail-actions .edit-action { display: grid; place-items: center; min-width: 38px; width: 38px; padding: 0; background: var(--bg-glass-strong); font-size: 16px; }
+.detail-context { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 12px 0; }
+.detail-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0; color: var(--text-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.detail-facts strong { font-size: 12px; font-weight: 570; }
+.detail-facts > span > span { margin: 0 4px; color: var(--text-faint); }
+.task-description { flex-basis: 100%; margin: 4px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+.progress-overview { display: grid; grid-template-columns: auto minmax(30px, 1fr) auto; align-items: center; gap: 10px 14px; padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: 13px; background: color-mix(in srgb, var(--bg-glass) 72%, transparent); }
+.progress-summary { display: flex; align-items: baseline; gap: 8px; }
+.progress-summary span { color: var(--text-muted); font-size: 12px; }
+.progress-summary strong { font-size: 17px; font-variant-numeric: tabular-nums; }
+.progress-overview > small { color: var(--text-faint); font-size: 11px; }
+.detail-switch { display: none; min-width: 200px; gap: 6px; padding: 4px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+.detail-switch button { flex: 1; min-height: 40px; padding: 8px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); font: inherit; font-size: 14px; cursor: pointer; }
+.detail-switch button.active { color: var(--text-primary); font-weight: 600; background: var(--bg-glass-strong); box-shadow: var(--shadow-sm); }
+.detail-switch button span { margin-left: 6px; color: var(--text-faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+.detail-section { margin-top: 0; padding: 12px 24px 34px; }
+.activity-empty-copy { color: var(--text-faint); font-size: 13px; line-height: 1.7; }
 .progress-track { height: 8px; border-radius: 8px; background: color-mix(in srgb, var(--text-primary) 6%, transparent); overflow: hidden; }
 .progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 65%, #34c759)); transition: width var(--motion-slow) var(--ease-spring-gentle); }
 .activity-list { display: grid; gap: 0; }
@@ -978,9 +1054,26 @@ onMounted(async () => {
 .activity-dialog time { color: var(--text-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
 .activity-dialog p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 .activity-dialog p.activity-dialog-empty { color: var(--text-faint); }
+.child-task-dialog { width: min(680px, calc(100vw - 40px)); max-height: min(760px, calc(100dvh - 48px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-glass); border-radius: 24px; background: var(--bg-glass-strong); box-shadow: var(--shadow-lg), var(--inset-highlight); }
+.child-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 24px 26px 16px; }
+.child-dialog-header > div { min-width: 0; }
+.child-dialog-header > div > span { display: block; overflow: hidden; color: var(--text-faint); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.child-dialog-header h3 { margin: 5px 0 0; font-size: 22px; line-height: 1.3; letter-spacing: -.015em; overflow-wrap: anywhere; }
+.child-edit { display: grid; place-items: center; min-width: 40px; width: 40px; min-height: 40px; padding: 0; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-glass); color: var(--text-secondary); font-size: 16px; cursor: pointer; }
+.child-dialog-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 26px 20px; }
+.child-description { margin: 0 0 14px; color: var(--text-muted); font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
+.child-facts { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 4%, transparent); color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.child-section { margin-top: 20px; }
+.child-list { display: grid; gap: 5px; }
+.child-list button { min-height: 48px; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 14px; align-items: center; gap: 9px; padding: 6px 10px; border: 0; border-radius: 12px; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
+.child-list button:hover { background: var(--bg-glass); }
+.child-list button strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.child-status { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }.child-status.status-in_progress { background: var(--accent); }.child-status.status-blocked { background: #ff9500; }.child-status.status-completed { background: #34c759; }
+.child-dialog-actions { display: grid; grid-template-columns: 1fr 1.25fr; gap: 9px; padding: 14px 26px 24px; border-top: 1px solid var(--border-subtle); }
+.child-dialog-actions button { min-height: 44px; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); color: var(--text-secondary); font: inherit; font-weight: 600; cursor: pointer; }
+.child-dialog-actions .primary { border-color: transparent; background: var(--accent); color: white; box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 22%, transparent); }
 .detail-loading { height: 100%; display: flex; align-items: center; justify-content: center; gap: 5px; }.detail-loading span { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite alternate; }.detail-loading span:nth-child(2) { animation-delay: .15s; }.detail-loading span:nth-child(3) { animation-delay: .3s; }
 @keyframes pulse { to { opacity: .25; transform: translateY(-4px); } }
-.detail-illustration { position: relative; width: 78px; height: 64px; margin-bottom: 13px; }.detail-illustration span, .detail-illustration i { position: absolute; display: block; border: 1px solid var(--border-subtle); border-radius: 17px; background: var(--bg-glass); box-shadow: var(--shadow-sm); }.detail-illustration span { inset: 0 13px 8px 0; transform: rotate(-6deg); }.detail-illustration i { inset: 8px 0 0 13px; transform: rotate(5deg); }
 .task-sheet { max-height: calc(100dvh - 48px); display: flex; flex-direction: column; border-radius: 24px; border: 1px solid var(--border-glass); background: var(--bg-glass-strong); box-shadow: var(--shadow-lg), var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, .03); backdrop-filter: blur(40px) saturate(200%); -webkit-backdrop-filter: blur(40px) saturate(200%); overflow: hidden; }
 .sheet-header { display: flex; align-items: center; justify-content: space-between; padding: 28px 28px 16px; }.sheet-header span { color: var(--text-faint); font-size: 10px; letter-spacing: .08em; }.sheet-header h3 { margin: 4px 0 0; font-size: 18px; font-weight: 700; }.sheet-target { margin: 3px 0 0; color: var(--text-secondary); font-size: 12px; }.sheet-header button { width: 38px; height: 38px; border: 0; border-radius: 12px; background: var(--bg-glass); color: var(--text-muted); font-size: 23px; cursor: pointer; transition: background var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-instant) ease; }.sheet-header button:hover { background: var(--bg-hover); color: var(--text-primary); }.sheet-header button:active { transform: scale(.94); }
 .sheet-body { overflow-y: auto; padding: 4px 28px 10px; }.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }.field { display: grid; gap: 7px; }.field.full { grid-column: 1 / -1; }.field > span:first-child { color: var(--text-muted); font-size: 11px; font-weight: 570; }.field input { height: 44px; padding: 0 11px; }.field textarea { resize: vertical; padding: 10px 11px; line-height: 1.5; }.field input:focus, .field textarea:focus { border-color: color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: var(--focus-ring); }
@@ -989,7 +1082,7 @@ onMounted(async () => {
 .task-date-input :deep(.el-input__wrapper) { width: 100%; box-sizing: border-box; }
 .kind-segment { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 5%, transparent); }.kind-segment button { height: 38px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); cursor: pointer; }.kind-segment button.active { background: var(--bg-glass-strong); box-shadow: var(--shadow-sm); color: var(--text-primary); font-weight: 600; }
 .range-field { display: grid; grid-template-columns: 1fr 48px; align-items: center; gap: 12px; }.range-field input { width: 100%; padding: 0; accent-color: var(--accent); }.range-field output { color: var(--accent); font-weight: 650; text-align: right; }.check-field { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--text-muted); font-size: 12px; cursor: pointer; }.check-field input { appearance: none; -webkit-appearance: none; position: relative; width: 20px; height: 20px; flex: none; margin: 0; border: 1px solid color-mix(in srgb, var(--text-muted) 42%, transparent); border-radius: 6px; background: var(--bg-glass); box-shadow: var(--inset-highlight); cursor: pointer; transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease, transform var(--motion-instant) ease, box-shadow var(--motion-fast) ease; }.check-field input::after { content: ''; position: absolute; left: 6px; top: 3px; width: 5px; height: 9px; border: solid white; border-width: 0 2px 2px 0; opacity: 0; transform: rotate(45deg) scale(.65); transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--ease-spring-gentle); }.check-field input:checked { border-color: var(--accent); background: var(--accent); box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 24%, transparent), var(--inset-highlight); }.check-field input:checked::after { opacity: 1; transform: rotate(45deg) scale(1); }.check-field input:focus-visible { outline: 0; box-shadow: var(--focus-ring); }.check-field:active input { transform: scale(.92); }.sheet-hint { margin: 0; color: var(--text-faint); font-size: 11px; }
-.sheet-footer { display: grid; grid-template-columns: 1fr 1.4fr; gap: 9px; padding: 16px 28px 28px; }.sheet-footer button { height: 44px; border-radius: 13px; font-weight: 620; cursor: pointer; }.sheet-footer .cancel { border: 1px solid var(--border-subtle); background: var(--bg-glass); color: var(--text-secondary); }.sheet-footer .confirm { border: 0; background: var(--accent); color: white; box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 22%, transparent); }.sheet-footer .confirm:disabled { opacity: .55; }
+.sheet-footer { display: grid; grid-template-columns: 1fr 1.4fr; gap: 9px; padding: 16px 28px 28px; }.sheet-footer button { height: 44px; border-radius: 13px; font-weight: 620; cursor: pointer; }.sheet-footer .cancel { border: 1px solid var(--border-subtle); background: var(--bg-glass); color: var(--text-secondary); }.sheet-footer .archive-from-edit { border: 1px solid color-mix(in srgb, #ff3b30 24%, var(--border-subtle)); background: color-mix(in srgb, #ff3b30 6%, var(--bg-glass)); color: #ff3b30; }.sheet-footer .confirm { border: 0; background: var(--accent); color: white; box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 22%, transparent); }.sheet-footer .confirm:disabled { opacity: .55; }
 
 .field input:focus, .field textarea:focus { box-shadow: none; }
 .check-field input:focus-visible { border-color: var(--accent); box-shadow: var(--inset-highlight); }
@@ -1001,14 +1094,30 @@ onMounted(async () => {
 .task-group-title small, .kind-badge { font-size: 10px; }
 .task-card { min-height: 88px; }
 .card-topline strong { font-size: 15px; font-weight: 620; }
-.card-footer { font-size: 11px; }
+.card-main { gap: 7px; }
+.card-topline strong { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.45; }
+.card-state { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.card-state .task-pill { min-height: 20px; padding: 2px 6px; font-size: 11px; }
+.priority-label { color: var(--text-faint); font-size: 11px; }
+.card-percent { margin-left: auto; color: var(--text-secondary); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.danger { color: var(--color-danger, #e75d56); }
+.accent { color: var(--accent); }
+.quiet { color: var(--text-muted); }
+.empty-detail { height: auto; min-height: 100%; align-content: center; padding: 16px 0; }
+.overview-eyebrow { color: var(--accent); font-size: 12px; letter-spacing: .06em; }
+.empty-detail h2 { margin: 10px 0 3px; color: var(--text-primary); font-size: clamp(20px, 2vw, 27px); line-height: 1.4; }
+.suggested-tasks { display: grid; width: 100%; max-width: 600px; gap: 8px; margin: 16px 0 20px; }
+.suggested-tasks button { display: flex; align-items: center; gap: 16px; text-align: left; padding: 15px; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-glass); color: var(--text-primary); font: inherit; cursor: pointer; }
+.suggested-tasks button:hover { background: var(--bg-glass-strong); border-color: color-mix(in srgb, var(--accent) 30%, var(--border-subtle)); }
+.suggestion-copy { min-width: 0; display: grid; gap: 6px; flex: 1; }
+.suggestion-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+.suggestion-copy small, .overview-note { color: var(--text-faint); font-size: 12px; }
+.suggestion-timing { flex: none; font-size: 12px; }
+.suggestion-timing > span { margin-left: 8px; }
+.task-card:focus-visible, .focus-filters button:focus-visible, .detail-switch button:focus-visible, .detail-actions button:focus-visible, .suggested-tasks button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .empty-list p, .empty-detail p { font-size: 13px; }
 .detail-title-group p { font-size: 14px; line-height: 1.65; }
-.detail-actions button, .section-heading button { font-size: 13px; }
-.detail-facts div span { font-size: 11px; }
-.detail-facts div strong { font-size: 13px; }
-.section-heading span { font-size: 13px; }
-.section-heading small { font-size: 11px; }
+.detail-actions button { font-size: 13px; }
 .activity-detail, .activity-note { font-size: 13px; }
 .activity-item time { font-size: 11px; }
 .field > span:first-child { font-size: 12px; }
@@ -1060,7 +1169,8 @@ onMounted(async () => {
 :global(.el-message) { z-index: 2600 !important; }
 
 @media (max-width: 1050px) {
-  .task-workspace { grid-template-columns: 290px minmax(0, 1fr); }.detail-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .task-workspace { grid-template-columns: 300px minmax(0, 1fr); }
+  .task-toolbar { flex-wrap: wrap; }
 }
 
 @media (max-width: 768px) {
@@ -1071,15 +1181,52 @@ onMounted(async () => {
      overflow:hidden, cutting off the bottom sections. On desktop the zone is a
      grid item that stretches, so only this block layout needs the explicit height. */
   .task-detail-zone { display: block; height: 100%; }
+  .task-workspace:not(.detail-open) .task-detail-zone { display: none; }
+  .tasks-page.mobile-focused .task-toolbar { display: none; }
+  .tasks-page.mobile-focused .page-header { display: none; }
+  .task-toolbar .view-switch { width: 116px; flex: none; }
+  .task-toolbar .task-search { order: 0; }
+  .task-toolbar .filters { order: 0; }
+  .focus-filters button { min-height: 44px; }
+  .task-card { min-height: 100px; }
+  .mobile-detail-nav { position: sticky; top: 0; z-index: 3; margin: 0 -4px 14px; background: var(--bg-glass-strong); border-bottom: 1px solid var(--border-subtle); }
+  .detail-actions { display: flex; margin: 16px 0; }
+  .detail-actions button { padding-inline: 10px; }
+  .detail-section { padding: 0 16px 24px; }
+  .detail-context .detail-facts { margin: 0; }
+  .progress-overview { grid-template-columns: auto minmax(50px, 1fr); }
+  .progress-overview > small { grid-column: 1 / -1; }
+  .detail-switch button { min-height: 44px; padding-inline: 8px; }
+  .suggested-tasks button { flex-wrap: wrap; }
 }
 
 @media (max-width: 768px) {
   .archive-dialog { padding: 38px 20px max(22px, env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; border-bottom: 0; }
   .archive-dialog-actions button { min-height: 48px; }
+  .task-workspace.list-collapsed { display: block; }
+  .task-workspace.detail-open .task-list-panel { display: none; }
+  .task-detail-zone { height: 100%; display: block; overflow-y: auto; overscroll-behavior: contain; border-radius: 20px; }
+  .detail-section, .task-progress-panel { height: auto; overflow: visible; }
+  .detail-summary { padding: 0 16px 22px; }
+  .task-progress-panel { margin-top: 0; padding: 0; }
+  .detail-columns { display: block; border-top: 1px solid var(--border-subtle); }
+  .detail-columns.split .task-progress-panel { border-left: 0; }
+  .progress-body { padding: 0 16px 24px; }
+  .progress-column-header { min-height: 68px; padding: 12px 16px; }
+  .detail-actions { display: flex; margin: 0; }
+  .detail-actions .edit-action { min-height: 44px; }
+  .column-heading button, .progress-column-header button { min-height: 44px; }
+  .detail-switch { display: flex; }
+  .task-detail-zone.mobile-section-progress .task-breakdown { display: none; }
+  .task-detail-zone.mobile-section-breakdown .task-progress-panel { display: none; }
+  .child-task-dialog { width: 100vw; max-height: min(88dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }
+  .child-dialog-header { padding: 28px 20px 14px; }
+  .child-dialog-scroll { padding: 0 20px 18px; }
+  .child-dialog-actions { padding: 14px 20px max(20px, env(safe-area-inset-bottom)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .switch-indicator, .task-card, .mini-progress i, .progress-track i, .check-field input, .check-field input::after, .error-banner-enter-active, .error-banner-leave-active, .task-card-enter-active, .task-card-leave-active { transition-duration: 1ms !important; }.task-skeletons span, .detail-loading span { animation: none !important; }
+  .task-workspace, .list-controls, .task-list-scroll, .task-list-rail, .switch-indicator, .task-card, .mini-progress i, .progress-track i, .check-field input, .check-field input::after, .error-banner-enter-active, .error-banner-leave-active, .task-card-enter-active, .task-card-leave-active { transition-duration: 1ms !important; }.task-skeletons span, .detail-loading span { animation: none !important; }
 }
 @media (prefers-reduced-transparency: reduce) { .glass-surface, .task-sheet, .archive-dialog { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--bg-primary); }:global(.task-select-popper.el-popper), :global(.task-date-popper.el-popper) { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background: var(--bg-primary) !important; } }
 @media (prefers-contrast: more) { .task-card.selected, .progress-overview, .detail-section, .check-field input { border-color: var(--text-muted); } }
