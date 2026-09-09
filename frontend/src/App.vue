@@ -1,12 +1,7 @@
 <template>
   <div
-    ref="appShellRef"
     class="app-shell"
-    :class="{ 'sidebar-dragging': isSidebarDragging }"
-    @pointerdown="onSidebarPointerDown"
-    @pointermove="onSidebarPointerMove"
-    @pointerup="onSidebarPointerUp"
-    @pointercancel="onSidebarPointerCancel"
+    :class="{ 'mobile-focus': isMobile && mobileFocusMode }"
   >
     <!-- Ambient gradient orbs for liquid glass effect -->
     <div class="ambient-bg">
@@ -17,35 +12,12 @@
     <!-- Subtle grain texture background -->
     <div class="bg-grain"></div>
 
-    <!-- Mobile global header: hamburger + centered page title -->
-    <div class="mobile-global-header" v-if="isMobile" :class="{ 'header-scrolled': isScrolled }">
-      <button
-        class="mobile-menu-btn"
-        type="button"
-        :aria-label="mobileSidebarVisible ? '关闭导航' : '打开导航'"
-        :aria-expanded="mobileSidebarVisible"
-        @click="mobileSidebarVisible ? closeMobileSidebar() : openMobileSidebar()"
-      >
-        <el-icon :size="20"><component :is="mobileSidebarVisible ? Fold : Expand" /></el-icon>
-      </button>
-      <span v-if="!mobileSidebarVisible" class="mobile-page-title">{{ currentTitle }}</span>
+    <!-- Mobile root header: one title. Page-level actions occupy the right slot. -->
+    <div v-if="isMobile && !mobileFocusMode" class="mobile-global-header" :class="{ 'header-scrolled': isScrolled }">
+      <div class="mobile-header-spacer"></div>
+      <span class="mobile-page-title">{{ currentTitle }}</span>
       <div class="mobile-header-spacer"></div>
     </div>
-
-    <!-- Mobile collapsing toolbar grip: click to re-expand the scrolled-away toolbar -->
-    <button
-      v-if="isMobile"
-      class="mobile-toolbar-grip"
-      :class="{ visible: gripRoute && isScrolled && !appStore.toolbarPinned && !appStore.immersiveHidden }"
-      type="button"
-      aria-label="展开工具栏"
-      @click="onGripClick"
-    >
-      <span class="grip-pill">
-        <span class="grip-line"></span>
-        <span class="grip-line"></span>
-      </span>
-    </button>
 
     <!-- Mobile sidebar overlay backdrop -->
     <transition name="scrim-fade">
@@ -62,10 +34,10 @@
         ref="appAsideRef"
         class="app-aside"
         :class="{ 'mobile-open': isMobile && !isCollapsed }"
-        :style="{ width: isMobile ? '260px' : (isCollapsed ? '72px' : '230px') }"
+        :style="{ width: isMobile ? '100%' : (isCollapsed ? '72px' : '230px') }"
         :role="isMobile && mobileSidebarVisible ? 'dialog' : undefined"
         :aria-modal="isMobile && mobileSidebarVisible ? 'true' : undefined"
-        :aria-label="isMobile && mobileSidebarVisible ? '主导航' : undefined"
+        :aria-label="isMobile && mobileSidebarVisible ? '全部功能' : undefined"
         :aria-hidden="isMobile && !mobileSidebarVisible ? 'true' : undefined"
         :inert="isMobile && !mobileSidebarVisible ? true : undefined"
         :tabindex="isMobile && mobileSidebarVisible ? -1 : undefined"
@@ -76,8 +48,7 @@
         class="app-main"
         :class="{
           'mobile-full': isMobile,
-          'mobile-scrolled': isMobile && gripRoute && isScrolled,
-          'toolbar-pinned': isMobile && appStore.toolbarPinned,
+          'mobile-focus': isMobile && mobileFocusMode,
           'reader-scroll-locked': lockMobileReaderOuterScroll,
         }"
         @scroll="onMainScroll"
@@ -91,6 +62,43 @@
         </div>
       </el-main>
     </el-container>
+
+    <nav v-if="isMobile && !mobileFocusMode" class="mobile-dock" aria-label="主要导航">
+      <router-link
+        :to="{ path: '/reader', query: { view: 'shelf' } }"
+        class="mobile-dock-item"
+        :class="{ active: mobileNavSection === 'reader' }"
+        :aria-current="mobileNavSection === 'reader' ? 'page' : undefined"
+      >
+        <el-icon><Files /></el-icon><span>阅境轩</span>
+      </router-link>
+      <router-link
+        to="/timeline"
+        class="mobile-dock-item"
+        :class="{ active: mobileNavSection === 'timeline' }"
+        :aria-current="mobileNavSection === 'timeline' ? 'page' : undefined"
+      >
+        <el-icon><Calendar /></el-icon><span>时光机</span>
+      </router-link>
+      <router-link
+        :to="{ path: '/tasks', query: { view: 'tasks' } }"
+        class="mobile-dock-item"
+        :class="{ active: mobileNavSection === 'tasks' }"
+        :aria-current="mobileNavSection === 'tasks' ? 'page' : undefined"
+      >
+        <el-icon><Finished /></el-icon><span>任务中枢</span>
+      </router-link>
+      <button
+        type="button"
+        class="mobile-dock-item"
+        :class="{ active: mobileNavSection === 'more' || mobileSidebarVisible }"
+        :aria-expanded="mobileSidebarVisible"
+        aria-label="全部模块"
+        @click="openMobileSidebar"
+      >
+        <el-icon><Grid /></el-icon><span>全部</span>
+      </button>
+    </nav>
   </div>
 </template>
 
@@ -98,160 +106,42 @@
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from './stores/app'
-import { Expand, Fold } from '@element-plus/icons-vue'
+import { Calendar, Files, Finished, Grid } from '@element-plus/icons-vue'
 import Sidebar from './components/Sidebar.vue'
 import { isPhoneViewport, shouldLockMobileReaderOuterScroll } from './utils/mobileLayoutPolicy'
+import { getMobileNavSection, isMobileFocusRoute } from './utils/mobileNavigationPolicy'
 import { useModalEnvironment } from './composables/useModalEnvironment'
 
 const route = useRoute()
+const appStore = useAppStore()
 // Reset scroll state when navigating between pages.
 watch(() => route.path, () => appStore.handleScroll(0))
-const appStore = useAppStore()
-// The collapsing-to-grip toolbar is only for pages whose top toolbar
-// should collapse on scroll: Reader and Tasks. Timeline keeps a static
-// toolbar (no grip, no collapse) — the grip interaction never worked
-// reliably there and the user prefers it plain.
-const gripRoute = computed(() =>
-  route.name === 'Reader' || route.name === 'Tasks',
-)
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
 const currentTitle = computed(() => (route.meta?.title as string) || '')
-const appShellRef = ref<HTMLElement | null>(null)
 const appAsideRef = ref<HTMLElement | null>(null)
 
 // Mobile detection
 const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => isPhoneViewport(windowWidth.value))
+const mobileFocusMode = computed(() => isMobileFocusRoute(route.path, route.query))
+const mobileNavSection = computed(() => getMobileNavSection(route.path))
 const lockMobileReaderOuterScroll = computed(() => (
   shouldLockMobileReaderOuterScroll(windowWidth.value, route.path)
 ))
 
-// Mobile navigation follows the pointer 1:1. On release, position and recent
-// velocity are projected forward before snapping to the nearest resting state.
-const DRAWER_WIDTH = 260
-const EDGE_ACTIVATION_WIDTH = 24
-const GESTURE_THRESHOLD = 8
-const isSidebarDragging = ref(false)
-const mobileSidebarVisible = computed(() => isMobile.value && (!isCollapsed.value || isSidebarDragging.value))
+const mobileSidebarVisible = computed(() => isMobile.value && !isCollapsed.value)
 useModalEnvironment(
   () => isMobile.value && !isCollapsed.value,
   appAsideRef,
   closeMobileSidebar,
 )
-let pointerId: number | null = null
-let pointerStartX = 0
-let pointerStartY = 0
-let pointerBaseX = -DRAWER_WIDTH
-let pointerAxis: 'pending' | 'horizontal' | 'vertical' = 'pending'
-let drawerX = -DRAWER_WIDTH
-let samples: Array<{ x: number; time: number }> = []
-
-function rubberband(overshoot: number, dimension: number, constant = 0.55) {
-  return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot))
-}
-
-function projectVelocity(velocity: number, decelerationRate = 0.995) {
-  return (velocity / 1000) * decelerationRate / (1 - decelerationRate)
-}
-
-function applyMobileSidebarPosition(x: number) {
-  drawerX = x
-  const progress = Math.max(0, Math.min(1, (x + DRAWER_WIDTH) / DRAWER_WIDTH))
-  const shell = appShellRef.value
-  shell?.style.setProperty('--mobile-sidebar-x', `${x}px`)
-  shell?.style.setProperty('--mobile-sidebar-progress', String(progress))
-  shell?.style.setProperty('--mobile-content-scale', String(1 - progress * 0.015))
-  shell?.style.setProperty('--mobile-content-shift', `${progress * 8}px`)
-}
-
-function syncMobileSidebarPosition() {
-  applyMobileSidebarPosition(isCollapsed.value ? -DRAWER_WIDTH : 0)
-}
 
 function openMobileSidebar() {
   appStore.setSidebarCollapsed(false)
-  requestAnimationFrame(syncMobileSidebarPosition)
 }
 
 function closeMobileSidebar() {
   appStore.setSidebarCollapsed(true)
-  requestAnimationFrame(syncMobileSidebarPosition)
-}
-
-function onSidebarPointerDown(event: PointerEvent) {
-  if (!isMobile.value || (event.pointerType === 'mouse' && event.button !== 0)) return
-  const drawerOpen = !isCollapsed.value
-  if (!drawerOpen && event.clientX > EDGE_ACTIVATION_WIDTH) return
-
-  pointerId = event.pointerId
-  pointerStartX = event.clientX
-  pointerStartY = event.clientY
-  pointerBaseX = drawerOpen ? 0 : -DRAWER_WIDTH
-  drawerX = pointerBaseX
-  pointerAxis = 'pending'
-  samples = [{ x: event.clientX, time: performance.now() }]
-  isSidebarDragging.value = true
-  applyMobileSidebarPosition(pointerBaseX)
-}
-
-function onSidebarPointerMove(event: PointerEvent) {
-  if (event.pointerId !== pointerId) return
-  const dx = event.clientX - pointerStartX
-  const dy = event.clientY - pointerStartY
-
-  if (pointerAxis === 'pending') {
-    if (Math.max(Math.abs(dx), Math.abs(dy)) < GESTURE_THRESHOLD) return
-    pointerAxis = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical'
-    if (pointerAxis === 'vertical') {
-      cancelSidebarGesture()
-      return
-    }
-    appShellRef.value?.setPointerCapture(event.pointerId)
-  }
-
-  event.preventDefault()
-  let nextX = pointerBaseX + dx
-  if (nextX > 0) nextX = rubberband(nextX, DRAWER_WIDTH)
-  if (nextX < -DRAWER_WIDTH) nextX = -DRAWER_WIDTH + rubberband(nextX + DRAWER_WIDTH, DRAWER_WIDTH)
-  applyMobileSidebarPosition(nextX)
-
-  const now = performance.now()
-  samples.push({ x: event.clientX, time: now })
-  samples = samples.filter((sample) => now - sample.time <= 100)
-}
-
-function finishSidebarGesture(commit: boolean) {
-  if (pointerId !== null && appShellRef.value?.hasPointerCapture(pointerId)) {
-    appShellRef.value.releasePointerCapture(pointerId)
-  }
-  pointerId = null
-  isSidebarDragging.value = false
-
-  if (!commit || pointerAxis !== 'horizontal') {
-    syncMobileSidebarPosition()
-    return
-  }
-
-  const first = samples[0]
-  const last = samples[samples.length - 1]
-  const elapsed = first && last ? Math.max(1, last.time - first.time) : 1
-  const velocity = first && last ? ((last.x - first.x) / elapsed) * 1000 : 0
-  const projected = drawerX + projectVelocity(velocity)
-  const shouldOpen = projected > -DRAWER_WIDTH / 2
-  appStore.setSidebarCollapsed(!shouldOpen)
-  requestAnimationFrame(syncMobileSidebarPosition)
-}
-
-function cancelSidebarGesture() {
-  finishSidebarGesture(false)
-}
-
-function onSidebarPointerUp(event: PointerEvent) {
-  if (event.pointerId === pointerId) finishSidebarGesture(true)
-}
-
-function onSidebarPointerCancel(event: PointerEvent) {
-  if (event.pointerId === pointerId) cancelSidebarGesture()
 }
 
 // Scroll detection for mobile header (shared via store so the Reader's internal
@@ -262,49 +152,15 @@ function onMainScroll(e: Event) {
   appStore.handleScroll(el.scrollTop)
 }
 
-function onGripClick() {
-  appStore.togglePin()
-  if (!appStore.toolbarPinned) return
-  // While the toolbar's max-height transition animates (~450ms), expanding
-  // it shifts .app-main.scrollTop upward (Timeline is the one page where
-  // .app-main itself is the scroller). iOS Safari throttles scroll events —
-  // the intermediate positions never arrive as events, so the grace-window
-  // absorption (which depends on those events) never runs, and a single
-  // post-transition read can land mid-shift on a slow device, leaving the
-  // baseline too low — the final settled shift then exceeds it and instantly
-  // re-collapses the toolbar we just opened. Poll the LIVE DOM scrollTop
-  // (not the throttled store ref) and keep raising the baseline throughout
-  // the transition so it tracks the rising shift to its settled value,
-  // regardless of device speed or iOS event delivery. On Reader/Tasks
-  // .app-main doesn't scroll (inner panes do), so reads are 0 and
-  // rebaselinePin is a no-op there.
-  const startedAt = performance.now()
-  const rebaseline = () => {
-    if (!appStore.toolbarPinned) return
-    const el = document.querySelector('.app-main') as HTMLElement | null
-    if (el) appStore.rebasePinScrollTop(el.scrollTop)
-    if (performance.now() - startedAt < 900) {
-      requestAnimationFrame(rebaseline)
-    }
-  }
-  requestAnimationFrame(rebaseline)
-}
-
 function onResize() {
   windowWidth.value = window.innerWidth
-  if (isMobile.value) syncMobileSidebarPosition()
 }
-watch(isCollapsed, () => {
-  if (isMobile.value && !isSidebarDragging.value) requestAnimationFrame(syncMobileSidebarPosition)
-})
 onMounted(() => {
   window.addEventListener('resize', onResize)
   if (isMobile.value && !isCollapsed.value) appStore.setSidebarCollapsed(true)
-  requestAnimationFrame(syncMobileSidebarPosition)
 })
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
-  if (pointerId !== null) cancelSidebarGesture()
 })
 </script>
 
@@ -447,6 +303,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --mobile-header-height: 56px;
+  --mobile-dock-height: 62px;
   --tap-target: 44px;
   --page-gutter: 40px;
   --bg-base: #f0f0f3;
@@ -488,9 +345,9 @@ code, pre, .code-block { font-family: var(--font-mono); }
   --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-ios: cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  --duration-fast: 0.2s;
-  --duration-normal: 0.3s;
-  --duration-slow: 0.45s;
+  --duration-fast: var(--motion-fast);
+  --duration-normal: var(--motion-normal);
+  --duration-slow: var(--motion-slow);
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   --font-mono: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
   --tracking-tight: -0.02em;
@@ -1059,113 +916,36 @@ code, pre, .code-block { font-family: var(--font-mono); }
   color: var(--accent) !important;
 }
 
-/* ── Mobile scroll: collapse page header + toolbar into the grip (unless pinned) ── */
-.app-main.mobile-scrolled:not(.toolbar-pinned) .page-header,
-.app-main.mobile-scrolled:not(.toolbar-pinned) .reader-topbar,
-.app-main.mobile-scrolled:not(.toolbar-pinned) .toolbar,
-.app-main.mobile-scrolled:not(.toolbar-pinned) .task-toolbar {
-  max-height: 0;
-  min-height: 0;
-  opacity: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-/* Timeline's .toolbar-row is position: sticky, which escapes its parent's
-   max-height:0/overflow:hidden clip and stays pinned under the global header
-   — so the toolbar never visually disappears. Neutralize the stickiness (and
-   hide) when collapsed; restore sticky when pinned/expanded. */
-.app-main.mobile-scrolled:not(.toolbar-pinned) .toolbar-row {
-  position: static !important;
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-.page-header,
-.reader-topbar,
-.toolbar,
-.task-toolbar {
-  transition: max-height var(--duration-slow) var(--ease-standard),
-              opacity var(--duration-fast) var(--ease-out),
-              margin var(--duration-slow) var(--ease-standard),
-              padding var(--duration-slow) var(--ease-standard);
-}
-
-/* ── Mobile toolbar grip: thin floating handle to re-expand the toolbar ──
-   The button is a 60×32 transparent hit area (easy to tap on a phone, easy
-   to click with a mouse in DevTools emulation); the visible .grip-pill
-   (44×14) is centered inside it, so a slightly off-center click still
-   lands on the grip instead of scrolling the page beneath.
-   IMPORTANT: no `transform` for positioning — iOS Safari mis-hit-tests
-   transformed fixed elements (the touch rect uses the pre-transform
-   layout box), so taps at the visible spot missed. Center with left calc. */
-.mobile-toolbar-grip {
-  position: fixed;
-  top: calc(var(--mobile-header-height) + var(--safe-top) + 2px);
-  left: calc(50% - 30px);
-  width: 60px;
-  height: 32px;
-  background: transparent;
-  border: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--duration-fast) var(--ease-out);
-  z-index: 1002;
-  cursor: pointer;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-}
-.mobile-toolbar-grip.visible {
-  opacity: 1;
-  pointer-events: auto;
-}
-.grip-pill {
-  width: 44px;
-  height: 14px;
-  background: var(--bg-glass);
-  border: 1px solid var(--border-glass);
-  border-radius: 7px;
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  gap: 2px;
-  pointer-events: none; /* the button handles the click, not the pill */
-}
-.grip-line {
-  width: 22px;
-  height: 1.5px;
-  background: var(--text-muted);
-  border-radius: 1px;
-}
-
-/* ── Global mobile title size ── */
+/* ── Mobile: a single app title with one page action in the right slot. ── */
 @media (max-width: 768px) {
-  .page-title {
-    font-size: 18px !important;
+  .page-header {
+    position: fixed;
+    inset: 0 0 auto 0;
+    z-index: 1002;
+    height: calc(var(--mobile-header-height) + var(--safe-top));
+    margin: 0 !important;
+    padding: var(--safe-top) max(12px, var(--safe-right)) 0 max(12px, var(--safe-left));
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    pointer-events: none;
   }
 
-  .page-header {
-    align-items: center;
-    gap: 10px;
-  }
+  .page-header > :first-child { display: none !important; }
+  .page-header > :not(:first-child) { pointer-events: auto; }
 
   .header-actions {
-    max-width: 100%;
-    overflow-x: auto;
-    scrollbar-width: none;
+    position: relative;
+    z-index: 1;
+    max-width: min(44vw, 152px);
+    pointer-events: auto;
+    overflow: visible;
   }
 
-  .header-actions::-webkit-scrollbar { display: none; }
+  .header-actions .el-button:not(:last-child) { display: none; }
+  .header-actions .el-button { min-height: var(--tap-target); }
+
+  .app-shell.mobile-focus .page-header { display: none !important; }
 }
 
 /* ── Unified keyframes (deduplicated) ── */
@@ -1292,41 +1072,11 @@ code, pre, .code-block { font-family: var(--font-mono); }
   box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
 }
 
-.mobile-menu-btn {
-  width: var(--tap-target);
-  height: var(--tap-target);
-  border-radius: 10px;
-  border: 1px solid var(--border-glass);
-  background: var(--bg-glass);
-  backdrop-filter: blur(12px) saturate(180%);
-  -webkit-backdrop-filter: blur(12px) saturate(180%);
-  color: var(--text-primary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
-  transition: transform var(--motion-instant) var(--ease-emphasized),
-              color var(--motion-fast) var(--ease-emphasized),
-              background-color var(--motion-fast) var(--ease-emphasized),
-              border-color var(--motion-fast) var(--ease-emphasized),
-              box-shadow var(--motion-fast) var(--ease-emphasized);
-  flex-shrink: 0;
-}
-.mobile-global-header.header-scrolled .mobile-menu-btn {
-  background: var(--bg-glass-subtle);
-  border-color: var(--border-subtle);
-  box-shadow: none;
-}
-.mobile-menu-btn:active {
-  transform: scale(0.9);
-}
-
 .mobile-page-title {
   flex: 1;
   text-align: center;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 19px;
+  font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.2px;
   white-space: nowrap;
@@ -1334,33 +1084,74 @@ code, pre, .code-block { font-family: var(--font-mono); }
   text-overflow: ellipsis;
 }
 .mobile-header-spacer {
-  width: var(--tap-target); /* match menu-btn width so title is visually centered */
+  width: var(--tap-target);
   flex-shrink: 0;
 }
 
-/* Title fade animation */
-.title-fade-enter-active {
-  transition: opacity var(--motion-normal) var(--ease-emphasized),
-              transform var(--motion-normal) var(--ease-spring-gentle);
+.mobile-dock {
+  position: fixed;
+  z-index: 1005;
+  left: max(8px, var(--safe-left));
+  right: max(8px, var(--safe-right));
+  bottom: max(8px, var(--safe-bottom));
+  height: var(--mobile-dock-height);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: stretch;
+  padding: 5px;
+  border: 1px solid var(--border-glass);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--bg-glass-strong) 92%, transparent);
+  backdrop-filter: blur(18px) saturate(170%);
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.12), var(--inset-highlight);
 }
-.title-fade-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
+
+.mobile-dock-item {
+  position: relative;
+  min-width: 0;
+  min-height: 52px;
+  border: 0;
+  border-radius: 15px;
+  background: transparent;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  text-decoration: none;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 570;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+  transition: color var(--motion-fast) var(--ease-emphasized),
+              background-color var(--motion-fast) var(--ease-emphasized),
+              transform var(--motion-instant) var(--ease-emphasized);
 }
-.title-fade-enter-from {
-  opacity: 0;
-  transform: translateX(-12px);
+
+.mobile-dock-item .el-icon {
+  font-size: 21px;
+  transition: transform var(--motion-normal) var(--ease-spring-gentle);
 }
-.title-fade-leave-to {
-  opacity: 0;
-  transform: translateX(-6px);
+
+.mobile-dock-item.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
 }
+
+.mobile-dock-item.active .el-icon { transform: translateY(-1px); }
+.mobile-dock-item:active { transform: scale(0.95); }
 
 .mobile-overlay {
   position: fixed;
   inset: 0;
-  z-index: 999;
+  z-index: 1090;
   background: rgba(0, 0, 0, 0.3);
-  opacity: var(--mobile-sidebar-progress);
+  opacity: 1;
+  backdrop-filter: blur(8px) saturate(90%);
+  -webkit-backdrop-filter: blur(8px) saturate(90%);
   touch-action: none;
 }
 
@@ -1369,31 +1160,24 @@ code, pre, .code-block { font-family: var(--font-mono); }
 .scrim-fade-enter-from,
 .scrim-fade-leave-to { opacity: 0; }
 
-/* Mobile aside: fixed overlay sliding from left */
+/* Mobile module sheet shares the same physical bottom origin as other sheets. */
 .app-aside {
   transition: width var(--motion-slow) var(--ease-spring-gentle),
               transform var(--motion-normal) var(--ease-spring-gentle),
               box-shadow var(--motion-normal) var(--ease-emphasized);
 }
-.app-aside.mobile-open {
-  position: fixed;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  z-index: 1000;
-  transform: translateX(0);
-  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.1);
-}
 
 .app-main.mobile-full {
-  padding: 16px max(12px, var(--safe-right)) calc(32px + var(--safe-bottom)) max(12px, var(--safe-left));
+  padding: 16px max(12px, var(--safe-right)) calc(var(--mobile-dock-height) + var(--safe-bottom) + 20px) max(12px, var(--safe-left));
   padding-top: calc(var(--mobile-header-height) + var(--safe-top) + 8px);
   overflow-x: hidden;
   width: 100%;
   max-width: 100%;
-  transform-origin: right center;
-  transform: translateX(var(--mobile-content-shift)) scale(var(--mobile-content-scale));
-  transition: transform var(--motion-normal) var(--ease-spring-gentle);
+}
+
+.app-main.mobile-full.mobile-focus {
+  padding-top: max(8px, var(--safe-top));
+  padding-bottom: max(8px, var(--safe-bottom));
 }
 
 /* Reader owns its vertical scroll on phones. Keeping the shell fixed prevents
@@ -1410,27 +1194,38 @@ code, pre, .code-block { font-family: var(--font-mono); }
 @media (max-width: 768px) {
   .app-aside {
     position: fixed;
-    top: 0;
+    top: auto;
     left: 0;
+    right: 0;
     bottom: 0;
-    z-index: 1000;
-    transform: translate3d(var(--mobile-sidebar-x), 0, 0);
+    z-index: 1100;
+    width: 100% !important;
+    height: min(76dvh, 660px);
+    border-radius: 26px 26px 0 0;
+    transform: translate3d(0, 100%, 0);
     will-change: transform;
     touch-action: pan-y;
   }
 
-  .app-shell { touch-action: pan-y; }
+  .app-shell { touch-action: auto; }
 
   .route-stage {
     min-height: calc(100dvh - var(--mobile-header-height) - var(--safe-top));
   }
 
-  .app-aside.mobile-open { transform: translate3d(var(--mobile-sidebar-x), 0, 0); }
+  .app-aside.mobile-open {
+    top: auto;
+    right: 0;
+    height: min(76dvh, 660px);
+    transform: translate3d(0, 0, 0);
+    box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.18);
+  }
 
-  .sidebar-dragging .app-aside,
-  .sidebar-dragging .app-main.mobile-full,
-  .sidebar-dragging .mobile-overlay {
-    transition: none !important;
+  .page-slide-enter-from {
+    transform: translateY(5px);
+  }
+  .page-slide-leave-to {
+    transform: translateY(-3px);
   }
 }
 

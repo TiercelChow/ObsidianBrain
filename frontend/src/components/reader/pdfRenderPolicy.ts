@@ -10,6 +10,32 @@ export const MAX_RENDER_DPR = 3
 export const MAX_CANVAS_PIXELS = 4_000_000
 
 /**
+ * Restore scroll after a zoom while keeping the same document point under the
+ * viewport center. This is more stable than preserving scrollTop/maxScroll:
+ * toolbars and safe-area padding can change the scrollable range without
+ * changing the point the reader is looking at.
+ */
+export function computeCenteredZoomScrollTop(
+  previousScrollTop: number,
+  previousViewportHeight: number,
+  previousScrollHeight: number,
+  nextViewportHeight: number,
+  nextScrollHeight: number,
+): number {
+  if (
+    !Number.isFinite(previousScrollHeight)
+    || !Number.isFinite(nextScrollHeight)
+    || previousScrollHeight <= 0
+    || nextScrollHeight <= 0
+  ) return 0
+
+  const previousCenter = Math.max(0, previousScrollTop) + Math.max(0, previousViewportHeight) / 2
+  const centerFraction = Math.min(1, previousCenter / previousScrollHeight)
+  const nextTop = centerFraction * nextScrollHeight - Math.max(0, nextViewportHeight) / 2
+  return Math.max(0, Math.min(nextTop, Math.max(0, nextScrollHeight - nextViewportHeight)))
+}
+
+/**
  * Pick a device-pixel ratio that balances text sharpness with a per-canvas
  * memory ceiling. The CSS viewport size is unchanged; only the backing buffer
  * is reduced for unusually large pages or very dense displays.

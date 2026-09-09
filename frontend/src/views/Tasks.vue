@@ -5,6 +5,7 @@
         <h1 class="page-title">任务中枢</h1>
         <p class="page-subtitle">让临期待办轻巧落地，让长期目标稳步生长</p>
       </div>
+      <button type="button" class="page-create" @click="openCreate()"><span aria-hidden="true">＋</span>新建</button>
     </header>
 
     <section class="task-toolbar glass-surface">
@@ -13,12 +14,24 @@
         <button type="button" :class="{ active: viewMode === 'tasks' }" @click="changeView('tasks')">任务</button>
         <button type="button" :class="{ active: viewMode === 'calendar' }" @click="changeView('calendar')">日历</button>
       </div>
+      <button
+        type="button"
+        class="mobile-filter-toggle"
+        :class="{ active: filtersExpanded || hasAdvancedFilters }"
+        :aria-expanded="filtersExpanded"
+        aria-controls="task-filter-fields"
+        @click="filtersExpanded = !filtersExpanded"
+      >
+        <span>筛选</span>
+        <small>{{ filterSummary }}</small>
+        <i aria-hidden="true">⌄</i>
+      </button>
       <div class="task-search glass-surface" role="search">
         <el-icon class="task-search-icon"><Search /></el-icon>
         <input v-model="searchQuery" type="search" aria-label="搜索任务" placeholder="搜索标题或描述" />
         <button v-if="searchQuery" type="button" class="task-search-clear" aria-label="清除搜索" @click="searchQuery = ''">×</button>
       </div>
-      <div class="filters">
+      <div id="task-filter-fields" class="filters" :class="{ expanded: filtersExpanded }">
         <el-select
           v-model="kindFilter"
           aria-label="任务类型"
@@ -55,7 +68,7 @@
 
     <div v-if="viewMode === 'tasks'" class="task-workspace" :class="{ 'detail-open': !!store.selectedTaskId, 'list-collapsed': !!detail && listCollapsed }">
       <aside class="task-list-panel glass-surface">
-        <div class="list-controls">
+        <div class="list-controls" :aria-hidden="listCollapsed" :inert="listCollapsed ? true : undefined">
         <div class="panel-heading">
           <div>
             <strong>我的任务</strong>
@@ -76,7 +89,7 @@
         <p class="list-order">按紧迫程度分组 · 组内重要任务优先</p>
         </div>
 
-        <div class="task-list-scroll" @scroll="onPanelScroll">
+        <div class="task-list-scroll" :aria-hidden="listCollapsed" :inert="listCollapsed ? true : undefined" @scroll="onPanelScroll">
         <div v-if="store.loading" class="task-skeletons" aria-label="加载中">
           <span v-for="index in 5" :key="index"></span>
         </div>
@@ -129,7 +142,7 @@
         </div>
         </div>
 
-        <div class="task-list-rail" aria-label="任务快速导航">
+        <div class="task-list-rail" aria-label="任务快速导航" :aria-hidden="!listCollapsed" :inert="!listCollapsed ? true : undefined">
           <button type="button" class="rail-expand" aria-label="展开任务列表" title="展开任务列表" @click="listCollapsed = false">›</button>
           <div class="rail-items">
             <button
@@ -155,11 +168,13 @@
           <div class="detail-loading"><span></span><span></span><span></span></div>
         </div>
         <template v-else-if="detail">
-        <div class="detail-summary">
         <div v-if="store.selectedTaskId" class="mobile-detail-nav">
           <button type="button" @click="closeMobileDetail">‹ 任务列表</button>
           <span>{{ detail.root.kind === 'short' ? '短期待办' : '长期任务' }}</span>
+          <button type="button" class="mobile-detail-edit" aria-label="编辑任务" @click="openEdit(detail.root)"><el-icon><EditPen /></el-icon><span>编辑</span></button>
         </div>
+        <div class="mobile-detail-scroll" @scroll="onPanelScroll">
+        <div class="detail-summary">
           <header ref="detailHeaderRef" class="detail-header">
             <div class="detail-title-group">
               <h2>{{ detail.root.title }}</h2>
@@ -239,6 +254,14 @@
           </div>
         </aside>
         </div>
+        </div>
+        <footer v-if="!isTaskClosed(detail.root)" class="mobile-context-actions" aria-label="任务操作">
+          <template v-if="detail.root.kind === 'long'">
+            <button type="button" @click="openSubtask(detail.root)">＋ 添加子任务</button>
+            <button type="button" class="primary" @click="openProgress(detail.root)">记录进展</button>
+          </template>
+          <button v-else type="button" class="primary complete-shortcut" @click="openCompleteShort(detail.root)">完成待办</button>
+        </footer>
         </template>
         <div v-else class="empty-detail">
           <template v-if="store.selectedTaskId">
@@ -268,16 +291,19 @@
       :selected-date="selectedDate"
       :tasks="store.calendarTasks"
       :loading="store.calendarLoading"
+      :expanded-task-ids="calendarExpandedTaskIds"
       @shift="shiftCalendar"
       @today="goToday"
       @select-date="selectCalendarDate"
       @open-task="openFromCalendar"
       @create="openCreate"
+      @update-expanded="calendarExpandedTaskIds = $event"
     />
 
     <MotionModal v-model="childDetailOpen" aria-label="子任务详情">
-      <section v-if="drawerNode" class="child-task-dialog glass-surface-heavy">
-        <header class="child-dialog-header">
+      <section v-if="drawerNode" :key="drawerNode.id" class="child-task-dialog glass-surface-heavy">
+        <header class="child-dialog-header" :class="{ 'has-back': drawerParent?.role === 'subtask' }">
+          <button v-if="drawerParent?.role === 'subtask'" type="button" class="child-back" aria-label="返回上一级" @click="backFromChild">‹</button>
           <div>
             <span>{{ drawerParent?.title || detail?.root.title }}</span>
             <h3>{{ drawerNode.title }}</h3>
@@ -286,7 +312,10 @@
               <span class="task-pill" :class="`importance-${drawerNode.importance}`">{{ taskImportanceLabel(drawerNode.importance) }}</span>
             </div>
           </div>
-          <button type="button" class="child-edit" aria-label="编辑任务" @click="openEdit(drawerNode)"><el-icon><EditPen /></el-icon></button>
+          <div class="child-header-actions">
+            <button type="button" class="child-edit" aria-label="编辑任务" @click="openEdit(drawerNode)"><el-icon><EditPen /></el-icon></button>
+            <button type="button" class="child-close" aria-label="关闭子任务详情" @click="closeDrawer">×</button>
+          </div>
         </header>
         <div class="child-dialog-scroll">
           <p v-if="drawerNode.description" class="child-description">{{ drawerNode.description }}</p>
@@ -529,6 +558,7 @@ const searchQuery = ref('')
 const kindFilter = ref<'all' | TaskKind>('all')
 const statusFilter = ref<'active' | 'all' | TaskStatus>('active')
 const focusFilter = ref<TaskFocus>('all')
+const filtersExpanded = ref(false)
 const listCollapsed = ref(false)
 const detailSection = ref<'breakdown' | 'progress'>('breakdown')
 const focusOptions: Array<{ value: TaskFocus; label: string }> = [
@@ -536,8 +566,9 @@ const focusOptions: Array<{ value: TaskFocus; label: string }> = [
   { value: 'today', label: '今日' }, { value: 'blocked', label: '受阻' },
 ]
 const today = todayLocal()
-const calendarAnchor = ref(`${today.slice(0, 7)}-01`)
 const selectedDate = ref(typeof route.query.date === 'string' ? route.query.date : today)
+const calendarAnchor = ref(`${selectedDate.value.slice(0, 7)}-01`)
+const calendarExpandedTaskIds = ref<string[]>([])
 const drawerNodeId = ref<string | null>(null)
 const detailHeaderRef = ref<HTMLElement | null>(null)
 const activitySectionRef = ref<HTMLElement | null>(null)
@@ -606,6 +637,13 @@ const visibleTasks = computed(() => store.tasks.filter(task => matchesTaskFocus(
 const groupedTasks = computed(() => groupWorkspaceTasks(visibleTasks.value, today))
 const suggestedTasks = computed(() => groupedTasks.value.flatMap(group => group.tasks).filter(task => !isTaskClosed(task)).slice(0, 4))
 const hasListFilters = computed(() => !!searchQuery.value || kindFilter.value !== 'all' || statusFilter.value !== 'active' || focusFilter.value !== 'all')
+const hasAdvancedFilters = computed(() => kindFilter.value !== 'all' || statusFilter.value !== 'active')
+const filterSummary = computed(() => {
+  const kind = kindFilter.value === 'short' ? '待办' : kindFilter.value === 'long' ? '长期' : '全部'
+  const status = statusFilter.value === 'active' ? '未关闭' : statusFilter.value === 'all'
+    ? '全部状态' : taskStatusLabel(statusFilter.value)
+  return `${kind} · ${status}`
+})
 
 function resetListFilters() {
   searchQuery.value = ''
@@ -662,7 +700,8 @@ async function openTask(id: string) {
 }
 
 async function openFromCalendar(id: string) {
-  changeView('tasks')
+  viewMode.value = 'tasks'
+  await router.replace({ query: { ...route.query, view: 'tasks' } })
   await openTask(id)
 }
 
@@ -677,8 +716,16 @@ function closeMobileDetail() {
 
 function changeView(mode: ViewMode) {
   viewMode.value = mode
-  void router.replace({ query: { ...route.query, view: mode } })
-  if (mode === 'calendar') void loadCalendar()
+  const query = { ...route.query }
+  query.view = mode
+  if (mode === 'calendar') {
+    delete query.task
+    store.clearSelection()
+    drawerNodeId.value = null
+    listCollapsed.value = false
+    void loadCalendar()
+  }
+  void router.replace({ query })
 }
 
 function shiftCalendar(months: number) {
@@ -737,6 +784,11 @@ function openEdit(task: TaskNode) {
   sheetOpen.value = true
 }
 
+function openCompleteShort(task: TaskNode) {
+  openEdit(task)
+  statusForm.value.status = 'completed'
+}
+
 function openSubtask(parent: TaskNode) {
   sheetMode.value = 'subtask'
   targetNode.value = parent
@@ -763,6 +815,11 @@ function focusTask(id: string) {
 
 function closeDrawer() {
   drawerNodeId.value = null
+}
+
+function backFromChild() {
+  if (drawerParent.value?.role === 'subtask') drawerNodeId.value = drawerParent.value.id
+  else closeDrawer()
 }
 
 // The locked page never scrolls app-main; forward panel scroll so the mobile
@@ -881,7 +938,9 @@ onUnmounted(() => {
 onMounted(async () => {
   await store.loadTasks(taskFilters()).catch(() => [])
   if (viewMode.value === 'calendar') await loadCalendar()
-  if (typeof route.query.task === 'string') await openTask(route.query.task)
+  if (viewMode.value === 'tasks' && typeof route.query.task === 'string') {
+    await openTask(route.query.task)
+  }
 })
 </script>
 
@@ -890,6 +949,23 @@ onMounted(async () => {
 /* Task view locks the page: only the list/detail/drawer panes scroll (Reader.vue pattern). */
 .tasks-page.view-tasks { display: flex; flex-direction: column; height: calc(100vh - 64px); height: calc(100dvh - 64px); overflow: hidden; }
 .tasks-page.view-tasks > :not(.task-workspace) { flex-shrink: 0; }
+.page-create {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 13px;
+  background: var(--accent);
+  color: white;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 25%, transparent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 620;
+  cursor: pointer;
+}
+.page-create:active { transform: scale(.965); }
 .glass-surface { background: var(--bg-glass); border: 1px solid var(--border-glass); box-shadow: var(--shadow-sm), var(--inset-highlight); backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)); }
 .task-toolbar { min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 8px 10px; margin-bottom: 14px; border-radius: 18px; }
 .view-switch { position: relative; display: grid; grid-template-columns: 1fr 1fr; width: 174px; padding: 3px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 5%, transparent); isolation: isolate; }
@@ -910,6 +986,7 @@ onMounted(async () => {
 .filters :deep(.el-select) { width: 150px; }
 .filters :deep(.el-select__wrapper) { min-height: 40px; border-radius: 12px !important; }
 .filters :deep(.el-select__selection) { text-align: center; }
+.mobile-filter-toggle, .mobile-context-actions { display: none; }
 .field input, .field textarea { border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-glass); color: var(--text-primary); font: inherit; outline: none; }
 .error-banner { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; padding: 10px 13px; border: 1px solid color-mix(in srgb, #ff3b30 28%, transparent); border-radius: 13px; background: color-mix(in srgb, #ff3b30 8%, var(--bg-glass)); color: var(--text-secondary); font-size: 13px; }
 .error-banner button { border: 0; background: transparent; color: #ff3b30; cursor: pointer; }
@@ -918,6 +995,7 @@ onMounted(async () => {
 .task-workspace { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(300px, 350px) minmax(0, 1fr); gap: 14px; transition: grid-template-columns 400ms var(--ease-spring-gentle); }
 .task-workspace.list-collapsed { grid-template-columns: 68px minmax(0, 1fr); }
 .task-detail-zone { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-radius: 22px; overflow: hidden; }
+.mobile-detail-scroll { display: contents; }
 .task-list-panel { border-radius: 22px; min-height: 0; overflow: auto; }
 .task-list-panel { position: relative; min-width: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .list-controls { flex: none; min-width: 300px; padding: 10px 12px 0; border-bottom: 1px solid var(--border-subtle); transition: opacity 140ms ease, transform 300ms var(--ease-spring-gentle); }
@@ -1062,7 +1140,10 @@ onMounted(async () => {
 .child-dialog-header > div { min-width: 0; }
 .child-dialog-header > div > span { display: block; overflow: hidden; color: var(--text-faint); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .child-dialog-header h3 { margin: 5px 0 0; font-size: 22px; line-height: 1.3; letter-spacing: -.015em; overflow-wrap: anywhere; }
-.child-edit { display: grid; place-items: center; min-width: 40px; width: 40px; min-height: 40px; padding: 0; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-glass); color: var(--text-secondary); font-size: 16px; cursor: pointer; }
+.child-back, .child-edit, .child-close { display: grid; place-items: center; min-width: 40px; width: 40px; min-height: 40px; padding: 0; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-glass); color: var(--text-secondary); font: inherit; font-size: 16px; cursor: pointer; }
+.child-back { flex: none; color: var(--accent); font-size: 25px; }
+.child-close { color: var(--text-muted); font-size: 23px; }
+.child-header-actions { display: flex; flex: none; gap: 7px; }
 .child-dialog-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 26px 20px; }
 .child-description { margin: 0 0 14px; color: var(--text-muted); font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
 .child-facts { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 4%, transparent); color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -1177,37 +1258,110 @@ onMounted(async () => {
 }
 
 @media (max-width: 768px) {
-  .task-toolbar { flex-wrap: wrap; padding: 7px; }.view-switch { width: 100%; }.view-switch button { min-height: 38px; }.task-search { order: 2; min-width: 0; max-width: none; flex: 1; min-height: 44px; }.filters { order: 3; width: 100%; }.filters :deep(.el-select) { flex: 1; width: auto; min-width: 0; }.filters :deep(.el-select__wrapper) { min-height: 44px; }.tasks-page.view-tasks { height: calc(100dvh - 96px - var(--safe-top) - var(--safe-bottom)); }.task-workspace { flex: 1 1 auto; min-height: 0; height: auto; display: block; }.task-list-panel, .task-detail-panel { height: 100%; min-height: 0; border-radius: 20px; }.task-detail-panel { display: none; padding: 12px; }.task-workspace.detail-open .task-list-panel { display: none; }.task-workspace.detail-open .task-detail-panel { display: block; }.mobile-detail-nav { height: 45px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }.mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font-weight: 600; }.mobile-detail-nav span { color: var(--text-faint); font-size: 11px; }.detail-header { display: block; }.detail-title-group h2 { font-size: 23px; }.detail-actions { display: grid; grid-template-columns: 1fr 1fr 44px; margin-top: 14px; }.detail-actions button { min-height: 44px; }.detail-facts { margin-left: auto; }.progress-overview, .detail-section { padding: 13px; }.section-heading button { min-height: 44px; }.task-card { min-height: 110px; }.panel-heading button { min-width: 44px; min-height: 44px; }.task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }.sheet-header { padding: 34px 20px 16px; }.sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }.form-grid { grid-template-columns: 1fr; }.field.full { grid-column: auto; }.field input, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; }.sheet-footer { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }.sheet-footer button { min-height: 48px; }
-  /* The zone must be height:100%: as a plain block child of the (flex-constrained)
-     workspace its auto height would make the panel's height:100% unresolvable —
-     the panel would grow to content height and get clipped by the page's
-     overflow:hidden, cutting off the bottom sections. On desktop the zone is a
-     grid item that stretches, so only this block layout needs the explicit height. */
-  .task-detail-zone { display: block; height: 100%; }
+  .page-create { display: none; }
+  .tasks-page.view-tasks {
+    height: calc(100dvh - var(--mobile-header-height) - var(--mobile-dock-height) - var(--safe-top) - var(--safe-bottom) - 36px);
+  }
+  .tasks-page.mobile-focused {
+    height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 16px);
+  }
+  .page-create {
+    min-height: var(--tap-target);
+    padding: 0 13px;
+    pointer-events: auto;
+  }
+  .task-toolbar {
+    display: grid;
+    grid-template-columns: 116px minmax(0, 1fr);
+    gap: 8px;
+    min-height: 0;
+    padding: 7px;
+  }
+  .task-search {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    min-height: var(--tap-target);
+  }
+  .task-search input { font-size: 16px; }
+  .task-toolbar .view-switch { grid-column: 1; grid-row: 2; width: 116px; }
+  .view-switch button { min-height: 38px; }
+  .mobile-filter-toggle {
+    grid-column: 2;
+    grid-row: 2;
+    min-width: 0;
+    min-height: 44px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    background: var(--bg-glass);
+    color: var(--text-secondary);
+    font: inherit;
+    text-align: left;
+  }
+  .mobile-filter-toggle small { overflow: hidden; color: var(--text-faint); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-filter-toggle i { color: var(--text-faint); font-style: normal; transition: transform var(--motion-normal) var(--ease-spring-gentle); }
+  .mobile-filter-toggle[aria-expanded="true"] i { transform: rotate(180deg); }
+  .mobile-filter-toggle.active { color: var(--accent); border-color: var(--accent-border); }
+  .filters {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    width: 100%;
+    display: none;
+    gap: 8px;
+    margin: 0;
+  }
+  .filters.expanded { display: flex; }
+  .filters :deep(.el-select) { flex: 1; width: auto; min-width: 0; }
+  .filters :deep(.el-select__wrapper) { min-height: var(--tap-target); }
+  .task-workspace { flex: 1 1 auto; min-height: 0; height: auto; display: block; }
+  .task-list-panel, .task-detail-zone { height: 100%; min-height: 0; border-radius: 20px; }
+  .task-workspace.detail-open .task-list-panel { display: none; }
   .task-workspace:not(.detail-open) .task-detail-zone { display: none; }
-  .tasks-page.mobile-focused .task-toolbar { display: none; }
+  .tasks-page.mobile-focused .task-toolbar,
   .tasks-page.mobile-focused .page-header { display: none; }
-  .task-toolbar .view-switch { width: 116px; flex: none; }
-  .task-toolbar .task-search { order: 0; }
-  .task-toolbar .filters { order: 0; }
   .focus-filters button { min-height: 44px; }
+  .panel-heading button { min-width: 44px; min-height: 44px; }
   .task-card { min-height: 100px; }
-  .mobile-detail-nav { position: sticky; top: 0; z-index: 3; margin: 0 -16px 14px; padding: 0 16px; background: var(--bg-glass-strong); border-bottom: 1px solid var(--border-subtle); }
-  .detail-actions { display: flex; margin: 16px 0; }
-  .detail-actions button { padding-inline: 10px; }
-  .detail-section { padding: 0 16px 24px; }
+  .mobile-detail-nav {
+    position: sticky;
+    top: 0;
+    z-index: 4;
+    height: 52px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    margin: 0 0 14px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: color-mix(in srgb, var(--bg-glass-strong) 94%, transparent);
+    backdrop-filter: blur(18px) saturate(170%);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+  }
+  .mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 600; }
+  .mobile-detail-nav > button:first-child { justify-self: start; }
+  .mobile-detail-nav > button:last-child { justify-self: end; }
+  .mobile-detail-nav span { color: var(--text-faint); font-size: 12px; }
+  .mobile-detail-edit { display: inline-flex; align-items: center; gap: 5px; }
+  .detail-header { display: block; }
+  .detail-title-group h2 { font-size: 24px; }
+  .detail-actions { display: none; }
+  .detail-facts { width: 100%; margin-left: 0; justify-content: space-between; }
+  .detail-switch { display: flex; width: 100%; margin-top: 16px; }
+  .detail-switch button { min-height: 44px; padding-inline: 8px; }
   .progress-overview { grid-template-columns: auto minmax(50px, 1fr); }
   .progress-overview > small { grid-column: 1 / -1; }
-  .detail-switch button { min-height: 44px; padding-inline: 8px; }
   .suggested-tasks button { flex-wrap: wrap; }
-}
-
-@media (max-width: 768px) {
   .archive-dialog { padding: 38px 20px max(22px, env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; border-bottom: 0; }
   .archive-dialog-actions button { min-height: 48px; }
-  .task-workspace.list-collapsed { display: block; }
-  .task-workspace.detail-open .task-list-panel { display: none; }
-  .task-detail-zone { height: 100%; display: block; overflow-y: auto; overscroll-behavior: contain; border-radius: 20px; }
+  .task-detail-zone { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+  .mobile-detail-scroll { flex: 1 1 auto; min-height: 0; display: block; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
   .detail-section, .task-progress-panel { height: auto; display: block; overflow: visible; }
   .detail-summary { padding: 0 16px 22px; }
   .task-progress-panel { margin-top: 0; padding: 0; }
@@ -1217,16 +1371,51 @@ onMounted(async () => {
   .column-scroll { overflow: visible; }
   .progress-column-header { padding: 8px 16px 0; }
   .task-breakdown .column-heading { margin: 0 -16px; padding: 8px 16px 0; }
-  .detail-actions { display: flex; margin: 0; }
-  .detail-actions .edit-action { min-height: 44px; }
   .column-heading button, .progress-column-header button { min-height: 44px; }
-  .detail-switch { display: flex; }
   .task-detail-zone.mobile-section-progress .task-breakdown { display: none; }
   .task-detail-zone.mobile-section-breakdown .task-progress-panel { display: none; }
-  .child-task-dialog { width: 100vw; max-height: min(88dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }
-  .child-dialog-header { padding: 28px 20px 14px; }
+  .mobile-context-actions {
+    position: relative;
+    flex: none;
+    z-index: 4;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: grid;
+    grid-template-columns: 1fr 1.2fr;
+    gap: 8px;
+    padding: 10px 12px max(10px, var(--safe-bottom));
+    border-top: 1px solid var(--border-glass);
+    background: color-mix(in srgb, var(--bg-glass-strong) 94%, transparent);
+    backdrop-filter: blur(18px) saturate(170%);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+  }
+  .mobile-context-actions button {
+    min-height: 46px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 13px;
+    background: var(--bg-glass);
+    color: var(--text-secondary);
+    font: inherit;
+    font-weight: 620;
+  }
+  .mobile-context-actions .primary { border-color: transparent; background: var(--accent); color: white; }
+  .mobile-context-actions .complete-shortcut { grid-column: 1 / -1; }
+  .child-task-dialog { width: 100vw; max-height: min(92dvh, 820px); border-radius: 24px 24px 0 0; border-bottom: 0; }
+  .child-dialog-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; padding: 36px 16px 14px; }
+  .child-dialog-header.has-back { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 8px; }
+  .child-back, .child-edit, .child-close { width: 44px; min-width: 44px; min-height: 44px; }
+  .child-dialog-header h3 { font-size: 21px; }
   .child-dialog-scroll { padding: 0 20px 18px; }
   .child-dialog-actions { padding: 14px 20px max(20px, env(safe-area-inset-bottom)); }
+  .task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }
+  .sheet-header { padding: 34px 20px 16px; }
+  .sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }
+  .form-grid { grid-template-columns: 1fr; }
+  .field.full { grid-column: auto; }
+  .field input, .field textarea, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; font-size: 16px; }
+  .sheet-footer { padding: 16px 20px max(20px, var(--safe-bottom)); }
+  .sheet-footer button { min-height: 48px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

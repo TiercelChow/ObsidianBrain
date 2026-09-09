@@ -192,6 +192,8 @@ function openAdd() {
   formVisible.value = true
 }
 
+defineExpose({ openAdd })
+
 function openEdit(b: ReaderBook) {
   resetForm()
   editingId.value = b.id
@@ -610,7 +612,7 @@ async function confirmRemove(b: ReaderBook) {
     margin-top: 36px;
   }
   .shelf-add {
-    min-height: var(--tap-target);
+    display: none;
   }
 }
 </style>

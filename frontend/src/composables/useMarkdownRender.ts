@@ -4,6 +4,7 @@ import 'katex/dist/katex.min.css'
 import { onScopeDispose, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { convertObsidianImageEmbeds, isLocalHref } from '@/utils/markdownImages'
+import { getHorizontalOverflowPosition } from '@/utils/readerOverflow'
 
 // ── helpers ────────────────────────────────────────────────────────────
 
@@ -220,7 +221,10 @@ export function useMarkdownRender(
     enhancementObserver = null
     tableResizeObserver?.disconnect()
     tableResizeObserver = null
-    if (currentContainer) currentContainer.removeEventListener('click', onContainerClick)
+    if (currentContainer) {
+      currentContainer.removeEventListener('click', onContainerClick)
+      currentContainer.removeEventListener('scroll', onContainerScroll, true)
+    }
     currentContainer = null
   }
 
@@ -314,6 +318,23 @@ export function useMarkdownRender(
     }
   }
 
+  function updateOverflowPosition(element: HTMLElement) {
+    const position = getHorizontalOverflowPosition(
+      element.scrollLeft,
+      element.clientWidth,
+      element.scrollWidth,
+    )
+    element.dataset.overflowPosition = position
+    element.classList.toggle('is-overflowing', position !== 'none')
+  }
+
+  function onContainerScroll(event: Event) {
+    const target = event.target
+    if (!(target instanceof HTMLElement)) return
+    if (!target.matches('.table-scroll, .code-content, .katex-display, .mermaid')) return
+    updateOverflowPosition(target)
+  }
+
   async function highlightCode(el: HTMLElement, generation: number) {
     try {
       const hljs = await getHighlighter()
@@ -374,6 +395,7 @@ export function useMarkdownRender(
     currentContainer = container
     const generation = enhancementGeneration
     container.addEventListener('click', onContainerClick)
+    container.addEventListener('scroll', onContainerScroll, true)
 
     // GFM tables already use the renderer wrapper. Raw HTML tables need the
     // same containment so an explicit width cannot escape the reading pane.
@@ -387,17 +409,24 @@ export function useMarkdownRender(
 
     const updateTableOverflow = () => {
       if (generation !== enhancementGeneration || !container.isConnected) return
-      container.querySelectorAll<HTMLElement>('.table-scroll').forEach((wrapper) => {
-        const overflowing = wrapper.scrollWidth > wrapper.clientWidth + 1
-        wrapper.classList.toggle('is-overflowing', overflowing)
-        if (overflowing) {
+      container.querySelectorAll<HTMLElement>('.table-scroll, .code-content, .katex-display, .mermaid').forEach((wrapper) => {
+        updateOverflowPosition(wrapper)
+        if (wrapper.dataset.overflowPosition !== 'none') {
           wrapper.tabIndex = 0
           wrapper.setAttribute('role', 'region')
-          wrapper.setAttribute('aria-label', '可横向滚动的表格')
+          if (!wrapper.getAttribute('aria-label')) {
+            const label = wrapper.classList.contains('table-scroll')
+              ? '可横向滚动的表格'
+              : wrapper.classList.contains('code-content')
+                ? '可横向滚动的代码'
+                : wrapper.classList.contains('mermaid')
+                  ? '可横向滚动的图表'
+                  : '可横向滚动的公式'
+            wrapper.setAttribute('aria-label', label)
+          }
         } else {
           wrapper.removeAttribute('tabindex')
-          wrapper.removeAttribute('role')
-          wrapper.removeAttribute('aria-label')
+          if (!wrapper.classList.contains('table-scroll')) wrapper.removeAttribute('role')
         }
       })
     }
@@ -407,7 +436,7 @@ export function useMarkdownRender(
     requestAnimationFrame(updateTableOverflow)
     if (typeof ResizeObserver !== 'undefined') {
       tableResizeObserver = new ResizeObserver(updateTableOverflow)
-      container.querySelectorAll<HTMLElement>('.table-scroll').forEach((wrapper) => {
+      container.querySelectorAll<HTMLElement>('.table-scroll, .code-content, .katex-display, .mermaid').forEach((wrapper) => {
         tableResizeObserver?.observe(wrapper)
       })
     }

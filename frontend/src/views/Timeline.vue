@@ -7,11 +7,11 @@
         <p class="page-subtitle">记录碎片化想法，回顾思考历程</p>
       </div>
       <div class="header-actions">
-        <el-button @click="doSync" :loading="syncing">
+        <el-button class="desktop-sync-action" @click="doSync" :loading="syncing">
           <el-icon v-if="!syncing"><Refresh /></el-icon>
           同步
         </el-button>
-        <el-button type="primary" @click="showCreateDialog = true">
+        <el-button type="primary" @click="openCreateDialog">
           <el-icon><Plus /></el-icon>
           写小记
         </el-button>
@@ -21,7 +21,7 @@
       <!-- Toolbar -->
       <div class="toolbar">
         <div class="toolbar-row">
-          <div class="search-box glass-surface">
+        <div class="search-box glass-surface">
           <el-icon class="search-icon"><Search /></el-icon>
           <input
             v-model="searchQuery"
@@ -29,10 +29,36 @@
             class="glass-input"
             @input="onSearchInput"
           />
-          <button v-if="searchQuery" class="clear-btn" @click="clearSearch">✕</button>
+          <button v-if="searchQuery" type="button" class="clear-btn" aria-label="清除搜索" @click="clearSearch">✕</button>
         </div>
 
-        <div class="filter-right">
+        <button v-if="isMobile" type="button" class="mobile-compose-action" aria-label="写小记" @click="openCreateDialog">
+          <el-icon><Plus /></el-icon>
+        </button>
+
+        <button
+          v-if="isMobile"
+          type="button"
+          class="mobile-filter-summary glass-surface"
+          :class="{ active: hasActiveFilter || mobileFiltersOpen }"
+          :aria-label="`时间范围：${rangeFilterLabel}`"
+          :title="rangeFilterLabel"
+          :aria-expanded="mobileFiltersOpen"
+          aria-controls="timeline-mobile-filters"
+          @click="mobileFiltersOpen = !mobileFiltersOpen"
+        >
+          <el-icon><MoreFilled /></el-icon>
+        </button>
+
+        <Transition name="filter-panel">
+        <div v-if="!isMobile || mobileFiltersOpen" id="timeline-mobile-filters" class="filter-right">
+          <div v-if="isMobile" class="mobile-filter-heading">
+            <span>时间范围</span>
+            <button type="button" class="mobile-sync-action" :disabled="syncing" @click="doSync">
+              <el-icon :class="{ 'is-loading': syncing }"><Refresh /></el-icon>
+              {{ syncing ? '同步中' : '同步记录' }}
+            </button>
+          </div>
           <div class="preset-chips">
             <div class="chip-track">
               <div
@@ -40,7 +66,11 @@
                 :key="preset.label"
                 class="chip"
                 :class="{ active: activePreset === preset.label }"
+                role="button"
+                tabindex="0"
                 @click="applyPreset(preset)"
+                @keydown.enter.prevent="applyPreset(preset)"
+                @keydown.space.prevent="applyPreset(preset)"
               >
                 {{ preset.label }}
               </div>
@@ -95,11 +125,18 @@
             </button>
           </div>
         </div>
+        </Transition>
       </div>
     </div>
 
     <!-- Main Content -->
     <div class="main-content">
+      <Transition name="published-notice">
+        <button v-if="showPublishedNotice" type="button" class="published-notice" @click="viewLatestMemo">
+          <span>小记已发布</span>
+          <strong>查看最新</strong>
+        </button>
+      </Transition>
       <!-- Left Timeline Nav -->
       <aside class="time-nav" v-if="timelineMonths.length > 0">
         <div class="time-nav-inner">
@@ -207,7 +244,7 @@
           <div class="empty-title" v-else-if="hasActiveFilter">该时间范围内没有小记</div>
           <div class="empty-title" v-else>还没有小记</div>
           <div class="empty-hint" v-if="!searchQuery && !hasActiveFilter">
-            点击右上角「写小记」开始记录
+            {{ isMobile ? '点击搜索栏旁的「＋」开始记录' : '点击右上角「写小记」开始记录' }}
           </div>
         </div>
 
@@ -224,7 +261,7 @@
       <div class="dialog-content glass-surface-heavy">
           <div class="dialog-header">
             <h3>写小记</h3>
-            <button class="glass-icon-btn" @click="showCreateDialog = false">✕</button>
+            <button type="button" class="glass-icon-btn" aria-label="关闭写小记面板" @click="showCreateDialog = false">✕</button>
           </div>
           <div class="create-form">
             <textarea
@@ -244,14 +281,16 @@
                 class="image-preview-item"
               >
                 <img :src="img.preview" class="image-preview-img" />
-                <button class="image-remove-btn" @click="removePendingImage(idx)">✕</button>
+                <button type="button" class="image-remove-btn" :aria-label="`移除第 ${idx + 1} 张图片`" @click="removePendingImage(idx)">✕</button>
                 <div v-if="img.uploading" class="image-upload-overlay">
                   <el-icon class="is-loading"><Loading /></el-icon>
                 </div>
               </div>
               <button
                 v-if="pendingImages.length < 9"
+                type="button"
                 class="image-add-btn"
+                aria-label="继续添加图片"
                 @click="triggerFileInput"
               >
                 <el-icon :size="24"><Plus /></el-icon>
@@ -267,7 +306,7 @@
                   class="glass-input inline"
                 />
               </div>
-              <button class="glass-btn image-btn" @click="triggerFileInput" v-if="pendingImages.length === 0">
+              <button type="button" class="glass-btn image-btn" @click="triggerFileInput" v-if="pendingImages.length === 0">
                 <el-icon><Picture /></el-icon>
                 <span>图片</span>
               </button>
@@ -286,8 +325,9 @@
               {{ newMemo.content.length }} 字
             </span>
             <div class="dialog-btns">
-              <button class="glass-btn" @click="showCreateDialog = false">取消</button>
+              <button type="button" class="glass-btn" @click="showCreateDialog = false">取消</button>
               <button
+                type="button"
                 class="glass-btn primary"
                 @click="submitMemo"
                 :disabled="!newMemo.content.trim() || creating"
@@ -341,7 +381,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus, Minus, Search, PriceTag, Loading, Picture, Refresh, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import { Plus, Minus, Search, PriceTag, Loading, Picture, Refresh, ArrowLeft, ArrowRight, MoreFilled } from '@element-plus/icons-vue'
 import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/github-dark.css'
 import panzoom, { type PanZoom } from 'panzoom'
@@ -382,6 +422,9 @@ const activePreset = ref('')
 const customDateRange = ref<[Date, Date] | null>(null)
 const mobileStartDate = ref<Date | null>(null)
 const mobileEndDate = ref<Date | null>(null)
+const mobileFiltersOpen = ref(false)
+const showPublishedNotice = ref(false)
+let wasReviewingHistory = false
 
 // Mobile detection
 const windowWidth = ref(window.innerWidth)
@@ -545,6 +588,16 @@ const activeDateRange = computed((): [string, string] | null => {
   return null
 })
 const hasActiveFilter = computed(() => !!activeDateRange.value)
+const rangeFilterLabel = computed(() => {
+  if (activePreset.value) return activePreset.value === '7天' || activePreset.value === '30天'
+    ? `最近 ${activePreset.value}`
+    : activePreset.value
+  if (customDateRange.value) {
+    const [start, end] = customDateRange.value
+    return `${start.getMonth() + 1}/${start.getDate()} – ${end.getMonth() + 1}/${end.getDate()}`
+  }
+  return '全部时间'
+})
 
 function formatDateStr(d: Date): string {
   const y = d.getFullYear()
@@ -700,6 +753,24 @@ function clearFilter() {
 }
 
 // ── Create ──
+function openCreateDialog() {
+  const timelineTop = memoScrollRef.value?.getBoundingClientRect().top ?? 0
+  wasReviewingHistory = isMobile.value && timelineTop < -180
+  showCreateDialog.value = true
+}
+
+async function viewLatestMemo() {
+  showPublishedNotice.value = false
+  searchQuery.value = ''
+  activePreset.value = ''
+  customDateRange.value = null
+  mobileStartDate.value = null
+  mobileEndDate.value = null
+  await loadMemos()
+  await nextTick()
+  document.querySelector('.app-main')?.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
 async function submitMemo() {
   if (!newMemo.value.content.trim() && pendingImages.value.length === 0) return
   creating.value = true
@@ -729,7 +800,12 @@ async function submitMemo() {
       images: imagePaths,
       tags,
     }
-    memos.value = [newMemoItem, ...memos.value]
+    const keepHistoryPosition = wasReviewingHistory || hasActiveFilter.value || !!searchQuery.value
+    if (keepHistoryPosition) {
+      showPublishedNotice.value = true
+    } else {
+      memos.value = [newMemoItem, ...memos.value]
+    }
     totalCount.value++
 
     // Cleanup
@@ -2112,6 +2188,41 @@ onMounted(() => { loadMemos() })
 .viewer-enter-from .viewer-image { transform: scale(0.9); opacity: 0; }
 .viewer-leave-to { opacity: 0; }
 
+/* Mobile-only controls stay out of the desktop hierarchy. */
+.mobile-filter-summary,
+.mobile-compose-action,
+.mobile-filter-heading,
+.published-notice { display: none; }
+.mobile-sync-action {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent-light);
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+.mobile-sync-action:disabled { opacity: 0.55; }
+.filter-panel-enter-active,
+.filter-panel-leave-active {
+  transition: opacity var(--motion-fast) var(--ease-emphasized),
+              transform var(--motion-normal) var(--ease-spring-gentle);
+}
+.filter-panel-enter-from,
+.filter-panel-leave-to { opacity: 0; transform: translateY(-8px); }
+.published-notice-enter-active,
+.published-notice-leave-active {
+  transition: opacity var(--motion-fast) var(--ease-emphasized),
+              transform var(--motion-normal) var(--ease-spring-gentle);
+}
+.published-notice-enter-from,
+.published-notice-leave-to { opacity: 0; transform: translate(-50%, -10px) scale(0.98); }
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .glass-btn { min-height: var(--tap-target); }
@@ -2187,6 +2298,163 @@ onMounted(() => { loadMemos() })
   .date-range-picker :deep(.el-range-editor) {
     width: 100% !important;
   }
+
+  /* One compact action row: search remains primary, range expands in place. */
+  .timeline-page > .page-header { display: none; }
+  .desktop-sync-action { display: none; }
+  .toolbar { margin-bottom: 14px; padding-top: 0; }
+  .toolbar-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--tap-target) var(--tap-target);
+    align-items: start;
+    gap: 10px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .search-box { height: var(--tap-target); }
+  .glass-input { font-size: 16px; }
+  .clear-btn { width: 30px; height: 30px; }
+  .mobile-compose-action {
+    grid-column: 2;
+    grid-row: 1;
+    width: var(--tap-target);
+    height: var(--tap-target);
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 13px;
+    background: var(--accent);
+    color: white;
+    font-size: 20px;
+    box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 24%, transparent);
+  }
+  .mobile-compose-action:active { transform: scale(.94); }
+  .mobile-filter-summary {
+    grid-column: 3;
+    grid-row: 1;
+    width: var(--tap-target);
+    height: var(--tap-target);
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border-radius: 13px;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 22px;
+  }
+  .mobile-filter-summary.active { color: var(--accent); border-color: var(--accent-border); background: var(--accent-light); }
+  .mobile-filter-summary:active { transform: scale(.94); }
+  .filter-right {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    margin: 0;
+    padding: 12px;
+    align-items: stretch;
+    border: 1px solid var(--border-glass);
+    border-radius: 16px;
+    background: var(--bg-glass-strong);
+  }
+  .mobile-filter-heading {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 650;
+  }
+  .preset-chips { width: 100%; }
+  .chip { min-height: 40px; display: inline-flex; align-items: center; }
+  .chip.active { background: var(--accent); }
+  .date-range-picker :deep(.el-date-editor) { min-height: var(--tap-target); }
+
+  /* Reading density follows the app's body type instead of shrinking on phones. */
+  .memo-card { gap: 10px; }
+  .memo-card-left { width: 6px; }
+  .memo-card-body {
+    position: relative;
+    padding: 18px 16px 16px;
+    border-radius: 18px;
+    background: var(--bg-glass-strong);
+  }
+  .memo-card-body:hover { transform: none; box-shadow: var(--shadow-sm), var(--shadow-md); }
+  .memo-time { position: absolute; top: 14px; left: 16px; right: auto; margin: 0; font-size: 13px; }
+  .memo-card-main { padding-top: 18px; }
+  .memo-content { font-size: 16px; line-height: 1.75; }
+  .memo-content :deep(.memo-code) { padding: 12px 14px; font-size: 13px; }
+  .memo-content :deep(ul), .memo-content :deep(ol) { padding-left: 20px; }
+  .memo-tags { margin-top: 12px; }
+  .memo-tag { min-height: 32px; display: inline-flex; align-items: center; font-size: 13px; }
+  .day-group-header { border-bottom: 0; padding: 0 2px; margin-bottom: 8px; }
+  .day-header-date { font-size: 17px; }
+  .day-header-weekday { font-size: 13px; }
+
+  /* The editor owns one scroll region and keeps publishing above the keyboard. */
+  .dialog-content {
+    height: min(88dvh, 760px);
+    max-height: min(88dvh, 760px);
+    display: flex;
+    flex-direction: column;
+    padding: 34px 16px calc(12px + var(--safe-bottom));
+    overflow: hidden;
+  }
+  .dialog-header { flex: none; margin-bottom: 14px; }
+  .dialog-header h3 { font-size: 19px; }
+  .dialog-header .glass-icon-btn { width: var(--tap-target); height: var(--tap-target); }
+  .create-form {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 2px 1px 12px;
+  }
+  .glass-textarea { min-height: 150px; max-height: 42dvh; font-size: 16px; resize: none; }
+  .tag-input-wrap, .image-btn { min-height: var(--tap-target); height: var(--tap-target); }
+  .dialog-footer { flex: none; margin-top: 10px; }
+  .image-remove-btn { width: 34px; height: 34px; }
+
+  .published-notice {
+    position: fixed;
+    top: calc(var(--mobile-header-height, 52px) + var(--safe-top, 0px) + 10px);
+    left: 50%;
+    z-index: 80;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-height: var(--tap-target);
+    padding: 0 16px;
+    border: 1px solid var(--border-glass);
+    border-radius: 999px;
+    background: var(--bg-glass-strong);
+    color: var(--text-secondary);
+    box-shadow: var(--shadow-lg);
+    backdrop-filter: blur(18px) saturate(170%);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    transform: translateX(-50%);
+    white-space: nowrap;
+  }
+  .published-notice strong { color: var(--accent); font-weight: 650; }
+}
+
+@media (max-width: 360px) {
+  .toolbar-row { grid-template-columns: minmax(0, 1fr) var(--tap-target) var(--tap-target); gap: 8px; }
+  .memo-card-left { display: none; }
+  .memo-card { display: block; }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .memo-card-body:hover,
+  .glass-btn:hover { transform: none; }
+  .chip,
+  .memo-image,
+  .memo-tag,
+  .mobile-filter-summary { -webkit-tap-highlight-color: transparent; }
 }
 </style>
 

@@ -20,6 +20,15 @@
     box-shadow var(--motion-fast) var(--ease-emphasized);
 }
 
+html.motion-overlay-open .app-main,
+html.motion-overlay-open .pane-center,
+html.motion-overlay-open .memo-scroll,
+html.motion-overlay-open .task-list-scroll,
+html.motion-overlay-open .task-detail-zone,
+html.motion-overlay-open .pdf-viewer {
+  overscroll-behavior: none !important;
+}
+
 /* Feedback starts on pointer-down; keyboard users receive an equally clear ring. */
 button,
 a,
@@ -57,7 +66,6 @@ select:focus-visible,
 .glass-btn,
 .glass-icon-btn,
 .collapse-btn,
-.mobile-menu-btn,
 .path-trigger,
 .pane-title-btn,
 .fab,
@@ -74,7 +82,6 @@ select:focus-visible,
 .glass-btn:active,
 .glass-icon-btn:active,
 .collapse-btn:active,
-.mobile-menu-btn:active,
 .path-trigger:active,
 .pane-title-btn:active,
 .fab:active,
@@ -169,6 +176,9 @@ select:focus-visible,
 @media (prefers-reduced-transparency: reduce) {
   .sidebar,
   .mobile-global-header,
+  .mobile-dock,
+  .reader-mobile-toolbar,
+  .mobile-context-actions,
   .el-card,
   .el-dialog,
   .el-drawer,
@@ -214,6 +224,44 @@ select:focus-visible,
 }
 
 @media (max-width: 768px) {
+  html.motion-overlay-open .app-main,
+  html.motion-overlay-open .pane-center,
+  html.motion-overlay-open .memo-scroll,
+  html.motion-overlay-open .task-list-scroll,
+  html.motion-overlay-open .task-detail-zone,
+  html.motion-overlay-open .pdf-viewer {
+    overflow: hidden !important;
+  }
+
+  .mobile-dock,
+  .reader-mobile-toolbar,
+  .mobile-context-actions {
+    transform: translateZ(0);
+  }
+
+  .el-overlay-dialog {
+    display: flex;
+    align-items: flex-end;
+    padding: calc(var(--safe-top) + 8px) 8px 0;
+  }
+
+  .el-popper {
+    max-width: calc(100vw - 16px);
+    border-radius: 14px !important;
+  }
+
+  .el-checkbox__inner,
+  .el-radio__inner {
+    width: 20px;
+    height: 20px;
+  }
+
+  .el-checkbox__input.is-checked .el-checkbox__inner,
+  .el-radio__input.is-checked .el-radio__inner {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
   /* Long feeds skip layout and paint work until they approach the viewport. */
   .memo-card,
   .radar-card,

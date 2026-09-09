@@ -27,6 +27,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { useAppStore } from '@/stores/app'
 import { localFileUrl } from '@/api/reader'
 import {
+  computeCenteredZoomScrollTop,
   computePdfZoomScale,
   computeRenderDpr,
   isWithinRenderWindow,
@@ -78,6 +79,7 @@ let visibleObserver: IntersectionObserver | null = null
 let resizeObserver: ResizeObserver | null = null
 let resizeTimer: number | null = null
 let loadGeneration = 0
+let layoutGeneration = 0
 let activeRenders = 0
 let renderQueue: number[] = []
 let unmounted = false
@@ -469,18 +471,26 @@ async function buildOutline(
 async function rerenderAll() {
   const doc = pdfDoc
   if (!doc) return
+  const layout = ++layoutGeneration
   const generation = loadGeneration
   // A fit-width resize changes every page's height, so the total document
   // height changes too. Without preserving the proportional scroll position,
   // the same absolute scrollTop points at different content — that is the
   // jump the user sees when toggling fullscreen (or any width change).
   const root = scrollRoot()
-  const prevMax = root ? root.scrollHeight - root.clientHeight : 0
-  const fraction = prevMax > 0
-    ? Math.min(1, Math.max(0, root!.scrollTop / prevMax))
-    : 0
+  const previousScroll = root
+    ? {
+        top: root.scrollTop,
+        left: root.scrollLeft,
+        height: root.scrollHeight,
+        width: root.scrollWidth,
+        viewportHeight: root.clientHeight,
+        viewportWidth: root.clientWidth,
+      }
+    : null
   // Recompute placeholder sizes for the new scale.
   const page1 = await doc.getPage(1)
+  if (layout !== layoutGeneration || generation !== loadGeneration) return
   if (zoomMode.value === 'fit') fitScale = computeFitScale(page1)
   const s = zoomMode.value === 'fit' ? fitScale : zoomMode.value
   const vp = page1.getViewport({ scale: s })
@@ -489,13 +499,25 @@ async function rerenderAll() {
   // new pixels in double-buffered, so the visible page never flashes blank.
   invalidateAllPages()
   await nextTick()
-  if (generation !== loadGeneration) return
+  if (layout !== layoutGeneration || generation !== loadGeneration) return
   // Restore the proportional reading position for the new layout. The
   // placeholder heights are bound to pageMetas and already live in the DOM
   // after nextTick, so scrollHeight reflects the new document height.
-  if (root && prevMax > 0) {
-    const newMax = root.scrollHeight - root.clientHeight
-    root.scrollTop = fraction * newMax
+  if (root && previousScroll) {
+    root.scrollTop = computeCenteredZoomScrollTop(
+      previousScroll.top,
+      previousScroll.viewportHeight,
+      previousScroll.height,
+      root.clientHeight,
+      root.scrollHeight,
+    )
+    root.scrollLeft = computeCenteredZoomScrollTop(
+      previousScroll.left,
+      previousScroll.viewportWidth,
+      previousScroll.width,
+      root.clientWidth,
+      root.scrollWidth,
+    )
   }
   setupObservers()
   const rootRect = scrollRoot()?.getBoundingClientRect()
@@ -529,6 +551,7 @@ function scrollToPage(num: number) {
 defineExpose({ scrollToPage, setZoom, setZoomRatio })
 
 async function destroyCurrentDocument() {
+  layoutGeneration += 1
   renderObserver?.disconnect()
   visibleObserver?.disconnect()
   renderObserver = null
@@ -613,6 +636,8 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
+  width: max-content;
+  min-width: 100%;
   gap: 16px;
 }
 .pdf-page-wrap {
@@ -660,7 +685,7 @@ onBeforeUnmount(() => {
 .pdf-state .is-loading { animation: spin 1s linear infinite; color: var(--accent); }
 
 @media (max-width: 768px) {
-  .pdf-viewer { padding: 8px 8px calc(112px + var(--safe-bottom)); }
+  .pdf-viewer { padding: 8px 8px calc(32px + var(--safe-bottom)); }
   .pdf-pages { gap: 10px; }
   .pdf-page-wrap { border-radius: 6px; }
 }

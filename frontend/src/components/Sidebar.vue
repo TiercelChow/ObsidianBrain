@@ -1,11 +1,20 @@
 <template>
   <div class="sidebar" :class="{ collapsed: isCollapsed }">
+    <span v-if="expandedOnMobile" class="mobile-sheet-handle" aria-hidden="true"></span>
     <!-- Logo -->
     <div class="logo-section">
       <img class="logo-mark" src="/favicon.svg" alt="" aria-hidden="true" />
       <transition name="logo-text">
         <span v-show="!isCollapsed" class="logo-name">ObsidianBrain</span>
       </transition>
+      <strong v-if="expandedOnMobile" class="mobile-sheet-title">全部功能</strong>
+      <button
+        v-if="expandedOnMobile"
+        type="button"
+        class="mobile-sidebar-close"
+        aria-label="关闭全部模块"
+        @click="appStore.setSidebarCollapsed(true)"
+      >×</button>
     </div>
 
     <!-- Navigation -->
@@ -133,6 +142,8 @@ const navGroups = [
     label: '管理',
     items: [
       { path: '/code-repo', label: '代码仓', icon: FolderOpened },
+      { path: '/inspiration', label: '灵感熔炉', icon: MagicStick },
+      { path: '/radar', label: '智识雷达', icon: DataLine },
     ],
   },
 ]
@@ -195,6 +206,9 @@ function isActive(path: string) {
   letter-spacing: var(--tracking-tight);
   white-space: nowrap;
 }
+
+.mobile-sidebar-close { display: none; }
+.mobile-sheet-title, .mobile-sheet-handle { display: none; }
 
 /* ── Navigation ── */
 .nav-list {
@@ -358,26 +372,77 @@ function isActive(path: string) {
 /* ── Mobile ── */
 @media (max-width: 768px) {
   .sidebar {
-    /* Clear the fixed mobile global header (hamburger + title) so the logo
-       and nav start below it instead of sitting behind the hamburger button. */
-    padding-top: calc(var(--mobile-header-height) + var(--safe-top));
+    position: relative;
+    padding-top: 28px;
     padding-left: 12px;
     padding-right: 12px;
     border-right: none;
+    border-radius: inherit;
     box-shadow: none;
     background: var(--bg-glass-strong);
     backdrop-filter: blur(32px) saturate(200%);
     -webkit-backdrop-filter: blur(32px) saturate(200%);
   }
+  .mobile-sheet-handle {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    width: 38px;
+    height: 5px;
+    display: block;
+    border-radius: 999px;
+    background: var(--text-faint);
+    opacity: .45;
+    transform: translateX(-50%);
+  }
+  .logo-section { height: 54px; margin-bottom: 2px; padding-inline: 4px; }
+  .logo-mark, .logo-name { display: none !important; }
+  .mobile-sheet-title { display: block; color: var(--text-primary); font-size: 19px; font-weight: 700; letter-spacing: -.02em; }
+  .mobile-sidebar-close {
+    display: inline-flex;
+    width: var(--tap-target);
+    height: var(--tap-target);
+    margin-left: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    background: var(--bg-glass-subtle);
+    color: var(--text-muted);
+    align-items: center;
+    justify-content: center;
+    font: inherit;
+    font-size: 24px;
+    line-height: 1;
+  }
+  .mobile-sidebar-close:active { transform: scale(0.94); }
   .sidebar-footer {
     display: none;
   }
-  .nav-item {
-    min-height: var(--tap-target);
-    padding: 10px 14px;
-    font-size: 15px;
+  .nav-list { gap: 12px; padding-bottom: max(18px, var(--safe-bottom)); }
+  .nav-active-indicator { display: none; }
+  .nav-group {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
   }
-  .nav-group + .nav-group { margin-top: 12px; }
-  .nav-group-label { padding-top: 8px; font-size: 11px; }
+  .nav-group-label { grid-column: 1 / -1; padding: 2px 4px 0; }
+  .nav-item {
+    min-width: 0;
+    min-height: 70px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 4px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--bg-glass) 72%, transparent);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+  }
+  .nav-item.active { background: color-mix(in srgb, var(--accent) 11%, var(--bg-glass)); border-color: var(--accent-border); color: var(--accent); }
+  .nav-icon { font-size: 22px; opacity: .85; }
+  .nav-label { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-group + .nav-group { margin-top: 0; }
+  .nav-group-label { font-size: 11px; }
 }
 </style>

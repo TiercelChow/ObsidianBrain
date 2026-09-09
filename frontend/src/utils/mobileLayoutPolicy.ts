@@ -20,9 +20,10 @@ export function getMobileReaderToolbarState(
   hasOpenFolder: boolean,
   hasDisplayedDocument: boolean,
   transientVisible: boolean,
+  interactionActive = false,
 ): MobileReaderToolbarState {
   const rendered = hasOpenFolder || hasDisplayedDocument
-  const pinned = hasOpenFolder && !hasDisplayedDocument
+  const pinned = (hasOpenFolder && !hasDisplayedDocument) || interactionActive
   return {
     rendered,
     pinned,

@@ -1,7 +1,13 @@
 <template>
   <Teleport to="body">
     <Transition name="motion-modal">
-      <div v-if="modelValue" class="motion-modal" :class="{ 'is-dragging': dragging }" @click.self="close">
+      <div
+        v-if="modelValue"
+        class="motion-modal"
+        :class="{ 'is-dragging': dragging, 'is-settling': settling }"
+        :style="overlayStyle"
+        @click.self="close"
+      >
         <section
           ref="panelRef"
           class="motion-modal__panel"
@@ -27,8 +33,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useModalEnvironment } from '@/composables/useModalEnvironment'
+import { animateSpring, projectMotion } from '@/utils/motionSpring'
 
 const props = withDefaults(defineProps<{
   modelValue: boolean
@@ -39,29 +46,48 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 const panelRef = ref<HTMLElement | null>(null)
 const dragging = ref(false)
+const settling = ref(false)
 const dragY = ref(0)
+const visualHeight = ref(window.visualViewport?.height ?? window.innerHeight)
+const visualOffsetTop = ref(window.visualViewport?.offsetTop ?? 0)
 let pointerId: number | null = null
 let startY = 0
 let samples: Array<{ y: number; time: number }> = []
+let cancelSpring: (() => void) | null = null
+let captureTarget: HTMLElement | null = null
 
 const panelStyle = computed(() => ({ '--motion-sheet-y': `${dragY.value}px` }))
+const overlayStyle = computed(() => ({
+  '--motion-viewport-height': `${visualHeight.value}px`,
+  '--motion-viewport-top': `${visualOffsetTop.value}px`,
+}))
 
 function rubberband(overshoot: number, dimension: number, constant = 0.35) {
   return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot))
 }
-function projectVelocity(velocity: number, decelerationRate = 0.99) {
-  return (velocity / 1000) * decelerationRate / (1 - decelerationRate)
-}
 function isMobile() { return window.matchMedia('(max-width: 768px)').matches }
 function close() { emit('update:modelValue', false) }
 
+function stopSpring() {
+  cancelSpring?.()
+  cancelSpring = null
+  settling.value = false
+}
+
+function updateVisualViewport() {
+  visualHeight.value = window.visualViewport?.height ?? window.innerHeight
+  visualOffsetTop.value = window.visualViewport?.offsetTop ?? 0
+}
+
 function onPointerDown(event: PointerEvent) {
   if (!isMobile() || (event.pointerType === 'mouse' && event.button !== 0)) return
+  stopSpring()
   pointerId = event.pointerId
   startY = event.clientY
   samples = [{ y: event.clientY, time: performance.now() }]
   dragging.value = true
-  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  captureTarget = event.currentTarget as HTMLElement
+  captureTarget.setPointerCapture(event.pointerId)
 }
 function onPointerMove(event: PointerEvent) {
   if (event.pointerId !== pointerId) return
@@ -79,14 +105,33 @@ function onPointerUp(event: PointerEvent) {
   const last = samples[samples.length - 1]
   const elapsed = first && last ? Math.max(1, last.time - first.time) : 1
   const velocity = first && last ? ((last.y - first.y) / elapsed) * 1000 : 0
-  const projected = dragY.value + projectVelocity(velocity)
+  const projected = projectMotion(dragY.value, velocity)
   const shouldClose = projected > (panelRef.value?.offsetHeight || 500) * 0.3
+  if (captureTarget?.hasPointerCapture(event.pointerId)) captureTarget.releasePointerCapture(event.pointerId)
+  captureTarget = null
   pointerId = null
   dragging.value = false
-  if (shouldClose) close()
-  else dragY.value = 0
+  settling.value = true
+  const target = shouldClose ? (panelRef.value?.offsetHeight || visualHeight.value) + 24 : 0
+  cancelSpring = animateSpring(
+    dragY.value,
+    target,
+    velocity,
+    (value) => { dragY.value = value },
+    () => {
+      cancelSpring = null
+      settling.value = false
+      if (shouldClose) close()
+    },
+    { response: 0.36, damping: Math.abs(velocity) > 500 ? 0.9 : 1 },
+  )
 }
 function resetGesture() {
+  stopSpring()
+  if (pointerId !== null && captureTarget?.hasPointerCapture(pointerId)) {
+    captureTarget.releasePointerCapture(pointerId)
+  }
+  captureTarget = null
   pointerId = null
   dragging.value = false
   dragY.value = 0
@@ -95,6 +140,16 @@ watch(() => props.modelValue, (open) => {
   if (open) resetGesture()
 })
 useModalEnvironment(() => props.modelValue, panelRef, close)
+onMounted(() => {
+  updateVisualViewport()
+  window.visualViewport?.addEventListener('resize', updateVisualViewport)
+  window.visualViewport?.addEventListener('scroll', updateVisualViewport)
+})
+onBeforeUnmount(() => {
+  resetGesture()
+  window.visualViewport?.removeEventListener('resize', updateVisualViewport)
+  window.visualViewport?.removeEventListener('scroll', updateVisualViewport)
+})
 </script>
 
 <style scoped>
@@ -134,7 +189,13 @@ useModalEnvironment(() => props.modelValue, panelRef, close)
 .motion-modal-leave-to .motion-modal__panel { transform: translateY(8px) scale(0.985); opacity: 0; }
 
 @media (max-width: 768px) {
-  .motion-modal { align-items: flex-end; padding: 0; }
+  .motion-modal {
+    top: var(--motion-viewport-top);
+    bottom: auto;
+    height: var(--motion-viewport-height);
+    align-items: flex-end;
+    padding: 0;
+  }
   .motion-modal__panel {
     width: 100%;
     max-height: min(88dvh, 760px);
@@ -165,7 +226,8 @@ useModalEnvironment(() => props.modelValue, panelRef, close)
     background: var(--text-faint);
     opacity: 0.45;
   }
-  .is-dragging .motion-modal__panel { transition: none; }
+  .is-dragging .motion-modal__panel,
+  .is-settling .motion-modal__panel { transition: none; will-change: transform; }
   .motion-modal-enter-from .motion-modal__panel,
   .motion-modal-leave-to .motion-modal__panel { transform: translateY(100%); opacity: 1; }
 }

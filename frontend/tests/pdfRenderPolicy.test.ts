@@ -4,10 +4,20 @@ import test from 'node:test'
 import {
   MAX_CANVAS_PIXELS,
   MAX_RENDER_DPR,
+  computeCenteredZoomScrollTop,
   computePdfZoomScale,
   computeRenderDpr,
   isWithinRenderWindow,
 } from '../src/components/reader/pdfRenderPolicy.ts'
+
+test('zoom keeps the same document point at the viewport center', () => {
+  assert.equal(computeCenteredZoomScrollTop(700, 600, 2400, 600, 4800), 1700)
+})
+
+test('zoom center restoration clamps to document bounds', () => {
+  assert.equal(computeCenteredZoomScrollTop(0, 600, 2400, 600, 1200), 0)
+  assert.equal(computeCenteredZoomScrollTop(1800, 600, 2400, 600, 1200), 600)
+})
 
 test('computeRenderDpr caps high-density displays', () => {
   assert.equal(computeRenderDpr(500, 700, 4, MAX_CANVAS_PIXELS), MAX_RENDER_DPR)

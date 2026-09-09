@@ -6,7 +6,7 @@ import { getMermaidViewerPolicy } from '../src/utils/mermaidViewerPolicy.ts'
 test('mobile mermaid viewer uses touch instructions and a floating close control', () => {
   assert.deepEqual(getMermaidViewerPolicy(390), {
     mobile: true,
-    hint: '双指缩放 · 单指拖动 · 双击放大',
+    hint: '拖动查看 · 双指缩放',
     floatingClose: true,
   })
 })

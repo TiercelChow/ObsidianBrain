@@ -21,6 +21,7 @@ function lockPageScroll() {
   savedBodyPaddingRight = document.body.style.paddingRight
   const scrollbarWidth = Math.max(0, window.innerWidth - document.documentElement.clientWidth)
   document.body.style.overflow = 'hidden'
+  document.documentElement.classList.add('motion-overlay-open')
   if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`
 }
 
@@ -29,6 +30,7 @@ function unlockPageScroll() {
   if (scrollLockCount !== 0) return
   document.body.style.overflow = savedBodyOverflow
   document.body.style.paddingRight = savedBodyPaddingRight
+  document.documentElement.classList.remove('motion-overlay-open')
 }
 
 /** Shared dialog behavior: scroll lock, focus trap, Escape, and focus return. */

@@ -3,22 +3,29 @@
     <header class="calendar-header">
       <div class="calendar-heading">
         <h2>{{ monthTitle(anchor) }}</h2>
-        <span>{{ topLevelTasks.length }} 项安排</span>
+        <span>{{ currentMonthTaskCount }} 项安排</span>
       </div>
       <div class="calendar-nav">
-        <button type="button" aria-label="上个月" @click="$emit('shift', -1)">‹</button>
+        <button type="button" aria-label="上个月" @click="requestMonthShift(-1)">‹</button>
         <button type="button" class="today-button" @click="$emit('today')">今天</button>
-        <button type="button" aria-label="下个月" @click="$emit('shift', 1)">›</button>
+        <button type="button" aria-label="下个月" @click="requestMonthShift(1)">›</button>
       </div>
     </header>
 
     <div class="calendar-body">
-      <div class="calendar-month">
+      <div
+        class="calendar-month"
+        @pointerdown="onMonthPointerDown"
+        @pointermove="onMonthPointerMove"
+        @pointerup="onMonthPointerUp"
+        @pointercancel="onMonthPointerCancel"
+        @click.capture="onMonthClick"
+      >
         <div class="weekday-row" aria-hidden="true">
           <span v-for="weekday in weekdays" :key="weekday">{{ weekday }}</span>
         </div>
 
-        <div class="calendar-grid" :class="{ loading }">
+        <div class="calendar-grid" :class="{ loading, dragging: swipeDragging }" :style="calendarTrackStyle">
           <button
             v-for="day in days"
             :key="day.date"
@@ -38,13 +45,14 @@
               <span class="day-number">{{ day.day }}</span>
               <span class="lunar-date">{{ formatLunarDate(day.date) }}</span>
             </span>
-            <span class="mobile-dots" aria-hidden="true">
+            <span v-if="topLevelEventsFor(day.date).length <= 3" class="mobile-dots" aria-hidden="true">
               <i
                 v-for="task in topLevelEventsFor(day.date).slice(0, 3)"
                 :key="task.id"
                 :class="`importance-${task.importance}`"
               ></i>
             </span>
+            <span v-else class="mobile-count" aria-hidden="true">{{ topLevelEventsFor(day.date).length }}</span>
             <span class="day-events">
               <span
                 v-for="task in topLevelEventsFor(day.date).slice(0, 3)"
@@ -113,7 +121,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import type { TaskSummary } from '@/api/tasks'
 import {
   buildMonthGrid,
@@ -125,26 +133,36 @@ import {
   parseLocalDate,
 } from '@/utils/taskDates'
 import { calendarAgendaEntries, calendarTopLevelTasks } from '@/utils/taskHierarchy'
+import { claimCalendarSwipe, resolveCalendarSwipe } from '@/utils/taskCalendarGesture'
 
 const props = defineProps<{
   anchor: string
   selectedDate: string
   tasks: TaskSummary[]
   loading?: boolean
+  expandedTaskIds?: string[]
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   shift: [months: number]
   today: []
   'select-date': [date: string]
   'open-task': [id: string]
   create: [date: string]
+  'update-expanded': [ids: string[]]
 }>()
 
 const weekdays = ['一', '二', '三', '四', '五', '六', '日']
 const days = computed(() => buildMonthGrid(props.anchor))
 const topLevelTasks = computed(() => calendarTopLevelTasks(props.tasks))
-const expandedAgendaIds = ref<Set<string>>(new Set())
+const currentMonthTaskCount = computed(() => {
+  const currentDays = days.value.filter(day => day.inCurrentMonth)
+  const first = currentDays[0]?.date
+  const last = currentDays[currentDays.length - 1]?.date
+  if (!first || !last) return 0
+  return topLevelTasks.value.filter(task => task.start_date <= last && task.end_date >= first).length
+})
+const expandedAgendaIds = ref<Set<string>>(new Set(props.expandedTaskIds ?? []))
 const selectedEntries = computed(() => calendarAgendaEntries(props.tasks, props.selectedDate, expandedAgendaIds.value))
 const selectedRootCount = computed(() => selectedEntries.value.filter(entry => entry.depth === 0).length)
 const selectedDateLabel = computed(() => {
@@ -173,10 +191,131 @@ function toggleAgenda(id: string) {
   if (next.has(id)) next.delete(id)
   else next.add(id)
   expandedAgendaIds.value = next
+  emit('update-expanded', [...next])
 }
 
 watch(() => props.selectedDate, () => {
   expandedAgendaIds.value = new Set()
+  emit('update-expanded', [])
+})
+
+watch(() => props.expandedTaskIds, (ids) => {
+  expandedAgendaIds.value = new Set(ids ?? [])
+})
+
+interface SwipeState {
+  pointerId: number
+  startX: number
+  startY: number
+  lastX: number
+  lastTime: number
+  velocityX: number
+  claimed: boolean
+}
+
+const swipeState = ref<SwipeState | null>(null)
+const swipeOffset = ref(0)
+const swipeDragging = ref(false)
+const suppressClick = ref(false)
+const calendarTrackStyle = computed(() => ({
+  transform: `translate3d(${swipeOffset.value}px, 0, 0)`,
+  opacity: `${1 - Math.min(Math.abs(swipeOffset.value) / 360, 0.16)}`,
+}))
+let shiftTimer: number | undefined
+let clickTimer: number | undefined
+let shiftFrame: number | undefined
+
+function onMonthPointerDown(event: PointerEvent) {
+  if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return
+  window.clearTimeout(shiftTimer)
+  swipeState.value = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    lastX: event.clientX,
+    lastTime: event.timeStamp,
+    velocityX: 0,
+    claimed: false,
+  }
+}
+
+function onMonthPointerMove(event: PointerEvent) {
+  const state = swipeState.value
+  if (!state || state.pointerId !== event.pointerId) return
+  const dx = event.clientX - state.startX
+  const dy = event.clientY - state.startY
+  if (!state.claimed && claimCalendarSwipe(dx, dy)) {
+    state.claimed = true
+    swipeDragging.value = true
+    ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  }
+  if (!state.claimed) return
+  event.preventDefault()
+  const elapsed = Math.max(event.timeStamp - state.lastTime, 1)
+  state.velocityX = (event.clientX - state.lastX) / elapsed
+  state.lastX = event.clientX
+  state.lastTime = event.timeStamp
+  swipeOffset.value = dx / (1 + Math.abs(dx) / 280)
+}
+
+function onMonthPointerUp(event: PointerEvent) {
+  const state = swipeState.value
+  if (!state || state.pointerId !== event.pointerId) return
+  swipeState.value = null
+  if (!state.claimed) return
+  event.preventDefault()
+  suppressClick.value = true
+  window.clearTimeout(clickTimer)
+  clickTimer = window.setTimeout(() => { suppressClick.value = false }, 0)
+  const direction = resolveCalendarSwipe({
+    dx: event.clientX - state.startX,
+    dy: event.clientY - state.startY,
+    velocityX: state.velocityX,
+  })
+  if (direction) animateMonthShift(direction)
+  else settleMonth()
+}
+
+function onMonthPointerCancel() {
+  swipeState.value = null
+  settleMonth()
+}
+
+function onMonthClick(event: MouseEvent) {
+  if (!suppressClick.value) return
+  event.preventDefault()
+  event.stopPropagation()
+}
+
+function settleMonth() {
+  swipeDragging.value = false
+  swipeOffset.value = 0
+}
+
+function requestMonthShift(direction: -1 | 1) {
+  animateMonthShift(direction)
+}
+
+function animateMonthShift(direction: -1 | 1) {
+  window.clearTimeout(shiftTimer)
+  swipeDragging.value = false
+  swipeOffset.value = direction > 0 ? -56 : 56
+  shiftTimer = window.setTimeout(async () => {
+    emit('shift', direction)
+    await nextTick()
+    swipeDragging.value = true
+    swipeOffset.value = direction > 0 ? 34 : -34
+    shiftFrame = window.requestAnimationFrame(() => {
+      swipeDragging.value = false
+      swipeOffset.value = 0
+    })
+  }, 110)
+}
+
+onUnmounted(() => {
+  window.clearTimeout(shiftTimer)
+  window.clearTimeout(clickTimer)
+  if (shiftFrame !== undefined) window.cancelAnimationFrame(shiftFrame)
 })
 </script>
 
@@ -203,7 +342,8 @@ watch(() => props.selectedDate, () => {
 .weekday-row, .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .weekday-row { flex: none; color: var(--text-faint); font-size: 11px; font-weight: 650; text-align: center; letter-spacing: .08em; }
 .weekday-row span { padding: 7px; }
-.calendar-grid { flex: 1; gap: 6px; margin-top: 4px; grid-template-rows: repeat(6, minmax(0, 1fr)); transition: opacity var(--motion-fast) ease; }
+.calendar-grid { flex: 1; gap: 6px; margin-top: 4px; grid-template-rows: repeat(6, minmax(0, 1fr)); transition: opacity var(--motion-fast) ease, transform var(--motion-normal) var(--ease-spring-gentle); will-change: transform, opacity; }
+.calendar-grid.dragging { transition: none; }
 .calendar-grid.loading { opacity: .5; }
 .calendar-day {
   position: relative;
@@ -236,7 +376,7 @@ watch(() => props.selectedDate, () => {
 .event-pill.importance-urgent { background-color: color-mix(in srgb, #ff3b30 12%, transparent); }
 .event-pill.closed { opacity: .5; }
 .more-events { padding-left: 7px; color: var(--text-faint); font-size: 11px; }
-.mobile-dots { display: none; }
+.mobile-dots, .mobile-count { display: none; }
 
 .agenda { flex: none; width: 340px; margin-top: 0; padding: 16px; border-radius: 18px; background: color-mix(in srgb, var(--text-primary) 2.5%, transparent); display: flex; flex-direction: column; overflow: hidden; }
 .agenda-header { flex: none; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
@@ -271,37 +411,49 @@ watch(() => props.selectedDate, () => {
 }
 
 @media (max-width: 768px) {
-  .task-calendar { height: auto; min-height: calc(100dvh - 260px); padding: 14px; border-radius: 20px; }
+  .task-calendar { height: auto; min-height: calc(100dvh - 234px); padding: 12px 10px; border-radius: 20px; }
   .calendar-header { margin-bottom: 10px; }
   .calendar-heading h2 { font-size: 18px; }
   .calendar-nav button { min-width: 44px; height: 44px; }
-  .calendar-nav .today-button { display: none; }
   .calendar-body { flex-direction: column; gap: 0; }
-  .calendar-month { overflow: visible; }
+  .calendar-month { overflow: hidden; touch-action: pan-y; }
   .weekday-row span { padding: 5px 1px; }
-  .calendar-grid { gap: 3px; grid-template-rows: none; }
-  .calendar-day { min-height: 0; aspect-ratio: 1; padding: 4px 2px; border-radius: 12px; text-align: center; overflow: visible; }
-  .date-badge { position: absolute; top: 1px; right: 1px; width: 40px; height: 40px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; border-radius: 50%; transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-fast) var(--ease-spring-gentle); }
-  .lunar-date { position: static; width: auto; max-width: 34px; color: var(--text-muted); font-size: 8px; line-height: 9px; text-align: center; }
-  .day-number { position: static; width: auto; height: auto; border-radius: 0; font-size: 17px; line-height: 19px; }
+  .calendar-grid { gap: 1px; grid-template-rows: none; }
+  .calendar-day { min-height: 0; aspect-ratio: 1; padding: 1px; border-radius: 13px; text-align: center; overflow: visible; }
+  .calendar-day.selected { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .date-badge { position: absolute; top: 50%; left: 50%; width: min(44px, calc(100% - 2px)); aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; border-radius: 50%; transform: translate(-50%, -50%); transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-fast) var(--ease-spring-gentle); }
+  .lunar-date { position: static; width: auto; max-width: 40px; color: var(--text-muted); font-size: 10px; line-height: 11px; text-align: center; }
+  .day-number { position: static; width: auto; height: auto; border-radius: 0; font-size: 21px; line-height: 23px; }
   .calendar-day.today .date-badge { background: var(--accent); color: white; box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 28%, transparent); }
   .calendar-day.today .day-number { background: transparent; color: white; box-shadow: none; }
   .calendar-day.today .lunar-date { color: color-mix(in srgb, white 78%, transparent); }
   .calendar-day.selected:not(.today) .lunar-date { color: var(--accent); }
   .day-events { display: none; }
-  .mobile-dots { position: absolute; top: 5px; right: auto; bottom: auto; left: -1px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 2px; }
+  .mobile-dots { position: absolute; right: 3px; bottom: 3px; display: flex; align-items: center; justify-content: center; gap: 2px; }
   .mobile-dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }
   .mobile-dots i.importance-low { background: #8e8e93; }
   .mobile-dots i.importance-high { background: #ff9500; }
   .mobile-dots i.importance-urgent { background: #ff3b30; }
+  .mobile-count { position: absolute; right: 2px; bottom: 1px; min-width: 15px; height: 15px; display: grid; place-items: center; border-radius: 8px; background: color-mix(in srgb, var(--accent) 14%, var(--bg-glass-strong)); color: var(--accent); font-size: 9px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .agenda { width: auto; margin-top: 14px; padding: 12px; border-radius: 16px; }
   .agenda-header button { min-height: 44px; }
   .agenda-body { overflow-y: visible; overscroll-behavior: auto; }
   .agenda-card { min-height: 64px; }
 }
 
+@media (max-width: 360px) {
+  .task-calendar { width: calc(100% + 30px); margin-inline: -15px; padding: 10px 4px; }
+  .calendar-grid { gap: 0; }
+  .calendar-nav { gap: 1px; padding: 2px; }
+  .calendar-nav button { min-width: 40px; }
+  .calendar-nav .today-button { padding-inline: 8px; }
+  .calendar-heading span { display: none; }
+  .date-badge { width: min(42px, calc(100% - 2px)); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .calendar-nav button, .calendar-grid, .calendar-day, .date-badge, .day-number, .agenda-card, .agenda-expand, .agenda-item-enter-active, .agenda-item-leave-active { transition-duration: 1ms !important; }
+  .calendar-grid { transform: none !important; }
 }
 
 @media (prefers-reduced-transparency: reduce) {

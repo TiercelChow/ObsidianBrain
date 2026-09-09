@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition :name="`motion-drawer-${direction}`">
-      <div v-if="modelValue" class="motion-drawer" :class="{ 'is-dragging': dragging }">
+      <div v-if="modelValue" class="motion-drawer" :class="{ 'is-dragging': dragging, 'is-settling': settling }">
         <div class="motion-drawer__scrim" :style="scrimStyle" aria-hidden="true" @click="close" />
         <aside
           ref="panelRef"
@@ -28,6 +28,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useModalEnvironment } from '@/composables/useModalEnvironment'
+import { animateSpring, projectMotion } from '@/utils/motionSpring'
 
 const props = withDefaults(defineProps<{
   modelValue: boolean
@@ -41,12 +42,14 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 const panelRef = ref<HTMLElement | null>(null)
 const dragging = ref(false)
+const settling = ref(false)
 const dragX = ref(0)
 let pointerId: number | null = null
 let startX = 0
 let startY = 0
 let axis: 'pending' | 'horizontal' | 'vertical' = 'pending'
 let samples: Array<{ x: number; time: number }> = []
+let cancelSpring: (() => void) | null = null
 
 const directionSign = computed(() => props.direction === 'left' ? -1 : 1)
 const panelStyle = computed(() => ({ '--motion-drawer-x': `${dragX.value}px` }))
@@ -60,16 +63,19 @@ function rubberband(overshoot: number, dimension: number, constant = 0.55) {
   return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot))
 }
 
-function projectVelocity(velocity: number, decelerationRate = 0.99) {
-  return (velocity / 1000) * decelerationRate / (1 - decelerationRate)
-}
-
 function close() {
   emit('update:modelValue', false)
 }
 
+function stopSpring() {
+  cancelSpring?.()
+  cancelSpring = null
+  settling.value = false
+}
+
 function onPointerDown(event: PointerEvent) {
   if (event.pointerType === 'mouse' && event.button !== 0) return
+  stopSpring()
   pointerId = event.pointerId
   startX = event.clientX
   startY = event.clientY
@@ -108,7 +114,7 @@ function finishGesture() {
   const last = samples[samples.length - 1]
   const elapsed = first && last ? Math.max(1, last.time - first.time) : 1
   const velocity = first && last ? ((last.x - first.x) / elapsed) * 1000 : 0
-  const projected = dragX.value + projectVelocity(velocity)
+  const projected = projectMotion(dragX.value, velocity)
   const width = panelRef.value?.offsetWidth || 320
   const shouldClose = projected * directionSign.value > width * 0.35
   if (pointerId !== null && panelRef.value?.hasPointerCapture(pointerId)) {
@@ -116,11 +122,24 @@ function finishGesture() {
   }
   pointerId = null
   dragging.value = false
-  if (shouldClose) close()
-  else dragX.value = 0
+  settling.value = true
+  const target = shouldClose ? directionSign.value * (width + 8) : 0
+  cancelSpring = animateSpring(
+    dragX.value,
+    target,
+    velocity,
+    (value) => { dragX.value = value },
+    () => {
+      cancelSpring = null
+      settling.value = false
+      if (shouldClose) close()
+    },
+    { response: 0.34, damping: Math.abs(velocity) > 500 ? 0.9 : 1 },
+  )
 }
 
 function resetGesture() {
+  stopSpring()
   if (pointerId !== null && panelRef.value?.hasPointerCapture(pointerId)) {
     panelRef.value.releasePointerCapture(pointerId)
   }
@@ -199,7 +218,9 @@ onBeforeUnmount(() => {
 .is-right .motion-drawer__grabber { left: 5px; }
 
 .is-dragging .motion-drawer__panel,
-.is-dragging .motion-drawer__scrim { transition: none; }
+.is-dragging .motion-drawer__scrim,
+.is-settling .motion-drawer__panel,
+.is-settling .motion-drawer__scrim { transition: none; }
 
 .motion-drawer-left-enter-active,
 .motion-drawer-left-leave-active,

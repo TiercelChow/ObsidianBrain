@@ -7,6 +7,8 @@
       'is-fs-transitioning': isFsTransitioning,
       'fs-ui-hidden': isFullscreen && !showFsUI,
       'is-mobile-immersive': isMobileImmersive,
+      'is-read-view': viewMode === 'read',
+      'has-document': Boolean(displayedFile),
     }"
   >
     <header class="page-header">
@@ -29,6 +31,9 @@
         <input v-model="shelfQuery" type="search" aria-label="搜索书籍" placeholder="搜索书名、描述或类别" />
         <button v-if="shelfQuery" type="button" class="shelf-search-clear" aria-label="清除搜索" @click="shelfQuery = ''">×</button>
       </div>
+      <button v-show="viewMode === 'shelf'" type="button" class="reader-shelf-add" @click="bookshelfRef?.openAdd()">
+        <el-icon><Plus /></el-icon><span>添加</span>
+      </button>
       <button v-show="viewMode === 'read'" class="path-trigger" @click="openHistoryOverlay">
         <el-icon><FolderOpened /></el-icon>
         <span v-if="currentFolderName" class="pt-name">{{ currentFolderName }}</span>
@@ -41,7 +46,7 @@
     </div>
 
     <!-- Bookshelf view (kept alive via v-show alongside the reading panes) -->
-    <BookshelfView v-show="viewMode === 'shelf'" class="bookshelf-root" :query="shelfQuery" @open="openBook" />
+    <BookshelfView ref="bookshelfRef" v-show="viewMode === 'shelf'" class="bookshelf-root" :query="shelfQuery" @open="openBook" />
 
     <!-- Floating path overlay (command-palette style) -->
     <transition name="overlay-fade">
@@ -191,24 +196,50 @@
       aria-label="阅读工具"
       @pointerdown="revealMobileToolbar"
     >
+      <div class="mobile-toolbar-side mobile-toolbar-left">
+        <button
+          type="button"
+          :aria-label="mobileToolbarState.pinned ? '选择文章' : '打开文件列表'"
+          :title="mobileToolbarState.pinned ? '选择文章' : '文件'"
+          @click="treeDrawer = true"
+        >
+          <el-icon><FolderOpened /></el-icon>
+        </button>
+        <button type="button" aria-label="切换沉浸阅读" :title="isImmersive ? '退出沉浸阅读' : '沉浸阅读'" @click="toggleFullscreen">
+          <el-icon><FullScreen /></el-icon>
+        </button>
+      </div>
       <button
+        v-if="fileKind === 'pdf' && displayedFile"
         type="button"
-        :aria-label="mobileToolbarState.pinned ? '选择文章' : '打开文件列表'"
-        :title="mobileToolbarState.pinned ? '选择文章' : '文件'"
-        @click="treeDrawer = true"
+        class="reader-document-center"
+        :aria-label="`${mobileDocumentLabel}，点按恢复适宽`"
+        @click="fitPdf"
       >
-        <el-icon><FolderOpened /></el-icon>
+        <span class="reader-document-label">{{ mobileDocumentLabel }}</span>
+        <small>{{ pdfCurrentPage || 1 }} / {{ pdfPageCount || '—' }}</small>
       </button>
-      <template v-if="fileKind === 'pdf' && displayedFile">
-        <button type="button" aria-label="缩小 PDF" title="缩小" @click="setPdfZoom(-1)"><el-icon><Minus /></el-icon></button>
-        <button type="button" class="pdf-fit-btn" @click="fitPdf">适宽</button>
-        <span class="pdf-page-indicator">{{ pdfCurrentPage || 1 }} / {{ pdfPageCount || '—' }}</span>
-        <button type="button" aria-label="放大 PDF" title="放大" @click="setPdfZoom(1)"><el-icon><Plus /></el-icon></button>
-      </template>
-      <span v-else class="reader-document-label">{{ mobileDocumentLabel }}</span>
-      <button type="button" aria-label="打开文章目录" title="目录" @click="tocDrawer = true">
-        <el-icon><Menu /></el-icon>
-      </button>
+      <div v-else class="reader-document-center" :aria-label="mobileDocumentLabel">
+        <span class="reader-document-label">{{ mobileDocumentLabel }}</span>
+      </div>
+      <div class="mobile-toolbar-side mobile-toolbar-right">
+        <template v-if="fileKind === 'pdf' && displayedFile">
+          <button type="button" aria-label="缩小 PDF" title="缩小" @click="setPdfZoom(-1)">
+            <el-icon><Minus /></el-icon>
+          </button>
+          <button type="button" aria-label="放大 PDF" title="放大" @click="setPdfZoom(1)">
+            <el-icon><Plus /></el-icon>
+          </button>
+        </template>
+        <template v-else>
+          <button type="button" aria-label="打开文章目录" title="目录" @click="tocDrawer = true">
+            <el-icon><Menu /></el-icon>
+          </button>
+          <button type="button" aria-label="搜索当前目录文件" title="搜索文件" @click="openFileSearch">
+            <el-icon><Search /></el-icon>
+          </button>
+        </template>
+      </div>
     </div>
 
     <!-- Mobile drawers: direct-manipulation panels that can be interrupted mid-swipe. -->
@@ -237,6 +268,50 @@
           @click="onTocClick(t); tocDrawer = false"
         >{{ t.text }}</a>
         <div v-if="!toc.length" class="pane-hint">无目录</div>
+      </div>
+    </MotionDrawer>
+    <MotionDrawer v-model="fileSearchDrawer" direction="right" aria-label="搜索当前目录文件">
+      <div class="drawer-inner reader-search-drawer">
+        <div class="reader-search-header">
+          <div>
+            <div class="pane-title">搜索文件</div>
+            <small :title="rootPath">{{ currentFolderName || rootPath || '当前目录' }}</small>
+          </div>
+          <button type="button" class="reader-search-close" aria-label="关闭文件搜索" @click="fileSearchDrawer = false">×</button>
+        </div>
+        <label class="reader-file-search glass-surface">
+          <el-icon><Search /></el-icon>
+          <input
+            ref="fileSearchInputRef"
+            v-model="fileSearchQuery"
+            type="text"
+            inputmode="search"
+            autocomplete="off"
+            placeholder="输入文件名或路径"
+          />
+          <button v-if="fileSearchQuery" type="button" aria-label="清除文件搜索" @click="fileSearchQuery = ''">×</button>
+        </label>
+        <p v-if="fileSearchQuery" class="reader-search-count">找到 {{ fileSearchResults.length }} 个可阅读文件</p>
+        <ul v-if="fileSearchResults.length" class="reader-search-results">
+          <li v-for="file in fileSearchResults" :key="file.path">
+            <button
+              type="button"
+              class="reader-search-result"
+              :class="{ active: file.path === displayedFile }"
+              @click="selectSearchResult(file.path)"
+            >
+              <span class="reader-search-kind">{{ file.kind === 'pdf' ? 'PDF' : 'MD' }}</span>
+              <span class="reader-search-copy">
+                <strong>{{ file.name }}</strong>
+                <small>{{ file.relativePath }}</small>
+              </span>
+            </button>
+          </li>
+        </ul>
+        <div v-else class="reader-search-empty">
+          <el-icon><Search /></el-icon>
+          <span>{{ fileSearchQuery ? '没有匹配的 Markdown 或 PDF' : '搜索当前目录中的 Markdown 与 PDF' }}</span>
+        </div>
       </div>
     </MotionDrawer>
 
@@ -298,6 +373,7 @@ import MotionDrawer from '@/components/motion/MotionDrawer.vue'
 import BookshelfView from '@/components/reader/BookshelfView.vue'
 import { getMobileReaderToolbarState, isPhoneViewport } from '@/utils/mobileLayoutPolicy'
 import { useModalEnvironment } from '@/composables/useModalEnvironment'
+import { searchReaderFiles } from '@/utils/readerFileSearch'
 
 // Heavy, optional readers stay out of the Markdown-first route chunk.
 const MermaidViewer = defineAsyncComponent(() => import('@/components/reader/MermaidViewer.vue'))
@@ -336,6 +412,20 @@ useModalEnvironment(() => showHistory.value, pathCardRef, () => { showHistory.va
 const history = ref<HistoryItem[]>([])
 const treeDrawer = ref(false)
 const tocDrawer = ref(false)
+const fileSearchDrawer = ref(false)
+const fileSearchQuery = ref('')
+const fileSearchInputRef = ref<HTMLInputElement | null>(null)
+const fileSearchResults = computed(() => searchReaderFiles(tree.value, rootPath.value, fileSearchQuery.value))
+
+function openFileSearch() {
+  fileSearchDrawer.value = true
+  void nextTick(() => fileSearchInputRef.value?.focus())
+}
+
+function selectSearchResult(path: string) {
+  fileSearchDrawer.value = false
+  void onSelectFile(path)
+}
 // Ref to the mobile drawer's FileTree so we can scroll it to the active file
 // when the drawer opens — the tree's own on-activePath scroll can't fire then
 // (the drawer is hidden while activeFile changes), so Reader triggers it here.
@@ -362,6 +452,7 @@ function initialViewMode(): ReaderView {
 
 const viewMode = ref<ReaderView>(initialViewMode())
 const shelfQuery = ref('')
+const bookshelfRef = ref<InstanceType<typeof BookshelfView> | null>(null)
 
 function changeView(mode: ReaderView) {
   // Leaving the reading view flushes any debounced progress first (FR-16).
@@ -1105,6 +1196,7 @@ const mobileToolbarState = computed(() => getMobileReaderToolbarState(
   Boolean(rootPath.value),
   Boolean(displayedFile.value),
   mobileToolbarVisible.value,
+  treeDrawer.value || tocDrawer.value || fileSearchDrawer.value || showHistory.value,
 ))
 const MOBILE_TOOLBAR_IDLE_MS = 2800
 let mobileToolbarTimer: ReturnType<typeof setTimeout> | null = null
@@ -1468,6 +1560,7 @@ onBeforeUnmount(() => {
   padding: 8px 10px;
   border-radius: 18px;
 }
+.reader-shelf-add { display: none; }
 /* Book search pill — task-search metrics (nested glass inside the toolbar). */
 .shelf-search {
   flex: 1;
@@ -1820,6 +1913,27 @@ onBeforeUnmount(() => {
 /* ── Drawer inner ── */
 .drawer-inner { padding: 12px 6px; }
 .drawer-inner .pane-title { padding: 0 2px 8px; border-bottom: 1px solid var(--border-faint); margin-bottom: 4px; }
+.reader-search-drawer { min-height: 100%; padding: 18px 14px calc(18px + var(--safe-bottom)); }
+.reader-search-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.reader-search-header .pane-title { padding: 0; margin: 0 0 2px; border: 0; font-size: 17px; color: var(--text-primary); }
+.reader-search-header small { display: block; max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-size: 11px; }
+.reader-search-close { width: 44px; height: 44px; display: grid; place-items: center; flex: none; padding: 0; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); color: var(--text-muted); font: inherit; font-size: 23px; }
+.reader-file-search { height: 46px; display: flex; align-items: center; gap: 9px; padding: 0 12px; border-radius: 14px; color: var(--text-faint); }
+.reader-file-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: inherit; font-size: 16px; }
+.reader-file-search input::placeholder { color: var(--text-faint); }
+.reader-file-search button { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--border-faint); color: var(--text-muted); font: inherit; }
+.reader-search-count { margin: 12px 4px 7px; color: var(--text-faint); font-size: 12px; }
+.reader-search-results { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.reader-search-result { width: 100%; min-height: 58px; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); color: var(--text-secondary); text-align: left; }
+.reader-search-result.active { border-color: var(--accent-border); background: var(--accent-light); color: var(--accent); }
+.reader-search-result:active { transform: scale(.98); }
+.reader-search-kind { min-width: 34px; padding: 4px 5px; border-radius: 8px; background: var(--bg-glass-strong); color: var(--text-muted); font-size: 10px; font-weight: 750; text-align: center; }
+.reader-search-copy { min-width: 0; display: grid; gap: 2px; }
+.reader-search-copy strong, .reader-search-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reader-search-copy strong { color: inherit; font-size: 14px; font-weight: 650; }
+.reader-search-copy small { color: var(--text-faint); font-size: 11px; }
+.reader-search-empty { min-height: 180px; display: grid; place-content: center; justify-items: center; gap: 10px; padding: 24px; color: var(--text-faint); font-size: 13px; text-align: center; }
+.reader-search-empty .el-icon { font-size: 28px; opacity: .55; }
 
 /* ── Mobile ── */
 @media (max-width: 768px) {
@@ -1827,11 +1941,34 @@ onBeforeUnmount(() => {
     height: calc(100dvh - var(--mobile-header-height) - var(--safe-top) - 40px);
     gap: 6px;
   }
+  .reader-page.is-read-view {
+    height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 16px);
+  }
   /* Tasks-Hub mobile pattern: the toolbar wraps and the switch takes its own row. */
   .reader-topbar { flex-wrap: wrap; padding: 7px; }
   .view-switch { width: 100%; }
   .view-switch button { min-height: 34px; }
   .shelf-search { order: 2; min-width: 0; flex: 1; min-height: 44px; }
+  .shelf-search input { font-size: 16px; }
+  .reader-shelf-add {
+    order: 2;
+    min-width: 78px;
+    min-height: var(--tap-target);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 13px;
+    background: var(--accent);
+    color: white;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 650;
+    box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 24%, transparent);
+  }
+  .reader-shelf-add:active { transform: scale(.96); }
   .path-trigger { min-height: var(--tap-target); padding-block: 8px; }
   .reader-topbar .icon-btn { width: 44px; height: 44px; }
   .pane-left, .pane-right { display: none; }
@@ -1855,19 +1992,20 @@ onBeforeUnmount(() => {
     left: 50%;
     bottom: max(10px, var(--safe-bottom));
     z-index: 80;
-    display: flex;
+    width: min(calc(100vw - 20px), 430px);
+    display: grid;
+    grid-template-columns: 108px minmax(0, 1fr) 108px;
     align-items: center;
-    gap: 4px;
-    padding: 5px;
+    gap: 2px;
+    padding: 3px;
     border: 1px solid var(--border-glass);
     border-radius: 18px;
     background: var(--bg-glass-strong);
     backdrop-filter: blur(22px) saturate(180%);
     -webkit-backdrop-filter: blur(22px) saturate(180%);
     box-shadow: var(--shadow-lg), var(--inset-highlight);
-    max-width: calc(100vw - 16px);
-    overflow-x: auto;
-    scrollbar-width: none;
+    max-width: calc(100vw - 20px);
+    overflow: hidden;
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
@@ -1877,7 +2015,6 @@ onBeforeUnmount(() => {
                 visibility 0s linear 260ms;
     will-change: opacity, transform;
   }
-  .reader-mobile-toolbar::-webkit-scrollbar { display: none; }
   .reader-mobile-toolbar.is-visible {
     opacity: 1;
     visibility: visible;
@@ -1886,8 +2023,8 @@ onBeforeUnmount(() => {
     transition-delay: 0s;
   }
   .reader-mobile-toolbar button {
-    min-width: var(--tap-target);
-    height: var(--tap-target);
+    min-width: 0;
+    height: 52px;
     border: 0;
     border-radius: 13px;
     background: transparent;
@@ -1897,27 +2034,36 @@ onBeforeUnmount(() => {
     justify-content: center;
     flex-shrink: 0;
   }
+  .reader-mobile-toolbar button .el-icon { font-size: 24px; }
   .reader-mobile-toolbar button:active { transform: scale(0.94); background: var(--accent-light); }
-  .reader-mobile-toolbar .pdf-fit-btn {
-    width: auto;
-    min-width: 52px;
-    padding-inline: 10px;
-    font-size: 13px;
-    font-weight: 600;
-    white-space: nowrap;
+  .mobile-toolbar-side {
+    height: 52px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: center;
   }
-  .pdf-page-indicator { min-width: 54px; text-align: center; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .mobile-toolbar-side button { width: 52px; justify-self: center; }
+  .reader-document-center {
+    width: 100%;
+    min-height: 52px;
+    display: grid !important;
+    align-content: center;
+    justify-items: center;
+    gap: 1px;
+    padding: 0 4px;
+    color: var(--text-primary) !important;
+  }
   .reader-document-label {
-    min-width: 84px;
-    max-width: min(46vw, 180px);
+    width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    padding-inline: 8px;
-    color: var(--text-muted);
-    font-size: 12px;
-    font-weight: 600;
+    color: inherit;
+    font-size: 12.5px;
+    font-weight: 650;
+    text-align: center;
   }
+  .reader-document-center small { color: var(--text-faint); font-size: 10px; font-variant-numeric: tabular-nums; }
 
   .reader-page.is-mobile-immersive {
     position: fixed;
@@ -1932,9 +2078,6 @@ onBeforeUnmount(() => {
   .reader-page.is-mobile-immersive .reader-topbar { display: none !important; }
   .reader-page.is-mobile-immersive .reader-body { min-height: 0; }
   .reader-page.is-mobile-immersive .pane-center { border: 0; border-radius: 0; }
-  /* The topbar's scroll-collapse is driven globally by App.vue's
-     .app-main.mobile-scrolled:not(.toolbar-pinned) .reader-topbar rule —
-     no local override needed. The base min-height: 58px is reset to 0 there. */
 }
 
 @media (max-width: 768px) and (prefers-reduced-motion: reduce) {
@@ -2211,6 +2354,18 @@ onBeforeUnmount(() => {
 .markdown-body .table-scroll:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+.markdown-body :is(.table-scroll, .code-content, .katex-display, .mermaid).is-overflowing {
+  --overflow-cue: color-mix(in srgb, var(--text-primary) 20%, transparent);
+}
+.markdown-body :is(.table-scroll, .code-content, .katex-display, .mermaid)[data-overflow-position="start"] {
+  box-shadow: inset -18px 0 16px -18px var(--overflow-cue);
+}
+.markdown-body :is(.table-scroll, .code-content, .katex-display, .mermaid)[data-overflow-position="middle"] {
+  box-shadow: inset 18px 0 16px -18px var(--overflow-cue), inset -18px 0 16px -18px var(--overflow-cue);
+}
+.markdown-body :is(.table-scroll, .code-content, .katex-display, .mermaid)[data-overflow-position="end"] {
+  box-shadow: inset 18px 0 16px -18px var(--overflow-cue);
 }
 .markdown-body table {
   width: max-content;

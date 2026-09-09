@@ -53,6 +53,14 @@ test('mobile reader toolbar returns to transient behavior while reading', () => 
   assert.equal(getMobileReaderToolbarState(true, true, true).visible, true)
 })
 
+test('mobile reader toolbar remains available while a reader control is open', () => {
+  assert.deepEqual(getMobileReaderToolbarState(true, true, false, true), {
+    rendered: true,
+    pinned: true,
+    visible: true,
+  })
+})
+
 test('mobile reader toolbar is not rendered before a folder is opened', () => {
   assert.deepEqual(getMobileReaderToolbarState(false, false, true), {
     rendered: false,

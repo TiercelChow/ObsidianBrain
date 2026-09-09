@@ -11,7 +11,7 @@ export function getMermaidViewerPolicy(viewportWidth: number): MermaidViewerPoli
   return mobile
     ? {
         mobile: true,
-        hint: '双指缩放 · 单指拖动 · 双击放大',
+        hint: '拖动查看 · 双指缩放',
         floatingClose: true,
       }
     : {
