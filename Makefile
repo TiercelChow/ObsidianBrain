@@ -19,6 +19,12 @@ backend:
 install: build
 	@mkdir -p $(PREFIX)/bin
 	cp backend/target/release/obsidian-brain $(PREFIX)/bin/
+# On macOS (esp. 26/Tahoe arm64), the linker's ad-hoc signature is only valid
+# in the build path; a cp'd binary has no matching Gatekeeper rule and the kernel
+# SIGKILLs it before main() (exit 137). Re-sign explicitly so it runs anywhere.
+ifeq ($(shell uname -s),Darwin)
+	codesign --force --sign - $(PREFIX)/bin/obsidian-brain
+endif
 	@echo "Installed: $(PREFIX)/bin/obsidian-brain"
 	@echo "Run 'obsidian-brain start' to start the server."
 
