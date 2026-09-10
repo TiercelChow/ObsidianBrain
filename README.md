@@ -189,7 +189,7 @@ obsidian-brain config set llm.model "gpt-4o-mini"
 |---|---|
 | 后端 | Rust + Axum + Tokio + rusqlite (bundled) |
 | 前端 | Vue 3 + Element Plus + Pinia + Vite |
-| Markdown | marked + highlight.js + mermaid + KaTeX |
+| Markdown | unified + remark/rehype + highlight.js + Mermaid + KaTeX |
 | 交互 | panzoom（图表缩放）、Fullscreen API |
 | 打包 | rust-embed（前端嵌入单二进制）+ clap（CLI） |
 
@@ -213,7 +213,9 @@ ObsidianBrain/
 │   ├── src/
 │   │   ├── views/              # 12 个页面
 │   │   ├── components/reader/  # 阅境轩组件（FileTree, MermaidViewer, PathPreviewModal）
-│   │   ├── composables/        # useMarkdownRender（marked+hljs+mermaid+katex 管线）
+│   │   ├── markdown/           # unified 语法树、Obsidian 扩展、公式与安全 HTML
+│   │   ├── workers/            # Markdown 后台解析 Worker
+│   │   ├── composables/        # useMarkdownRender（异步渲染与懒增强管线）
 │   │   └── stores/             # Pinia（主题、滚动状态）
 │   └── vite.config.ts
 ├── Makefile                    # build / install / clean

@@ -1,139 +1,25 @@
-import { Marked, type Tokens } from 'marked'
-import markedKatex from 'marked-katex-extension'
 import 'katex/dist/katex.min.css'
 import { onScopeDispose, watch } from 'vue'
+import type { MarkdownRenderOptions, RenderedMarkdown } from '@/markdown/renderMarkdown'
 import { useAppStore } from '@/stores/app'
-import { convertObsidianImageEmbeds, isLocalHref } from '@/utils/markdownImages'
 import { getHorizontalOverflowPosition } from '@/utils/readerOverflow'
-
-// ── helpers ────────────────────────────────────────────────────────────
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-/** Strip a leading YAML frontmatter block (`---\n...\n---`). */
-function stripFrontmatter(md: string): string {
-  return md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '')
-}
-
-function stripHtml(html: string): string {
-  return html.replace(/<[^>]+>/g, '')
-}
-
-/** Slugify heading text — keeps letters (incl. CJK), numbers, hyphens. */
-function slugify(text: string): string {
-  const slug = text
-    .trim()
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s-]/gu, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-  return slug || 'heading'
-}
-
-const usedIds = new Set<string>()
-function uniqueSlug(text: string): string {
-  const base = slugify(text)
-  let slug = base
-  let i = 1
-  while (usedIds.has(slug)) {
-    slug = `${base}-${i++}`
-  }
-  usedIds.add(slug)
-  return slug
-}
-
-// ── marked instance (configured once) ──────────────────────────────────
 
 /** Optional per-render hooks that map local image references to servable URLs
  *  (the Reader wires them to /v1/reader/raw). Omitted → hrefs pass through. */
-export interface MarkdownImageResolvers {
-  /** Obsidian wiki embed target (`![[a.jpg]]`) → URL; null leaves the embed as text. */
-  resolveEmbed?: (target: string) => string | null
-  /** Standard markdown image href → URL; null keeps the href unchanged. */
-  resolveImage?: (href: string) => string | null
+export type MarkdownImageResolvers = Pick<
+  MarkdownRenderOptions,
+  'resolveEmbed' | 'resolveImage' | 'resourceContext'
+>
+
+interface MarkdownWorkerResponse {
+  id: number
+  result: RenderedMarkdown
 }
 
-/** Per-call image resolver (see renderMarkdown's options). Set only for the
- *  duration of the synchronous md.parse() below, which makes a module-level
- *  slot safe: no other render can interleave. */
-let activeImageResolver: ((href: string) => string | null) | null = null
-
-const renderer = {
-  image({ href, title, text }: Tokens.Image): string {
-    // Local filesystem hrefs get rewritten to a servable URL by the resolver
-    // (e.g. the Reader's /v1/reader/raw endpoint); everything else passes through.
-    const src = (isLocalHref(href) && activeImageResolver?.(href)) || href
-    const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
-    return `<img src="${escapeHtml(src)}" alt="${escapeHtml(text)}"${titleAttr}>`
-  },
-  code({ text, lang }: Tokens.Code): string {
-    const language = (lang || '').trim().split(/\s+/)[0].toLowerCase()
-    if (language === 'mermaid') {
-      // Convert LaTeX subscripts/superscripts to Unicode characters, but ONLY
-      // inside quoted node labels ("...") — not in mermaid keywords/syntax.
-      // mermaid renders to SVG, so HTML <sub>/<sup> tags don't work;
-      // Unicode subscript/superscript chars work in SVG text elements.
-      const subMap: Record<string, string> = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉','a':'ₐ','e':'ₑ','o':'ₒ','x':'ₓ','h':'ₕ','k':'ₖ','l':'ₗ','m':'ₘ','n':'ₙ','p':'ₚ','s':'ₛ','t':'ₜ','i':'ᵢ','j':'ⱼ','r':'ᵣ','u':'ᵤ','v':'ᵥ' }
-      const supMap: Record<string, string> = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','a':'ᵃ','b':'ᵇ','c':'ᶜ','d':'ᵈ','e':'ᵉ','f':'ᶠ','g':'ᵍ','h':'ʰ','i':'ⁱ','j':'ʲ','k':'ᵏ','l':'ˡ','m':'ᵐ','n':'ⁿ','o':'ᵒ','p':'ᵖ','r':'ʳ','s':'ˢ','t':'ᵗ','u':'ᵘ','v':'ᵛ','w':'ʷ','x':'ˣ','y':'ʸ','z':'ᶻ','+':'⁺','-':'⁻','=':'⁼','(':'⁽',')':'⁾' }
-      const toSub = (s: string) => s.split('').map(c => subMap[c.toLowerCase()] || c).join('')
-      const toSup = (s: string) => s.split('').map(c => supMap[c.toLowerCase()] || c).join('')
-      // Only convert inside quoted labels: "h_t" → "hₜ"
-      const processed = text.replace(/"([^"]*)"/g, (_match: string, inner: string) => {
-        const converted = inner
-          .replace(/_\{([^}]+)\}/g, (_: string, g: string) => toSub(g))
-          .replace(/_([a-zA-Z0-9])/g, (_: string, c: string) => toSub(c))
-          .replace(/\^\{([^}]+)\}/g, (_: string, g: string) => toSup(g))
-          .replace(/\^([a-zA-Z0-9])/g, (_: string, c: string) => toSup(c))
-        return `"${converted}"`
-      })
-      const escaped = escapeHtml(processed)
-      return `<div class="mermaid" data-raw="${escaped}">${escaped}</div>`
-    }
-    const cls = language ? `hljs language-${language}` : 'hljs'
-    const gutter = text.split('\n').map((_, i) => i + 1).join('\n')
-    return `<div class="code-block"><pre class="code-gutter">${gutter}</pre><pre class="code-content"><code class="${cls}">${escapeHtml(text)}</code></pre></div>`
-  },
-  heading({ tokens, depth }: Tokens.Heading): string {
-    // `this` is the marked Renderer instance at runtime; marked injects `.parser`.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const inner = (this as any).parser.parseInline(tokens) as string
-    const id = uniqueSlug(stripHtml(inner))
-    return `<h${depth} id="${id}">${inner}</h${depth}>\n`
-  },
-  table(token: Tokens.Table): string {
-    // A table cannot reliably scroll itself. Keep the semantic table intact and
-    // place it inside a dedicated region so wide columns remain reachable.
-    // The enhancement pass below also applies this wrapper to raw HTML tables.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parser = (this as any).parser
-    const renderCell = (cell: Tokens.TableCell) => {
-      const tag = cell.header ? 'th' : 'td'
-      const align = cell.align && ['left', 'center', 'right'].includes(cell.align)
-        ? ` style="text-align:${cell.align}"`
-        : ''
-      return `<${tag}${align}>${parser.parseInline(cell.tokens)}</${tag}>`
-    }
-    const renderRow = (cells: Tokens.TableCell[]) => `<tr>${cells.map(renderCell).join('')}</tr>`
-    const head = renderRow(token.header)
-    const body = token.rows.length
-      ? `<tbody>${token.rows.map(renderRow).join('')}</tbody>`
-      : ''
-    return `<div class="table-scroll" role="region" aria-label="表格"><table><thead>${head}</thead>${body}</table></div>\n`
-  },
+interface PendingMarkdownRender {
+  resolve: (html: string) => void
+  reject: (reason: unknown) => void
 }
-
-const md = new Marked({ gfm: true, breaks: false, renderer })
-// LaTeX math via KaTeX: $...$ inline, $$...$$ block.
-// \[...\], \(...\), and bare [math] are pre-processed to $$/$$ in renderMarkdown().
-md.use(markedKatex({ throwOnError: false }))
 
 // ── lazy enhancement dependencies ─────────────────────────────────────
 
@@ -143,13 +29,16 @@ type HighlightApi = typeof import('highlight.js/lib/common')['default']
 
 let mermaidPromise: Promise<MermaidApi> | null = null
 let highlightPromise: Promise<HighlightApi> | null = null
+let mermaidQueue = Promise.resolve()
 
 async function getMermaid(theme: AppTheme): Promise<MermaidApi> {
   mermaidPromise ??= import('mermaid').then((module) => module.default)
   const mermaid = await mermaidPromise
   mermaid.initialize({
     startOnLoad: false,
-    securityLevel: 'loose',
+    securityLevel: 'strict',
+    forceLegacyMathML: true,
+    suppressErrorRendering: true,
     theme: theme === 'dark' ? 'dark' : 'default',
     fontFamily: 'inherit',
     flowchart: { useMaxWidth: true, htmlLabels: true },
@@ -186,7 +75,7 @@ async function rerenderMermaid(container: HTMLElement, theme: AppTheme) {
 // ── composable ─────────────────────────────────────────────────────────
 
 /**
- * Markdown rendering pipeline: marked + highlight.js + mermaid.
+ * Markdown rendering pipeline: unified/remark/rehype + highlight.js + mermaid.
  * Re-renders mermaid diagrams when the app theme changes.
  *
  * @param onMermaidClick called when a rendered mermaid diagram is clicked,
@@ -212,7 +101,39 @@ export function useMarkdownRender(
   let enhancementObserver: IntersectionObserver | null = null
   let tableResizeObserver: ResizeObserver | null = null
   let enhancementGeneration = 0
-  let mermaidQueue = Promise.resolve()
+  let markdownWorker: Worker | null = null
+  let markdownRequestId = 0
+  const pendingMarkdown = new Map<number, PendingMarkdownRender>()
+
+  function rejectPendingMarkdown(reason: unknown) {
+    pendingMarkdown.forEach((pending) => pending.reject(reason))
+    pendingMarkdown.clear()
+  }
+
+  function stopMarkdownWorker(reason?: unknown) {
+    markdownWorker?.terminate()
+    markdownWorker = null
+    if (pendingMarkdown.size) {
+      rejectPendingMarkdown(reason ?? new DOMException('Markdown render cancelled', 'AbortError'))
+    }
+  }
+
+  function getMarkdownWorker(): Worker | null {
+    if (typeof Worker === 'undefined') return null
+    if (markdownWorker) return markdownWorker
+    const worker = new Worker(new URL('../workers/markdown.worker.ts', import.meta.url), { type: 'module' })
+    worker.addEventListener('message', (event: MessageEvent<MarkdownWorkerResponse>) => {
+      const pending = pendingMarkdown.get(event.data.id)
+      if (!pending) return
+      pendingMarkdown.delete(event.data.id)
+      pending.resolve(event.data.result.html)
+    })
+    worker.addEventListener('error', (event) => {
+      stopMarkdownWorker(event.error ?? new Error(event.message || 'Markdown Worker failed'))
+    })
+    markdownWorker = worker
+    return worker
+  }
 
   function cleanup(container?: HTMLElement) {
     if (container && currentContainer !== container) return
@@ -237,52 +158,39 @@ export function useMarkdownRender(
     },
   )
 
-  onScopeDispose(cleanup)
+  onScopeDispose(() => {
+    cleanup()
+    stopMarkdownWorker()
+  })
 
-  function renderMarkdown(src: string, resolvers?: MarkdownImageResolvers): string {
-    usedIds.clear()
-    let text = stripFrontmatter(src)
-
-    // Protect fenced code blocks and inline code from math preprocessing.
-    const codeBlocks: string[] = []
-    text = text.replace(/```[\s\S]*?```/g, (block) => {
-      codeBlocks.push(block)
-      return `\x00CB${codeBlocks.length - 1}\x00`
-    })
-    text = text.replace(/`[^`\n]+`/g, (block) => {
-      codeBlocks.push(block)
-      return `\x00CB${codeBlocks.length - 1}\x00`
-    })
-
-    // Convert LaTeX delimiters to $...$ / $$...$$ (marked-katex-extension v5 only supports these).
-    // \[...\] → $$...$$ (display, collapse multi-line to single line)
-    // \(...\) → $...$ (inline, with spaces to satisfy KaTeX's whitespace requirement)
-    text = text.replace(/\\\[([\s\S]+?)\\\]/g, (_, inner) => {
-      const collapsed = inner.trim().replace(/\n\s*/g, ' ')
-      return `\n\n$$${collapsed}$$\n\n`
-    })
-    text = text.replace(/\\\(([\s\S]+?)\\\)/g, (_, inner) => {
-      const collapsed = inner.trim().replace(/\n\s*/g, ' ')
-      return ` $${collapsed}$ `
-    })
-
-    // Obsidian wiki image embeds → markdown images, while code blocks are stashed
-    // so embed syntax inside code samples is never rewritten.
-    if (resolvers?.resolveEmbed) {
-      text = convertObsidianImageEmbeds(text, resolvers.resolveEmbed)
+  async function renderMarkdown(
+    src: string,
+    resolvers?: MarkdownImageResolvers,
+    documentKey?: string,
+  ): Promise<string> {
+    const hasNonSerializableResolvers = Boolean(
+      (resolvers?.resolveEmbed || resolvers?.resolveImage) && !resolvers?.resourceContext,
+    )
+    if (hasNonSerializableResolvers) {
+      const { renderMarkdownDocument } = await import('@/markdown/renderMarkdown')
+      return renderMarkdownDocument(src, { ...resolvers, documentKey }).html
+    }
+    const worker = getMarkdownWorker()
+    if (!worker) {
+      const { renderMarkdownDocument } = await import('@/markdown/renderMarkdown')
+      return renderMarkdownDocument(src, { ...resolvers, documentKey }).html
     }
 
-    // Restore code blocks.
-    text = text.replace(/\x00CB(\d+)\x00/g, (_, i) => codeBlocks[parseInt(i, 10)])
-
-    // The image renderer reads this slot during the synchronous md.parse()
-    // below; clear it again so later resolver-less renders pass hrefs through.
-    activeImageResolver = resolvers?.resolveImage ?? null
-    try {
-      return md.parse(text) as string
-    } finally {
-      activeImageResolver = null
+    if (pendingMarkdown.size) {
+      stopMarkdownWorker(new DOMException('Markdown render superseded', 'AbortError'))
+      return renderMarkdown(src, resolvers, documentKey)
     }
+
+    const id = ++markdownRequestId
+    return new Promise<string>((resolve, reject) => {
+      pendingMarkdown.set(id, { resolve, reject })
+      worker.postMessage({ id, source: src, documentKey, resourceContext: resolvers?.resourceContext })
+    })
   }
 
   function onContainerClick(event: Event) {
@@ -305,7 +213,11 @@ export function useMarkdownRender(
       if (href.startsWith('#')) {
         const id = decodeURIComponent(href.slice(1))
         if (onAnchorJump) onAnchorJump(id)
-        else document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        else {
+          const escaped = typeof CSS === 'undefined' ? id : CSS.escape(id)
+          container.querySelector<HTMLElement>(`#${escaped}, [data-anchor="${escaped}"]`)
+            ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
       } else {
         onLinkClick?.(href)
       }

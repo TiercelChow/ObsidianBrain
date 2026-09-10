@@ -57,6 +57,7 @@ import {
   type DirEntry, type PathStat,
 } from '@/api/reader'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
+import { normalizeHeadingAnchor } from '@/markdown/headingAnchors'
 import { makeReaderImageResolvers } from '@/utils/readerImages'
 import { resolveRelativePath } from '@/utils/markdownImages'
 import FileTree from './FileTree.vue'
@@ -154,9 +155,10 @@ async function load() {
     } else if (kind.value === 'md') {
       const rres = await readLocalFile(currentPath.value)
       if (rres.status === 'success' && rres.result) {
-        mdHtml.value = renderMarkdown(
+        mdHtml.value = await renderMarkdown(
           rres.result.content,
           makeReaderImageResolvers(currentPath.value, props.root),
+          currentPath.value,
         )
       } else {
         error.value = rres.error?.message || '读取失败'
@@ -252,7 +254,16 @@ async function scrollToAnchor() {
   if (kind.value === 'md') {
     await nextTick()
     const body = bodyRef.value
-    const el = document.getElementById(a)
+    const root = mdRef.value
+    const candidates = Array.from(new Set([a, normalizeHeadingAnchor(a)]))
+    let el: HTMLElement | null = null
+    for (const candidate of candidates) {
+      const escaped = CSS.escape(candidate)
+      el = root?.querySelector<HTMLElement>(
+        `#${escaped}, [data-anchor="${escaped}"], [data-block-anchor="${escaped}"]`,
+      ) ?? null
+      if (el) break
+    }
     if (body && el) {
       const bodyRect = body.getBoundingClientRect()
       const elRect = el.getBoundingClientRect()

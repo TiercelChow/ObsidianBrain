@@ -15,6 +15,7 @@ export function makeReaderImageResolvers(notePath: string, root: string): Markdo
   const noteDir = notePath.substring(0, notePath.lastIndexOf('/'))
   const rootDir = root.replace(/\/$/, '') || noteDir
   return {
+    resourceContext: { noteDir, rootDir },
     resolveEmbed: (target) =>
       localFileUrl(resolveRelativePath(rootDir, target.replace(/^\//, ''))),
     resolveImage: (href) => {

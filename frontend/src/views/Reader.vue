@@ -179,7 +179,7 @@
             :style="{ paddingLeft: 8 + (t.level - 1) * 12 + 'px' }"
             :title="t.text"
             @click="onTocClick(t)"
-          >{{ t.text }}</a>
+          ><span v-if="t.html" class="toc-label" v-html="t.html"></span><span v-else>{{ t.text }}</span></a>
         </div>
       </aside>
     </div>
@@ -265,8 +265,9 @@
           class="toc-item"
           :class="{ active: activeHeading === t.id }"
           :style="{ paddingLeft: 8 + (t.level - 1) * 12 + 'px' }"
+          :title="t.text"
           @click="onTocClick(t); tocDrawer = false"
-        >{{ t.text }}</a>
+        ><span v-if="t.html" class="toc-label" v-html="t.html"></span><span v-else>{{ t.text }}</span></a>
         <div v-if="!toc.length" class="pane-hint">无目录</div>
       </div>
     </MotionDrawer>
@@ -360,6 +361,7 @@ import {
 import { makeReaderImageResolvers } from '@/utils/readerImages'
 import { resolveRelativePath } from '@/utils/markdownImages'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
+import { normalizeHeadingAnchor } from '@/markdown/headingAnchors'
 import { useBookshelf } from '@/composables/useBookshelf'
 import { clampPdfPage } from '@/utils/readerBooks'
 import {
@@ -382,7 +384,7 @@ const PdfViewer = defineAsyncComponent(() => import('@/components/reader/PdfView
 
 const appStore = useAppStore()
 
-interface TocItem { id: string; text: string; level: number; page?: number }
+interface TocItem { id: string; text: string; level: number; page?: number; html?: string }
 
 // Per-browser "last session" (folder + file to reopen). History itself is server-stored.
 const LAST_FOLDER_KEY = 'reader.lastFolder'
@@ -1065,10 +1067,13 @@ async function onSelectFile(path: string) {
       // Render new content, then swap the transition key in the SAME tick so the leaving
       // <article> stays frozen on the OLD content while the new one slides in.
       fileKind.value = 'md'
-      renderedHtml.value = renderMarkdown(
+      const html = await renderMarkdown(
         res.result.content,
         makeReaderImageResolvers(path, rootPath.value),
+        path,
       )
+      if (version !== selectionVersion || request.signal.aborted) return
+      renderedHtml.value = html
       displayedFile.value = path
       localStorage.setItem(LAST_FILE_KEY, path)
       // Folder-book progress: a fresh file starts from the top (FR-15 lastFile).
@@ -1098,7 +1103,7 @@ async function onArticleEnter(el: Element) {
   if (el.tagName !== 'ARTICLE') return
   // Don't reset scroll if we're jumping to a cross-file anchor.
   if (contentRef.value && !pendingAnchor.value) contentRef.value.scrollTop = 0
-  buildToc()
+  buildToc(el as HTMLElement)
   await enhance(el as HTMLElement)
   if (pendingAnchor.value) {
     scrollToHeading(pendingAnchor.value)
@@ -1181,13 +1186,45 @@ function onTocClick(t: TocItem) {
   }
 }
 
-function buildToc() {
-  const body = contentRef.value?.querySelector('.markdown-body')
+function currentMarkdownBody(): HTMLElement | null {
+  const bodies = contentRef.value?.querySelectorAll<HTMLElement>('.markdown-body')
+  return bodies?.[bodies.length - 1] ?? null
+}
+
+function findMarkdownHeading(id: string, root: HTMLElement | null = currentMarkdownBody()): HTMLElement | null {
+  if (!root) return null
+  const candidates = Array.from(new Set([id, normalizeHeadingAnchor(id)]))
+  for (const candidate of candidates) {
+    const escaped = CSS.escape(candidate)
+    const heading = root.querySelector<HTMLElement>(
+      `#${escaped}, [data-anchor="${escaped}"], [data-block-anchor="${escaped}"]`,
+    )
+    if (heading) return heading
+  }
+  return null
+}
+
+function headingTocHtml(heading: HTMLElement): string | undefined {
+  if (!heading.querySelector('.katex')) return undefined
+  const clone = heading.cloneNode(true) as HTMLElement
+  clone.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'))
+  clone.querySelectorAll('a').forEach((anchor) => anchor.replaceWith(...anchor.childNodes))
+  clone.querySelectorAll('img').forEach((image) => image.replaceWith(document.createTextNode(image.alt)))
+  return clone.innerHTML
+}
+
+function buildToc(article?: HTMLElement) {
+  const body = article?.matches('.markdown-body') ? article : currentMarkdownBody()
   if (!body) { toc.value = []; return }
-  const els = Array.from(body.querySelectorAll<HTMLElement>('h1,h2,h3,h4'))
+  const els = Array.from(body.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6'))
   toc.value = els
-    .filter((el) => el.id)
-    .map((el) => ({ id: el.id, text: el.textContent || '', level: Number(el.tagName[1]) }))
+    .filter((el) => el.id && el.dataset.headingLabel)
+    .map((el) => ({
+      id: el.id,
+      text: el.dataset.headingLabel || el.textContent || '',
+      level: Number(el.tagName[1]),
+      html: headingTocHtml(el),
+    }))
 }
 
 // Mobile controls stay out of the reading surface until the user moves it.
@@ -1252,7 +1289,7 @@ function processContentScroll() {
   const containerTop = contentRef.value.getBoundingClientRect().top
   let current = ''
   for (const t of toc.value) {
-    const el = document.getElementById(t.id)
+    const el = findMarkdownHeading(t.id)
     if (!el) continue
     const top = el.getBoundingClientRect().top - containerTop
     if (top <= 90) current = t.id
@@ -1279,7 +1316,10 @@ function scrollTocToActive() {
 function scrollToHeading(id: string) {
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   holdHeaderForJump()
-  document.getElementById(id)?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
+  findMarkdownHeading(id)?.scrollIntoView({
+    behavior: reduceMotion ? 'auto' : 'smooth',
+    block: 'start',
+  })
 }
 
 onMounted(async () => {
@@ -1909,6 +1949,8 @@ onBeforeUnmount(() => {
 }
 .toc-item:hover { color: var(--text-secondary); background: var(--bg-glass-subtle); }
 .toc-item.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-light); font-weight: 600; }
+.toc-item .toc-label { display: inline; }
+.toc-item .katex { font-size: 0.94em; }
 
 /* ── Drawer inner ── */
 .drawer-inner { padding: 12px 6px; }
@@ -2195,6 +2237,10 @@ onBeforeUnmount(() => {
 }
 .markdown-body h3 { font-size: 1.25em; }
 .markdown-body h4 { font-size: 1.05em; }
+.markdown-body :is(h1, h2, h3, h4, h5, h6) .katex {
+  font-size: 0.94em;
+  line-height: 1;
+}
 
 .markdown-body p { margin: 0 0 1em; min-width: 0; }
 .markdown-body a {
@@ -2204,6 +2250,23 @@ onBeforeUnmount(() => {
   word-break: break-word;
 }
 .markdown-body a:hover { text-decoration: underline; }
+.markdown-body .internal-link {
+  padding: 0.08em 0.18em;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  text-underline-offset: 0.2em;
+}
+.markdown-body mark {
+  padding: 0.06em 0.2em;
+  border-radius: 4px;
+  color: inherit;
+  background: color-mix(in srgb, #f3c969 48%, transparent);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
 
 .markdown-body ul, .markdown-body ol { padding-left: 1.6em; margin: 0 0 1em; }
 .markdown-body li { margin: 0.3em 0; }
@@ -2219,6 +2282,44 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 .markdown-body blockquote p { margin: 0.3em 0; }
+
+.markdown-body .callout {
+  --callout-color: var(--accent);
+  width: 100%;
+  margin: 1em 0;
+  overflow: clip;
+  border: 1px solid color-mix(in srgb, var(--callout-color) 24%, var(--border-faint));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--callout-color) 6%, var(--bg-glass-subtle));
+}
+.markdown-body .callout-warning,
+.markdown-body .callout-caution,
+.markdown-body .callout-attention { --callout-color: #e49b32; }
+.markdown-body .callout-danger,
+.markdown-body .callout-error,
+.markdown-body .callout-failure { --callout-color: #dc625e; }
+.markdown-body .callout-success,
+.markdown-body .callout-check,
+.markdown-body .callout-done { --callout-color: #42a477; }
+.markdown-body .callout-question,
+.markdown-body .callout-help,
+.markdown-body .callout-faq { --callout-color: #9b75cf; }
+.markdown-body .callout-title {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 9px 13px;
+  color: color-mix(in srgb, var(--callout-color) 82%, var(--text-primary));
+  font-weight: 650;
+  line-height: 1.45;
+  background: color-mix(in srgb, var(--callout-color) 8%, transparent);
+}
+.markdown-body summary.callout-title {
+  cursor: pointer;
+  user-select: none;
+}
+.markdown-body .callout-content { padding: 11px 14px 12px; }
+.markdown-body .callout-content > :last-child { margin-bottom: 0; }
 
 .markdown-body code {
   font-family: var(--font-mono);
@@ -2435,8 +2536,25 @@ onBeforeUnmount(() => {
   vertical-align: middle;
 }
 
-/* task lists */
-.markdown-body input[type="checkbox"] { margin-right: 0.4em; transform: translateY(1px); }
+/* task lists + footnotes */
+.markdown-body input[type="checkbox"] {
+  margin-right: 0.4em;
+  transform: translateY(1px);
+  accent-color: var(--accent);
+}
+.markdown-body [data-footnotes] {
+  margin-top: 2.4em;
+  padding-top: 0.8em;
+  border-top: 1px solid var(--border-faint);
+  color: var(--text-tertiary);
+  font-size: 0.9em;
+}
+.markdown-body [data-footnote-ref] {
+  margin-inline: 0.08em;
+  font-size: 0.78em;
+  font-weight: 650;
+}
+.markdown-body [data-footnote-backref] { margin-left: 0.3em; }
 
 /* ── mermaid ── */
 .markdown-body .mermaid {
