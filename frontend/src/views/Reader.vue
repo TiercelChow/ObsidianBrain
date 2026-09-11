@@ -34,13 +34,17 @@
       <button v-show="viewMode === 'shelf'" type="button" class="reader-shelf-add" @click="bookshelfRef?.openAdd()">
         <el-icon><Plus /></el-icon><span>添加</span>
       </button>
-      <button v-show="viewMode === 'read'" class="path-trigger" @click="openHistoryOverlay">
-        <el-icon><FolderOpened /></el-icon>
-        <span v-if="currentFolderName" class="pt-name">{{ currentFolderName }}</span>
-        <span v-if="rootPath" class="pt-path">{{ rootPath }}</span>
-        <span v-if="!rootPath" class="pt-hint">输入本地文件夹路径</span>
+      <button
+        v-show="viewMode === 'read'"
+        class="path-trigger reader-file-search-trigger"
+        :aria-label="rootPath ? '搜索当前目录文件' : '返回书架选择书籍'"
+        @click="openFileSearch"
+      >
+        <el-icon><Search /></el-icon>
+        <span v-if="rootPath" class="pt-path">搜索当前目录中的 Markdown 与 PDF</span>
+        <span v-else class="pt-hint">请先从书架选择书籍</span>
       </button>
-      <el-button v-show="viewMode === 'read'" class="icon-btn" :title="isImmersive ? '退出沉浸阅读' : '沉浸阅读'" @click="toggleFullscreen">
+      <el-button v-show="viewMode === 'read'" class="icon-btn reader-fullscreen-btn" :title="isImmersive ? '退出沉浸阅读' : '沉浸阅读'" @click="toggleFullscreen">
         <el-icon><FullScreen /></el-icon>
       </el-button>
     </div>
@@ -48,62 +52,61 @@
     <!-- Bookshelf view (kept alive via v-show alongside the reading panes) -->
     <BookshelfView ref="bookshelfRef" v-show="viewMode === 'shelf'" class="bookshelf-root" :query="shelfQuery" @open="openBook" />
 
-    <!-- Floating path overlay (command-palette style) -->
+    <!-- Current-book file search (command-palette style) -->
     <transition name="overlay-fade">
-      <div v-if="showHistory" class="path-overlay" @click.self="showHistory = false">
+      <div v-if="fileSearchOpen" class="path-overlay" @click.self="fileSearchOpen = false">
         <transition name="overlay-pop" appear>
-          <div v-if="showHistory" ref="pathCardRef" class="path-card" role="dialog" aria-modal="true" aria-label="打开文件夹" tabindex="-1">
-            <div class="path-input-wrap">
-              <el-input
-                ref="pathInputRef"
-                v-model="pathInput"
-                class="path-input"
-                placeholder="输入本地文件夹路径，如 /Users/.../docs"
-                clearable
-                size="large"
-                @keyup.enter="openPath()"
-                @keydown.escape="showHistory = false"
-              >
-                <template #prefix><el-icon><FolderOpened /></el-icon></template>
-              </el-input>
-            </div>
-
-            <div class="history-panel">
-              <div class="hp-head">
-                <span>历史记录</span>
-                <button v-if="history.length" class="hp-clear" @click="clearHistory">清空</button>
-              </div>
-              <div class="hp-list">
-                <div v-if="!history.length" class="hp-empty">暂无历史记录</div>
-                <div v-else-if="!filteredHistory.length" class="hp-empty">无匹配记录</div>
-                <div v-for="h in filteredHistory" :key="h.path" class="hp-row" :class="{ pinned: h.pinned }">
-                  <div class="hp-item">
-                    <button class="hp-pin" :title="h.pinned ? '取消置顶' : '置顶'" @click="togglePin(h.path)">
-                      <el-icon><StarFilled v-if="h.pinned" /><Star v-else /></el-icon>
-                    </button>
-                    <div class="hp-info" @click="useHistory(h.path)">
-                      <span v-if="h.name" class="hp-name">{{ h.name }}</span>
-                      <span class="hp-path" :title="h.path">{{ h.path }}</span>
-                    </div>
-                    <button class="hp-edit" title="命名" @click.stop="startRename(h)">
-                      <el-icon><EditPen /></el-icon>
-                    </button>
-                    <button class="hp-del" title="删除" @click="removeHistory(h.path)">
-                      <el-icon><Delete /></el-icon>
-                    </button>
-                  </div>
-                  <div v-if="renamingPath === h.path" class="hp-rename">
-                    <input
-                      v-model="renameValue"
-                      class="hp-rename-input"
-                      placeholder="输入名称（留空清除名称）"
-                      @keyup.enter="confirmRename(h)"
-                      @keydown.escape="cancelRename"
-                    />
-                    <button class="hp-rename-ok" @click="confirmRename(h)">确定</button>
-                    <button class="hp-rename-cancel" @click="cancelRename">取消</button>
-                  </div>
+          <div
+            v-if="fileSearchOpen"
+            ref="fileSearchCardRef"
+            class="path-card is-file-search"
+            role="dialog"
+            aria-modal="true"
+            aria-label="搜索当前目录文件"
+            tabindex="-1"
+          >
+            <div class="reader-search-modal">
+              <div class="reader-search-header">
+                <div>
+                  <div class="pane-title">搜索文件</div>
+                  <small :title="rootPath">{{ rootPath }}</small>
                 </div>
+                <button type="button" class="reader-search-close" aria-label="关闭文件搜索" @click="fileSearchOpen = false">×</button>
+              </div>
+              <label class="reader-file-search glass-surface">
+                <el-icon><Search /></el-icon>
+                <input
+                  ref="fileSearchInputRef"
+                  v-model="fileSearchQuery"
+                  type="search"
+                  inputmode="search"
+                  autocomplete="off"
+                  aria-label="搜索当前目录文件"
+                  placeholder="输入文件名或路径"
+                  @keydown.escape="fileSearchOpen = false"
+                />
+                <button v-if="fileSearchQuery" type="button" aria-label="清除文件搜索" @click="fileSearchQuery = ''">×</button>
+              </label>
+              <p v-if="fileSearchQuery" class="reader-search-count">找到 {{ fileSearchResults.length }} 个可阅读文件</p>
+              <ul v-if="fileSearchResults.length" class="reader-search-results">
+                <li v-for="file in fileSearchResults" :key="file.path">
+                  <button
+                    type="button"
+                    class="reader-search-result"
+                    :class="{ active: file.path === displayedFile }"
+                    @click="selectSearchResult(file.path)"
+                  >
+                    <span class="reader-search-kind">{{ file.kind === 'pdf' ? 'PDF' : 'MD' }}</span>
+                    <span class="reader-search-copy">
+                      <strong>{{ file.name }}</strong>
+                      <small>{{ file.relativePath }}</small>
+                    </span>
+                  </button>
+                </li>
+              </ul>
+              <div v-else class="reader-search-empty">
+                <el-icon><Search /></el-icon>
+                <span>{{ fileSearchQuery ? '没有匹配的 Markdown 或 PDF' : '搜索当前目录中的 Markdown 与 PDF' }}</span>
               </div>
             </div>
           </div>
@@ -123,7 +126,7 @@
         </div>
         <div class="pane-scroll">
           <FileTree v-if="tree.length" :entries="tree" :active-path="activeFile" @select="onSelectFile" @refresh="refreshTree" />
-          <div v-else class="pane-hint">打开一个文件夹后在此浏览</div>
+          <div v-else class="pane-hint">请先从书架选择书籍</div>
         </div>
       </aside>
 
@@ -199,9 +202,9 @@
       <div class="mobile-toolbar-side mobile-toolbar-left">
         <button
           type="button"
-          :aria-label="mobileToolbarState.pinned ? '选择文章' : '打开文件列表'"
-          :title="mobileToolbarState.pinned ? '选择文章' : '文件'"
-          @click="treeDrawer = true"
+          :aria-label="!rootPath ? '返回书架选择书籍' : mobileToolbarState.pinned ? '选择文章' : '打开文件列表'"
+          :title="!rootPath ? '返回书架' : mobileToolbarState.pinned ? '选择文章' : '文件'"
+          @click="openMobileFilePicker"
         >
           <el-icon><FolderOpened /></el-icon>
         </button>
@@ -253,7 +256,7 @@
           :active-path="activeFile"
           @select="(p) => { onSelectFile(p); treeDrawer = false }"
         />
-        <div v-else class="pane-hint">打开一个文件夹后在此浏览</div>
+        <div v-else class="pane-hint">请先从书架选择书籍</div>
       </div>
     </MotionDrawer>
     <MotionDrawer v-model="tocDrawer" direction="right" aria-label="文章目录">
@@ -271,51 +274,6 @@
         <div v-if="!toc.length" class="pane-hint">无目录</div>
       </div>
     </MotionDrawer>
-    <MotionDrawer v-model="fileSearchDrawer" direction="right" aria-label="搜索当前目录文件">
-      <div class="drawer-inner reader-search-drawer">
-        <div class="reader-search-header">
-          <div>
-            <div class="pane-title">搜索文件</div>
-            <small :title="rootPath">{{ currentFolderName || rootPath || '当前目录' }}</small>
-          </div>
-          <button type="button" class="reader-search-close" aria-label="关闭文件搜索" @click="fileSearchDrawer = false">×</button>
-        </div>
-        <label class="reader-file-search glass-surface">
-          <el-icon><Search /></el-icon>
-          <input
-            ref="fileSearchInputRef"
-            v-model="fileSearchQuery"
-            type="text"
-            inputmode="search"
-            autocomplete="off"
-            placeholder="输入文件名或路径"
-          />
-          <button v-if="fileSearchQuery" type="button" aria-label="清除文件搜索" @click="fileSearchQuery = ''">×</button>
-        </label>
-        <p v-if="fileSearchQuery" class="reader-search-count">找到 {{ fileSearchResults.length }} 个可阅读文件</p>
-        <ul v-if="fileSearchResults.length" class="reader-search-results">
-          <li v-for="file in fileSearchResults" :key="file.path">
-            <button
-              type="button"
-              class="reader-search-result"
-              :class="{ active: file.path === displayedFile }"
-              @click="selectSearchResult(file.path)"
-            >
-              <span class="reader-search-kind">{{ file.kind === 'pdf' ? 'PDF' : 'MD' }}</span>
-              <span class="reader-search-copy">
-                <strong>{{ file.name }}</strong>
-                <small>{{ file.relativePath }}</small>
-              </span>
-            </button>
-          </li>
-        </ul>
-        <div v-else class="reader-search-empty">
-          <el-icon><Search /></el-icon>
-          <span>{{ fileSearchQuery ? '没有匹配的 Markdown 或 PDF' : '搜索当前目录中的 Markdown 与 PDF' }}</span>
-        </div>
-      </div>
-    </MotionDrawer>
-
     <!-- Floating fullscreen UI (auto-hides) -->
     <div v-if="isImmersive" class="fs-ui" :class="{ hidden: isFullscreen && !showFsUI }">
       <button class="fs-fab" :title="isFullscreen ? '退出全屏 (Esc)' : '退出沉浸阅读'" @click="toggleFullscreen">
@@ -352,11 +310,11 @@ import {
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  FolderOpened, Star, StarFilled, Delete, Menu, Document, FullScreen, EditPen, Refresh, Minus, Plus, Search,
+  FolderOpened, Menu, Document, FullScreen, Refresh, Minus, Plus, Search,
 } from '@element-plus/icons-vue'
 import {
-  listLocalDir, readLocalFile, getReaderHistory, saveReaderHistory,
-  type DirEntry, type HistoryItem, type ReaderBook,
+  listLocalDir, readLocalFile,
+  type DirEntry, type ReaderBook,
 } from '@/api/reader'
 import { makeReaderImageResolvers } from '@/utils/readerImages'
 import { resolveRelativePath } from '@/utils/markdownImages'
@@ -386,47 +344,54 @@ const appStore = useAppStore()
 
 interface TocItem { id: string; text: string; level: number; page?: number; html?: string }
 
-// Per-browser "last session" (folder + file to reopen). History itself is server-stored.
+// Per-browser "last session" (folder + file to reopen).
 const LAST_FOLDER_KEY = 'reader.lastFolder'
 const LAST_FILE_KEY = 'reader.lastFile'
 
-const pathInput = ref('')
 const tree = ref<DirEntry[]>([])
 const rootPath = ref('')          // the currently opened folder (absolute)
 const activeFile = ref('')
-const loading = ref(false)
 const fileLoading = ref(false)
 const renderedHtml = ref('')
 const error = ref('')
 const toc = ref<TocItem[]>([])
 const activeHeading = ref('')
-const showHistory = ref(false)
-const renamingPath = ref('')
-const renameValue = ref('')
-const pathInputRef = ref<{ focus: () => void } | null>(null)
-const pathCardRef = ref<HTMLElement | null>(null)
-
-// Auto-focus the input when the overlay opens.
-watch(showHistory, (v) => {
-  if (v) nextTick(() => pathInputRef.value?.focus())
-})
-useModalEnvironment(() => showHistory.value, pathCardRef, () => { showHistory.value = false })
-const history = ref<HistoryItem[]>([])
-const treeDrawer = ref(false)
-const tocDrawer = ref(false)
-const fileSearchDrawer = ref(false)
+const fileSearchOpen = ref(false)
+const fileSearchCardRef = ref<HTMLElement | null>(null)
 const fileSearchQuery = ref('')
 const fileSearchInputRef = ref<HTMLInputElement | null>(null)
 const fileSearchResults = computed(() => searchReaderFiles(tree.value, rootPath.value, fileSearchQuery.value))
 
+// Auto-focus the input when the overlay opens.
+watch(fileSearchOpen, (v) => {
+  if (!v) return
+  nextTick(() => fileSearchInputRef.value?.focus())
+})
+useModalEnvironment(
+  () => fileSearchOpen.value,
+  fileSearchCardRef,
+  () => { fileSearchOpen.value = false },
+)
+const treeDrawer = ref(false)
+const tocDrawer = ref(false)
+
 function openFileSearch() {
-  fileSearchDrawer.value = true
-  void nextTick(() => fileSearchInputRef.value?.focus())
+  if (!rootPath.value) {
+    changeView('shelf')
+    return
+  }
+  fileSearchQuery.value = ''
+  fileSearchOpen.value = true
 }
 
 function selectSearchResult(path: string) {
-  fileSearchDrawer.value = false
+  fileSearchOpen.value = false
   void onSelectFile(path)
+}
+
+function openMobileFilePicker() {
+  if (rootPath.value) treeDrawer.value = true
+  else changeView('shelf')
 }
 // Ref to the mobile drawer's FileTree so we can scroll it to the active file
 // when the drawer opens — the tree's own on-activePath scroll can't fire then
@@ -793,12 +758,6 @@ function setPdfZoom(direction: -1 | 1) {
 const transitionDir = ref<'page-next' | 'page-prev'>('page-next')
 
 // Markdown paths in tree display order (depth-first) — used to pick turn direction.
-// Show the history name for the currently open folder (if any).
-const currentFolderName = computed(() => {
-  if (!rootPath.value) return ''
-  return history.value.find((h) => h.path === rootPath.value)?.name || ''
-})
-
 const flatFiles = computed(() => {
   const out: string[] = []
   const walk = (entries: DirEntry[]) => {
@@ -874,77 +833,6 @@ const {
   cleanup: cleanupMarkdown,
 } = useMarkdownRender(handleMermaidClick, handleLinkClick, handleImageClick, scrollToHeading)
 
-// ── history (server-stored, shared across all users) ──────────────────
-async function loadHistory() {
-  try {
-    const res = await getReaderHistory()
-    if (res.status === 'success' && res.result) history.value = res.result.history
-  } catch (e) {
-    console.error('加载历史失败:', e)
-  }
-  sortHistory()
-}
-async function saveHistory() {
-  try {
-    await saveReaderHistory(history.value)
-  } catch (e) {
-    console.error('保存历史失败:', e)
-  }
-}
-function sortHistory() {
-  history.value.sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
-    return b.lastUsed - a.lastUsed
-  })
-}
-function addHistory(path: string) {
-  const existing = history.value.find((h) => h.path === path)
-  if (existing) existing.lastUsed = Date.now()
-  else history.value.push({ path, pinned: false, lastUsed: Date.now() })
-  sortHistory()
-  void saveHistory()
-}
-function togglePin(path: string) {
-  const h = history.value.find((x) => x.path === path)
-  if (h) { h.pinned = !h.pinned; sortHistory(); void saveHistory() }
-}
-function removeHistory(path: string) {
-  history.value = history.value.filter((h) => h.path !== path)
-  void saveHistory()
-}
-function startRename(h: HistoryItem) {
-  renamingPath.value = h.path
-  renameValue.value = h.name || ''
-}
-function confirmRename(h: HistoryItem) {
-  h.name = renameValue.value.trim() || undefined
-  renamingPath.value = ''
-  void saveHistory()
-}
-function cancelRename() {
-  renamingPath.value = ''
-}
-function clearHistory() {
-  history.value = []
-  void saveHistory()
-}
-function openHistoryOverlay() {
-  pathInput.value = ''
-  showHistory.value = true
-}
-function useHistory(path: string) {
-  pathInput.value = path
-  showHistory.value = false
-  openPath(path)
-}
-
-// History filtered by the current input text (shown in the focus dropdown).
-const filteredHistory = computed(() => {
-  const q = pathInput.value.trim().toLowerCase()
-  if (!q) return history.value
-  return history.value.filter((h) => h.path.toLowerCase().includes(q))
-})
-
 // ── open folder ───────────────────────────────────────────────────────
 // Refresh feedback — works inside fullscreen (ElMessage is hidden in fullscreen).
 const refreshFlash = ref<'none' | 'success' | 'error'>('none')
@@ -978,12 +866,10 @@ async function refreshTree() {
   }
 }
 
-async function openPath(p?: string) {
-  const path = (p ?? pathInput.value).trim()
+async function openPath(rawPath: string) {
+  const path = rawPath.trim()
   if (!path) return
   cancelPendingFileSelection()
-  pathInput.value = path
-  loading.value = true
   error.value = ''
   try {
     const res = await listLocalDir(path)
@@ -1005,13 +891,9 @@ async function openPath(p?: string) {
     // Remember last opened folder; clear stale last-file until a new one is chosen.
     localStorage.setItem(LAST_FOLDER_KEY, path)
     localStorage.removeItem(LAST_FILE_KEY)
-    addHistory(path)
-    showHistory.value = false
   } catch (e) {
     error.value = (e as Error)?.message || '打开失败'
     ElMessage.error(error.value)
-  } finally {
-    loading.value = false
   }
 }
 
@@ -1230,10 +1112,9 @@ function buildToc(article?: HTMLElement) {
 // Mobile controls stay out of the reading surface until the user moves it.
 const mobileToolbarVisible = ref(false)
 const mobileToolbarState = computed(() => getMobileReaderToolbarState(
-  Boolean(rootPath.value),
   Boolean(displayedFile.value),
   mobileToolbarVisible.value,
-  treeDrawer.value || tocDrawer.value || fileSearchDrawer.value || showHistory.value,
+  treeDrawer.value || tocDrawer.value || fileSearchOpen.value,
 ))
 const MOBILE_TOOLBAR_IDLE_MS = 2800
 let mobileToolbarTimer: ReturnType<typeof setTimeout> | null = null
@@ -1333,7 +1214,6 @@ onMounted(async () => {
   document.addEventListener('visibilitychange', onVisibilityHidden)
   window.addEventListener('pagehide', onPageHide)
   void shelf.ensureLoaded()
-  await loadHistory()
   // Restore last opened folder + file (per-browser).
   const lastFolder = localStorage.getItem(LAST_FOLDER_KEY)
   const lastFile = localStorage.getItem(LAST_FILE_KEY)
@@ -1721,85 +1601,7 @@ onBeforeUnmount(() => {
   box-shadow: var(--shadow-lg), var(--inset-highlight);
   overflow: hidden;
 }
-.path-input-wrap { padding: 16px 20px; border-bottom: 1px solid var(--border-faint); }
-.path-input { width: 100%; }
-.path-input :deep(.el-input__wrapper) { padding-left: 12px; }
-.path-input :deep(.el-input__inner:focus-visible) {
-  outline: none;
-  box-shadow: none !important;
-}
-
-.history-panel {
-  max-height: 400px;
-  display: flex; flex-direction: column;
-  overflow: hidden;
-}
-
-.hp-head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; border-bottom: 1px solid var(--border-faint);
-  font-size: 13px; font-weight: 600; color: var(--text-secondary);
-}
-.hp-clear {
-  background: none; border: none; color: var(--text-muted);
-  font-size: 12px; cursor: pointer; padding: 2px 6px; border-radius: 6px;
-}
-.hp-clear:hover { color: #f87171; background: rgba(248, 113, 113, 0.1); }
-.hp-list { overflow-y: auto; padding: 6px; }
-.hp-empty { padding: 24px; text-align: center; font-size: 12px; color: var(--text-faint); }
-.hp-row { border-radius: 10px; transition: background 0.12s var(--ease-out); }
-.hp-row:hover { background: var(--bg-glass-subtle); }
-.hp-row.pinned { background: var(--accent-light); }
-.hp-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 7px 10px;
-}
-.hp-pin, .hp-del, .hp-edit {
-  flex-shrink: 0; width: 26px; height: 26px; border-radius: 8px;
-  border: none; background: transparent; color: var(--text-muted);
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-}
-.hp-pin:hover { color: var(--accent); background: var(--bg-glass-subtle); }
-.hp-item.pinned .hp-pin { color: var(--accent); }
-.hp-edit:hover { color: var(--accent); background: var(--bg-glass-subtle); }
-.hp-del:hover { color: #f87171; background: rgba(248, 113, 113, 0.1); }
-.hp-info {
-  flex: 1; min-width: 0; cursor: pointer; display: flex; flex-direction: column; gap: 1px;
-}
-.hp-info:hover .hp-name { color: var(--accent); }
-.hp-info:hover .hp-path { color: var(--accent); }
-.hp-name {
-  font-size: 13px; font-weight: 500; color: var(--text-primary);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.hp-path {
-  font-size: 11.5px; color: var(--text-faint);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.hp-rename {
-  display: flex; align-items: center; gap: 8px;
-  padding: 0 10px 10px 44px;
-}
-.hp-rename-input {
-  flex: 1; height: 32px; padding: 0 12px; border-radius: 8px;
-  border: 1px solid var(--accent-border);
-  background: var(--bg-glass-subtle);
-  color: var(--text-primary); font-size: 13px;
-  outline: none;
-}
-.hp-rename-input:focus { border-color: var(--accent); }
-.hp-rename-ok, .hp-rename-cancel {
-  flex-shrink: 0; padding: 5px 12px; border-radius: 8px; border: none;
-  font-size: 12px; cursor: pointer;
-  transition: transform var(--motion-instant) var(--ease-emphasized),
-              opacity var(--motion-fast) var(--ease-emphasized),
-              color var(--motion-fast) var(--ease-emphasized),
-              background-color var(--motion-fast) var(--ease-emphasized);
-}
-.hp-rename-ok { background: var(--accent); color: #fff; }
-.hp-rename-ok:hover { opacity: 0.85; }
-.hp-rename-cancel { background: var(--bg-glass-subtle); color: var(--text-muted); }
-.hp-rename-cancel:hover { color: var(--text-secondary); }
+.path-card.is-file-search { max-height: min(72vh, 620px); }
 
 /* Overlay transitions */
 .overlay-fade-enter-active, .overlay-fade-leave-active { transition: opacity 0.25s var(--ease-out); }
@@ -1955,17 +1757,18 @@ onBeforeUnmount(() => {
 /* ── Drawer inner ── */
 .drawer-inner { padding: 12px 6px; }
 .drawer-inner .pane-title { padding: 0 2px 8px; border-bottom: 1px solid var(--border-faint); margin-bottom: 4px; }
-.reader-search-drawer { min-height: 100%; padding: 18px 14px calc(18px + var(--safe-bottom)); }
+.reader-search-modal { min-height: 280px; max-height: min(72vh, 620px); display: flex; flex-direction: column; padding: 18px 20px 20px; }
 .reader-search-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .reader-search-header .pane-title { padding: 0; margin: 0 0 2px; border: 0; font-size: 17px; color: var(--text-primary); }
 .reader-search-header small { display: block; max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-size: 11px; }
 .reader-search-close { width: 44px; height: 44px; display: grid; place-items: center; flex: none; padding: 0; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); color: var(--text-muted); font: inherit; font-size: 23px; }
 .reader-file-search { height: 46px; display: flex; align-items: center; gap: 9px; padding: 0 12px; border-radius: 14px; color: var(--text-faint); }
 .reader-file-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: inherit; font-size: 16px; }
+.reader-file-search input::-webkit-search-cancel-button { display: none; }
 .reader-file-search input::placeholder { color: var(--text-faint); }
 .reader-file-search button { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--border-faint); color: var(--text-muted); font: inherit; }
 .reader-search-count { margin: 12px 4px 7px; color: var(--text-faint); font-size: 12px; }
-.reader-search-results { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.reader-search-results { min-height: 0; display: grid; gap: 7px; margin: 0; padding: 2px; overflow: hidden auto; overscroll-behavior: contain; list-style: none; }
 .reader-search-result { width: 100%; min-height: 58px; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); color: var(--text-secondary); text-align: left; }
 .reader-search-result.active { border-color: var(--accent-border); background: var(--accent-light); color: var(--accent); }
 .reader-search-result:active { transform: scale(.98); }
@@ -2011,6 +1814,8 @@ onBeforeUnmount(() => {
     box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 24%, transparent);
   }
   .reader-shelf-add:active { transform: scale(.96); }
+  .reader-file-search-trigger,
+  .reader-fullscreen-btn { display: none !important; }
   .path-trigger { min-height: var(--tap-target); padding-block: 8px; }
   .reader-topbar .icon-btn { width: 44px; height: 44px; }
   .pane-left, .pane-right { display: none; }
@@ -2021,12 +1826,10 @@ onBeforeUnmount(() => {
     -webkit-overflow-scrolling: touch;
   }
   .markdown-body { padding: 12px 14px 100px; max-width: 100%; }
-  .history-panel { max-height: 50vh; }
   .path-card { width: calc(100vw - 24px); }
+  .path-card.is-file-search { max-height: min(76dvh, 620px); }
   .path-overlay { padding-top: 10vh; }
-  .hp-item { min-height: var(--tap-target); padding-block: 4px; }
-  .hp-pin, .hp-del, .hp-edit { width: var(--tap-target); height: var(--tap-target); }
-  .hp-clear { min-height: var(--tap-target); padding-inline: 10px; }
+  .reader-search-modal { min-height: min(58dvh, 440px); max-height: min(76dvh, 620px); padding: 16px 14px calc(16px + var(--safe-bottom)); }
   .toc-item { min-height: var(--tap-target); display: flex; align-items: center; }
   .drawer-inner { padding-bottom: var(--safe-bottom); }
   .reader-mobile-toolbar {

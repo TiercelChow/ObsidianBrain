@@ -15,19 +15,18 @@ export interface MobileReaderToolbarState {
   visible: boolean
 }
 
-/** Keep the document picker reachable until a folder has an active document. */
+/** Keep book/file navigation reachable throughout the mobile read view. */
 export function getMobileReaderToolbarState(
-  hasOpenFolder: boolean,
   hasDisplayedDocument: boolean,
   transientVisible: boolean,
   interactionActive = false,
 ): MobileReaderToolbarState {
-  const rendered = hasOpenFolder || hasDisplayedDocument
-  const pinned = (hasOpenFolder && !hasDisplayedDocument) || interactionActive
+  const rendered = true
+  const pinned = !hasDisplayedDocument || interactionActive
   return {
     rendered,
     pinned,
-    visible: rendered && (pinned || transientVisible),
+    visible: pinned || transientVisible,
   }
 }
 

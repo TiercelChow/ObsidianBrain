@@ -35,6 +35,28 @@ test('reader mobile toolbar keeps folder and fullscreen on the left with full-he
   assert.match(reader, /\.reader-mobile-toolbar button \.el-icon \{ font-size: 24px; \}/)
 })
 
+test('reader file search reuses the original centered path dialog instead of a drawer', async () => {
+  const reader = await source('src/views/Reader.vue')
+  const pathOverlay = reader.match(/class="path-overlay"([\s\S]*?)<\/transition>\s*<\/div>\s*<\/transition>/)?.[1] ?? ''
+
+  assert.match(pathOverlay, /v-model="fileSearchQuery"/)
+  assert.match(pathOverlay, /class="reader-search-results"/)
+  assert.doesNotMatch(reader, /<MotionDrawer v-model="fileSearchDrawer"/)
+  assert.match(reader, /function openFileSearch\(\) \{[\s\S]*?fileSearchOpen\.value = true/)
+})
+
+test('reader routes folder changes through the shelf and keeps read controls focused', async () => {
+  const reader = await source('src/views/Reader.vue')
+
+  assert.match(reader, /class="path-trigger reader-file-search-trigger"[^>]*@click="openFileSearch"/)
+  assert.match(reader, /class="icon-btn reader-fullscreen-btn"/)
+  assert.match(reader, /@click="openMobileFilePicker"/)
+  assert.match(reader, /function openFileSearch\(\) \{[\s\S]*?if \(!rootPath\.value\) \{[\s\S]*?changeView\('shelf'\)/)
+  assert.match(reader, /function openMobileFilePicker\(\) \{[\s\S]*?if \(rootPath\.value\) treeDrawer\.value = true[\s\S]*?else changeView\('shelf'\)/)
+  assert.doesNotMatch(reader, /reader-folder-btn|drawer-folder-action|openHistoryOverlay|更换文件夹/)
+  assert.match(reader, /@media \(max-width: 768px\)[\s\S]*?\.reader-file-search-trigger,[\s\S]*?\.reader-fullscreen-btn \{ display: none !important; \}/)
+})
+
 test('timeline composes from an icon beside mobile search', async () => {
   const timeline = await source('src/views/Timeline.vue')
   const searchAt = timeline.indexOf('class="search-box glass-surface"')

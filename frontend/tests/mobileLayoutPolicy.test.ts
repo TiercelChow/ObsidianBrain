@@ -37,7 +37,7 @@ test('getPdfRenderPolicy avoids parallel canvas work on low-core devices', () =>
 })
 
 test('mobile reader toolbar stays pinned until the first document is selected', () => {
-  assert.deepEqual(getMobileReaderToolbarState(true, false, false), {
+  assert.deepEqual(getMobileReaderToolbarState(false, false), {
     rendered: true,
     pinned: true,
     visible: true,
@@ -45,27 +45,27 @@ test('mobile reader toolbar stays pinned until the first document is selected', 
 })
 
 test('mobile reader toolbar returns to transient behavior while reading', () => {
-  assert.deepEqual(getMobileReaderToolbarState(true, true, false), {
+  assert.deepEqual(getMobileReaderToolbarState(true, false), {
     rendered: true,
     pinned: false,
     visible: false,
   })
-  assert.equal(getMobileReaderToolbarState(true, true, true).visible, true)
+  assert.equal(getMobileReaderToolbarState(true, true).visible, true)
 })
 
 test('mobile reader toolbar remains available while a reader control is open', () => {
-  assert.deepEqual(getMobileReaderToolbarState(true, true, false, true), {
+  assert.deepEqual(getMobileReaderToolbarState(true, false, true), {
     rendered: true,
     pinned: true,
     visible: true,
   })
 })
 
-test('mobile reader toolbar is not rendered before a folder is opened', () => {
-  assert.deepEqual(getMobileReaderToolbarState(false, false, true), {
-    rendered: false,
-    pinned: false,
-    visible: false,
+test('mobile reader toolbar keeps the return-to-shelf entry reachable before a book is opened', () => {
+  assert.deepEqual(getMobileReaderToolbarState(false, true), {
+    rendered: true,
+    pinned: true,
+    visible: true,
   })
 })
 
