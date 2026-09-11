@@ -70,6 +70,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "remove task sync queue and sync_error marker",
         sql: include_str!("../../migrations/010_remove_task_sync.sql"),
     },
+    Migration {
+        version: 11,
+        description: "rebuild radar_items with source_name",
+        sql: include_str!("../../migrations/011_radar_items_source_name.sql"),
+    },
 ];
 
 impl SqliteStore {
@@ -749,7 +754,22 @@ mod tests {
         let count: u32 = conn
             .query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(count, 10);
+        assert_eq!(count, MIGRATIONS.len() as u32);
+
+        let max_version: u32 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM _migrations",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            max_version,
+            MIGRATIONS
+                .last()
+                .map(|migration| migration.version)
+                .unwrap_or(0)
+        );
     }
 
     #[test]
@@ -834,5 +854,42 @@ mod tests {
                 .unwrap();
             assert!(exists, "Table {table} should exist");
         }
+    }
+
+    /// 002 用 `source` 建了 radar_items，007 的 CREATE TABLE IF NOT EXISTS 因此失效，
+    /// `source_name` / `saved_path` 从未被创建，而读写代码一直在用 `source_name`。
+    #[test]
+    fn test_radar_items_exposes_source_name_and_saved_path() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+        let conn = store.conn.lock().unwrap();
+
+        for column in &["source_name", "saved_path"] {
+            let count: u32 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('radar_items') WHERE name=?1",
+                    params![column],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "radar_items 应包含列 {column}");
+        }
+    }
+
+    #[test]
+    fn test_insert_and_get_radar_item_round_trips_source_name() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+
+        store
+            .insert_radar_item("r1", "标题", "摘要", "hackernews", "https://example.com/a")
+            .unwrap();
+
+        let items = store.get_radar_items("new", 10).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].0, "r1");
+        assert_eq!(items[0].3, "hackernews");
     }
 }

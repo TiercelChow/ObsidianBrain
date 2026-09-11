@@ -127,7 +127,7 @@
     </div>
 
     <el-empty v-else-if="!loading" description="无法加载知识库洞察" :image-size="80">
-      <el-button type="primary" @click="loadInsights">重试</el-button>
+      <el-button type="primary" @click="loadInsights(true)">重试</el-button>
     </el-empty>
   </div>
 </template>
