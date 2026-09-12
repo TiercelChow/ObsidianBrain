@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
+pub mod book_wiki;
 pub mod inspiration;
 pub mod memory;
 pub mod note;
@@ -8,6 +9,7 @@ pub mod repo;
 pub mod task;
 pub mod timeline;
 
+pub use book_wiki::*;
 pub use inspiration::{
     ConceptRef, CounterpointItem, InspirationRecord, InspirationResult, InspirationType, NoteRef,
     QuestionItem,

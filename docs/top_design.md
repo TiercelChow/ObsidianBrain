@@ -1,6 +1,6 @@
 # ObsidianBrain — 顶层设计文档
 
-> **版本**: v1.1 | **最后更新**: 2026-08-17 | **状态**: 持续演进
+> **版本**: v1.2 | **最后更新**: 2026-09-12 | **状态**: 持续演进
 
 ---
 
@@ -8,7 +8,7 @@
 
 ### 1.1 定位
 
-ObsidianBrain 是一个运行在本地的 **Rust 知识引擎**，对外提供标准化的 LLM Tool API（兼容 MCP 协议与 OpenAI function calling 格式）。它围绕用户的 **Obsidian 知识库** 和 **本地代码仓库**，提供记忆管理、代码仓概览、灵感催化、外部信息聚合、时间线回顾和个人任务管理等能力。
+ObsidianBrain 是一个运行在本地的 **Rust 知识引擎**，对外提供标准化的 LLM Tool API（兼容 MCP 协议与 OpenAI function calling 格式）。它围绕用户的 **Obsidian 知识库**、**阅境轩书架**和**本地代码仓库**，提供记忆管理、每书独立知识库、代码仓概览、时间线回顾和个人任务管理等能力。
 
 **核心原则**：对话由 Claude / ChatGPT 等 LLM 前端完成，本引擎是 LLM 的 **"手"和"眼"**——负责感知（读取 vault、代码仓、外部信息）和执行（写入笔记、打开编辑器、保存文章）。
 
@@ -26,6 +26,7 @@ ObsidianBrain 是一个运行在本地的 **Rust 知识引擎**，对外提供�
 | 外部信息过载，手动筛选成本高 | 智识雷达基于个人知识图谱做个性化推荐 |
 | 时间维度上的知识演变不可见 | 时间线回溯知识动态 |
 | 短期待办容易遗忘，长期目标难以持续拆解和追踪 | 个人任务模块统一管理待办、任务树、进展和日历，并持久化到本地 SQLite |
+| 书籍读完后难以形成可查询、可验证的长期知识 | 阅境轩每本书绑定独立 Book Wiki，以 SQLite 管理实体、论断、关系、引用、问答和研究任务 |
 
 ### 1.4 非功能性需求
 
@@ -165,6 +166,24 @@ ObsidianBrain/
 
 ---
 
+### 2.4 Book Wiki v3 权威边界
+
+Book Wiki 采用与普通 Obsidian 笔记不同的数据边界：
+
+```text
+阅境轩 PDF / Markdown（只读原始资料）
+                  ↓
+     来源版本、片段和定位信息
+                  ↓
+SQLite：实体、论断、关系、引用、版本、问答、任务、审核
+                  ↓
+DeepSeek Harness / Claude Code（可替换的 Agent 执行器）
+```
+
+Agent 通过受控工具读取来源和提交结构化变更集，不能直接执行 SQL 或改写原书。配置文档和 Skill 在数据库中版本化，运行时物化为临时 Markdown 文件。完整产品与开发边界见 [Book Wiki 需求设计](requirement/08-llm-wiki.md) 和 [开发设计](development/08-llm-wiki.md)。
+
+---
+
 ## 3. 技术栈
 
 | 层次 | 组件 | 技术选型 | 选型理由 |
@@ -195,7 +214,7 @@ ObsidianBrain/
 │  └──────┬───────┘                    │
 │         │                           │
 │         ├── Config: ./config/       │
-│         └── SQLite（可重建查询投影）  │
+│         └── SQLite（任务/Book Wiki 权威数据 + 其他投影）│
 └─────────┼────────────────────────────┘
           │  HTTP (127.0.0.1:27123)
           ▼
@@ -205,7 +224,7 @@ ObsidianBrain/
 └──────────────────────────────────────┘
 ```
 
-**注意**：不再需要 Qdrant Docker 容器或笔记全文/向量索引。笔记与任务的权威内容由 Obsidian 管理；SQLite 只保存代码仓、雷达、时间线和任务等模块的可重建查询投影。
+**注意**：不再需要 Qdrant Docker 容器或普通笔记的全文/向量索引。普通 Obsidian 笔记仍由 Obsidian 管理；个人任务与 Book Wiki 的生成知识以 SQLite 为唯一权威存储，代码仓、雷达和时间线等模块按各自设计使用 SQLite 状态或投影。
 
 ---
 
@@ -330,7 +349,33 @@ struct ProgressEntry {
 
 个人任务以 SQLite 为唯一权威存储（四张表：task_documents / task_nodes / task_progress / task_audit_events），不再读写 Markdown 文件；文档键为 `db:short:{uuid}` / `db:long:{uuid}`（存量行保留原路径字符串作为主键）。完整字段和生命周期见 [任务需求设计](requirement/09-task-management.md)。
 
-### 4.7 SQLite Schema
+### 4.7 书籍知识库 (Book Wiki)
+
+```rust
+struct KnowledgeBase {
+    id: Uuid,
+    book_id: String,
+    lifecycle: KnowledgeBaseLifecycle,
+    sync_state: KnowledgeSyncState,
+    health_state: KnowledgeHealthState,
+    revision: i64,
+}
+
+struct KnowledgeEntry {
+    id: Uuid,
+    knowledge_base_id: Uuid,
+    entry_type: KnowledgeEntryType,
+    title: String,
+    summary: String,
+    content_md: String,
+    status: KnowledgeEntryStatus,
+    revision: i64,
+}
+```
+
+每一本阅境轩书籍最多绑定一个知识库。SQLite 是来源版本、知识条目、论断、关系、引用、版本、问答、研究任务、审核、配置文档和 Skill 的唯一权威存储；Markdown 仅用于原书、临时 Agent 工作区和导出。完整模型见 [REQ-08](requirement/08-llm-wiki.md) 和 [DEV-08](development/08-llm-wiki.md)。
+
+### 4.8 SQLite Schema
 
 ```sql
 -- 代码仓库注册信息
@@ -1096,6 +1141,20 @@ enum BrainError {
 - [x] 11 个任务 Tool API
 
 **设计文档**：[需求设计](requirement/09-task-management.md) · [开发设计](development/09-task-management.md)
+
+### Phase 6: 阅境轩 Book Wiki v3（MVP 1 已落地）
+
+- [x] 书架正规化、软删除与每书一库基础生命周期
+- [x] Markdown 来源版本、章节片段、实体和行号引用
+- [x] PDF 来源登记与待 Harness 提取状态
+- [x] 数据库实体浏览、检索与 FTS5 数据底座
+- [ ] DeepSeek Harness Sidecar、专用 Profile、Skill 与受控工具
+- [x] 知识库、Wiki 工作台、证据问答、研究任务草稿和配置中心首版页面
+- [ ] 论断、关系、审核、变更集与 Agent 执行闭环
+- [ ] Claude Code Adapter、导出与恢复
+- [ ] 退役原知识库、Wiki 看板、Wiki 工作台、知识探索和外部摄入页面
+
+**设计文档**：[需求设计](requirement/08-llm-wiki.md) · [开发设计](development/08-llm-wiki.md)
 
 ---
 

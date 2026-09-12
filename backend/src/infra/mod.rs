@@ -1,3 +1,4 @@
+pub mod book_wiki_store;
 #[allow(dead_code)]
 pub mod file_watcher;
 #[allow(dead_code)]

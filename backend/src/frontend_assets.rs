@@ -6,6 +6,8 @@ use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use rust_embed::Embed;
 
+// Rebuild the binary after `dist_new` changes so release builds carry the
+// matching SPA and its route chunks.
 #[derive(Embed)]
 #[folder = "../frontend/dist_new/"]
 struct FrontendAssets;

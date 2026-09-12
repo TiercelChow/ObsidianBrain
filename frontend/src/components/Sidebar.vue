@@ -70,9 +70,11 @@ import {
   MagicStick,
   DataLine,
   Document,
-  Connection,
+  ChatDotRound,
   Files,
   Finished,
+  Operation,
+  Setting,
   Expand,
   Fold,
 } from '@element-plus/icons-vue'
@@ -131,11 +133,11 @@ const navGroups = [
   {
     label: '知识',
     items: [
-      { path: '/memory', label: '知识库', icon: Notebook },
-      { path: '/wiki-dashboard', label: 'Wiki 看板', icon: DataLine },
-      { path: '/wiki', label: 'Wiki 工作台', icon: Document },
-      { path: '/explore', label: '知识探索', icon: MagicStick },
-      { path: '/ingest', label: '外部摄入', icon: Connection },
+      { path: '/knowledge', label: '书籍知识库', icon: Notebook },
+      { path: '/knowledge/wiki', label: 'Wiki 工作台', icon: Document },
+      { path: '/knowledge/chat', label: '知识问答', icon: ChatDotRound },
+      { path: '/knowledge/tasks', label: '研究任务', icon: Operation },
+      { path: '/knowledge/settings', label: 'Wiki 配置', icon: Setting },
     ],
   },
   {

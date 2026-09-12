@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::error::BrainError;
+use crate::infra::book_wiki_store::BookWikiStore;
 use crate::infra::sqlite_store::SqliteStore;
+use crate::models::book_wiki::ReaderBook;
 use crate::tools::traits::ToolHandler;
 use crate::AppContext;
 
@@ -351,62 +353,18 @@ impl ToolHandler for SaveReaderHistoryHandler {
 
 // ── Reader bookshelf (server-stored, shared across all users) ──────────
 
-/// SQLite `app_state` key holding the bookshelf JSON array.
-const BOOKS_KEY: &str = "reader_books";
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Debug)]
-#[serde(rename_all = "lowercase")]
-enum BookKind {
-    Folder,
-    Pdf,
+/// Read from the normalized table. The store also performs the one-time
+/// migration from the former `app_state.reader_books` JSON value.
+fn get_books(db: &Arc<SqliteStore>) -> Result<Vec<ReaderBook>, BrainError> {
+    BookWikiStore::new(db.clone()).list_reader_books()
 }
 
-/// Reading progress: folder books store lastFile + scroll ratio (0..1);
-/// pdf books store the page number (+ pageCount for display).
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-struct BookProgress {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    last_file: Option<String>,
-    position: f64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    page_count: Option<i64>,
-    updated_at: i64,
-}
-
-/// A bookshelf entry: a local folder (md collection) or a pdf file.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-struct ReaderBook {
-    id: String,
-    path: String,
-    kind: BookKind,
-    name: String,
-    #[serde(default)]
-    description: String,
-    #[serde(default)]
-    category: String,
-    added_at: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    progress: Option<BookProgress>,
-}
-
-/// Read the bookshelf from SQLite. Returns an empty vec if unset or unparseable.
-fn get_books(db: &SqliteStore) -> Result<Vec<ReaderBook>, BrainError> {
-    match db.get_state(BOOKS_KEY)? {
-        Some(json) => Ok(serde_json::from_str(&json).unwrap_or_default()),
-        None => Ok(Vec::new()),
-    }
-}
-
-/// Validate + persist the full book list (whole-list replace). Returns the count.
-fn save_books(db: &SqliteStore, json: &Value) -> Result<usize, BrainError> {
+/// Persist the active list. Missing books are soft removed so an attached
+/// knowledge base is never silently destroyed.
+fn save_books(db: &Arc<SqliteStore>, json: &Value) -> Result<usize, BrainError> {
     let books: Vec<ReaderBook> = serde_json::from_value(json.clone())
         .map_err(|e| BrainError::Internal(format!("books 格式错误: {e}")))?;
-    let serialized = serde_json::to_string(&books)
-        .map_err(|e| BrainError::Internal(format!("序列化失败: {e}")))?;
-    db.set_state(BOOKS_KEY, &serialized)?;
-    Ok(books.len())
+    BookWikiStore::new(db.clone()).save_reader_books(&books)
 }
 
 /// Get the bookshelf.
@@ -555,6 +513,7 @@ impl ToolHandler for StatLocalPathHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::book_wiki::BookKind;
 
     /// Build a temp tree:
     /// ```text
@@ -781,7 +740,7 @@ mod tests {
     #[test]
     fn test_books_roundtrip_through_state() {
         let tmp = tempfile::tempdir().unwrap();
-        let db = SqliteStore::new(&tmp.path().join("books.db")).unwrap();
+        let db = Arc::new(SqliteStore::new(&tmp.path().join("books.db")).unwrap());
 
         // Empty initially.
         assert!(get_books(&db).unwrap().is_empty());
@@ -810,15 +769,15 @@ mod tests {
     #[test]
     fn test_books_corrupted_json_yields_empty() {
         let tmp = tempfile::tempdir().unwrap();
-        let db = SqliteStore::new(&tmp.path().join("books.db")).unwrap();
-        db.set_state(BOOKS_KEY, "{not json").unwrap();
+        let db = Arc::new(SqliteStore::new(&tmp.path().join("books.db")).unwrap());
+        db.set_state("reader_books", "{not json").unwrap();
         assert!(get_books(&db).unwrap().is_empty());
     }
 
     #[test]
     fn test_save_books_rejects_missing_required_field() {
         let tmp = tempfile::tempdir().unwrap();
-        let db = SqliteStore::new(&tmp.path().join("books.db")).unwrap();
+        let db = Arc::new(SqliteStore::new(&tmp.path().join("books.db")).unwrap());
         let bad = json!([{ "id": "x", "path": "/tmp/a" }]); // missing kind/name/addedAt
         let err = save_books(&db, &bad).unwrap_err();
         assert!(matches!(err, BrainError::Internal(_)));
@@ -829,7 +788,7 @@ mod tests {
     #[test]
     fn test_save_books_rejects_bad_kind() {
         let tmp = tempfile::tempdir().unwrap();
-        let db = SqliteStore::new(&tmp.path().join("books.db")).unwrap();
+        let db = Arc::new(SqliteStore::new(&tmp.path().join("books.db")).unwrap());
         let bad =
             json!([{ "id": "x", "path": "/tmp/a", "kind": "video", "name": "n", "addedAt": 1 }]);
         assert!(save_books(&db, &bad).is_err());

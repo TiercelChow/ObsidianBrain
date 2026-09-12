@@ -43,6 +43,12 @@ pub enum BrainError {
     #[error("任务文档损坏 {path}: {detail}")]
     TaskDocumentCorrupt { path: String, detail: String },
 
+    #[error("书籍或知识库不存在: {0}")]
+    KnowledgeNotFound(String),
+
+    #[error("知识库校验失败: {0}")]
+    KnowledgeValidation(String),
+
     #[error("Obsidian API 不可用")]
     ObsidianUnavailable,
 
@@ -81,6 +87,8 @@ impl BrainError {
             Self::TaskVersionConflict(_) => "TASK_VERSION_CONFLICT",
             Self::TaskDuplicateId(_) => "TASK_DUPLICATE_ID",
             Self::TaskDocumentCorrupt { .. } => "TASK_DOCUMENT_CORRUPT",
+            Self::KnowledgeNotFound(_) => "KNOWLEDGE_NOT_FOUND",
+            Self::KnowledgeValidation(_) => "KNOWLEDGE_VALIDATION_ERROR",
             Self::ObsidianUnavailable => "OBSIDIAN_UNAVAILABLE",
             Self::GitError { .. } => "GIT_ERROR",
             Self::QdrantError(_) => "QDRANT_ERROR",
@@ -114,6 +122,8 @@ impl BrainError {
             Self::TaskVersionConflict(_) => Some("任务已被修改，请刷新后重试"),
             Self::TaskDuplicateId(_) => Some("任务 ID 冲突，请重试或反馈"),
             Self::TaskDocumentCorrupt { .. } => Some("任务数据损坏，请检查数据库"),
+            Self::KnowledgeNotFound(_) => Some("请刷新书架或知识库列表后重试"),
+            Self::KnowledgeValidation(_) => Some("请检查知识库、实体或任务参数"),
             Self::ObsidianUnavailable => Some("请启用并检查 Obsidian Local REST API 插件"),
             Self::GitError { .. } => {
                 Some("Ensure the repository is a valid git repo and git is accessible")
@@ -135,10 +145,12 @@ impl BrainError {
             Self::VaultNotFound(_)
             | Self::NoteNotFound(_)
             | Self::RepoNotFound(_)
-            | Self::TaskNotFound(_) => StatusCode::NOT_FOUND,
+            | Self::TaskNotFound(_)
+            | Self::KnowledgeNotFound(_) => StatusCode::NOT_FOUND,
             Self::ParseError { .. }
             | Self::TaskValidation(_)
-            | Self::TaskDocumentCorrupt { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            | Self::TaskDocumentCorrupt { .. }
+            | Self::KnowledgeValidation(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::TaskVersionConflict(_) | Self::TaskDuplicateId(_) => StatusCode::CONFLICT,
             Self::ObsidianUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::SearchError(_)

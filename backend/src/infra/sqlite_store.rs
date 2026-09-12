@@ -75,6 +75,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "rebuild radar_items with source_name",
         sql: include_str!("../../migrations/011_radar_items_source_name.sql"),
     },
+    Migration {
+        version: 12,
+        description: "database-native per-book knowledge bases",
+        sql: include_str!("../../migrations/012_book_wiki.sql"),
+    },
 ];
 
 impl SqliteStore {

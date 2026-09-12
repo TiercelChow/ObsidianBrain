@@ -9,6 +9,7 @@
 //! - `inspiration_handlers` — get_inspiration
 //! - `radar_handlers` — get_radar, add_to_vault, dismiss_radar_item
 
+pub mod book_wiki_handlers;
 pub mod code_repo_handlers;
 pub mod config_handlers;
 pub mod explore_handlers;
@@ -24,6 +25,7 @@ pub mod wiki_handlers;
 
 use std::sync::Arc;
 
+use crate::tools::handlers::book_wiki_handlers::*;
 use crate::tools::handlers::code_repo_handlers::*;
 use crate::tools::handlers::config_handlers::{
     GetConfigHandler, SaveConfigHandler, VerifyLlmHandler,
@@ -98,6 +100,37 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     registry.register(Arc::new(GetConfigHandler)).await;
     registry.register(Arc::new(SaveConfigHandler)).await;
     registry.register(Arc::new(VerifyLlmHandler)).await;
+
+    // Database-native, per-book knowledge bases
+    registry
+        .register(Arc::new(ListBookKnowledgeBasesHandler))
+        .await;
+    registry
+        .register(Arc::new(InitializeBookKnowledgeBaseHandler))
+        .await;
+    registry
+        .register(Arc::new(SyncBookKnowledgeBaseHandler))
+        .await;
+    registry
+        .register(Arc::new(GetBookKnowledgeBaseHandler))
+        .await;
+    registry
+        .register(Arc::new(ListKnowledgeEntriesHandler))
+        .await;
+    registry.register(Arc::new(GetKnowledgeEntryHandler)).await;
+    registry.register(Arc::new(ListKnowledgeTasksHandler)).await;
+    registry
+        .register(Arc::new(CreateKnowledgeTaskHandler))
+        .await;
+    registry
+        .register(Arc::new(GetBookWikiSettingsHandler))
+        .await;
+    registry
+        .register(Arc::new(SaveBookWikiConfigDocumentHandler))
+        .await;
+    registry
+        .register(Arc::new(SaveAgentRuntimeProfileHandler))
+        .await;
 
     // Wiki module
     registry.register(Arc::new(IngestSourceHandler)).await;

@@ -16,6 +16,7 @@ use tokio::signal;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::AppConfig;
+use crate::core::book_wiki::BookWikiService;
 use crate::core::code_repo::manager::{RepoManager, RepoManagerConfig};
 use crate::core::code_repo::note_linker::NoteLinker;
 use crate::core::inspiration::InspirationService;
@@ -24,6 +25,7 @@ use crate::core::radar::RadarService;
 use crate::core::tasks::TaskService;
 use crate::core::timeline::store::TimelineStore;
 use crate::core::timeline::{MemoManager, TimelineConfig, TimelineService};
+use crate::infra::book_wiki_store::BookWikiStore;
 use crate::infra::obsidian_client::{new_provider, ObsidianClient};
 use crate::infra::sqlite_store::SqliteStore;
 use crate::infra::task_index_store::SqliteTaskIndexStore;
@@ -45,6 +47,7 @@ pub struct AppContext {
     pub task_service: Arc<TaskService>,
     pub inspiration_service: Arc<InspirationService>,
     pub radar_service: Arc<RadarService>,
+    pub book_wiki_service: Arc<BookWikiService>,
     /// Server start time — used to compute uptime in health endpoint.
     pub start_time: chrono::DateTime<chrono::Utc>,
 }
@@ -377,6 +380,7 @@ async fn run_server_async(
     let task_service = Arc::new(TaskService::new(Arc::new(SqliteTaskIndexStore::new(
         db.clone(),
     ))));
+    let book_wiki_service = Arc::new(BookWikiService::new(BookWikiStore::new(db.clone())));
 
     let llm: Arc<dyn crate::infra::llm_client::LlmProvider> =
         crate::infra::llm_client::LlmClientFactory::create(&config.llm)
@@ -434,6 +438,7 @@ async fn run_server_async(
         task_service,
         inspiration_service,
         radar_service,
+        book_wiki_service,
         start_time,
     });
     register_all_tools(&tool_registry, ctx.clone()).await;
@@ -652,6 +657,7 @@ mod test_helpers {
             let task_service = Arc::new(TaskService::new(Arc::new(SqliteTaskIndexStore::new(
                 db.clone(),
             ))));
+            let book_wiki_service = Arc::new(BookWikiService::new(BookWikiStore::new(db.clone())));
 
             let llm_config = crate::config::LlmConfig::default();
             let llm: Arc<dyn crate::infra::llm_client::LlmProvider> = Arc::from(
@@ -688,6 +694,7 @@ mod test_helpers {
                 task_service,
                 inspiration_service,
                 radar_service,
+                book_wiki_service,
                 start_time: chrono::Utc::now(),
             });
 
