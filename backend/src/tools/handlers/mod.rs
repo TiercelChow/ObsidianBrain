@@ -118,9 +118,16 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(ListKnowledgeEntriesHandler))
         .await;
     registry.register(Arc::new(GetKnowledgeEntryHandler)).await;
+    registry.register(Arc::new(AskBookKnowledgeHandler)).await;
     registry.register(Arc::new(ListKnowledgeTasksHandler)).await;
     registry
         .register(Arc::new(CreateKnowledgeTaskHandler))
+        .await;
+    registry
+        .register(Arc::new(GetKnowledgeTaskResultHandler))
+        .await;
+    registry
+        .register(Arc::new(ExecuteKnowledgeTaskHandler))
         .await;
     registry
         .register(Arc::new(GetBookWikiSettingsHandler))
@@ -131,6 +138,7 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     registry
         .register(Arc::new(SaveAgentRuntimeProfileHandler))
         .await;
+    registry.register(Arc::new(VerifyAgentRuntimeHandler)).await;
 
     // Wiki module
     registry.register(Arc::new(IngestSourceHandler)).await;

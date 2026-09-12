@@ -80,6 +80,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "database-native per-book knowledge bases",
         sql: include_str!("../../migrations/012_book_wiki.sql"),
     },
+    Migration {
+        version: 13,
+        description: "DeepSeek Harness ACP runtime command",
+        sql: include_str!("../../migrations/013_deepseek_harness_acp.sql"),
+    },
 ];
 
 impl SqliteStore {

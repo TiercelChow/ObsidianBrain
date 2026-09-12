@@ -4,12 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#f0f0f3" />
-    <meta name="description" content="ObsidianBrain 是围绕 Obsidian 构建的本地知识工作台，用一个 Rust 引擎连接阅读、记录、任务、Wiki、代码与 AI 工具。" />
-    <meta name="keywords" content="Obsidian, 知识管理, Markdown 阅读器, PDF 阅读器, MCP, Rust, 本地优先, 任务管理" />
+    <meta name="description" content="ObsidianBrain 是本地优先的知识工作台，用一个 Rust 引擎连接 Markdown/PDF 阅读、记录、任务，以及由 DeepSeek Harness 驱动的书籍知识库。" />
+    <meta name="keywords" content="Obsidian, 知识管理, Markdown 阅读器, PDF 阅读器, Book Wiki, DeepSeek Harness, MCP, Rust, 本地优先, 任务管理" />
     <meta name="author" content="TiercelChow" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="ObsidianBrain · 本地知识工作台" />
-    <meta property="og:description" content="让阅读、记录、任务与灵感在你自己的 Obsidian Vault 中重新建立连接。" />
+    <meta property="og:description" content="让每一本书形成可检索、可追溯、可持续研究的本地知识库。" />
     <meta property="og:url" content="https://tiercelchow.github.io/ObsidianBrain/" />
     <meta property="og:image" content="https://tiercelchow.github.io/ObsidianBrain/favicon.svg" />
     <meta name="twitter:card" content="summary" />
@@ -24,7 +24,7 @@
         "name": "ObsidianBrain",
         "applicationCategory": "ProductivityApplication",
         "operatingSystem": "macOS, Linux, Windows",
-        "description": "围绕 Obsidian 构建的本地知识工作台。",
+        "description": "连接阅读、记录、任务与书籍知识库的本地优先工作台。",
         "url": "https://tiercelchow.github.io/ObsidianBrain/",
         "codeRepository": "https://github.com/TiercelChow/ObsidianBrain"
       }
@@ -90,7 +90,7 @@
         <div class="hero-copy" data-reveal data-reveal-sequence>
           <div class="eyebrow"><span class="status-dot"></span> OBSIDIANBRAIN · 本地知识工作台</div>
           <h1>把散落的知识，<br /><span>变成自己的力量。</span></h1>
-          <p class="hero-lead">阅读有归处，灵感被记住，计划向前走。<br class="desktop-break" />围绕你的 Obsidian，把知识与行动放回同一个工作空间。</p>
+          <p class="hero-lead">阅读有归处，灵感被记住，计划向前走。<br class="desktop-break" />每一本书还能沉淀为可检索、可引用、可持续研究的独立知识库。</p>
           <div class="hero-actions">
             <a class="button button-primary" href="#quick-start">开始使用 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a>
             <a class="button button-secondary" href="./manual/"><svg aria-hidden="true"><use href="#icon-book" /></svg>阅读使用手册</a>
@@ -113,12 +113,12 @@
               <aside class="mock-sidebar">
                 <div class="mock-brand"><img class="brand-mark small" src="./favicon.svg" alt="" width="32" height="32" /><b>ObsidianBrain</b></div>
                 <div class="mock-nav">
-                  <span><svg><use href="#icon-search" /></svg>知识库</span>
+                  <span><svg><use href="#icon-search" /></svg>书籍知识库</span>
                   <span class="active"><svg><use href="#icon-book" /></svg>阅境轩</span>
                   <span><svg><use href="#icon-clock" /></svg>时光机</span>
                   <span><svg><use href="#icon-task" /></svg>任务中枢</span>
-                  <span><svg><use href="#icon-wiki" /></svg>Wiki 工作台</span>
-                  <span><svg><use href="#icon-code" /></svg>代码仓</span>
+                  <span><svg><use href="#icon-wiki" /></svg>书籍问答</span>
+                  <span><svg><use href="#icon-spark" /></svg>研究任务</span>
                 </div>
                 <div class="mock-sidebar-foot"><span></span><i></i></div>
               </aside>
@@ -147,12 +147,12 @@
               </div>
             </div>
           </div>
-          <p class="preview-caption"><span class="status-dot"></span> 一个空间，连接阅读、记录与行动 <span>界面示意 · 非真实数据</span></p>
+          <p class="preview-caption"><span class="status-dot"></span> 一个空间，连接阅读、理解、记录与行动 <span>界面示意 · 非真实数据</span></p>
         </div>
       </section>
 
       <section class="trust-strip section-shell" aria-label="技术特性" data-reveal data-reveal-sequence>
-        <span>Rust + Axum</span><i></i><span>Vue 3</span><i></i><span>Obsidian REST API</span><i></i><span>MCP / Tool API</span><i></i><span>Local-first</span>
+        <span>Rust + Axum</span><i></i><span>Vue 3</span><i></i><span>SQLite</span><i></i><span>DeepSeek Harness + ACP</span><i></i><span>Local-first</span>
       </section>
 
       <section class="showcase-section" id="tour">
@@ -162,6 +162,7 @@
             <button type="button" role="tab" aria-selected="true" data-feature-target="reader">沉浸阅读</button>
             <button type="button" role="tab" aria-selected="false" data-feature-target="timeline" tabindex="-1">轻量记录</button>
             <button type="button" role="tab" aria-selected="false" data-feature-target="tasks" tabindex="-1">目标推进</button>
+            <button type="button" role="tab" aria-selected="false" data-feature-target="knowledge" tabindex="-1">书籍研究</button>
           </div>
           <div class="showcase-stage" data-reveal>
             <article class="showcase-panel" data-feature-panel="reader">
@@ -176,6 +177,15 @@
               <div class="showcase-copy"><span class="panel-number">03 / 任务中枢</span><h3>把长期目标拆到今天可以开始的程度。</h3><p>创建长期任务，逐层增加子任务并追加进展。日历只呈现顶层日程，展开明细后再查看完整拆解。</p><ul><li><svg><use href="#icon-check" /></svg>重要程度和日期范围清晰可见</li><li><svg><use href="#icon-check" /></svg>每个节点都能记录进展</li><li><svg><use href="#icon-check" /></svg>审计历史保留状态变化</li></ul></div>
               <div class="showcase-ui tasks-ui"><div class="task-head"><div><span>长期任务</span><b>发布 ObsidianBrain 1.0</b></div><strong>64%</strong></div><div class="progress-bar"><i></i></div><div class="task-tree"><div class="done"><i>✓</i><span><b>完成核心架构</b><small>已完成</small></span></div><div class="active"><i></i><span><b>打磨移动端体验</b><small>进行中 · 72%</small></span></div><div><i></i><span><b>整理使用文档</b><small>计划中</small></span></div><div class="nested"><i></i><span><b>发布 GitHub Pages</b><small>今天截止</small></span></div></div></div>
             </article>
+            <article class="showcase-panel" data-feature-panel="knowledge" hidden>
+              <div class="showcase-copy"><span class="panel-number">04 / 书籍知识库</span><h3>读完一页，也能继续追问整本书。</h3><p>每本书一个独立知识库。原书保持只读，结构化实体、来源片段、问答与研究报告写入本地 SQLite。</p><ul><li><svg><use href="#icon-check" /></svg>回答中的 [S#] 可跳回证据卡片</li><li><svg><use href="#icon-check" /></svg>任务只读取当前书籍证据</li><li><svg><use href="#icon-check" /></svg>运行输入、结果和失败均可审计</li></ul></div>
+              <div class="showcase-ui knowledge-ui">
+                <div class="knowledge-demo-head"><div class="knowledge-demo-mark"><svg><use href="#icon-wiki" /></svg></div><div><span>知识问答 · 单书边界</span><b>AI Systems Performance Engineering</b></div><i>Harness 已连接</i></div>
+                <div class="knowledge-demo-question">如何判断系统瓶颈来自计算还是内存？</div>
+                <div class="knowledge-demo-answer"><span>DS</span><p>先比较算术强度与机器平衡点，再结合带宽、吞吐和利用率定位瓶颈 <button type="button">S1</button>。测量时应同时保留工作负载与硬件上下文 <button type="button">S2</button>。</p></div>
+                <div class="knowledge-demo-sources"><article><i>S1</i><div><b>Roofline 分析</b><small>chapter-04.md · 第 82–96 行</small></div></article><article><i>S2</i><div><b>性能测量方法</b><small>chapter-02.md · 第 31–48 行</small></div></article></div>
+              </div>
+            </article>
           </div>
         </div>
       </section>
@@ -184,24 +194,24 @@
         <div class="section-heading narrow" data-reveal>
           <span class="section-label">不是另一个笔记应用</span>
           <h2>在你已有的知识之上，<br />建立更完整的工作流。</h2>
-          <p>Obsidian 继续负责文件、链接和长期保存；ObsidianBrain 负责把内容变成可以阅读、检索、回顾、拆解和被 AI 调用的能力。</p>
+          <p>你的原始文件继续留在原处；ObsidianBrain 负责把它们变成可以阅读、检索、回顾、拆解和被 AI 安全调用的本地能力。</p>
         </div>
         <div class="principle-grid" data-reveal-group>
           <article class="principle-card featured" data-reveal>
             <div class="principle-visual local-visual">
-              <div class="vault-node"><svg><use href="#icon-folder" /></svg><span>你的 Vault</span></div>
+              <div class="vault-node"><svg><use href="#icon-folder" /></svg><span>你的资料</span></div>
               <div class="connection-lines"><i></i><i></i><i></i></div>
               <div class="capability-nodes"><span>阅读</span><span>任务</span><span>Wiki</span></div>
             </div>
-            <div><span class="card-index">01</span><h3>本地优先，不搬走知识</h3><p>笔记、附件和阅读材料仍由你管理。服务只在本地访问 Vault，不创建一份难以迁移的云端副本。</p></div>
+            <div><span class="card-index">01</span><h3>本地优先，来源保持原样</h3><p>笔记、附件和阅读材料仍由你管理；书籍实体、引用和任务保存到本地 SQLite，并始终能够追溯原文。</p></div>
           </article>
           <article class="principle-card" data-reveal>
             <div class="mini-icon"><svg><use href="#icon-spark" /></svg></div>
-            <span class="card-index">02</span><h3>一个空间，连接多个阶段</h3><p>从读一篇文档，到留下一条想法，再到拆成长期任务，信息不必在多个工具之间反复搬运。</p>
+            <span class="card-index">02</span><h3>一个空间，连接多个阶段</h3><p>从读一篇文档，到形成书籍知识库、留下一条想法，再到拆成长期任务，信息不必反复搬运。</p>
           </article>
           <article class="principle-card" data-reveal>
             <div class="mini-icon"><svg><use href="#icon-code" /></svg></div>
-            <span class="card-index">03</span><h3>让 AI 拥有手和眼</h3><p>通过标准 Tool API 与 MCP 暴露本地能力。对话留在你选择的 LLM 前端，执行发生在自己的知识引擎中。</p>
+            <span class="card-index">03</span><h3>让 Agent 有能力，也有边界</h3><p>Rust 后端先限定书籍范围并召回证据，再通过 ACP 调用 DeepSeek Harness；Runtime 不直接接触正式数据库和原书。</p>
           </article>
         </div>
       </section>
@@ -215,7 +225,7 @@
           <div class="workflow-track" data-reveal-group>
             <article data-reveal><span>01</span><div class="workflow-icon"><svg><use href="#icon-book" /></svg></div><h3>阅读</h3><p>Markdown、PDF、公式与图表</p></article>
             <article data-reveal><span>02</span><div class="workflow-icon"><svg><use href="#icon-clock" /></svg></div><h3>记录</h3><p>捕捉此刻的想法和图片</p></article>
-            <article data-reveal><span>03</span><div class="workflow-icon"><svg><use href="#icon-wiki" /></svg></div><h3>组织</h3><p>把资料编译为结构化知识</p></article>
+            <article data-reveal><span>03</span><div class="workflow-icon"><svg><use href="#icon-wiki" /></svg></div><h3>理解</h3><p>形成实体、来源与带引用回答</p></article>
             <article data-reveal><span>04</span><div class="workflow-icon"><svg><use href="#icon-task" /></svg></div><h3>执行</h3><p>拆解长期目标并持续推进</p></article>
             <article data-reveal><span>05</span><div class="workflow-icon"><svg><use href="#icon-radar" /></svg></div><h3>回顾</h3><p>重新发现知识之间的联系</p></article>
           </div>
@@ -232,11 +242,11 @@
           <article class="feature-card reader-card" data-reveal><div class="feature-icon"><svg><use href="#icon-book" /></svg></div><span class="feature-state">阅读</span><h3>阅境轩</h3><p>把本地 Markdown 文集与 PDF 变成可持续阅读的书架。支持 Mermaid、KaTeX、代码高亮、全屏阅读和进度恢复。</p><ul><li>文件夹与 PDF 书架</li><li>阅读历史和位置同步</li><li>手机端触控阅读</li></ul></article>
           <article class="feature-card timeline-card" data-reveal><div class="feature-icon"><svg><use href="#icon-clock" /></svg></div><span class="feature-state">记录</span><h3>时光机</h3><p>用低负担的小记留下此刻。按时间、关键词和标签重新浏览，让零散想法在未来仍然可以被找回。</p><ul><li>Markdown 与图片</li><li>时间筛选和全文搜索</li><li>与 Obsidian 内容协同</li></ul></article>
           <article class="feature-card tasks-card" data-reveal><div class="feature-icon"><svg><use href="#icon-task" /></svg></div><span class="feature-state">执行</span><h3>任务中枢</h3><p>短期待办保持轻量，长期任务支持任意层级拆解、进展记录与日历视图，让目标始终可行动。</p><ul><li>短期与长期任务</li><li>多级子任务和进展</li><li>任务与日历双视图</li></ul></article>
-          <article class="feature-card wiki-card" data-reveal><div class="feature-icon"><svg><use href="#icon-wiki" /></svg></div><span class="feature-state">组织</span><h3>Wiki 工作台</h3><p>让 LLM 成为知识编译器，将原始资料整理成完整条目，并检查知识网络中的孤岛、枢纽和缺口。</p><ul><li>资料编译与合并</li><li>基于 Wiki 的问答</li><li>知识健康度检查</li></ul></article>
-          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg><use href="#icon-search" /></svg></div><div><span class="feature-state">发现</span><h3>知识库</h3><p>搜索笔记，观察领域分布、孤岛、枢纽、尘封和新生内容。</p></div></article>
-          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg><use href="#icon-code" /></svg></div><div><span class="feature-state">开发</span><h3>代码仓</h3><p>注册本地仓库，关联项目资料，从工作台直接进入 VS Code。</p></div></article>
-          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg><use href="#icon-spark" /></svg></div><div><span class="feature-state">创造</span><h3>灵感熔炉</h3><p>组合概念、追问假设、寻找反例，把尚未成形的念头向前推进。</p></div></article>
-          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg><use href="#icon-radar" /></svg></div><div><span class="feature-state">输入</span><h3>智识雷达</h3><p>聚合外部信息源，按个人兴趣排序，并将值得保留的文章收纳进 Vault。</p></div></article>
+          <article class="feature-card wiki-card" data-reveal><div class="feature-icon"><svg><use href="#icon-wiki" /></svg></div><span class="feature-state">理解</span><h3>书籍知识库</h3><p>每本书一个独立知识库。Markdown 文集可以扫描为带文件、标题和行号来源的结构化实体，原文保持只读，知识结果保存到 SQLite。</p><ul><li>单书隔离与状态管理</li><li>数据库实体和来源片段</li><li>PDF 来源登记，等待版面提取</li></ul></article>
+          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg><use href="#icon-search" /></svg></div><div><span class="feature-state">浏览</span><h3>Wiki 工作台</h3><p>按书搜索、筛选并查看实体正文，让每条知识都能回到原始文件和具体位置。</p></div></article>
+          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg><use href="#icon-spark" /></svg></div><div><span class="feature-state">追问</span><h3>书籍问答</h3><p>先召回当前书籍的数据库证据，再由 DeepSeek Harness 生成带引用问答；点击 [S#] 直接定位证据。</p></div></article>
+          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg><use href="#icon-task" /></svg></div><div><span class="feature-state">研究</span><h3>研究任务</h3><p>创建可执行研究任务，显式运行、失败重试，并持久化报告、证据映射和 Agent 审计记录。</p></div></article>
+          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg><use href="#icon-code" /></svg></div><div><span class="feature-state">配置</span><h3>Wiki 配置</h3><p>管理 Runtime Profile、模型覆盖及每本书的 Purpose、Schema 与安全规则，模型密钥不写入知识库。</p></div></article>
         </div>
       </section>
 
@@ -244,7 +254,7 @@
 
       <section class="section-shell quick-start-section" id="quick-start">
         <div class="quick-start-layout" data-reveal-group>
-          <div class="quick-start-copy" data-reveal><span class="section-label">开始使用</span><h2>一个二进制，<br />启动整个工作台。</h2><p>从源码构建后，Vue 前端会嵌入 Rust 可执行文件。正式运行不再需要 Node.js，也不需要额外启动前端服务。</p><div class="requirements"><span><b>Node.js</b> 18+</span><span><b>Rust</b> 1.75+</span><span><b>Obsidian</b> 推荐</span></div></div>
+          <div class="quick-start-copy" data-reveal><span class="section-label">开始使用</span><h2>一个二进制，<br />启动整个工作台。</h2><p>从源码构建后，Vue 前端会嵌入 Rust 可执行文件。核心工作台无需单独运行 Node.js；启用默认 DeepSeek Harness 时需保留可用的 npm / npx。</p><div class="requirements"><span><b>Node.js</b> 18+ 构建</span><span><b>Rust</b> 1.75+</span><span><b>npm / npx</b> Harness</span></div></div>
           <div class="terminal-card" data-reveal>
             <div class="terminal-head"><div><i></i><i></i><i></i></div><span>安装 ObsidianBrain</span><button type="button" data-copy="#install-command"><svg><use href="#icon-copy" /></svg><span>复制</span></button></div>
             <pre id="install-command"><code><span class="command">git clone</span> https://github.com/TiercelChow/ObsidianBrain.git
@@ -255,10 +265,10 @@
           </div>
         </div>
         <div class="start-steps" data-reveal-group>
-          <article data-reveal><span class="step-number">1</span><div><h3>构建与安装</h3><p>运行 <code>make build</code> 构建前后端，再运行 <code>make install</code> 安装到系统路径。</p></div></article>
+          <article data-reveal><span class="step-number">1</span><div><h3>构建与安装</h3><p>运行 <code>make build</code> 构建前后端，再运行 <code>make install</code> 安装到当前用户的 <code>~/.local/bin</code>。</p></div></article>
           <article data-reveal><span class="step-number">2</span><div><h3>启动服务</h3><p>执行 <code>obsidian-brain start</code>，然后访问 <code>http://localhost:9876</code>。</p></div></article>
           <article data-reveal><span class="step-number">3</span><div><h3>连接 Obsidian</h3><p>安装 Obsidian Local REST API 插件，在控制面板填写 Vault 路径、服务地址和 API Key。</p></div></article>
-          <article data-reveal><span class="step-number">4</span><div><h3>配置 LLM</h3><p>选择 OpenAI 兼容服务或 Ollama，填写模型、API Key 与 Base URL，并执行连接验证。</p></div></article>
+          <article data-reveal><span class="step-number">4</span><div><h3>启用书籍问答</h3><p>提供 <code>DEEPSEEK_API_KEY</code>，在 Wiki 配置中保存并验证 DeepSeek Harness，再执行问答或研究任务。</p></div></article>
         </div>
       </section>
 
@@ -286,17 +296,17 @@
       </section>
 
       <section class="section-shell privacy-section" id="privacy">
-        <div class="section-heading centered" data-reveal><span class="section-label">本地与隐私</span><h2>你的知识，没有离开你的工作空间。</h2><p>官网只是静态介绍页；真正的 ObsidianBrain 运行在自己的设备上。</p></div>
+        <div class="section-heading centered" data-reveal><span class="section-label">本地与隐私</span><h2>原书在原处，知识库在本机。</h2><p>官网只是静态介绍页；真正的 ObsidianBrain、SQLite 数据库与来源文件都运行或保存在自己的设备上。</p></div>
         <div class="architecture" data-reveal data-reveal-sequence>
           <article><div class="architecture-icon browser-icon"><i></i><i></i><i></i></div><span>界面层</span><h3>浏览器</h3><p>访问本地 Web UI</p></article><i class="architecture-arrow">→</i>
           <article><div class="architecture-icon"><svg><use href="#icon-terminal" /></svg></div><span>执行层</span><h3>Rust 引擎</h3><p>默认端口 9876</p></article><i class="architecture-arrow">→</i>
-          <article><div class="architecture-icon"><svg><use href="#icon-wiki" /></svg></div><span>连接层</span><h3>Obsidian API</h3><p>本地 REST 插件</p></article><i class="architecture-arrow">→</i>
-          <article><div class="architecture-icon"><svg><use href="#icon-folder" /></svg></div><span>数据层</span><h3>你的 Vault</h3><p>Markdown 与附件</p></article>
+          <article><div class="architecture-icon"><svg><use href="#icon-wiki" /></svg></div><span>知识层</span><h3>本地 SQLite</h3><p>实体、引用与审计</p></article><i class="architecture-arrow">→</i>
+          <article><div class="architecture-icon"><svg><use href="#icon-folder" /></svg></div><span>来源层</span><h3>本地资料</h3><p>Vault、文集与 PDF</p></article>
         </div>
         <div class="privacy-grid" data-reveal-group>
-          <article data-reveal><svg><use href="#icon-shield" /></svg><div><h3>数据归你所有</h3><p>Vault 文件仍可被任何兼容 Markdown 的工具读取，不被锁定在专有云格式里。</p></div></article>
+          <article data-reveal><svg><use href="#icon-shield" /></svg><div><h3>数据归你所有</h3><p>原始资料保持原样；结构化知识、任务和运行审计集中保存在本机数据库中。</p></div></article>
           <article data-reveal><svg><use href="#icon-terminal" /></svg><div><h3>本地服务边界清晰</h3><p>可绑定 `127.0.0.1` 仅供本机使用，也可以主动开启局域网访问。</p></div></article>
-          <article data-reveal><svg><use href="#icon-spark" /></svg><div><h3>模型由你选择</h3><p>支持 OpenAI 兼容服务和 Ollama。只有你主动调用的内容会按照所选提供商配置发送。</p></div></article>
+          <article data-reveal><svg><use href="#icon-spark" /></svg><div><h3>Agent 权限受限</h3><p>书籍问答只把召回证据交给 DeepSeek Harness；安全 Patch 默认关闭文件、Shell、Web 与子 Agent 能力。</p></div></article>
         </div>
       </section>
 
@@ -305,11 +315,12 @@
           <div class="faq-heading" data-reveal><span class="section-label">常见问题</span><h2>开始之前，<br />你可能还想知道。</h2><p>如果问题没有列在这里，可以直接在 GitHub 提交 Issue。</p><a class="text-link" href="https://github.com/TiercelChow/ObsidianBrain/issues" target="_blank" rel="noreferrer">前往 Issues <svg><use href="#icon-arrow" /></svg></a></div>
           <div class="faq-list" data-reveal>
             <details><summary>这个 GitHub Pages 页面可以直接使用 ObsidianBrain 吗？<svg><use href="#icon-chevron" /></svg></summary><p>不可以。这里是完全静态的产品介绍和使用指南，不会连接你的本地数据。实际应用需要在自己的电脑上启动 `obsidian-brain` 后访问本地地址。</p></details>
-            <details><summary>必须安装 Obsidian 才能使用吗？<svg><use href="#icon-chevron" /></svg></summary><p>阅境轩可以直接阅读本地文件夹和 PDF；但笔记搜索、Wiki、时光机与 Vault 集成能力建议配合 Obsidian Local REST API 使用。</p></details>
+            <details><summary>必须安装 Obsidian 才能使用吗？<svg><use href="#icon-chevron" /></svg></summary><p>阅境轩、书籍知识库和任务中枢可以直接使用本地文件与 SQLite；时光机及 Vault 集成功能建议配合 Obsidian Local REST API 使用。</p></details>
             <details><summary>任务数据保存在哪里？<svg><use href="#icon-chevron" /></svg></summary><p>当前任务中枢以本地 SQLite 为唯一权威存储；阅读书架、配置和部分运行状态也保存在本机数据目录。Markdown 笔记与附件仍在你的 Vault 中。</p></details>
+            <details><summary>书籍知识库保存在哪里？<svg><use href="#icon-chevron" /></svg></summary><p>实体、来源片段、配置文档、研究报告和 Agent 审计均保存在 <code>~/.obsidian-brain/brain.db</code>。原始 Markdown 与 PDF 不会被改写。</p></details>
             <details><summary>如何进行局域网访问？<svg><use href="#icon-chevron" /></svg></summary><p>默认服务可绑定 `0.0.0.0:9876`，同一局域网设备访问 `http://你的IP:9876`。若只希望本机使用，可将 `server.host` 设置为 `127.0.0.1`。</p></details>
-            <details><summary>支持哪些 LLM？<svg><use href="#icon-chevron" /></svg></summary><p>支持 OpenAI 兼容接口与 Ollama。可以填写自定义 Base URL，因此也能连接实现兼容协议的第三方或本地服务。</p></details>
-            <details><summary>正式运行还需要 Node.js 吗？<svg><use href="#icon-chevron" /></svg></summary><p>不需要。Node.js 只在构建前端时使用；最终前端资源通过 `rust-embed` 嵌入 Rust 二进制，运行时只需要一个可执行文件。</p></details>
+            <details><summary>支持哪些 LLM？<svg><use href="#icon-chevron" /></svg></summary><p>通用 LLM 功能支持 OpenAI 兼容接口与 Ollama；书籍问答和研究任务当前通过 DeepSeek Harness 的 ACP 适配器执行，Runtime 边界允许后续替换。</p></details>
+            <details><summary>正式运行还需要 Node.js 吗？<svg><use href="#icon-chevron" /></svg></summary><p>阅境轩、时光机和任务中枢不需要。若使用默认的 DeepSeek Harness 启动命令，则需要系统中存在 npm / npx；前端仍已通过 <code>rust-embed</code> 嵌入 Rust 二进制。</p></details>
           </div>
         </div>
       </section>

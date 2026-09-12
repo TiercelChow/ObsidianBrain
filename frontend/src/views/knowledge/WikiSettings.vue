@@ -15,12 +15,19 @@
             <div class="runtime-title">
               <div class="runtime-logo">DS</div>
               <div><h3>{{ item.profile.name }}</h3><p>{{ item.profile.runtime === 'deepseek_harness' ? 'ACP stdio sidecar' : item.profile.runtime }}</p></div>
-              <span class="knowledge-status" :class="item.available ? 'is-healthy' : 'is-warning'">{{ item.available ? '可执行' : '未连接' }}</span>
+              <span class="knowledge-status" :class="runtimeVerification[item.profile.id] ? 'is-healthy' : (item.available ? '' : 'is-warning')">{{ runtimeVerification[item.profile.id] ? '连接已验证' : (item.available ? '启动器可用' : '不可用') }}</span>
             </div>
-            <div class="runtime-message">{{ item.message }}<span v-if="item.version"> · {{ item.version }}</span></div>
-            <label><span>可执行文件</span><el-input v-model="item.profile.executable" placeholder="deepseek-harness" /></label>
+            <div class="runtime-message" :class="{ 'is-verified': runtimeVerification[item.profile.id] }">{{ runtimeVerification[item.profile.id] || item.message }}<span v-if="item.version"> · {{ item.version }}</span></div>
+            <label><span>ACP 启动命令</span><el-input v-model="item.profile.executable" placeholder="npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp" /></label>
             <label><span>模型覆盖（可选）</span><el-input v-model="item.profile.model" placeholder="留空则使用 Harness 配置" /></label>
-            <div class="runtime-actions"><el-switch v-model="item.profile.enabled" active-text="启用" /><el-button type="primary" :loading="savingRuntime" @click="saveRuntime(item.profile)">保存并检测</el-button></div>
+            <p class="credential-hint">模型密钥由 Harness 管理，不保存在知识库数据库中。可通过 Harness Web 的 Models 页面配置，或在启动本应用前设置 <code>DEEPSEEK_API_KEY</code>。</p>
+            <div class="runtime-actions">
+              <el-switch v-model="item.profile.enabled" active-text="启用" />
+              <div>
+                <el-button :loading="verifyingRuntimeId === item.profile.id" :disabled="!item.profile.enabled || savingRuntime" @click="verifyRuntime(item.profile)">验证已保存配置</el-button>
+                <el-button type="primary" :loading="savingRuntime" @click="saveRuntime(item.profile)">保存</el-button>
+              </div>
+            </div>
           </article>
         </template>
 
@@ -60,6 +67,7 @@ import {
   listBookKnowledgeBases,
   saveAgentRuntimeProfile,
   saveBookWikiConfigDocument,
+  verifyAgentRuntime,
   type ConfigDocument,
   type KnowledgeBaseSummary,
   type RuntimeHealth,
@@ -74,6 +82,8 @@ const activeDocumentId = ref('')
 const runtimeHealth = ref<RuntimeHealth[]>([])
 const loading = ref(false)
 const savingRuntime = ref(false)
+const verifyingRuntimeId = ref('')
+const runtimeVerification = ref<Record<string, string>>({})
 const savingDocument = ref(false)
 const activeDocument = computed(() => documents.value.find(document => document.id === activeDocumentId.value))
 
@@ -111,12 +121,28 @@ async function saveRuntime(profile: RuntimeProfile) {
   try {
     const response = await saveAgentRuntimeProfile(profile)
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '运行配置保存失败')
+    delete runtimeVerification.value[profile.id]
     ElMessage.success('运行配置已保存')
     await loadSettings()
   } catch (error) {
     ElMessage.error((error as Error).message)
   } finally {
     savingRuntime.value = false
+  }
+}
+
+async function verifyRuntime(profile: RuntimeProfile) {
+  verifyingRuntimeId.value = profile.id
+  try {
+    const response = await verifyAgentRuntime(profile.id)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '连接验证失败')
+    runtimeVerification.value[profile.id] = response.result.message
+    ElMessage.success(response.result.message)
+  } catch (error) {
+    delete runtimeVerification.value[profile.id]
+    ElMessage.error((error as Error).message)
+  } finally {
+    verifyingRuntimeId.value = ''
   }
 }
 
@@ -164,9 +190,13 @@ onMounted(initialize)
 .runtime-title h3 { margin: 0; font-size: 16px; }
 .runtime-title p { color: var(--text-faint); font-size: 10px; }
 .runtime-message { padding: 9px 11px; border-radius: 10px; background: var(--bg-glass); color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; }
+.runtime-message.is-verified { background: color-mix(in srgb, #34c759 11%, transparent); color: #248a3d; }
 .runtime-card label { display: grid; gap: 6px; }
 .runtime-card label > span { color: var(--text-muted); font-size: 11px; }
+.credential-hint { color: var(--text-faint); font-size: 10px; line-height: 1.55; }
+.credential-hint code { color: var(--text-muted); font-family: var(--font-mono); }
 .runtime-actions { display: flex; align-items: center; justify-content: space-between; }
+.runtime-actions > div { display: flex; gap: 8px; }
 .document-editor { display: grid; gap: 12px; }
 .document-tabs { display: flex; gap: 6px; overflow-x: auto; }
 .document-tabs button { min-height: 38px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--border-faint); border-radius: 11px; background: transparent; color: var(--text-muted); font: inherit; font-size: 11px; white-space: nowrap; cursor: pointer; }
@@ -192,6 +222,8 @@ onMounted(initialize)
   .settings-section-head.split :deep(.el-select) { width: 100%; }
   .runtime-title { flex-wrap: wrap; }
   .runtime-title .knowledge-status { margin-left: 55px; }
+  .runtime-actions { align-items: stretch; flex-direction: column; gap: 12px; }
+  .runtime-actions > div { display: grid; grid-template-columns: 1fr 1fr; }
   .document-actions { align-items: stretch; flex-direction: column; }
   .skills-preview { grid-template-columns: 1fr; }
 }

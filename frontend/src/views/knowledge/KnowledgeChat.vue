@@ -12,7 +12,7 @@
         </div>
         <div class="runtime-state">
           <span class="knowledge-status" :class="runtimeReady ? 'is-healthy' : 'is-warning'">
-            {{ runtimeReady ? 'Harness 可用' : '证据检索模式' }}
+            {{ runtimeReady ? 'Harness 启动器可用' : '证据检索模式' }}
           </span>
           <p>{{ runtimeMessage }}</p>
         </div>
@@ -27,28 +27,41 @@
           <div v-if="!messages.length" class="chat-welcome">
             <div class="welcome-symbol"><el-icon><ChatDotRound /></el-icon></div>
             <h2>从这本书开始思考</h2>
-            <p>当前体验版已经接通数据库证据召回，并能从自然问题中提取检索词。生成式回答与自动引用会在 DeepSeek Harness ACP 适配器接入后开启。</p>
+            <p>问题会先在当前书籍的数据库实体中召回证据，再交给 DeepSeek Harness 生成带来源编号的回答。</p>
             <button v-for="question in starterQuestions" :key="question" @click="ask(question)">{{ question }}</button>
           </div>
           <template v-for="message in messages" :key="message.id">
             <div class="message" :class="message.role">
               <span class="message-role">{{ message.role === 'user' ? '你' : '知识库' }}</span>
-              <p>{{ message.content }}</p>
+              <p v-if="message.role === 'user'">{{ message.content }}</p>
+              <p v-else>
+                <template v-for="(segment, segmentIndex) in answerSegments(message)" :key="segmentIndex">
+                  <button
+                    v-if="segment.sourceIndex !== undefined"
+                    class="answer-citation"
+                    type="button"
+                    :aria-label="`定位来源 ${segment.sourceIndex + 1}`"
+                    @click="focusEvidence(message, segment.sourceIndex)"
+                  >{{ segment.text }}</button>
+                  <span v-else>{{ segment.text }}</span>
+                </template>
+              </p>
             </div>
             <div v-if="message.evidence?.length" class="evidence-grid">
               <button
-                v-for="entry in message.evidence"
+                v-for="(entry, evidenceIndex) in message.evidence"
                 :key="entry.id"
+                :id="evidenceId(message.id, evidenceIndex)"
                 @click="openEntry(entry)"
               >
-                <span>{{ entry.source_path || '数据库实体' }}</span>
+                <span><b>S{{ evidenceIndex + 1 }}</b>{{ entry.source_path || '数据库实体' }}</span>
                 <strong>{{ entry.title }}</strong>
                 <p>{{ entry.summary || '打开查看完整正文' }}</p>
                 <em>查看来源 <el-icon><ArrowRight /></el-icon></em>
               </button>
             </div>
           </template>
-          <div v-if="searching" class="searching-bubble"><i></i><i></i><i></i><span>正在检索书内证据</span></div>
+          <div v-if="searching" class="searching-bubble"><i></i><i></i><i></i><span>{{ runtimeReady ? '正在检索证据并调用 Harness' : '正在检索书内证据' }}</span></div>
         </div>
 
         <form class="chat-composer" @submit.prevent="ask(draft)">
@@ -68,7 +81,9 @@ import { ElMessage } from 'element-plus'
 import { ArrowRight, ChatDotRound, Lock, Top } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
+import { parseKnowledgeCitations } from '@/utils/knowledgeCitations'
 import {
+  askBookKnowledge,
   getBookWikiSettings,
   listBookKnowledgeBases,
   listKnowledgeEntries,
@@ -91,7 +106,7 @@ const draft = ref('')
 const messages = ref<ChatMessage[]>([])
 const searching = ref(false)
 const runtimeReady = ref(false)
-const runtimeMessage = ref('DeepSeek Harness 尚未连接；当前只返回真实命中的书内证据，不生成答案。')
+const runtimeMessage = ref('DeepSeek Harness 尚未连接；当前只返回真实命中的书内证据。')
 const messageListRef = ref<HTMLElement | null>(null)
 let messageId = 0
 
@@ -111,7 +126,9 @@ async function loadContext() {
     const runtime = settingsResponse.result?.runtime_profiles.find(item => item.profile.runtime === 'deepseek_harness')
     runtimeReady.value = Boolean(runtime?.available)
     if (runtime?.available) {
-      runtimeMessage.value = `${runtime.version || 'DeepSeek Harness'} 已检测到；ACP 对话适配器将在下一阶段接入。当前仍使用证据检索模式。`
+      runtimeMessage.value = `${runtime.version || '本地启动器'} 可用；ACP 会话与模型凭据将在问答时验证。`
+    } else if (runtime) {
+      runtimeMessage.value = runtime.message
     }
   } catch (error) {
     ElMessage.error((error as Error).message)
@@ -131,6 +148,17 @@ async function ask(question: string) {
   searching.value = true
   await scrollToBottom()
   try {
+    if (runtimeReady.value) {
+      const response = await askBookKnowledge(activeBaseId.value, value)
+      if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || 'Harness 回答失败')
+      messages.value.push({
+        id: ++messageId,
+        role: 'assistant',
+        content: response.result.answer,
+        evidence: response.result.evidence,
+      })
+      return
+    }
     const response = await listKnowledgeEntries(activeBaseId.value, { query: value, limit: 6 })
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '检索失败')
     const evidence = response.result.entries
@@ -138,12 +166,32 @@ async function ask(question: string) {
       id: ++messageId,
       role: 'assistant',
       content: evidence.length
-        ? `在《${activeBase.value?.book_name || '当前书籍'}》中找到 ${evidence.length} 条相关证据。体验版暂不拼接生成式答案，你可以直接打开下方来源核对原文。`
+        ? `在《${activeBase.value?.book_name || '当前书籍'}》中找到 ${evidence.length} 条相关证据。当前未检测到 Harness，你可以直接打开下方来源核对原文。`
         : '当前书籍知识库中没有找到足够相关的证据。可以换一个关键词，或先返回知识库页面同步来源。',
       evidence,
     })
   } catch (error) {
-    messages.value.push({ id: ++messageId, role: 'assistant', content: `检索失败：${(error as Error).message}` })
+    const detail = (error as Error).message
+    if (runtimeReady.value) {
+      runtimeReady.value = false
+      runtimeMessage.value = 'Harness 本次调用失败，本次会话已切换为书内证据检索模式。'
+      try {
+        const response = await listKnowledgeEntries(activeBaseId.value, { query: value, limit: 6 })
+        const evidence = response.status === 'success' && response.result ? response.result.entries : []
+        messages.value.push({
+          id: ++messageId,
+          role: 'assistant',
+          content: evidence.length
+            ? `Harness 暂时不可用：${detail}\n\n已保留 ${evidence.length} 条真实命中的书内证据，你仍可打开下方来源核对。`
+            : `Harness 暂时不可用：${detail}\n\n当前书籍也没有召回足够相关的证据。`,
+          evidence,
+        })
+      } catch {
+        messages.value.push({ id: ++messageId, role: 'assistant', content: `Harness 调用失败：${detail}` })
+      }
+    } else {
+      messages.value.push({ id: ++messageId, role: 'assistant', content: `检索失败：${detail}` })
+    }
   } finally {
     searching.value = false
     await scrollToBottom()
@@ -152,6 +200,23 @@ async function ask(question: string) {
 
 function openEntry(entry: KnowledgeEntrySummary) {
   router.push({ path: '/knowledge/wiki', query: { base: activeBaseId.value, entry: entry.id } })
+}
+
+function answerSegments(message: ChatMessage) {
+  return parseKnowledgeCitations(message.content, message.evidence?.length ?? 0)
+}
+
+function evidenceId(messageId: number, sourceIndex: number) {
+  return `chat-evidence-${messageId}-${sourceIndex}`
+}
+
+function focusEvidence(message: ChatMessage, sourceIndex: number) {
+  const element = document.getElementById(evidenceId(message.id, sourceIndex))
+  if (!element) return
+  element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  element.classList.remove('is-citation-focus')
+  requestAnimationFrame(() => element.classList.add('is-citation-focus'))
+  window.setTimeout(() => element.classList.remove('is-citation-focus'), 1400)
 }
 
 async function scrollToBottom() {
@@ -185,12 +250,16 @@ onMounted(loadContext)
 .message { max-width: 78%; display: grid; gap: 5px; margin-bottom: 16px; }
 .message.user { margin-left: auto; justify-items: end; }
 .message-role { color: var(--text-faint); font-size: 10px; }
-.message p { padding: 11px 14px; border-radius: 16px 16px 16px 5px; background: var(--bg-glass-subtle); color: var(--text-secondary); font-size: 13px; line-height: 1.65; }
+.message p { padding: 11px 14px; border-radius: 16px 16px 16px 5px; background: var(--bg-glass-subtle); color: var(--text-secondary); font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
 .message.user p { border-radius: 16px 16px 5px 16px; background: var(--accent); color: white; }
+.answer-citation { display: inline-flex; align-items: center; margin: 0 2px; padding: 1px 5px; border: 0; border-radius: 6px; background: var(--accent-light); color: var(--accent); font: inherit; font-size: 11px; font-weight: 720; line-height: 1.5; vertical-align: .08em; cursor: pointer; }
+.answer-citation:hover { box-shadow: inset 0 0 0 1px var(--accent-border); }
 .evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: -6px 0 22px; }
 .evidence-grid button { min-width: 0; display: grid; gap: 5px; padding: 13px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); color: var(--text-primary); text-align: left; cursor: pointer; transition: var(--transition-interactive); }
 .evidence-grid button:hover { border-color: var(--accent-border); transform: translateY(-1px); }
+.evidence-grid button.is-citation-focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light), var(--shadow-sm); animation: evidence-focus 700ms var(--ease-spring-gentle); }
 .evidence-grid span { overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.evidence-grid span b { display: inline-flex; margin-right: 7px; padding: 2px 5px; border-radius: 5px; background: var(--accent-light); color: var(--accent); font-size: 9px; }
 .evidence-grid strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .evidence-grid p { display: -webkit-box; overflow: hidden; color: var(--text-muted); font-size: 11px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .evidence-grid em { display: flex; align-items: center; gap: 3px; margin-top: 3px; color: var(--accent); font-size: 10px; font-style: normal; }
@@ -203,6 +272,7 @@ onMounted(loadContext)
 .chat-composer button { width: 38px; height: 38px; display: grid; place-items: center; flex: none; border: 0; border-radius: 12px; background: var(--accent); color: white; cursor: pointer; }
 .chat-composer button:disabled { opacity: .35; cursor: default; }
 @keyframes bubble { to { transform: translateY(-4px); opacity: .45; } }
+@keyframes evidence-focus { 50% { transform: scale(1.012); } }
 @media (max-width: 768px) {
   .chat-layout { min-height: 0; display: block; }
   .chat-context { margin-bottom: 10px; padding: 13px; }

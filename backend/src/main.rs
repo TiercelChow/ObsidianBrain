@@ -26,6 +26,7 @@ use crate::core::tasks::TaskService;
 use crate::core::timeline::store::TimelineStore;
 use crate::core::timeline::{MemoManager, TimelineConfig, TimelineService};
 use crate::infra::book_wiki_store::BookWikiStore;
+use crate::infra::deepseek_harness::DeepSeekHarnessRuntime;
 use crate::infra::obsidian_client::{new_provider, ObsidianClient};
 use crate::infra::sqlite_store::SqliteStore;
 use crate::infra::task_index_store::SqliteTaskIndexStore;
@@ -380,7 +381,10 @@ async fn run_server_async(
     let task_service = Arc::new(TaskService::new(Arc::new(SqliteTaskIndexStore::new(
         db.clone(),
     ))));
-    let book_wiki_service = Arc::new(BookWikiService::new(BookWikiStore::new(db.clone())));
+    let book_wiki_service = Arc::new(BookWikiService::new(
+        BookWikiStore::new(db.clone()),
+        Arc::new(DeepSeekHarnessRuntime::default()),
+    ));
 
     let llm: Arc<dyn crate::infra::llm_client::LlmProvider> =
         crate::infra::llm_client::LlmClientFactory::create(&config.llm)
@@ -657,7 +661,10 @@ mod test_helpers {
             let task_service = Arc::new(TaskService::new(Arc::new(SqliteTaskIndexStore::new(
                 db.clone(),
             ))));
-            let book_wiki_service = Arc::new(BookWikiService::new(BookWikiStore::new(db.clone())));
+            let book_wiki_service = Arc::new(BookWikiService::new(
+                BookWikiStore::new(db.clone()),
+                Arc::new(DeepSeekHarnessRuntime::default()),
+            ));
 
             let llm_config = crate::config::LlmConfig::default();
             let llm: Arc<dyn crate::infra::llm_client::LlmProvider> = Arc::from(

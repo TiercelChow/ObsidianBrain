@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -157,4 +158,41 @@ pub struct RuntimeHealth {
     pub available: bool,
     pub version: Option<String>,
     pub message: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct RuntimeVerification {
+    pub profile_id: String,
+    pub available: bool,
+    pub message: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeAnswer {
+    pub run_id: String,
+    pub answer: String,
+    pub runtime: String,
+    pub evidence: Vec<KnowledgeEntrySummary>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeTaskExecution {
+    pub task: KnowledgeTask,
+    pub run_id: String,
+    pub evidence: Vec<KnowledgeEntrySummary>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct AgentRun {
+    pub id: String,
+    pub knowledge_base_id: Option<String>,
+    pub runtime: String,
+    pub task_type: String,
+    pub status: String,
+    pub input: Value,
+    pub output: Option<Value>,
+    pub error: Option<String>,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub created_at: String,
 }

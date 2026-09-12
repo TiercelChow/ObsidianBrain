@@ -15,7 +15,7 @@ test('product site contains the complete introduction and onboarding journey', a
     assert.match(html, new RegExp(`id=["']${id}["']`), `missing #${id}`)
   }
 
-  for (const moduleName of ['阅境轩', '时光机', '任务中枢', 'Wiki 工作台', '知识库', '代码仓', '灵感熔炉', '智识雷达']) {
+  for (const moduleName of ['阅境轩', '时光机', '任务中枢', '书籍知识库', 'Wiki 工作台', '书籍问答', '研究任务', 'Wiki 配置']) {
     assert.match(html, new RegExp(moduleName), `missing ${moduleName}`)
   }
 })
@@ -23,9 +23,20 @@ test('product site contains the complete introduction and onboarding journey', a
 test('product site describes installation, configuration and module usage', async () => {
   const html = `${await read('index.html')}\n${await read('manual/index.html')}`
 
-  for (const phrase of ['make build', 'obsidian-brain start', 'Obsidian Local REST API', '配置 LLM', '局域网访问']) {
+  for (const phrase of ['make build', 'obsidian-brain start', 'Obsidian Local REST API', 'DeepSeek Harness', 'DEEPSEEK_API_KEY', '局域网访问']) {
     assert.match(html, new RegExp(phrase), `missing usage phrase: ${phrase}`)
   }
+})
+
+test('product site describes the database-native Book Wiki workflow and current limits', async () => {
+  const html = await read('index.html')
+
+  for (const phrase of ['每本书一个独立知识库', '结构化实体', '带引用问答', '可执行研究任务', 'SQLite']) {
+    assert.match(html, new RegExp(phrase), `missing Book Wiki phrase: ${phrase}`)
+  }
+
+  assert.match(html, /PDF[^。]*等待版面提取/)
+  assert.doesNotMatch(html, /观察领域分布、孤岛、枢纽、尘封和新生内容/)
 })
 
 test('site assets use repository-relative paths and never call the local API', async () => {

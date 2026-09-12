@@ -102,6 +102,25 @@ export interface RuntimeHealth {
   message: string
 }
 
+export interface RuntimeVerification {
+  profile_id: string
+  available: boolean
+  message: string
+}
+
+export interface KnowledgeAnswer {
+  run_id: string
+  answer: string
+  runtime: 'deepseek_harness'
+  evidence: KnowledgeEntrySummary[]
+}
+
+export interface KnowledgeTaskExecution {
+  task: KnowledgeTask
+  run_id: string
+  evidence: KnowledgeEntrySummary[]
+}
+
 export function listBookKnowledgeBases() {
   return callTool('list_book_knowledge_bases') as unknown as Promise<
     ToolEnvelope<{ items: BookKnowledgeCard[] }>
@@ -145,6 +164,13 @@ export function getKnowledgeEntry(entryId: string) {
   >
 }
 
+export function askBookKnowledge(knowledgeBaseId: string, question: string) {
+  return callTool('ask_book_knowledge', {
+    knowledge_base_id: knowledgeBaseId,
+    question,
+  }, { timeout: 190_000 }) as unknown as Promise<ToolEnvelope<KnowledgeAnswer>>
+}
+
 export function listKnowledgeTasks(knowledgeBaseId?: string) {
   return callTool('list_knowledge_tasks', {
     ...(knowledgeBaseId ? { knowledge_base_id: knowledgeBaseId } : {}),
@@ -163,6 +189,18 @@ export function createKnowledgeTask(input: {
     description: input.description ?? '',
     task_type: input.taskType ?? 'research',
   }) as unknown as Promise<ToolEnvelope<KnowledgeTask>>
+}
+
+export function executeKnowledgeTask(taskId: string) {
+  return callTool('execute_knowledge_task', {
+    task_id: taskId,
+  }, { timeout: 190_000 }) as unknown as Promise<ToolEnvelope<KnowledgeTaskExecution>>
+}
+
+export function getKnowledgeTaskResult(taskId: string) {
+  return callTool('get_knowledge_task_result', {
+    task_id: taskId,
+  }) as unknown as Promise<ToolEnvelope<KnowledgeTaskExecution>>
 }
 
 export function getBookWikiSettings(knowledgeBaseId?: string) {
@@ -189,4 +227,11 @@ export function saveAgentRuntimeProfile(profile: RuntimeProfile) {
     enabled: profile.enabled,
     expected_revision: profile.revision,
   }) as unknown as Promise<ToolEnvelope<RuntimeProfile>>
+}
+
+
+export function verifyAgentRuntime(profileId: string) {
+  return callTool('verify_agent_runtime', {
+    profile_id: profileId,
+  }, { timeout: 190_000 }) as unknown as Promise<ToolEnvelope<RuntimeVerification>>
 }

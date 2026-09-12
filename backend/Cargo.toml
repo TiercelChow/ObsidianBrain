@@ -25,6 +25,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 tantivy = "0.22"
 async-trait = "0.1"
 futures = "0.3"
+agent-client-protocol = "2.1.0"
+shell-words = "1"
+tempfile = "3"
 
 pulldown-cmark = "0.10"
 gray_matter = "0.2"
@@ -43,9 +46,6 @@ mime_guess = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-
-[dev-dependencies]
-tempfile = "3"
 
 [profile.release]
 opt-level = 3

@@ -7,7 +7,7 @@ use rusqlite::{params, OptionalExtension};
 use crate::error::BrainError;
 use crate::infra::sqlite_store::SqliteStore;
 use crate::models::book_wiki::{
-    BookKind, BookKnowledgeCard, ConfigDocument, KnowledgeBaseSummary, KnowledgeCitation,
+    AgentRun, BookKind, BookKnowledgeCard, ConfigDocument, KnowledgeBaseSummary, KnowledgeCitation,
     KnowledgeEntryDetail, KnowledgeEntrySummary, KnowledgeTask, ReaderBook, RuntimeProfile,
 };
 
@@ -747,9 +747,21 @@ impl BookWikiStore {
         description: &str,
         task_type: &str,
     ) -> Result<KnowledgeTask, BrainError> {
-        if title.trim().is_empty() {
+        let title = title.trim();
+        let description = description.trim();
+        if title.is_empty() {
             return Err(BrainError::KnowledgeValidation(
                 "研究任务标题不能为空".to_string(),
+            ));
+        }
+        if title.chars().count() > 200 {
+            return Err(BrainError::KnowledgeValidation(
+                "研究任务标题不能超过 200 个字符".to_string(),
+            ));
+        }
+        if description.chars().count() > 4_000 {
+            return Err(BrainError::KnowledgeValidation(
+                "研究任务说明不能超过 4000 个字符".to_string(),
             ));
         }
         if !matches!(task_type, "research" | "refresh" | "review") {
@@ -765,7 +777,7 @@ impl BookWikiStore {
                 "INSERT INTO knowledge_tasks
                  (id, knowledge_base_id, title, description, task_type, status, created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, 'draft', ?6, ?6)",
-                params![id, base_id, title.trim(), description.trim(), task_type, now],
+                params![id, base_id, title, description, task_type, now],
             )?;
             Ok(())
         })?;
@@ -773,6 +785,106 @@ impl BookWikiStore {
             .into_iter()
             .find(|task| task.id == id)
             .ok_or(BrainError::KnowledgeNotFound(id))
+    }
+
+    pub fn get_task(&self, task_id: &str) -> Result<KnowledgeTask, BrainError> {
+        self.db.with_connection(|conn| {
+            conn.query_row(
+                "SELECT kt.id, kt.knowledge_base_id, b.name, kt.title, kt.description,
+                        kt.task_type, kt.status, kt.result_summary, kt.created_at, kt.updated_at
+                 FROM knowledge_tasks kt
+                 JOIN knowledge_bases kb ON kb.id = kt.knowledge_base_id
+                 JOIN reader_books b ON b.id = kb.book_id
+                 WHERE kt.id = ?1",
+                params![task_id],
+                |row| {
+                    Ok(KnowledgeTask {
+                        id: row.get(0)?,
+                        knowledge_base_id: row.get(1)?,
+                        book_name: row.get(2)?,
+                        title: row.get(3)?,
+                        description: row.get(4)?,
+                        task_type: row.get(5)?,
+                        status: row.get(6)?,
+                        result_summary: row.get(7)?,
+                        created_at: row.get(8)?,
+                        updated_at: row.get(9)?,
+                    })
+                },
+            )
+            .optional()?
+            .ok_or_else(|| BrainError::KnowledgeNotFound(task_id.to_string()))
+        })
+    }
+
+    pub fn start_task_execution(&self, task_id: &str) -> Result<KnowledgeTask, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        let updated = self.db.with_connection(|conn| {
+            Ok(conn.execute(
+                "UPDATE knowledge_tasks
+                 SET status = 'running', result_summary = '', updated_at = ?2
+                 WHERE id = ?1
+                   AND (
+                       status IN ('draft', 'failed', 'completed')
+                       OR (
+                           status = 'running'
+                           AND julianday(updated_at) < julianday(?2, '-10 minutes')
+                       )
+                   )",
+                params![task_id, now],
+            )?)
+        })?;
+        if updated == 0 {
+            self.get_task(task_id)?;
+            return Err(BrainError::KnowledgeValidation(
+                "任务正在执行或当前状态不允许重新运行".to_string(),
+            ));
+        }
+        self.get_task(task_id)
+    }
+
+    pub fn complete_task_execution(
+        &self,
+        task_id: &str,
+        result_summary: &str,
+    ) -> Result<KnowledgeTask, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        let updated = self.db.with_connection(|conn| {
+            Ok(conn.execute(
+                "UPDATE knowledge_tasks
+                 SET status = 'completed', result_summary = ?2, updated_at = ?3
+                 WHERE id = ?1 AND status = 'running'",
+                params![task_id, result_summary.trim(), now],
+            )?)
+        })?;
+        if updated == 0 {
+            return Err(BrainError::KnowledgeValidation(
+                "任务不存在或已经结束".to_string(),
+            ));
+        }
+        self.get_task(task_id)
+    }
+
+    pub fn fail_task_execution(
+        &self,
+        task_id: &str,
+        error: &str,
+    ) -> Result<KnowledgeTask, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        let updated = self.db.with_connection(|conn| {
+            Ok(conn.execute(
+                "UPDATE knowledge_tasks
+                 SET status = 'failed', result_summary = ?2, updated_at = ?3
+                 WHERE id = ?1 AND status = 'running'",
+                params![task_id, error.trim(), now],
+            )?)
+        })?;
+        if updated == 0 {
+            return Err(BrainError::KnowledgeValidation(
+                "任务不存在或已经结束".to_string(),
+            ));
+        }
+        self.get_task(task_id)
     }
 
     pub fn list_config_documents(
@@ -904,6 +1016,142 @@ impl BookWikiStore {
             .into_iter()
             .find(|profile| profile.id == profile_id)
             .ok_or_else(|| BrainError::KnowledgeNotFound(profile_id.to_string()))
+    }
+
+    pub fn start_agent_run(
+        &self,
+        base_id: &str,
+        runtime: &str,
+        task_type: &str,
+        input: &serde_json::Value,
+    ) -> Result<AgentRun, BrainError> {
+        self.get_base(base_id)?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        let input_json = serde_json::to_string(input)
+            .map_err(|error| BrainError::Internal(format!("Agent 输入序列化失败: {error}")))?;
+        self.db.with_connection(|conn| {
+            conn.execute(
+                "INSERT INTO agent_runs
+                 (id, knowledge_base_id, runtime, task_type, status, input_json,
+                  started_at, created_at)
+                 VALUES (?1, ?2, ?3, ?4, 'running', ?5, ?6, ?6)",
+                params![id, base_id, runtime, task_type, input_json, now],
+            )?;
+            Ok(())
+        })?;
+        self.get_agent_run(&id)
+    }
+
+    pub fn complete_agent_run(
+        &self,
+        run_id: &str,
+        output: &serde_json::Value,
+    ) -> Result<AgentRun, BrainError> {
+        let output_json = serde_json::to_string(output)
+            .map_err(|error| BrainError::Internal(format!("Agent 输出序列化失败: {error}")))?;
+        let now = Utc::now().to_rfc3339();
+        let updated = self.db.with_connection(|conn| {
+            Ok(conn.execute(
+                "UPDATE agent_runs
+                 SET status = 'completed', output_json = ?2, error = NULL, finished_at = ?3
+                 WHERE id = ?1 AND status = 'running'",
+                params![run_id, output_json, now],
+            )?)
+        })?;
+        if updated == 0 {
+            return Err(BrainError::KnowledgeValidation(
+                "Agent 运行不存在或已结束".to_string(),
+            ));
+        }
+        self.get_agent_run(run_id)
+    }
+
+    pub fn fail_agent_run(&self, run_id: &str, error: &str) -> Result<AgentRun, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        let updated = self.db.with_connection(|conn| {
+            Ok(conn.execute(
+                "UPDATE agent_runs
+                 SET status = 'failed', error = ?2, finished_at = ?3
+                 WHERE id = ?1 AND status = 'running'",
+                params![run_id, error, now],
+            )?)
+        })?;
+        if updated == 0 {
+            return Err(BrainError::KnowledgeValidation(
+                "Agent 运行不存在或已结束".to_string(),
+            ));
+        }
+        self.get_agent_run(run_id)
+    }
+
+    pub fn get_agent_run(&self, run_id: &str) -> Result<AgentRun, BrainError> {
+        let raw = self.db.with_connection(|conn| {
+            conn.query_row(
+                "SELECT id, knowledge_base_id, runtime, task_type, status, input_json,
+                        output_json, error, started_at, finished_at, created_at
+                 FROM agent_runs WHERE id = ?1",
+                params![run_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, String>(10)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+        })?;
+        let raw = raw.ok_or_else(|| BrainError::KnowledgeNotFound(run_id.to_string()))?;
+        Ok(AgentRun {
+            id: raw.0,
+            knowledge_base_id: raw.1,
+            runtime: raw.2,
+            task_type: raw.3,
+            status: raw.4,
+            input: serde_json::from_str(&raw.5)
+                .map_err(|error| BrainError::Internal(format!("Agent 输入解析失败: {error}")))?,
+            output: raw
+                .6
+                .map(|value| serde_json::from_str(&value))
+                .transpose()
+                .map_err(|error| BrainError::Internal(format!("Agent 输出解析失败: {error}")))?,
+            error: raw.7,
+            started_at: raw.8,
+            finished_at: raw.9,
+            created_at: raw.10,
+        })
+    }
+
+    pub fn get_latest_completed_task_run(
+        &self,
+        task_id: &str,
+    ) -> Result<Option<AgentRun>, BrainError> {
+        let run_id = self.db.with_connection(|conn| {
+            conn.query_row(
+                "SELECT id
+                 FROM agent_runs
+                 WHERE status = 'completed'
+                   AND task_type LIKE 'knowledge_task_%'
+                   AND json_extract(input_json, '$.knowledge_task_id') = ?1
+                 ORDER BY finished_at DESC, created_at DESC
+                 LIMIT 1",
+                params![task_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(Into::into)
+        })?;
+        run_id.map(|run_id| self.get_agent_run(&run_id)).transpose()
     }
 }
 
@@ -1185,5 +1433,140 @@ mod tests {
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].title, "核心架构");
+    }
+
+    #[test]
+    fn test_agent_run_records_completed_output() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-agent", "/tmp/book-agent")])
+            .unwrap();
+        let base = store.initialize_base("book-agent").unwrap();
+
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({"question": "核心主题是什么？"}),
+            )
+            .unwrap();
+        assert_eq!(run.status, "running");
+
+        let completed = store
+            .complete_agent_run(&run.id, &serde_json::json!({"answer": "测试回答"}))
+            .unwrap();
+        assert_eq!(completed.status, "completed");
+        assert_eq!(completed.output.unwrap()["answer"], "测试回答");
+        assert!(completed.finished_at.is_some());
+    }
+
+    #[test]
+    fn test_agent_run_records_failure_message() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-agent", "/tmp/book-agent-fail")])
+            .unwrap();
+        let base = store.initialize_base("book-agent").unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+
+        let failed = store.fail_agent_run(&run.id, "认证失败").unwrap();
+        assert_eq!(failed.status, "failed");
+        assert_eq!(failed.error.as_deref(), Some("认证失败"));
+    }
+
+    #[test]
+    fn test_knowledge_task_execution_lifecycle_persists_result() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-task", "/tmp/book-task")])
+            .unwrap();
+        let base = store.initialize_base("book-task").unwrap();
+        let task = store
+            .create_task(&base.id, "梳理核心观点", "输出证据化摘要", "research")
+            .unwrap();
+
+        let running = store.start_task_execution(&task.id).unwrap();
+        assert_eq!(running.status, "running");
+
+        let completed = store
+            .complete_task_execution(&task.id, "核心观点已经完成梳理。[S1]")
+            .unwrap();
+        assert_eq!(completed.status, "completed");
+        assert_eq!(completed.result_summary, "核心观点已经完成梳理。[S1]");
+        assert_eq!(store.get_task(&task.id).unwrap(), completed);
+    }
+
+    #[test]
+    fn test_knowledge_task_can_retry_after_failure() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-retry", "/tmp/book-retry")])
+            .unwrap();
+        let base = store.initialize_base("book-retry").unwrap();
+        let task = store
+            .create_task(&base.id, "核验事实", "", "review")
+            .unwrap();
+
+        store.start_task_execution(&task.id).unwrap();
+        let failed = store
+            .fail_task_execution(&task.id, "执行失败：凭据未配置")
+            .unwrap();
+        assert_eq!(failed.status, "failed");
+        assert!(failed.result_summary.contains("凭据未配置"));
+
+        let retried = store.start_task_execution(&task.id).unwrap();
+        assert_eq!(retried.status, "running");
+        assert!(retried.result_summary.is_empty());
+    }
+
+    #[test]
+    fn test_create_knowledge_task_rejects_oversized_prompt_fields() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-limits", "/tmp/book-limits")])
+            .unwrap();
+        let base = store.initialize_base("book-limits").unwrap();
+
+        let error = store
+            .create_task(&base.id, &"标题".repeat(101), "", "research")
+            .unwrap_err();
+
+        assert!(error.to_string().contains("200"));
+    }
+
+    #[test]
+    fn test_stale_running_knowledge_task_can_recover_after_interruption() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-stale", "/tmp/book-stale")])
+            .unwrap();
+        let base = store.initialize_base("book-stale").unwrap();
+        let task = store
+            .create_task(&base.id, "恢复任务", "", "research")
+            .unwrap();
+        store.start_task_execution(&task.id).unwrap();
+        store
+            .db
+            .with_connection(|conn| {
+                conn.execute(
+                    "UPDATE knowledge_tasks SET updated_at = '2020-01-01T00:00:00Z' WHERE id = ?1",
+                    params![task.id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(
+            store.start_task_execution(&task.id).unwrap().status,
+            "running"
+        );
     }
 }

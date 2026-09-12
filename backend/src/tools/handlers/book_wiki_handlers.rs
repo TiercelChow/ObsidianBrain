@@ -1,11 +1,10 @@
-use std::process::Command;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use crate::error::BrainError;
-use crate::models::book_wiki::RuntimeHealth;
+use crate::infra::deepseek_harness::inspect_runtime_profiles;
 use crate::tools::traits::ToolHandler;
 use crate::AppContext;
 
@@ -219,6 +218,47 @@ impl ToolHandler for GetKnowledgeEntryHandler {
     }
 }
 
+pub struct AskBookKnowledgeHandler;
+
+#[async_trait]
+impl ToolHandler for AskBookKnowledgeHandler {
+    fn name(&self) -> &str {
+        "ask_book_knowledge"
+    }
+
+    fn description(&self) -> &str {
+        "检索当前书籍的数据库证据，并通过 DeepSeek Harness ACP 生成带来源编号的回答"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": { "type": "string" },
+                "question": { "type": "string", "minLength": 1, "maxLength": 2000 }
+            },
+            "required": ["knowledge_base_id", "question"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let result = ctx
+            .book_wiki_service
+            .ask(
+                required_string(&args, "knowledge_base_id")?,
+                required_string(&args, "question")?,
+            )
+            .await?;
+        serde_json::to_value(result)
+            .map_err(|error| BrainError::Internal(format!("结果序列化失败: {error}")))
+    }
+}
+
 pub struct ListKnowledgeTasksHandler;
 
 #[async_trait]
@@ -262,7 +302,7 @@ impl ToolHandler for CreateKnowledgeTaskHandler {
     }
 
     fn description(&self) -> &str {
-        "创建一项书籍研究任务；在 Harness 可用前保持草稿状态"
+        "创建一项书籍研究任务，等待用户确认后通过 Harness 执行"
     }
 
     fn input_schema(&self) -> Value {
@@ -270,8 +310,8 @@ impl ToolHandler for CreateKnowledgeTaskHandler {
             "type": "object",
             "properties": {
                 "knowledge_base_id": { "type": "string" },
-                "title": { "type": "string", "minLength": 1 },
-                "description": { "type": "string", "default": "" },
+                "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "description": { "type": "string", "maxLength": 4000, "default": "" },
                 "task_type": {
                     "type": "string",
                     "enum": ["research", "refresh", "review"],
@@ -299,6 +339,65 @@ impl ToolHandler for CreateKnowledgeTaskHandler {
                 .unwrap_or("research"),
         )?;
         serde_json::to_value(task)
+            .map_err(|error| BrainError::Internal(format!("结果序列化失败: {error}")))
+    }
+}
+
+pub struct GetKnowledgeTaskResultHandler;
+
+#[async_trait]
+impl ToolHandler for GetKnowledgeTaskResultHandler {
+    fn name(&self) -> &str {
+        "get_knowledge_task_result"
+    }
+
+    fn description(&self) -> &str {
+        "读取已完成研究任务的报告、运行记录与当前仍可访问的来源证据"
+    }
+
+    fn input_schema(&self) -> Value {
+        required_id_schema("task_id")
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(
+            ctx.book_wiki_service
+                .get_task_result(required_string(&args, "task_id")?)?,
+        )
+        .map_err(|error| BrainError::Internal(format!("结果序列化失败: {error}")))
+    }
+}
+
+pub struct ExecuteKnowledgeTaskHandler;
+
+#[async_trait]
+impl ToolHandler for ExecuteKnowledgeTaskHandler {
+    fn name(&self) -> &str {
+        "execute_knowledge_task"
+    }
+
+    fn description(&self) -> &str {
+        "使用当前书籍的数据库证据执行研究任务，并保存带引用的结果"
+    }
+
+    fn input_schema(&self) -> Value {
+        required_id_schema("task_id")
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let result = ctx
+            .book_wiki_service
+            .execute_task(required_string(&args, "task_id")?)
+            .await?;
+        serde_json::to_value(result)
             .map_err(|error| BrainError::Internal(format!("结果序列化失败: {error}")))
     }
 }
@@ -436,51 +535,34 @@ impl ToolHandler for SaveAgentRuntimeProfileHandler {
     }
 }
 
-fn inspect_runtime_profiles(
-    profiles: Vec<crate::models::book_wiki::RuntimeProfile>,
-) -> Vec<RuntimeHealth> {
-    profiles
-        .into_iter()
-        .map(|profile| {
-            if !profile.enabled {
-                return RuntimeHealth {
-                    profile,
-                    available: false,
-                    version: None,
-                    message: "运行时已停用".to_string(),
-                };
-            }
-            match Command::new(&profile.executable).arg("--version").output() {
-                Ok(output) if output.status.success() => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    let version = stdout
-                        .lines()
-                        .chain(stderr.lines())
-                        .find(|line| !line.trim().is_empty())
-                        .map(|line| line.trim().to_string());
-                    RuntimeHealth {
-                        profile,
-                        available: true,
-                        version,
-                        message: "运行时可用".to_string(),
-                    }
-                }
-                Ok(output) => RuntimeHealth {
-                    profile,
-                    available: false,
-                    version: None,
-                    message: format!("运行时返回状态 {}", output.status),
-                },
-                Err(error) => RuntimeHealth {
-                    profile,
-                    available: false,
-                    version: None,
-                    message: format!("未找到可执行文件: {error}"),
-                },
-            }
-        })
-        .collect()
+pub struct VerifyAgentRuntimeHandler;
+
+#[async_trait]
+impl ToolHandler for VerifyAgentRuntimeHandler {
+    fn name(&self) -> &str {
+        "verify_agent_runtime"
+    }
+
+    fn description(&self) -> &str {
+        "发起一次最小 ACP 模型请求，验证 DeepSeek Harness 会话与凭据"
+    }
+
+    fn input_schema(&self) -> Value {
+        required_id_schema("profile_id")
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let result = ctx
+            .book_wiki_service
+            .verify_runtime(required_string(&args, "profile_id")?)
+            .await?;
+        serde_json::to_value(result)
+            .map_err(|error| BrainError::Internal(format!("结果序列化失败: {error}")))
+    }
 }
 
 fn required_string<'a>(args: &'a Value, key: &str) -> Result<&'a str, BrainError> {
@@ -507,28 +589,4 @@ fn required_id_schema(key: &str) -> Value {
         "required": [key],
         "additionalProperties": false
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::models::book_wiki::RuntimeProfile;
-
-    #[test]
-    fn test_inspect_runtime_profiles_reports_missing_executable() {
-        let health = inspect_runtime_profiles(vec![RuntimeProfile {
-            id: "runtime-test".to_string(),
-            name: "Test".to_string(),
-            runtime: "deepseek_harness".to_string(),
-            executable: "/path/that/does/not/exist/deepseek-harness".to_string(),
-            model: String::new(),
-            enabled: true,
-            revision: 1,
-            updated_at: String::new(),
-        }]);
-
-        assert_eq!(health.len(), 1);
-        assert!(!health[0].available);
-        assert!(health[0].message.contains("未找到"));
-    }
 }
