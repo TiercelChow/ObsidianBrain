@@ -344,12 +344,14 @@ impl BookWikiStore {
         self.db.with_connection(|conn| {
             let sql = format!(
                 "SELECT kb.id, kb.book_id, b.name, b.path, b.kind, b.description, b.category,
-                        kb.lifecycle, kb.sync_state, kb.health_state, kb.last_error,
-                        kb.last_synced_at, kb.last_scanned_at,
+                        kb.lifecycle, kb.sync_state, kb.compile_mode, kb.compile_state,
+                        kb.compile_error, kb.health_state, kb.last_error,
+                        kb.last_synced_at, kb.last_scanned_at, kb.last_compiled_at,
                         (SELECT COUNT(*) FROM source_documents sd
                           WHERE sd.knowledge_base_id = kb.id AND sd.sync_status = 'current'),
                         (SELECT COUNT(*) FROM knowledge_entries ke
-                          WHERE ke.knowledge_base_id = kb.id AND ke.status != 'archived'),
+                          WHERE ke.knowledge_base_id = kb.id
+                            AND ke.status NOT IN ('archived', 'stale')),
                         (SELECT COUNT(*) FROM knowledge_claims kc
                           WHERE kc.knowledge_base_id = kb.id),
                         (SELECT COUNT(*) FROM knowledge_tasks kt
@@ -387,13 +389,38 @@ impl BookWikiStore {
         })
     }
 
-    pub fn replace_markdown_sources(
+    pub fn sync_markdown_sources(
         &self,
         base_id: &str,
         sources: &[MarkdownSourceDraft],
     ) -> Result<(), BrainError> {
         let now = Utc::now().to_rfc3339();
         self.db.transaction(|conn| {
+            let existing_versions = {
+                let mut stmt = conn.prepare(
+                    "SELECT original_path, current_version_id
+                     FROM source_documents
+                     WHERE knowledge_base_id = ?1
+                       AND source_type = 'markdown'
+                       AND sync_status = 'current'",
+                )?;
+                let versions = stmt.query_map(params![base_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+                })?
+                .collect::<Result<BTreeMap<_, _>, _>>()?;
+                versions
+            };
+            let incoming_versions = sources
+                .iter()
+                .map(|source| {
+                    (
+                        source.original_path.clone(),
+                        Some(source.version_id.clone()),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
+            let sources_changed = existing_versions != incoming_versions;
+
             conn.execute(
                 "UPDATE source_documents SET sync_status = 'missing', updated_at = ?2
                  WHERE knowledge_base_id = ?1 AND source_type = 'markdown'",
@@ -405,11 +432,6 @@ impl BookWikiStore {
                     SELECT id FROM knowledge_entries
                     WHERE knowledge_base_id = ?1 AND entry_type = 'source_section'
                  )",
-                params![base_id],
-            )?;
-            conn.execute(
-                "DELETE FROM knowledge_entries
-                 WHERE knowledge_base_id = ?1 AND entry_type = 'source_section'",
                 params![base_id],
             )?;
 
@@ -454,17 +476,20 @@ impl BookWikiStore {
                         now,
                     ],
                 )?;
-                conn.execute(
-                    "DELETE FROM source_spans WHERE source_version_id = ?1",
-                    params![source.version_id],
-                )?;
-
                 for (ordinal, section) in source.sections.iter().enumerate() {
                     conn.execute(
                         "INSERT INTO source_spans
                          (id, knowledge_base_id, source_version_id, ordinal, heading, anchor,
                           line_start, line_end, content, content_hash, token_estimate)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                         ON CONFLICT(source_version_id, ordinal) DO UPDATE SET
+                            heading = excluded.heading,
+                            anchor = excluded.anchor,
+                            line_start = excluded.line_start,
+                            line_end = excluded.line_end,
+                            content = excluded.content,
+                            content_hash = excluded.content_hash,
+                            token_estimate = excluded.token_estimate",
                         params![
                             section.id,
                             base_id,
@@ -479,6 +504,12 @@ impl BookWikiStore {
                             (section.content_md.chars().count() / 3) as i64,
                         ],
                     )?;
+                    let span_id = conn.query_row(
+                        "SELECT id FROM source_spans
+                         WHERE source_version_id = ?1 AND ordinal = ?2",
+                        params![source.version_id, ordinal as i64],
+                        |row| row.get::<_, String>(0),
+                    )?;
                     conn.execute(
                         "INSERT INTO knowledge_entries
                          (id, knowledge_base_id, origin_document_id, entry_type, slug, title,
@@ -492,8 +523,21 @@ impl BookWikiStore {
                             content_md = excluded.content_md,
                             status = 'verified',
                             confidence = 1.0,
-                            revision = knowledge_entries.revision + 1,
-                            updated_at = excluded.updated_at",
+                            revision = CASE
+                                WHEN knowledge_entries.title != excluded.title
+                                  OR knowledge_entries.summary != excluded.summary
+                                  OR knowledge_entries.content_md != excluded.content_md
+                                THEN knowledge_entries.revision + 1
+                                ELSE knowledge_entries.revision
+                            END,
+                            updated_at = CASE
+                                WHEN knowledge_entries.title != excluded.title
+                                  OR knowledge_entries.summary != excluded.summary
+                                  OR knowledge_entries.content_md != excluded.content_md
+                                  OR knowledge_entries.status != 'verified'
+                                THEN excluded.updated_at
+                                ELSE knowledge_entries.updated_at
+                            END",
                         params![
                             section.entry_id,
                             base_id,
@@ -505,12 +549,22 @@ impl BookWikiStore {
                             now,
                         ],
                     )?;
+                    let entry_id = conn.query_row(
+                        "SELECT id FROM knowledge_entries
+                         WHERE knowledge_base_id = ?1 AND entry_type = 'source_section' AND slug = ?2",
+                        params![base_id, section.slug],
+                        |row| row.get::<_, String>(0),
+                    )?;
+                    conn.execute(
+                        "DELETE FROM knowledge_entries_fts WHERE entry_id = ?1",
+                        params![entry_id],
+                    )?;
                     conn.execute(
                         "INSERT INTO knowledge_entries_fts
                          (entry_id, knowledge_base_id, title, summary, content_md)
                          VALUES (?1, ?2, ?3, ?4, ?5)",
                         params![
-                            section.entry_id,
+                            entry_id,
                             base_id,
                             section.title,
                             section.summary,
@@ -518,20 +572,38 @@ impl BookWikiStore {
                         ],
                     )?;
                     conn.execute(
-                        "INSERT INTO knowledge_citations
+                        "INSERT OR IGNORE INTO knowledge_citations
                          (id, knowledge_base_id, entry_id, source_span_id, quote_text, created_at)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                         params![
-                            format!("citation-{}", section.id),
+                            format!("citation-{span_id}"),
                             base_id,
-                            section.entry_id,
-                            section.id,
+                            entry_id,
+                            span_id,
                             section.summary,
                             now,
                         ],
                     )?;
                 }
             }
+
+            conn.execute(
+                "UPDATE knowledge_entries AS ke
+                 SET status = 'stale', updated_at = ?2
+                 WHERE ke.knowledge_base_id = ?1
+                   AND ke.entry_type = 'source_section'
+                   AND NOT EXISTS (
+                       SELECT 1
+                       FROM knowledge_citations kc
+                       JOIN source_spans ss ON ss.id = kc.source_span_id
+                       JOIN source_versions sv ON sv.id = ss.source_version_id
+                       JOIN source_documents sd ON sd.id = sv.source_document_id
+                       WHERE kc.entry_id = ke.id
+                         AND sd.sync_status = 'current'
+                         AND sd.current_version_id = ss.source_version_id
+                   )",
+                params![base_id, now],
+            )?;
 
             let health = if sources.is_empty() {
                 "warning"
@@ -541,10 +613,15 @@ impl BookWikiStore {
             conn.execute(
                 "UPDATE knowledge_bases
                  SET sync_state = 'clean', health_state = ?2, last_error = NULL,
+                     compile_state = CASE
+                         WHEN ?4 = 1 AND compile_mode = 'smart' THEN 'outdated'
+                         ELSE compile_state
+                     END,
+                     compile_error = CASE WHEN ?4 = 1 THEN NULL ELSE compile_error END,
                      last_synced_at = ?3, last_scanned_at = ?3,
                      revision = revision + 1, updated_at = ?3
                  WHERE id = ?1",
-                params![base_id, health, now],
+                params![base_id, health, now, i64::from(sources_changed)],
             )?;
             Ok(())
         })
@@ -613,7 +690,7 @@ impl BookWikiStore {
                  FROM knowledge_entries ke
                  LEFT JOIN source_documents sd ON sd.id = ke.origin_document_id
                  WHERE ke.knowledge_base_id = ?1
-                   AND ke.status != 'archived'
+                   AND ke.status NOT IN ('archived', 'stale')
                    AND (?2 IS NULL OR ke.entry_type = ?2)
                    AND (ke.title LIKE ?3 OR ke.summary LIKE ?3 OR ke.content_md LIKE ?3)
                  ORDER BY sd.ordinal, ke.title COLLATE NOCASE
@@ -692,10 +769,11 @@ impl BookWikiStore {
                  JOIN source_versions sv ON sv.id = ss.source_version_id
                  JOIN source_documents sd ON sd.id = sv.source_document_id
                  WHERE kc.entry_id = ?1
+                   AND (?2 != 'source_section' OR sd.current_version_id = ss.source_version_id)
                  ORDER BY sd.ordinal, ss.ordinal",
             )?;
             let citations = stmt
-                .query_map(params![entry_id], |row| {
+                .query_map(params![entry_id, entry.entry_type], |row| {
                     Ok(KnowledgeCitation {
                         id: row.get(0)?,
                         source_path: row.get(1)?,
@@ -898,11 +976,26 @@ impl BookWikiStore {
                 ],
             )?;
             for (ordinal, entry) in evidence.iter().enumerate() {
-                conn.execute(
-                    "INSERT INTO knowledge_message_citations (message_id, ordinal, entry_id)
-                     VALUES (?1, ?2, ?3)",
-                    params![assistant_message_id, ordinal as i64, entry.id],
+                let inserted = conn.execute(
+                    "INSERT INTO knowledge_message_citations
+                     (message_id, ordinal, entry_id, entry_revision,
+                      knowledge_base_id_snapshot, entry_type_snapshot, slug_snapshot,
+                      title_snapshot, summary_snapshot, status_snapshot, confidence_snapshot,
+                      source_path_snapshot, updated_at_snapshot)
+                     SELECT ?1, ?2, ke.id, ke.revision, ke.knowledge_base_id, ke.entry_type,
+                            ke.slug, ke.title, ke.summary, ke.status, ke.confidence,
+                            sd.relative_path, ke.updated_at
+                     FROM knowledge_entries ke
+                     LEFT JOIN source_documents sd ON sd.id = ke.origin_document_id
+                     WHERE ke.id = ?3 AND ke.knowledge_base_id = ?4",
+                    params![assistant_message_id, ordinal as i64, entry.id, base_id],
                 )?;
+                if inserted == 0 {
+                    return Err(BrainError::KnowledgeValidation(format!(
+                        "消息引用的知识条目不存在: {}",
+                        entry.id
+                    )));
+                }
             }
             conn.execute(
                 "UPDATE knowledge_conversations SET updated_at = ?2 WHERE id = ?1",
@@ -1565,10 +1658,18 @@ fn load_message_evidence(
     message_id: &str,
 ) -> Result<Vec<KnowledgeEntrySummary>, BrainError> {
     let mut stmt = conn.prepare(
-        "SELECT ke.id, ke.knowledge_base_id, ke.entry_type, ke.slug, ke.title,
-                ke.summary, ke.status, ke.confidence, sd.relative_path, ke.updated_at
+        "SELECT kmc.entry_id,
+                COALESCE(kmc.knowledge_base_id_snapshot, ke.knowledge_base_id),
+                COALESCE(kmc.entry_type_snapshot, ke.entry_type),
+                COALESCE(kmc.slug_snapshot, ke.slug),
+                COALESCE(kmc.title_snapshot, ke.title),
+                COALESCE(kmc.summary_snapshot, ke.summary),
+                COALESCE(kmc.status_snapshot, ke.status),
+                COALESCE(kmc.confidence_snapshot, ke.confidence),
+                COALESCE(kmc.source_path_snapshot, sd.relative_path),
+                COALESCE(kmc.updated_at_snapshot, ke.updated_at)
          FROM knowledge_message_citations kmc
-         JOIN knowledge_entries ke ON ke.id = kmc.entry_id
+         LEFT JOIN knowledge_entries ke ON ke.id = kmc.entry_id
          LEFT JOIN source_documents sd ON sd.id = ke.origin_document_id
          WHERE kmc.message_id = ?1
          ORDER BY kmc.ordinal",
@@ -1691,14 +1792,18 @@ fn map_base_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<KnowledgeBaseSu
         book_category: row.get(6)?,
         lifecycle: row.get(7)?,
         sync_state: row.get(8)?,
-        health_state: row.get(9)?,
-        last_error: row.get(10)?,
-        last_synced_at: row.get(11)?,
-        last_scanned_at: row.get(12)?,
-        source_count: row.get(13)?,
-        entry_count: row.get(14)?,
-        claim_count: row.get(15)?,
-        task_count: row.get(16)?,
+        compile_mode: row.get(9)?,
+        compile_state: row.get(10)?,
+        compile_error: row.get(11)?,
+        health_state: row.get(12)?,
+        last_error: row.get(13)?,
+        last_synced_at: row.get(14)?,
+        last_scanned_at: row.get(15)?,
+        last_compiled_at: row.get(16)?,
+        source_count: row.get(17)?,
+        entry_count: row.get(18)?,
+        claim_count: row.get(19)?,
+        task_count: row.get(20)?,
     })
 }
 
@@ -1881,7 +1986,7 @@ mod tests {
     }
 
     #[test]
-    fn test_replace_markdown_sources_indexes_entries_and_citations() {
+    fn test_sync_markdown_sources_indexes_entries_and_citations() {
         let (store, _dir) = test_store();
         store
             .save_reader_books(&[sample_book("book-1", "/tmp/book-1")])
@@ -1910,7 +2015,7 @@ mod tests {
             }],
         };
 
-        store.replace_markdown_sources(&base.id, &[source]).unwrap();
+        store.sync_markdown_sources(&base.id, &[source]).unwrap();
 
         let entries = store
             .list_entries(&base.id, Some("正文"), None, 20)
@@ -1919,6 +2024,207 @@ mod tests {
         let detail = store.get_entry(&entries[0].id).unwrap();
         assert_eq!(detail.citations.len(), 1);
         assert_eq!(detail.citations[0].source_path, "intro.md");
+    }
+
+    #[test]
+    fn test_source_update_preserves_old_spans_and_conversation_evidence_snapshot() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-history", "/tmp/book-history")])
+            .unwrap();
+        let base = store.initialize_base("book-history").unwrap();
+        let first = MarkdownSourceDraft {
+            id: "source-history".to_string(),
+            version_id: "version-history-1".to_string(),
+            original_path: "/tmp/book-history/intro.md".to_string(),
+            relative_path: "intro.md".to_string(),
+            title: "介绍".to_string(),
+            ordinal: 0,
+            content_hash: "document-hash-1".to_string(),
+            size_bytes: 20,
+            modified_at: None,
+            sections: vec![SourceSectionDraft {
+                id: "span-history-1".to_string(),
+                entry_id: "entry-history".to_string(),
+                slug: "intro--history".to_string(),
+                title: "历史章节".to_string(),
+                summary: "旧摘要".to_string(),
+                content_md: "旧正文".to_string(),
+                line_start: 1,
+                line_end: 2,
+                content_hash: "section-hash-1".to_string(),
+            }],
+        };
+        store
+            .sync_markdown_sources(&base.id, std::slice::from_ref(&first))
+            .unwrap();
+        let old_evidence = store.list_entries(&base.id, None, None, 10).unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        let conversation_id = store
+            .save_conversation_exchange(
+                &base.id,
+                None,
+                "旧内容是什么？",
+                "旧内容。[S1]",
+                &run.id,
+                &old_evidence,
+            )
+            .unwrap();
+        store
+            .db
+            .with_connection(|conn| {
+                conn.execute(
+                    "UPDATE knowledge_bases
+                     SET compile_mode = 'smart', compile_state = 'ready'
+                     WHERE id = ?1",
+                    params![base.id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        let mut second = first;
+        second.version_id = "version-history-2".to_string();
+        second.content_hash = "document-hash-2".to_string();
+        second.sections[0].id = "span-history-2".to_string();
+        second.sections[0].summary = "新摘要".to_string();
+        second.sections[0].content_md = "新正文".to_string();
+        second.sections[0].content_hash = "section-hash-2".to_string();
+        store.sync_markdown_sources(&base.id, &[second]).unwrap();
+
+        let current = store.get_entry("entry-history").unwrap();
+        assert_eq!(current.entry.summary, "新摘要");
+        assert_eq!(current.citations.len(), 1);
+        assert_eq!(current.citations[0].quote_text.as_deref(), Some("新摘要"));
+        let conversation = store.get_conversation(&conversation_id).unwrap();
+        assert_eq!(conversation.messages[1].evidence[0].summary, "旧摘要");
+        assert_eq!(store.get_base(&base.id).unwrap().compile_state, "outdated");
+        let span_count = store
+            .db
+            .with_connection(|conn| {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM source_spans WHERE knowledge_base_id = ?1",
+                    params![base.id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(Into::into)
+            })
+            .unwrap();
+        assert_eq!(span_count, 2);
+    }
+
+    #[test]
+    fn test_repeated_source_sync_is_idempotent() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-repeat", "/tmp/book-repeat")])
+            .unwrap();
+        let base = store.initialize_base("book-repeat").unwrap();
+        let source = MarkdownSourceDraft {
+            id: "source-repeat".to_string(),
+            version_id: "version-repeat".to_string(),
+            original_path: "/tmp/book-repeat/intro.md".to_string(),
+            relative_path: "intro.md".to_string(),
+            title: "介绍".to_string(),
+            ordinal: 0,
+            content_hash: "document-repeat".to_string(),
+            size_bytes: 20,
+            modified_at: None,
+            sections: vec![SourceSectionDraft {
+                id: "span-repeat".to_string(),
+                entry_id: "entry-repeat".to_string(),
+                slug: "intro--repeat".to_string(),
+                title: "重复同步".to_string(),
+                summary: "摘要".to_string(),
+                content_md: "正文".to_string(),
+                line_start: 1,
+                line_end: 2,
+                content_hash: "section-repeat".to_string(),
+            }],
+        };
+
+        store
+            .sync_markdown_sources(&base.id, std::slice::from_ref(&source))
+            .unwrap();
+        store
+            .db
+            .with_connection(|conn| {
+                conn.execute(
+                    "UPDATE knowledge_bases
+                     SET compile_mode = 'smart', compile_state = 'ready'
+                     WHERE id = ?1",
+                    params![base.id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        store.sync_markdown_sources(&base.id, &[source]).unwrap();
+
+        let detail = store.get_entry("entry-repeat").unwrap();
+        assert_eq!(detail.citations.len(), 1);
+        let revision = store
+            .db
+            .with_connection(|conn| {
+                conn.query_row(
+                    "SELECT revision FROM knowledge_entries WHERE id = 'entry-repeat'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(Into::into)
+            })
+            .unwrap();
+        assert_eq!(revision, 1);
+        assert_eq!(store.get_base(&base.id).unwrap().compile_state, "ready");
+    }
+
+    #[test]
+    fn test_missing_source_is_hidden_from_current_index_but_remains_addressable() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-missing", "/tmp/book-missing")])
+            .unwrap();
+        let base = store.initialize_base("book-missing").unwrap();
+        let source = MarkdownSourceDraft {
+            id: "source-missing".to_string(),
+            version_id: "version-missing".to_string(),
+            original_path: "/tmp/book-missing/removed.md".to_string(),
+            relative_path: "removed.md".to_string(),
+            title: "即将删除".to_string(),
+            ordinal: 0,
+            content_hash: "document-missing".to_string(),
+            size_bytes: 20,
+            modified_at: None,
+            sections: vec![SourceSectionDraft {
+                id: "span-missing".to_string(),
+                entry_id: "entry-missing".to_string(),
+                slug: "removed--missing".to_string(),
+                title: "已删除章节".to_string(),
+                summary: "保留历史".to_string(),
+                content_md: "历史正文".to_string(),
+                line_start: 1,
+                line_end: 2,
+                content_hash: "section-missing".to_string(),
+            }],
+        };
+        store.sync_markdown_sources(&base.id, &[source]).unwrap();
+
+        store.sync_markdown_sources(&base.id, &[]).unwrap();
+
+        assert!(store
+            .list_entries(&base.id, Some("历史正文"), None, 10)
+            .unwrap()
+            .is_empty());
+        let historic = store.get_entry("entry-missing").unwrap();
+        assert_eq!(historic.entry.status, "stale");
+        assert_eq!(historic.content_md, "历史正文");
+        assert_eq!(store.get_base(&base.id).unwrap().entry_count, 0);
     }
 
     #[test]
@@ -1950,7 +2256,7 @@ mod tests {
                 content_hash: "history-section-hash".to_string(),
             }],
         };
-        store.replace_markdown_sources(&base.id, &[source]).unwrap();
+        store.sync_markdown_sources(&base.id, &[source]).unwrap();
         let evidence = store.list_entries(&base.id, None, None, 10).unwrap();
         let run = store
             .start_agent_run(
@@ -2022,7 +2328,7 @@ mod tests {
                 content_hash: "section-architecture-hash".to_string(),
             }],
         };
-        store.replace_markdown_sources(&base.id, &[source]).unwrap();
+        store.sync_markdown_sources(&base.id, &[source]).unwrap();
 
         let entries = store
             .list_entries(&base.id, Some("找出与架构相关的章节"), None, 20)

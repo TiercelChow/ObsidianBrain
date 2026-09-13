@@ -96,6 +96,21 @@ test('knowledge tasks expose explicit run retry and persisted result actions', a
   assert.match(api, /get_knowledge_task_result/)
 })
 
+test('knowledge pages distinguish source synchronization from wiki compilation', async () => {
+  const [bases, workspace, api] = await Promise.all([
+    source('src/views/knowledge/KnowledgeBases.vue'),
+    source('src/views/knowledge/WikiWorkspace.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+
+  assert.match(bases, /来源 ·/)
+  assert.match(bases, /Wiki ·/)
+  assert.match(bases, /章节索引/)
+  assert.match(workspace, /compileLabel/)
+  assert.match(api, /compile_mode: 'chapter' \| 'smart'/)
+  assert.match(api, /compile_state: 'not_started' \| 'outdated' \| 'compiling' \| 'ready' \| 'failed'/)
+})
+
 test('runtime settings keep save and paid connection verification as separate actions', async () => {
   const settings = await source('src/views/knowledge/WikiSettings.vue')
 

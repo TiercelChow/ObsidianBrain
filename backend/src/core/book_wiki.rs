@@ -418,7 +418,8 @@ impl BookWikiService {
             let content_hash = hash_text(&content);
             let source_id = stable_id("source", &format!("{}:{}", base.id, path.display()));
             let version_id = stable_id("version", &format!("{source_id}:{content_hash}"));
-            let sections = split_markdown_sections(&content, &relative_path, &source_id);
+            let sections =
+                split_markdown_sections(&content, &relative_path, &source_id, &version_id);
             indexed_entries += sections.len();
             sources.push(MarkdownSourceDraft {
                 id: source_id,
@@ -434,7 +435,7 @@ impl BookWikiService {
             });
         }
 
-        self.store.replace_markdown_sources(&base.id, &sources)?;
+        self.store.sync_markdown_sources(&base.id, &sources)?;
         let knowledge_base = self.store.get_base(&base.id)?;
         let message = if sources.is_empty() {
             "目录中没有找到可摄入的 Markdown 文件".to_string()
@@ -738,6 +739,7 @@ fn split_markdown_sections(
     content: &str,
     relative_path: &str,
     source_id: &str,
+    version_id: &str,
 ) -> Vec<SourceSectionDraft> {
     let lines: Vec<&str> = content.lines().collect();
     let fallback_title = Path::new(relative_path)
@@ -792,7 +794,10 @@ fn split_markdown_sections(
             );
             let content_hash = hash_text(&content_md);
             Some(SourceSectionDraft {
-                id: stable_id("span", &format!("{identity}:{content_hash}")),
+                id: stable_id(
+                    "span",
+                    &format!("{version_id}:{ordinal}:{title}:{content_hash}"),
+                ),
                 entry_id: stable_id("entry", &identity),
                 slug,
                 title: title.clone(),
@@ -971,12 +976,23 @@ mod tests {
     #[test]
     fn test_split_markdown_sections_ignores_headings_inside_fences() {
         let content = "# 第一章\n正文\n```md\n# 不是标题\n```\n## 第二节\n内容";
-        let sections = split_markdown_sections(content, "demo.md", "source-1");
+        let sections = split_markdown_sections(content, "demo.md", "source-1", "version-1");
 
         assert_eq!(sections.len(), 2);
         assert_eq!(sections[0].title, "第一章");
         assert_eq!(sections[1].title, "第二节");
         assert!(sections[0].content_md.contains("# 不是标题"));
+    }
+
+    #[test]
+    fn test_split_markdown_sections_keeps_entry_identity_but_versions_source_spans() {
+        let content = "# 第一章\n相同内容";
+        let first = split_markdown_sections(content, "demo.md", "source-1", "version-1");
+        let second = split_markdown_sections(content, "demo.md", "source-1", "version-2");
+
+        assert_eq!(first[0].entry_id, second[0].entry_id);
+        assert_eq!(first[0].slug, second[0].slug);
+        assert_ne!(first[0].id, second[0].id);
     }
 
     #[test]
@@ -1010,6 +1026,8 @@ mod tests {
         assert_eq!(result.scanned_sources, 1);
         assert_eq!(result.indexed_entries, 2);
         assert_eq!(result.knowledge_base.sync_state, "clean");
+        assert_eq!(result.knowledge_base.compile_mode, "chapter");
+        assert_eq!(result.knowledge_base.compile_state, "not_started");
         let entries = store
             .list_entries(&result.knowledge_base.id, Some("d_k"), None, 10)
             .expect("search");

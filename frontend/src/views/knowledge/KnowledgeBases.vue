@@ -33,10 +33,17 @@
               <span v-if="card.book.category" class="book-category">{{ card.book.category }}</span>
               <h2>{{ card.book.name }}</h2>
             </div>
-            <span
-              class="knowledge-status"
-              :class="statusClass(card)"
-            >{{ statusLabel(card) }}</span>
+            <div class="knowledge-status-stack">
+              <span
+                class="knowledge-status"
+                :class="sourceStatusClass(card)"
+              >来源 · {{ sourceStatusLabel(card) }}</span>
+              <span
+                v-if="card.knowledge_base"
+                class="knowledge-status"
+                :class="`is-${card.knowledge_base.compile_state}`"
+              >Wiki · {{ compileStatusLabel(card.knowledge_base) }}</span>
+            </div>
           </div>
           <p class="book-description">{{ card.book.description || '还没有添加书籍说明' }}</p>
           <p class="book-path" :title="card.book.path">{{ card.book.path }}</p>
@@ -107,7 +114,11 @@ const initializedCount = computed(() => cards.value.filter(card => card.knowledg
 const entryCount = computed(() => cards.value.reduce((sum, card) => sum + (card.knowledge_base?.entry_count ?? 0), 0))
 const attentionCount = computed(() => cards.value.filter(card => {
   const base = card.knowledge_base
-  return base && (base.sync_state !== 'clean' || base.health_state !== 'healthy')
+  return base && (
+    base.sync_state !== 'clean'
+    || base.health_state !== 'healthy'
+    || (base.compile_mode === 'smart' && base.compile_state !== 'ready')
+  )
 }).length)
 
 async function loadCards() {
@@ -156,7 +167,7 @@ function openWiki(baseId: string) {
   router.push({ path: '/knowledge/wiki', query: { base: baseId } })
 }
 
-function statusLabel(card: BookKnowledgeCard) {
+function sourceStatusLabel(card: BookKnowledgeCard) {
   if (!card.knowledge_base) return '未初始化'
   const labels: Record<string, string> = {
     clean: '已同步', outdated: '待同步', scanning: '扫描中', extracting: '提取中',
@@ -165,8 +176,16 @@ function statusLabel(card: BookKnowledgeCard) {
   return labels[card.knowledge_base.sync_state] || card.knowledge_base.sync_state
 }
 
-function statusClass(card: BookKnowledgeCard) {
+function sourceStatusClass(card: BookKnowledgeCard) {
   return card.knowledge_base ? `is-${card.knowledge_base.sync_state}` : 'is-draft'
+}
+
+function compileStatusLabel(base: NonNullable<BookKnowledgeCard['knowledge_base']>) {
+  if (base.compile_mode === 'chapter' && base.compile_state === 'not_started') return '章节索引'
+  const labels: Record<string, string> = {
+    not_started: '待编译', outdated: '待更新', compiling: '编译中', ready: '智能 Wiki', failed: '编译失败',
+  }
+  return labels[base.compile_state] || base.compile_state
 }
 
 onMounted(loadCards)
@@ -186,6 +205,7 @@ onMounted(loadCards)
 .book-cover span { font-size: 10px; font-weight: 760; letter-spacing: .12em; opacity: .8; }
 .book-card-main { min-width: 0; }
 .book-card-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.knowledge-status-stack { display: grid; justify-items: end; gap: 6px; flex: 0 0 auto; }
 .book-card-title-row h2 { margin: 3px 0 0; font-size: 18px; font-weight: 690; line-height: 1.3; }
 .book-category { color: var(--accent); font-size: 10px; font-weight: 720; letter-spacing: .07em; }
 .book-description { min-height: 20px; margin: 8px 0 4px; color: var(--text-muted); font-size: 13px; }
@@ -207,7 +227,7 @@ onMounted(loadCards)
   .book-wiki-card { grid-template-columns: 62px 1fr; gap: 13px; padding: 15px; }
   .book-cover { height: 86px; border-radius: 13px 10px 10px 13px; }
   .book-card-title-row { display: block; }
-  .book-card-title-row .knowledge-status { margin-top: 7px; }
+  .knowledge-status-stack { justify-items: start; margin-top: 8px; }
   .book-actions { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; }
   .book-actions .el-button { width: 100%; margin: 0; }
   .book-actions .el-button:last-child:nth-child(3) { grid-column: 1 / -1; }

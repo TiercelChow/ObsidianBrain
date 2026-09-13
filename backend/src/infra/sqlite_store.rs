@@ -95,6 +95,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "auditable agent token usage",
         sql: include_str!("../../migrations/015_agent_token_usage.sql"),
     },
+    Migration {
+        version: 16,
+        description: "safe source versions and separate wiki compilation state",
+        sql: include_str!("../../migrations/016_book_wiki_source_safety.sql"),
+    },
 ];
 
 impl SqliteStore {
@@ -826,6 +831,92 @@ mod tests {
         let _store1 = SqliteStore::new(&db_path).unwrap();
         let store2 = SqliteStore::new(&db_path).unwrap();
         assert!(store2.health_check());
+    }
+
+    #[test]
+    fn test_migration_016_backfills_compile_state_and_message_evidence_snapshot() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("upgrade.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE _migrations (
+                version INTEGER PRIMARY KEY,
+                description TEXT NOT NULL,
+                applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );",
+        )
+        .unwrap();
+        for migration in MIGRATIONS.iter().filter(|migration| migration.version < 16) {
+            conn.execute_batch(migration.sql).unwrap();
+            conn.execute(
+                "INSERT INTO _migrations (version, description) VALUES (?1, ?2)",
+                params![migration.version, migration.description],
+            )
+            .unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO reader_books
+                (id, path, kind, name, description, category, added_at)
+             VALUES ('book-upgrade', '/tmp/book-upgrade', 'folder', '升级书籍', '', '', 1);
+             INSERT INTO knowledge_bases
+                (id, book_id, lifecycle, sync_state, health_state, created_at, updated_at)
+             VALUES ('base-upgrade', 'book-upgrade', 'active', 'clean', 'healthy',
+                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+             INSERT INTO source_documents
+                (id, knowledge_base_id, source_type, original_path, relative_path, title,
+                 mime_type, current_version_id, created_at, updated_at)
+             VALUES ('source-upgrade', 'base-upgrade', 'markdown', '/tmp/book-upgrade/a.md',
+                     'a.md', '旧来源', 'text/markdown', 'version-upgrade',
+                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+             INSERT INTO source_versions
+                (id, source_document_id, content_hash, size_bytes, extraction_version,
+                 extraction_status, created_at)
+             VALUES ('version-upgrade', 'source-upgrade', 'hash', 10, 'markdown-v1',
+                     'ready', CURRENT_TIMESTAMP);
+             INSERT INTO source_spans
+                (id, knowledge_base_id, source_version_id, ordinal, content, content_hash)
+             VALUES ('span-upgrade', 'base-upgrade', 'version-upgrade', 0, '旧正文', 'hash');
+             INSERT INTO knowledge_entries
+                (id, knowledge_base_id, origin_document_id, entry_type, slug, title,
+                 summary, content_md, status, revision, created_at, updated_at)
+             VALUES ('entry-upgrade', 'base-upgrade', 'source-upgrade', 'source_section',
+                     'old-entry', '旧标题', '旧摘要', '旧正文', 'verified', 3,
+                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+             INSERT INTO knowledge_conversations (id, title, created_at, updated_at)
+             VALUES ('conversation-upgrade', '历史问答', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+             INSERT INTO knowledge_conversation_scopes
+                (conversation_id, knowledge_base_id, ordinal)
+             VALUES ('conversation-upgrade', 'base-upgrade', 0);
+             INSERT INTO knowledge_messages
+                (id, conversation_id, ordinal, role, content, created_at)
+             VALUES ('message-upgrade', 'conversation-upgrade', 0, 'assistant', '历史回答',
+                     CURRENT_TIMESTAMP);
+             INSERT INTO knowledge_message_citations (message_id, ordinal, entry_id)
+             VALUES ('message-upgrade', 0, 'entry-upgrade');",
+        )
+        .unwrap();
+        drop(conn);
+
+        let store = SqliteStore::new(&db_path).unwrap();
+        store
+            .with_connection(|conn| {
+                let compile: (String, String) = conn.query_row(
+                    "SELECT compile_mode, compile_state FROM knowledge_bases
+                     WHERE id = 'base-upgrade'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+                assert_eq!(compile, ("chapter".to_string(), "not_started".to_string()));
+                let snapshot: (i64, String, String) = conn.query_row(
+                    "SELECT entry_revision, title_snapshot, summary_snapshot
+                     FROM knowledge_message_citations WHERE message_id = 'message-upgrade'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?;
+                assert_eq!(snapshot, (3, "旧标题".to_string(), "旧摘要".to_string()));
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]

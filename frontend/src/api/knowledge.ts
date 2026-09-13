@@ -11,10 +11,14 @@ export interface KnowledgeBaseSummary {
   book_category: string
   lifecycle: 'uninitialized' | 'active' | 'paused' | 'archived'
   sync_state: 'clean' | 'outdated' | 'scanning' | 'extracting' | 'ingesting' | 'failed'
+  compile_mode: 'chapter' | 'smart'
+  compile_state: 'not_started' | 'outdated' | 'compiling' | 'ready' | 'failed'
+  compile_error?: string | null
   health_state: 'healthy' | 'warning' | 'needs_review'
   last_error?: string | null
   last_synced_at?: string | null
   last_scanned_at?: string | null
+  last_compiled_at?: string | null
   source_count: number
   entry_count: number
   claim_count: number

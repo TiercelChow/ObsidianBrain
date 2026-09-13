@@ -33,9 +33,14 @@
             <strong>{{ activeBase?.book_name }}</strong>
             <span>{{ entries.length >= 160 ? '显示前 160 个结果' : `${entries.length} 个结果` }}</span>
           </div>
-          <span v-if="activeBase" class="knowledge-status" :class="`is-${activeBase.sync_state}`">
-            {{ syncLabel(activeBase.sync_state) }}
-          </span>
+          <div v-if="activeBase" class="entry-statuses">
+            <span class="knowledge-status" :class="`is-${activeBase.sync_state}`">
+              来源 · {{ syncLabel(activeBase.sync_state) }}
+            </span>
+            <span class="knowledge-status" :class="`is-${activeBase.compile_state}`">
+              Wiki · {{ compileLabel(activeBase) }}
+            </span>
+          </div>
         </div>
         <div class="entry-list">
           <button
@@ -126,6 +131,14 @@ let searchTimer = 0
 
 const activeBase = computed(() => bases.value.find(base => base.id === activeBaseId.value))
 const { renderMarkdown, enhance, cleanup } = useMarkdownRender(() => {})
+
+function compileLabel(base: KnowledgeBaseSummary) {
+  if (base.compile_mode === 'chapter' && base.compile_state === 'not_started') return '章节索引'
+  const labels: Record<string, string> = {
+    not_started: '待编译', outdated: '待更新', compiling: '编译中', ready: '智能 Wiki', failed: '编译失败',
+  }
+  return labels[base.compile_state] || base.compile_state
+}
 
 async function loadBases() {
   loadingBases.value = true
@@ -226,6 +239,7 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); cleanup() })
 .entry-pane { display: flex; flex-direction: column; }
 .entry-pane-head { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border-faint); }
 .entry-pane-head > div { min-width: 0; display: grid; gap: 2px; }
+.entry-pane-head > .entry-statuses { flex: 0 0 auto; justify-items: end; gap: 5px; }
 .entry-pane-head strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .entry-pane-head span:not(.knowledge-status) { color: var(--text-faint); font-size: 11px; }
 .entry-list { flex: 1; max-height: calc(100vh - 260px); overflow: auto; padding: 7px; }
