@@ -8,7 +8,9 @@ use crate::error::BrainError;
 use crate::infra::sqlite_store::SqliteStore;
 use crate::models::book_wiki::{
     AgentRun, BookKind, BookKnowledgeCard, ConfigDocument, KnowledgeBaseSummary, KnowledgeCitation,
-    KnowledgeEntryDetail, KnowledgeEntrySummary, KnowledgeTask, ReaderBook, RuntimeProfile,
+    KnowledgeConversationDetail, KnowledgeConversationSummary, KnowledgeEntryDetail,
+    KnowledgeEntrySummary, KnowledgeMessage, KnowledgeTask, ReaderBook, RuntimeProfile,
+    RuntimeProviderConfig,
 };
 
 const LEGACY_BOOKS_KEY: &str = "reader_books";
@@ -711,6 +713,205 @@ impl BookWikiStore {
         })
     }
 
+    pub fn list_conversations(
+        &self,
+        base_id: &str,
+        limit: usize,
+    ) -> Result<Vec<KnowledgeConversationSummary>, BrainError> {
+        self.get_base(base_id)?;
+        self.db.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT kc.id, kcs.knowledge_base_id, kc.title,
+                        (SELECT COUNT(*) FROM knowledge_messages km
+                         WHERE km.conversation_id = kc.id),
+                        COALESCE((SELECT km.content FROM knowledge_messages km
+                                  WHERE km.conversation_id = kc.id
+                                  ORDER BY km.ordinal DESC LIMIT 1), ''),
+                        kc.created_at, kc.updated_at
+                 FROM knowledge_conversations kc
+                 JOIN knowledge_conversation_scopes kcs ON kcs.conversation_id = kc.id
+                 WHERE kcs.knowledge_base_id = ?1
+                 ORDER BY kc.updated_at DESC
+                 LIMIT ?2",
+            )?;
+            let conversations =
+                stmt.query_map(params![base_id, limit.clamp(1, 100) as i64], |row| {
+                    Ok(KnowledgeConversationSummary {
+                        id: row.get(0)?,
+                        knowledge_base_id: row.get(1)?,
+                        title: row.get(2)?,
+                        message_count: row.get(3)?,
+                        preview: row.get(4)?,
+                        created_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                    })
+                })?;
+            conversations
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(Into::into)
+        })
+    }
+
+    pub fn get_conversation(
+        &self,
+        conversation_id: &str,
+    ) -> Result<KnowledgeConversationDetail, BrainError> {
+        self.db.with_connection(|conn| {
+            let conversation = conn
+                .query_row(
+                    "SELECT kc.id, kcs.knowledge_base_id, kc.title,
+                            (SELECT COUNT(*) FROM knowledge_messages km
+                             WHERE km.conversation_id = kc.id),
+                            COALESCE((SELECT km.content FROM knowledge_messages km
+                                      WHERE km.conversation_id = kc.id
+                                      ORDER BY km.ordinal DESC LIMIT 1), ''),
+                            kc.created_at, kc.updated_at
+                     FROM knowledge_conversations kc
+                     JOIN knowledge_conversation_scopes kcs ON kcs.conversation_id = kc.id
+                     WHERE kc.id = ?1 AND kcs.ordinal = 0",
+                    params![conversation_id],
+                    |row| {
+                        Ok(KnowledgeConversationSummary {
+                            id: row.get(0)?,
+                            knowledge_base_id: row.get(1)?,
+                            title: row.get(2)?,
+                            message_count: row.get(3)?,
+                            preview: row.get(4)?,
+                            created_at: row.get(5)?,
+                            updated_at: row.get(6)?,
+                        })
+                    },
+                )
+                .optional()?
+                .ok_or_else(|| BrainError::KnowledgeNotFound(conversation_id.to_string()))?;
+            let mut stmt = conn.prepare(
+                "SELECT id, role, content, run_id, created_at
+                 FROM knowledge_messages
+                 WHERE conversation_id = ?1
+                 ORDER BY ordinal",
+            )?;
+            let rows = stmt
+                .query_map(params![conversation_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut messages = Vec::with_capacity(rows.len());
+            for (id, role, content, run_id, created_at) in rows {
+                messages.push(KnowledgeMessage {
+                    evidence: load_message_evidence(conn, &id)?,
+                    id,
+                    role,
+                    content,
+                    run_id,
+                    created_at,
+                });
+            }
+            Ok(KnowledgeConversationDetail {
+                conversation,
+                messages,
+            })
+        })
+    }
+
+    pub fn save_conversation_exchange(
+        &self,
+        base_id: &str,
+        conversation_id: Option<&str>,
+        question: &str,
+        answer: &str,
+        run_id: &str,
+        evidence: &[KnowledgeEntrySummary],
+    ) -> Result<String, BrainError> {
+        self.get_base(base_id)?;
+        if evidence
+            .iter()
+            .any(|entry| entry.knowledge_base_id != base_id)
+        {
+            return Err(BrainError::KnowledgeValidation(
+                "消息引用不能跨越当前书籍知识边界".to_string(),
+            ));
+        }
+        let id = conversation_id
+            .map(str::to_string)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let user_message_id = uuid::Uuid::new_v4().to_string();
+        let assistant_message_id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        let title = conversation_title(question);
+        self.db.transaction(|conn| {
+            if conversation_id.is_some() {
+                let in_scope = conn
+                    .query_row(
+                        "SELECT 1 FROM knowledge_conversation_scopes
+                         WHERE conversation_id = ?1 AND knowledge_base_id = ?2",
+                        params![id, base_id],
+                        |_| Ok(()),
+                    )
+                    .optional()?;
+                if in_scope.is_none() {
+                    return Err(BrainError::KnowledgeValidation(
+                        "会话不存在或不属于当前知识库".to_string(),
+                    ));
+                }
+            } else {
+                conn.execute(
+                    "INSERT INTO knowledge_conversations (id, title, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?3)",
+                    params![id, title, now],
+                )?;
+                conn.execute(
+                    "INSERT INTO knowledge_conversation_scopes
+                     (conversation_id, knowledge_base_id, ordinal) VALUES (?1, ?2, 0)",
+                    params![id, base_id],
+                )?;
+            }
+            let next_ordinal = conn.query_row(
+                "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM knowledge_messages
+                 WHERE conversation_id = ?1",
+                params![id],
+                |row| row.get::<_, i64>(0),
+            )?;
+            conn.execute(
+                "INSERT INTO knowledge_messages
+                 (id, conversation_id, ordinal, role, content, run_id, created_at)
+                 VALUES (?1, ?2, ?3, 'user', ?4, NULL, ?5)",
+                params![user_message_id, id, next_ordinal, question, now],
+            )?;
+            conn.execute(
+                "INSERT INTO knowledge_messages
+                 (id, conversation_id, ordinal, role, content, run_id, created_at)
+                 VALUES (?1, ?2, ?3, 'assistant', ?4, ?5, ?6)",
+                params![
+                    assistant_message_id,
+                    id,
+                    next_ordinal + 1,
+                    answer,
+                    run_id,
+                    now
+                ],
+            )?;
+            for (ordinal, entry) in evidence.iter().enumerate() {
+                conn.execute(
+                    "INSERT INTO knowledge_message_citations (message_id, ordinal, entry_id)
+                     VALUES (?1, ?2, ?3)",
+                    params![assistant_message_id, ordinal as i64, entry.id],
+                )?;
+            }
+            conn.execute(
+                "UPDATE knowledge_conversations SET updated_at = ?2 WHERE id = ?1",
+                params![id, now],
+            )?;
+            Ok(())
+        })?;
+        Ok(id)
+    }
+
     pub fn list_tasks(&self, base_id: Option<&str>) -> Result<Vec<KnowledgeTask>, BrainError> {
         self.db.with_connection(|conn| {
             let mut stmt = conn.prepare(
@@ -958,22 +1159,38 @@ impl BookWikiStore {
     pub fn list_runtime_profiles(&self) -> Result<Vec<RuntimeProfile>, BrainError> {
         self.db.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, runtime, executable, model, enabled, revision, updated_at
+                "SELECT id, name, runtime, executable, model, enabled, config_json, revision, updated_at
                  FROM agent_runtime_profiles ORDER BY name",
             )?;
             let rows = stmt.query_map([], |row| {
-                Ok(RuntimeProfile {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    runtime: row.get(2)?,
-                    executable: row.get(3)?,
-                    model: row.get(4)?,
-                    enabled: row.get::<_, i64>(5)? != 0,
-                    revision: row.get(6)?,
-                    updated_at: row.get(7)?,
-                })
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, String>(8)?,
+                ))
             })?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+            rows.map(|row| {
+                let (id, name, runtime, executable, model, enabled, config_json, revision, updated_at) =
+                    row?;
+                Ok(RuntimeProfile {
+                    id,
+                    name,
+                    runtime,
+                    executable,
+                    model,
+                    provider_config: parse_runtime_provider_config(&config_json)?,
+                    enabled: enabled != 0,
+                    revision,
+                    updated_at,
+                })
+            })
+            .collect()
         })
     }
 
@@ -982,6 +1199,7 @@ impl BookWikiStore {
         profile_id: &str,
         executable: &str,
         model: &str,
+        provider_config: Option<&RuntimeProviderConfig>,
         enabled: bool,
         expected_revision: i64,
     ) -> Result<RuntimeProfile, BrainError> {
@@ -990,17 +1208,25 @@ impl BookWikiStore {
                 "运行时可执行文件不能为空".to_string(),
             ));
         }
+        let provider_config = provider_config
+            .map(|provider| validate_runtime_provider_config(provider, model))
+            .transpose()?;
+        let config_json = serde_json::to_string(&serde_json::json!({
+            "provider": provider_config,
+        }))
+        .map_err(|error| BrainError::Internal(format!("运行时供应商配置序列化失败: {error}")))?;
         let now = Utc::now().to_rfc3339();
         let updated = self.db.with_connection(|conn| {
             Ok(conn.execute(
                 "UPDATE agent_runtime_profiles
-                 SET executable = ?2, model = ?3, enabled = ?4,
-                     revision = revision + 1, updated_at = ?5
-                 WHERE id = ?1 AND revision = ?6",
+                 SET executable = ?2, model = ?3, config_json = ?4, enabled = ?5,
+                     revision = revision + 1, updated_at = ?6
+                 WHERE id = ?1 AND revision = ?7",
                 params![
                     profile_id,
                     executable.trim(),
                     model.trim(),
+                    config_json,
                     i64::from(enabled),
                     now,
                     expected_revision,
@@ -1155,6 +1381,126 @@ impl BookWikiStore {
     }
 }
 
+fn load_message_evidence(
+    conn: &rusqlite::Connection,
+    message_id: &str,
+) -> Result<Vec<KnowledgeEntrySummary>, BrainError> {
+    let mut stmt = conn.prepare(
+        "SELECT ke.id, ke.knowledge_base_id, ke.entry_type, ke.slug, ke.title,
+                ke.summary, ke.status, ke.confidence, sd.relative_path, ke.updated_at
+         FROM knowledge_message_citations kmc
+         JOIN knowledge_entries ke ON ke.id = kmc.entry_id
+         LEFT JOIN source_documents sd ON sd.id = ke.origin_document_id
+         WHERE kmc.message_id = ?1
+         ORDER BY kmc.ordinal",
+    )?;
+    let entries = stmt.query_map(params![message_id], |row| {
+        Ok(KnowledgeEntrySummary {
+            id: row.get(0)?,
+            knowledge_base_id: row.get(1)?,
+            entry_type: row.get(2)?,
+            slug: row.get(3)?,
+            title: row.get(4)?,
+            summary: row.get(5)?,
+            status: row.get(6)?,
+            confidence: row.get(7)?,
+            source_path: row.get(8)?,
+            updated_at: row.get(9)?,
+        })
+    })?;
+    entries.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+fn conversation_title(question: &str) -> String {
+    let title = question.trim().chars().take(42).collect::<String>();
+    if question.trim().chars().count() > 42 {
+        format!("{title}…")
+    } else {
+        title
+    }
+}
+
+fn parse_runtime_provider_config(
+    config_json: &str,
+) -> Result<Option<RuntimeProviderConfig>, BrainError> {
+    let value: serde_json::Value = serde_json::from_str(config_json)
+        .map_err(|error| BrainError::Internal(format!("运行时供应商配置解析失败: {error}")))?;
+    let Some(provider) = value.get("provider").filter(|provider| !provider.is_null()) else {
+        return Ok(None);
+    };
+    serde_json::from_value(provider.clone())
+        .map(Some)
+        .map_err(|error| BrainError::Internal(format!("运行时供应商配置解析失败: {error}")))
+}
+
+fn validate_runtime_provider_config(
+    provider: &RuntimeProviderConfig,
+    model: &str,
+) -> Result<RuntimeProviderConfig, BrainError> {
+    let provider_id = provider.provider_id.trim();
+    if provider_id.is_empty()
+        || provider_id.len() > 64
+        || !provider_id.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        })
+    {
+        return Err(BrainError::KnowledgeValidation(
+            "供应商 ID 只能包含字母、数字、点、短横线和下划线".to_string(),
+        ));
+    }
+    let display_name = provider.display_name.trim();
+    if display_name.is_empty() || display_name.chars().count() > 100 {
+        return Err(BrainError::KnowledgeValidation(
+            "供应商名称不能为空且不能超过 100 个字符".to_string(),
+        ));
+    }
+    if model.trim().is_empty() || model.chars().count() > 200 {
+        return Err(BrainError::KnowledgeValidation(
+            "自定义供应商必须填写有效的模型 ID".to_string(),
+        ));
+    }
+    let api_protocol = provider.api_protocol.trim();
+    if !matches!(
+        api_protocol,
+        "openai-completions" | "openai-responses" | "anthropic-messages"
+    ) {
+        return Err(BrainError::KnowledgeValidation(
+            "不支持的模型 API 协议".to_string(),
+        ));
+    }
+    let base_url = provider.base_url.trim().trim_end_matches('/');
+    let parsed_url = reqwest::Url::parse(base_url)
+        .map_err(|_| BrainError::KnowledgeValidation("模型 API Base URL 格式不正确".to_string()))?;
+    if !matches!(parsed_url.scheme(), "http" | "https")
+        || parsed_url.host_str().is_none()
+        || !parsed_url.username().is_empty()
+        || parsed_url.password().is_some()
+    {
+        return Err(BrainError::KnowledgeValidation(
+            "模型 API Base URL 必须是无内嵌凭据的 HTTP(S) 地址".to_string(),
+        ));
+    }
+    let api_key_env = provider.api_key_env.trim();
+    let mut env_characters = api_key_env.chars();
+    let valid_env = env_characters
+        .next()
+        .is_some_and(|character| character.is_ascii_alphabetic() || character == '_')
+        && env_characters.all(|character| character.is_ascii_alphanumeric() || character == '_');
+    if !valid_env || api_key_env.len() > 128 {
+        return Err(BrainError::KnowledgeValidation(
+            "API Key 环境变量名只能包含字母、数字和下划线，且不能以数字开头".to_string(),
+        ));
+    }
+
+    Ok(RuntimeProviderConfig {
+        provider_id: provider_id.to_string(),
+        display_name: display_name.to_string(),
+        api_protocol: api_protocol.to_string(),
+        base_url: base_url.to_string(),
+        api_key_env: api_key_env.to_string(),
+    })
+}
+
 fn map_base_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<KnowledgeBaseSummary> {
     Ok(KnowledgeBaseSummary {
         id: row.get(0)?,
@@ -1267,7 +1613,7 @@ fn knowledge_query_patterns(query: Option<&str>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::book_wiki::BookProgress;
+    use crate::models::book_wiki::{BookProgress, RuntimeProviderConfig};
 
     fn test_store() -> (BookWikiStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1394,6 +1740,78 @@ mod tests {
         let detail = store.get_entry(&entries[0].id).unwrap();
         assert_eq!(detail.citations.len(), 1);
         assert_eq!(detail.citations[0].source_path, "intro.md");
+    }
+
+    #[test]
+    fn test_knowledge_conversation_round_trips_messages_and_evidence() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-1", "/tmp/book-1")])
+            .unwrap();
+        let base = store.initialize_base("book-1").unwrap();
+        let source = MarkdownSourceDraft {
+            id: "conversation-source".to_string(),
+            version_id: "conversation-version".to_string(),
+            original_path: "/tmp/book-1/history.md".to_string(),
+            relative_path: "history.md".to_string(),
+            title: "历史".to_string(),
+            ordinal: 0,
+            content_hash: "history-hash".to_string(),
+            size_bytes: 20,
+            modified_at: None,
+            sections: vec![SourceSectionDraft {
+                id: "conversation-span".to_string(),
+                entry_id: "conversation-entry".to_string(),
+                slug: "history".to_string(),
+                title: "历史章节".to_string(),
+                summary: "来源摘要".to_string(),
+                content_md: "来源正文".to_string(),
+                line_start: 1,
+                line_end: 3,
+                content_hash: "history-section-hash".to_string(),
+            }],
+        };
+        store.replace_markdown_sources(&base.id, &[source]).unwrap();
+        let evidence = store.list_entries(&base.id, None, None, 10).unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({ "question": "什么是历史？" }),
+            )
+            .unwrap();
+
+        let conversation_id = store
+            .save_conversation_exchange(
+                &base.id,
+                None,
+                "什么是历史？",
+                "历史是可追溯的。[S1]",
+                &run.id,
+                &evidence,
+            )
+            .unwrap();
+        store
+            .save_conversation_exchange(
+                &base.id,
+                Some(&conversation_id),
+                "再说明一下",
+                "这是第二轮回答。[S1]",
+                &run.id,
+                &evidence,
+            )
+            .unwrap();
+
+        let summaries = store.list_conversations(&base.id, 20).unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].message_count, 4);
+        assert_eq!(summaries[0].title, "什么是历史？");
+        let detail = store.get_conversation(&conversation_id).unwrap();
+        assert_eq!(detail.messages.len(), 4);
+        assert_eq!(detail.messages[0].role, "user");
+        assert_eq!(detail.messages[1].evidence, evidence);
+        assert_eq!(detail.messages[3].content, "这是第二轮回答。[S1]");
     }
 
     #[test]
@@ -1540,6 +1958,77 @@ mod tests {
             .unwrap_err();
 
         assert!(error.to_string().contains("200"));
+    }
+
+    #[test]
+    fn test_runtime_provider_config_round_trips_without_storing_secret() {
+        let (store, _dir) = test_store();
+        let profile = store
+            .list_runtime_profiles()
+            .unwrap()
+            .into_iter()
+            .find(|profile| profile.id == "runtime-deepseek-harness")
+            .unwrap();
+        let provider = RuntimeProviderConfig {
+            provider_id: "aliyun-bailian".to_string(),
+            display_name: "阿里云百炼".to_string(),
+            api_protocol: "openai-completions".to_string(),
+            base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
+            api_key_env: "CUSTOM_LLM_API_KEY".to_string(),
+        };
+
+        let saved = store
+            .save_runtime_profile(
+                &profile.id,
+                &profile.executable,
+                "glm-5.2",
+                Some(&provider),
+                true,
+                profile.revision,
+            )
+            .unwrap();
+
+        assert_eq!(saved.provider_config.as_ref(), Some(&provider));
+        assert_eq!(saved.model, "glm-5.2");
+        let raw_config = store
+            .db
+            .with_connection(|conn| {
+                conn.query_row(
+                    "SELECT config_json FROM agent_runtime_profiles WHERE id = ?1",
+                    params![profile.id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(Into::into)
+            })
+            .unwrap();
+        assert!(raw_config.contains("CUSTOM_LLM_API_KEY"));
+        assert!(!raw_config.contains("sk-"));
+    }
+
+    #[test]
+    fn test_runtime_provider_config_rejects_invalid_environment_variable() {
+        let (store, _dir) = test_store();
+        let profile = store.list_runtime_profiles().unwrap().remove(0);
+        let provider = RuntimeProviderConfig {
+            provider_id: "aliyun-bailian".to_string(),
+            display_name: "阿里云百炼".to_string(),
+            api_protocol: "openai-completions".to_string(),
+            base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
+            api_key_env: "CUSTOM-LLM-KEY".to_string(),
+        };
+
+        let error = store
+            .save_runtime_profile(
+                &profile.id,
+                &profile.executable,
+                "glm-5.2",
+                Some(&provider),
+                true,
+                profile.revision,
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("环境变量"));
     }
 
     #[test]

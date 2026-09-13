@@ -11,6 +11,7 @@
         <section
           ref="panelRef"
           class="motion-modal__panel"
+          :class="{ 'is-wide': size === 'wide' }"
           :style="panelStyle"
           role="dialog"
           aria-modal="true"
@@ -40,8 +41,10 @@ import { animateSpring, projectMotion } from '@/utils/motionSpring'
 const props = withDefaults(defineProps<{
   modelValue: boolean
   ariaLabel?: string
+  size?: 'regular' | 'wide'
 }>(), {
   ariaLabel: '对话框',
+  size: 'regular',
 })
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 const panelRef = ref<HTMLElement | null>(null)
@@ -174,6 +177,7 @@ onBeforeUnmount(() => {
   transform: translate3d(0, var(--motion-sheet-y), 0);
   transition: transform var(--motion-normal) var(--ease-spring-gentle);
 }
+.motion-modal__panel.is-wide { width: min(840px, calc(100vw - 48px)); }
 .motion-modal__handle { display: none; }
 
 .motion-modal-enter-active,
@@ -205,6 +209,7 @@ onBeforeUnmount(() => {
     overscroll-behavior: contain;
     padding-bottom: env(safe-area-inset-bottom);
   }
+  .motion-modal__panel.is-wide { width: 100%; }
   .motion-modal__handle {
     display: flex;
     position: absolute;

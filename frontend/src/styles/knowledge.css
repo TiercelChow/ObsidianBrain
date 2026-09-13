@@ -67,6 +67,9 @@
   gap: 10px;
   min-width: 0;
 }
+.knowledge-select { width: 230px; flex: none; }
+.knowledge-select.is-compact { width: 220px; }
+.knowledge-select.is-fluid { width: 100%; }
 .knowledge-search {
   position: relative;
   min-height: 44px;
@@ -159,6 +162,7 @@
     -webkit-backdrop-filter: none;
   }
   .knowledge-toolbar { width: 100%; }
+  .knowledge-select.is-responsive { width: 100%; }
   .knowledge-search { min-height: 46px; }
   .knowledge-modal-card { border-radius: 24px 24px 0 0; }
   .knowledge-modal-head { padding-top: 34px; }

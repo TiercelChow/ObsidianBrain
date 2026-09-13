@@ -26,7 +26,7 @@
 - 阅境轩书架中的每本 Markdown 文集或 PDF 都可建立一个相互隔离的知识库
 - Markdown 文件夹可同步为带文件路径和行号来源的数据库知识条目；原始文件保持只读
 - Wiki 工作台支持按书检索、筛选和查看条目正文及引用
-- 书籍问答先从当前知识库召回证据，再通过 DeepSeek Harness ACP 生成带 `[S#]` 引用的回答
+- 书籍问答先从当前知识库召回证据，再通过 DeepSeek Harness ACP 生成带 `[S#]` 引用的回答；会话、消息和来源保存在 SQLite，来源默认在当前页面弹窗预览
 - 研究任务支持创建、执行、失败重试，并持久化报告、证据映射与 Agent 运行审计
 - Wiki 配置集中管理 Runtime Profile、模型覆盖和每本书的 Purpose / Schema 等配置文档
 
@@ -168,27 +168,40 @@ npm run dev
 
 1. 在阅境轩把 Markdown 文件夹或 PDF 加入书架。
 2. 打开“书籍知识库”，为目标书籍初始化知识库。Markdown 文集会立即扫描并写入 SQLite；PDF 当前只登记来源，等待后续版面提取能力。
-3. 确保本机可以运行 `npx`，并在启动 ObsidianBrain 前提供 DeepSeek 模型凭据：
+3. 确保本机可以运行 `npx`。模型既可以使用 Harness 默认供应商，也可以在 Wiki 配置中接入 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 兼容接口。API Key 只通过环境变量交给启动进程，不写入数据库。
+
+例如接入阿里云百炼兼容接口时，先在本机设置自定义凭据变量：
 
 ```bash
-export DEEPSEEK_API_KEY="你的 Key"
+export CUSTOM_LLM_API_KEY="你的百炼 Key"
 obsidian-brain start
 ```
 
 Windows PowerShell：
 
 ```powershell
-$env:DEEPSEEK_API_KEY = "你的 Key"
+$env:CUSTOM_LLM_API_KEY = "你的百炼 Key"
 obsidian-brain.exe start
 ```
 
-也可以在 DeepSeek Harness Web 的 Models 页面保存模型凭据。凭据由 Harness 或进程环境管理，不写入 Book Wiki 数据库。
+4. 在“Wiki 配置 → Agent Runtime”中启用“第三方模型供应商”，填写供应商、协议、Base URL、模型 ID 和环境变量名，再保存配置。阿里云百炼示例：
 
-4. 在“Wiki 配置 → Agent Runtime”中先保存启动命令，再点击“验证已保存配置”。默认命令固定为：
+```text
+供应商名称：阿里云百炼
+供应商 ID：aliyun-bailian
+API 协议：OpenAI Chat Completions
+API Base URL：https://dashscope.aliyuncs.com/compatible-mode/v1
+模型 ID：glm-5.2
+API Key 环境变量：CUSTOM_LLM_API_KEY
+```
+
+默认 Harness 启动命令固定为：
 
 ```text
 npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp
 ```
+
+保存后再点击“验证已保存配置”，该操作会发起一次最小模型请求。
 
 5. 在“书籍问答”选择知识库进行带引用问答，或在“研究任务”创建并显式运行一项单书研究任务。
 

@@ -268,7 +268,7 @@
           <article data-reveal><span class="step-number">1</span><div><h3>构建与安装</h3><p>运行 <code>make build</code> 构建前后端，再运行 <code>make install</code> 安装到当前用户的 <code>~/.local/bin</code>。</p></div></article>
           <article data-reveal><span class="step-number">2</span><div><h3>启动服务</h3><p>执行 <code>obsidian-brain start</code>，然后访问 <code>http://localhost:9876</code>。</p></div></article>
           <article data-reveal><span class="step-number">3</span><div><h3>连接 Obsidian</h3><p>安装 Obsidian Local REST API 插件，在控制面板填写 Vault 路径、服务地址和 API Key。</p></div></article>
-          <article data-reveal><span class="step-number">4</span><div><h3>启用书籍问答</h3><p>提供 <code>DEEPSEEK_API_KEY</code>，在 Wiki 配置中保存并验证 DeepSeek Harness，再执行问答或研究任务。</p></div></article>
+          <article data-reveal><span class="step-number">4</span><div><h3>启用书籍问答</h3><p>在 Wiki 配置中选择模型供应商、兼容协议、Base URL、模型与凭据环境变量（如 <code>CUSTOM_LLM_API_KEY</code>），再验证 DeepSeek Harness 后执行问答或研究任务。</p></div></article>
         </div>
       </section>
 
@@ -319,7 +319,7 @@
             <details><summary>任务数据保存在哪里？<svg><use href="#icon-chevron" /></svg></summary><p>当前任务中枢以本地 SQLite 为唯一权威存储；阅读书架、配置和部分运行状态也保存在本机数据目录。Markdown 笔记与附件仍在你的 Vault 中。</p></details>
             <details><summary>书籍知识库保存在哪里？<svg><use href="#icon-chevron" /></svg></summary><p>实体、来源片段、配置文档、研究报告和 Agent 审计均保存在 <code>~/.obsidian-brain/brain.db</code>。原始 Markdown 与 PDF 不会被改写。</p></details>
             <details><summary>如何进行局域网访问？<svg><use href="#icon-chevron" /></svg></summary><p>默认服务可绑定 `0.0.0.0:9876`，同一局域网设备访问 `http://你的IP:9876`。若只希望本机使用，可将 `server.host` 设置为 `127.0.0.1`。</p></details>
-            <details><summary>支持哪些 LLM？<svg><use href="#icon-chevron" /></svg></summary><p>通用 LLM 功能支持 OpenAI 兼容接口与 Ollama；书籍问答和研究任务当前通过 DeepSeek Harness 的 ACP 适配器执行，Runtime 边界允许后续替换。</p></details>
+            <details><summary>支持哪些 LLM？<svg><use href="#icon-chevron" /></svg></summary><p>书籍问答和研究任务通过 DeepSeek Harness 的 ACP 适配器执行，但模型供应商不受 DeepSeek 限制；可配置 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 兼容接口，API Key 仅从环境变量读取。</p></details>
             <details><summary>正式运行还需要 Node.js 吗？<svg><use href="#icon-chevron" /></svg></summary><p>阅境轩、时光机和任务中枢不需要。若使用默认的 DeepSeek Harness 启动命令，则需要系统中存在 npm / npx；前端仍已通过 <code>rust-embed</code> 嵌入 Rust 二进制。</p></details>
           </div>
         </div>

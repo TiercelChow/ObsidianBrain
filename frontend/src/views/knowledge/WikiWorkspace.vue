@@ -5,7 +5,7 @@
     </template>
 
     <div class="wiki-toolbar knowledge-toolbar">
-      <el-select v-model="activeBaseId" placeholder="选择一本书" @change="onBaseChanged">
+      <el-select v-model="activeBaseId" class="knowledge-select is-responsive" placeholder="选择一本书" @change="onBaseChanged">
         <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
       </el-select>
       <label class="knowledge-search">
@@ -220,7 +220,6 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); cleanup() })
 
 <style scoped>
 .wiki-toolbar { margin-bottom: 12px; }
-.wiki-toolbar :deep(.el-select) { width: 230px; flex: none; }
 .wiki-toolbar .knowledge-search { flex: 1; }
 .wiki-workspace { min-height: 570px; display: grid; grid-template-columns: minmax(250px, 320px) minmax(0, 1fr); gap: 12px; }
 .entry-pane, .entry-detail { min-height: 0; overflow: hidden; }
@@ -263,7 +262,6 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); cleanup() })
 .mobile-sync-button { display: none; }
 @media (max-width: 768px) {
   .wiki-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 46px; align-items: stretch; }
-  .wiki-toolbar :deep(.el-select) { width: 100%; }
   .wiki-toolbar .knowledge-search { grid-column: 1 / -1; grid-row: 2; }
   .mobile-sync-button { grid-column: 2; grid-row: 1; width: 46px; min-height: 46px; display: grid; place-items: center; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-glass); color: var(--accent); font-size: 17px; }
   .wiki-workspace { min-height: calc(100dvh - 230px); display: block; }

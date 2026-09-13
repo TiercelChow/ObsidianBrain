@@ -140,6 +140,15 @@ pub struct ConfigDocument {
     pub updated_at: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeProviderConfig {
+    pub provider_id: String,
+    pub display_name: String,
+    pub api_protocol: String,
+    pub base_url: String,
+    pub api_key_env: String,
+}
+
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct RuntimeProfile {
     pub id: String,
@@ -147,6 +156,7 @@ pub struct RuntimeProfile {
     pub runtime: String,
     pub executable: String,
     pub model: String,
+    pub provider_config: Option<RuntimeProviderConfig>,
     pub enabled: bool,
     pub revision: i64,
     pub updated_at: String,
@@ -170,9 +180,38 @@ pub struct RuntimeVerification {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct KnowledgeAnswer {
     pub run_id: String,
+    pub conversation_id: String,
     pub answer: String,
     pub runtime: String,
     pub evidence: Vec<KnowledgeEntrySummary>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeConversationSummary {
+    pub id: String,
+    pub knowledge_base_id: String,
+    pub title: String,
+    pub message_count: i64,
+    pub preview: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeMessage {
+    pub id: String,
+    pub role: String,
+    pub content: String,
+    pub run_id: Option<String>,
+    pub evidence: Vec<KnowledgeEntrySummary>,
+    pub created_at: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeConversationDetail {
+    #[serde(flatten)]
+    pub conversation: KnowledgeConversationSummary,
+    pub messages: Vec<KnowledgeMessage>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]

@@ -85,6 +85,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "DeepSeek Harness ACP runtime command",
         sql: include_str!("../../migrations/013_deepseek_harness_acp.sql"),
     },
+    Migration {
+        version: 14,
+        description: "persistent knowledge conversations and messages",
+        sql: include_str!("../../migrations/014_knowledge_conversations.sql"),
+    },
 ];
 
 impl SqliteStore {
@@ -854,6 +859,10 @@ mod tests {
             "timeline_events",
             "app_state",
             "memos",
+            "knowledge_conversations",
+            "knowledge_conversation_scopes",
+            "knowledge_messages",
+            "knowledge_message_citations",
         ] {
             let exists: bool = conn
                 .query_row(

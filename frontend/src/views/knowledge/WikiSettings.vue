@@ -9,7 +9,7 @@
 
       <section class="settings-main knowledge-surface">
         <template v-if="section === 'runtime'">
-          <header class="settings-section-head"><div><span>执行环境</span><h2>Agent Runtime</h2><p>首选 DeepSeek Harness；业务数据仍由 Rust 与 SQLite 管理。</p></div></header>
+          <header class="settings-section-head"><div><span>执行环境</span><h2>Agent Runtime</h2><p>DeepSeek Harness 负责执行，模型可连接任意受支持的供应商；业务数据仍由 Rust 与 SQLite 管理。</p></div></header>
           <div v-if="loading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
           <article v-for="item in runtimeHealth" v-else :key="item.profile.id" class="runtime-card">
             <div class="runtime-title">
@@ -19,8 +19,20 @@
             </div>
             <div class="runtime-message" :class="{ 'is-verified': runtimeVerification[item.profile.id] }">{{ runtimeVerification[item.profile.id] || item.message }}<span v-if="item.version"> · {{ item.version }}</span></div>
             <label><span>ACP 启动命令</span><el-input v-model="item.profile.executable" placeholder="npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp" /></label>
-            <label><span>模型覆盖（可选）</span><el-input v-model="item.profile.model" placeholder="留空则使用 Harness 配置" /></label>
-            <p class="credential-hint">模型密钥由 Harness 管理，不保存在知识库数据库中。可通过 Harness Web 的 Models 页面配置，或在启动本应用前设置 <code>DEEPSEEK_API_KEY</code>。</p>
+            <div class="provider-mode">
+              <div><strong>第三方模型供应商</strong><span>为当前 Runtime 注入独立的模型路由</span></div>
+              <el-switch :model-value="Boolean(item.profile.provider_config)" @change="toggleProviderConfig(item.profile, Boolean($event))" />
+            </div>
+            <div v-if="item.profile.provider_config" class="provider-fields">
+              <label><span>供应商名称</span><el-input v-model="item.profile.provider_config.display_name" placeholder="例如：阿里云百炼" /></label>
+              <label><span>供应商 ID</span><el-input v-model="item.profile.provider_config.provider_id" placeholder="例如：aliyun-bailian" /></label>
+              <label><span>API 协议</span><el-select v-model="item.profile.provider_config.api_protocol" class="knowledge-select is-fluid"><el-option label="OpenAI Chat Completions" value="openai-completions" /><el-option label="OpenAI Responses" value="openai-responses" /><el-option label="Anthropic Messages" value="anthropic-messages" /></el-select></label>
+              <label class="is-wide"><span>API Base URL</span><el-input v-model="item.profile.provider_config.base_url" placeholder="https://example.com/v1" /></label>
+              <label><span>模型 ID</span><el-input v-model="item.profile.model" placeholder="例如：glm-5.2" /></label>
+              <label><span>API Key 环境变量</span><el-input v-model="item.profile.provider_config.api_key_env" placeholder="CUSTOM_LLM_API_KEY" /></label>
+            </div>
+            <label v-else><span>模型覆盖（可选）</span><el-input v-model="item.profile.model" placeholder="留空则使用 Harness 默认模型" /></label>
+            <p class="credential-hint">这里只保存环境变量名，不保存密钥。<template v-if="item.profile.provider_config">启动 ObsidianBrain 前请设置 <code>{{ item.profile.provider_config.api_key_env || 'CUSTOM_LLM_API_KEY' }}</code>。</template><template v-else>凭据由 Harness 默认 Profile 或 Harness Web 的 Models 页面管理。</template></p>
             <div class="runtime-actions">
               <el-switch v-model="item.profile.enabled" active-text="启用" />
               <div>
@@ -32,7 +44,7 @@
         </template>
 
         <template v-else-if="section === 'documents'">
-          <header class="settings-section-head split"><div><span>提示词与规则</span><h2>配置文档</h2><p>内容保存在 SQLite，需要运行时才会物化为临时文件。</p></div><el-select v-model="activeBaseId" placeholder="选择知识库" @change="loadSettings"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" /></el-select></header>
+          <header class="settings-section-head split"><div><span>提示词与规则</span><h2>配置文档</h2><p>内容保存在 SQLite，需要运行时才会物化为临时文件。</p></div><el-select v-model="activeBaseId" class="knowledge-select is-compact is-responsive" placeholder="选择知识库" @change="loadSettings"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" /></el-select></header>
           <div v-if="!activeBaseId" class="knowledge-empty"><strong>选择一本书</strong><span>查看并调整它的知识建模、问答与任务规则。</span></div>
           <div v-else class="document-editor">
             <nav class="document-tabs"><button v-for="document in documents" :key="document.id" :class="{ active: document.id === activeDocument?.id }" @click="activeDocumentId = document.id"><el-icon><Document /></el-icon>{{ document.name }}</button></nav>
@@ -86,6 +98,19 @@ const verifyingRuntimeId = ref('')
 const runtimeVerification = ref<Record<string, string>>({})
 const savingDocument = ref(false)
 const activeDocument = computed(() => documents.value.find(document => document.id === activeDocumentId.value))
+
+function toggleProviderConfig(profile: RuntimeProfile, enabled: boolean) {
+  profile.provider_config = enabled
+    ? {
+        provider_id: 'custom-provider',
+        display_name: '自定义供应商',
+        api_protocol: 'openai-completions',
+        base_url: '',
+        api_key_env: 'CUSTOM_LLM_API_KEY',
+      }
+    : null
+  delete runtimeVerification.value[profile.id]
+}
 
 async function initialize() {
   try {
@@ -178,7 +203,6 @@ onMounted(initialize)
 .settings-main { min-width: 0; padding: clamp(20px, 3vw, 34px); }
 .settings-section-head { margin-bottom: 25px; padding-bottom: 20px; border-bottom: 1px solid var(--border-faint); }
 .settings-section-head.split { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
-.settings-section-head.split :deep(.el-select) { width: 220px; }
 .settings-section-head span { color: var(--accent); font-size: 10px; font-weight: 720; letter-spacing: .08em; }
 .settings-section-head h2 { margin: 5px 0 4px; font-size: 24px; }
 .settings-section-head p { color: var(--text-muted); font-size: 12px; }
@@ -193,6 +217,12 @@ onMounted(initialize)
 .runtime-message.is-verified { background: color-mix(in srgb, #34c759 11%, transparent); color: #248a3d; }
 .runtime-card label { display: grid; gap: 6px; }
 .runtime-card label > span { color: var(--text-muted); font-size: 11px; }
+.provider-mode { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 13px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); }
+.provider-mode > div { display: grid; gap: 2px; }
+.provider-mode strong { font-size: 12px; }
+.provider-mode span { color: var(--text-faint); font-size: 10px; }
+.provider-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 14px; border: 1px solid var(--accent-border); border-radius: 14px; background: var(--accent-light); }
+.provider-fields .is-wide { grid-column: 1 / -1; }
 .credential-hint { color: var(--text-faint); font-size: 10px; line-height: 1.55; }
 .credential-hint code { color: var(--text-muted); font-family: var(--font-mono); }
 .runtime-actions { display: flex; align-items: center; justify-content: space-between; }
@@ -219,11 +249,12 @@ onMounted(initialize)
   .settings-nav button span { display: none; }
   .settings-main { padding: 16px; }
   .settings-section-head.split { display: grid; }
-  .settings-section-head.split :deep(.el-select) { width: 100%; }
   .runtime-title { flex-wrap: wrap; }
   .runtime-title .knowledge-status { margin-left: 55px; }
   .runtime-actions { align-items: stretch; flex-direction: column; gap: 12px; }
   .runtime-actions > div { display: grid; grid-template-columns: 1fr 1fr; }
+  .provider-fields { grid-template-columns: 1fr; }
+  .provider-fields .is-wide { grid-column: auto; }
   .document-actions { align-items: stretch; flex-direction: column; }
   .skills-preview { grid-template-columns: 1fr; }
 }

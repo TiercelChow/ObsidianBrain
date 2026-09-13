@@ -19,7 +19,8 @@ pub struct AgentPromptRequest {
     pub model: String,
     pub cwd: PathBuf,
     pub prompt: String,
-    pub patch_path: Option<PathBuf>,
+    pub patch_paths: Vec<PathBuf>,
+    pub credential_env: Option<String>,
 }
 
 #[async_trait]
@@ -63,7 +64,7 @@ impl AgentRuntime for DeepSeekHarnessRuntime {
             return Err(harness_error("ACP 启动命令为空"));
         }
         let command = command_parts.remove(0);
-        if let Some(patch_path) = &request.patch_path {
+        for patch_path in &request.patch_paths {
             if !patch_path.is_absolute() || !patch_path.is_file() {
                 return Err(harness_error("Harness Patch 必须是已存在的绝对文件"));
             }
@@ -120,7 +121,12 @@ impl AgentRuntime for DeepSeekHarnessRuntime {
         let answer = tokio::time::timeout(self.timeout, operation)
             .await
             .map_err(|_| harness_error("DeepSeek Harness 在 180 秒内没有完成回答"))?
-            .map_err(|error| harness_error(acp_error_message(&error.to_string())))?;
+            .map_err(|error| {
+                harness_error(acp_error_message(
+                    &error.to_string(),
+                    request.credential_env.as_deref(),
+                ))
+            })?;
         if answer.trim().is_empty() {
             return Err(harness_error("DeepSeek Harness 返回了空回答"));
         }
@@ -217,10 +223,19 @@ fn harness_error(detail: impl Into<String>) -> BrainError {
     }
 }
 
-fn acp_error_message(detail: &str) -> String {
-    if detail.contains("no API key") || detail.contains("MISSING_CREDENTIAL") {
-        return "DeepSeek Harness 未配置 DEEPSEEK_API_KEY。请在 Harness Web 的 Models 页面保存密钥，或在启动 ObsidianBrain 前导出该环境变量"
-            .to_string();
+fn acp_error_message(detail: &str, credential_env: Option<&str>) -> String {
+    let normalized = detail.to_ascii_lowercase();
+    if normalized.contains("no api key")
+        || normalized.contains("missing_credential")
+        || normalized.contains("no credential")
+    {
+        return match credential_env {
+            Some(environment) => format!(
+                "DeepSeek Harness 未找到模型凭据 {environment}。请在启动 ObsidianBrain 前设置该环境变量；密钥不会保存到知识库数据库"
+            ),
+            None => "DeepSeek Harness 未找到当前模型供应商的 API Key。请在 Harness Web 的 Models 页面保存凭据，或为 Runtime 配置凭据环境变量"
+                .to_string(),
+        };
     }
     format!("ACP 调用失败: {detail}")
 }
@@ -236,6 +251,7 @@ mod tests {
             runtime: "deepseek_harness".to_string(),
             executable: executable.to_string(),
             model: String::new(),
+            provider_config: None,
             enabled,
             revision: 1,
             updated_at: String::new(),
@@ -263,12 +279,13 @@ mod tests {
     }
 
     #[test]
-    fn test_acp_error_message_simplifies_missing_credentials() {
+    fn test_acp_error_message_uses_configured_credential_reference() {
         let message = acp_error_message(
-            "turn failed: no API key for provider route deepseek-official: internal data",
+            "turn failed: llm-pi-ai: no credential for provider route aliyun-bailian; its profile resolves CUSTOM_LLM_API_KEY, which is not set: internal data",
+            Some("CUSTOM_LLM_API_KEY"),
         );
 
-        assert!(message.contains("DEEPSEEK_API_KEY"));
+        assert!(message.contains("CUSTOM_LLM_API_KEY"));
         assert!(!message.contains("internal data"));
     }
 
@@ -281,7 +298,8 @@ mod tests {
                 model: String::new(),
                 cwd: PathBuf::from("relative"),
                 prompt: "test".to_string(),
-                patch_path: None,
+                patch_paths: Vec::new(),
+                credential_env: None,
             })
             .await
             .unwrap_err();
@@ -299,7 +317,8 @@ mod tests {
                 model: String::new(),
                 cwd: workspace.path().to_path_buf(),
                 prompt: "只回答：连接成功".to_string(),
-                patch_path: None,
+                patch_paths: Vec::new(),
+                credential_env: None,
             })
             .await
             .expect("real ACP response");

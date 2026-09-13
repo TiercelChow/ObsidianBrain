@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 
 use crate::error::BrainError;
 use crate::infra::deepseek_harness::inspect_runtime_profiles;
+use crate::models::book_wiki::RuntimeProviderConfig;
 use crate::tools::traits::ToolHandler;
 use crate::AppContext;
 
@@ -220,6 +221,74 @@ impl ToolHandler for GetKnowledgeEntryHandler {
 
 pub struct AskBookKnowledgeHandler;
 
+pub struct ListKnowledgeConversationsHandler;
+
+#[async_trait]
+impl ToolHandler for ListKnowledgeConversationsHandler {
+    fn name(&self) -> &str {
+        "list_knowledge_conversations"
+    }
+
+    fn description(&self) -> &str {
+        "列出一本书知识库中持久化的问答会话"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": { "type": "string" },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 30 }
+            },
+            "required": ["knowledge_base_id"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        Ok(json!({
+            "conversations": ctx.book_wiki_service.store().list_conversations(
+                required_string(&args, "knowledge_base_id")?,
+                args.get("limit").and_then(Value::as_u64).unwrap_or(30) as usize,
+            )?
+        }))
+    }
+}
+
+pub struct GetKnowledgeConversationHandler;
+
+#[async_trait]
+impl ToolHandler for GetKnowledgeConversationHandler {
+    fn name(&self) -> &str {
+        "get_knowledge_conversation"
+    }
+
+    fn description(&self) -> &str {
+        "读取问答会话的历史消息与来源引用"
+    }
+
+    fn input_schema(&self) -> Value {
+        required_id_schema("conversation_id")
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(
+            ctx.book_wiki_service
+                .store()
+                .get_conversation(required_string(&args, "conversation_id")?)?,
+        )
+        .map_err(|error| BrainError::Internal(format!("结果序列化失败: {error}")))
+    }
+}
+
 #[async_trait]
 impl ToolHandler for AskBookKnowledgeHandler {
     fn name(&self) -> &str {
@@ -235,7 +304,8 @@ impl ToolHandler for AskBookKnowledgeHandler {
             "type": "object",
             "properties": {
                 "knowledge_base_id": { "type": "string" },
-                "question": { "type": "string", "minLength": 1, "maxLength": 2000 }
+                "question": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                "conversation_id": { "type": "string" }
             },
             "required": ["knowledge_base_id", "question"],
             "additionalProperties": false
@@ -252,6 +322,7 @@ impl ToolHandler for AskBookKnowledgeHandler {
             .ask(
                 required_string(&args, "knowledge_base_id")?,
                 required_string(&args, "question")?,
+                args.get("conversation_id").and_then(Value::as_str),
             )
             .await?;
         serde_json::to_value(result)
@@ -504,6 +575,21 @@ impl ToolHandler for SaveAgentRuntimeProfileHandler {
                 "profile_id": { "type": "string" },
                 "executable": { "type": "string", "minLength": 1 },
                 "model": { "type": "string" },
+                "provider_config": {
+                    "type": ["object", "null"],
+                    "properties": {
+                        "provider_id": { "type": "string", "minLength": 1 },
+                        "display_name": { "type": "string", "minLength": 1 },
+                        "api_protocol": {
+                            "type": "string",
+                            "enum": ["openai-completions", "openai-responses", "anthropic-messages"]
+                        },
+                        "base_url": { "type": "string", "minLength": 1 },
+                        "api_key_env": { "type": "string", "minLength": 1 }
+                    },
+                    "required": ["provider_id", "display_name", "api_protocol", "base_url", "api_key_env"],
+                    "additionalProperties": false
+                },
                 "enabled": { "type": "boolean" },
                 "expected_revision": { "type": "integer", "minimum": 1 }
             },
@@ -517,10 +603,20 @@ impl ToolHandler for SaveAgentRuntimeProfileHandler {
     }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let provider_config = args
+            .get("provider_config")
+            .filter(|value| !value.is_null())
+            .cloned()
+            .map(serde_json::from_value::<RuntimeProviderConfig>)
+            .transpose()
+            .map_err(|error| {
+                BrainError::KnowledgeValidation(format!("供应商配置格式不正确: {error}"))
+            })?;
         let profile = ctx.book_wiki_service.store().save_runtime_profile(
             required_string(&args, "profile_id")?,
             required_string(&args, "executable")?,
             args.get("model").and_then(Value::as_str).unwrap_or(""),
+            provider_config.as_ref(),
             args.get("enabled")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),

@@ -90,9 +90,18 @@ export interface RuntimeProfile {
   runtime: 'deepseek_harness' | 'claude_code'
   executable: string
   model: string
+  provider_config?: RuntimeProviderConfig | null
   enabled: boolean
   revision: number
   updated_at: string
+}
+
+export interface RuntimeProviderConfig {
+  provider_id: string
+  display_name: string
+  api_protocol: 'openai-completions' | 'openai-responses' | 'anthropic-messages'
+  base_url: string
+  api_key_env: string
 }
 
 export interface RuntimeHealth {
@@ -110,9 +119,33 @@ export interface RuntimeVerification {
 
 export interface KnowledgeAnswer {
   run_id: string
+  conversation_id: string
   answer: string
   runtime: 'deepseek_harness'
   evidence: KnowledgeEntrySummary[]
+}
+
+export interface KnowledgeConversationSummary {
+  id: string
+  knowledge_base_id: string
+  title: string
+  message_count: number
+  preview: string
+  created_at: string
+  updated_at: string
+}
+
+export interface KnowledgeChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  run_id?: string | null
+  evidence: KnowledgeEntrySummary[]
+  created_at: string
+}
+
+export interface KnowledgeConversationDetail extends KnowledgeConversationSummary {
+  messages: KnowledgeChatMessage[]
 }
 
 export interface KnowledgeTaskExecution {
@@ -164,11 +197,25 @@ export function getKnowledgeEntry(entryId: string) {
   >
 }
 
-export function askBookKnowledge(knowledgeBaseId: string, question: string) {
+export function askBookKnowledge(knowledgeBaseId: string, question: string, conversationId?: string) {
   return callTool('ask_book_knowledge', {
     knowledge_base_id: knowledgeBaseId,
     question,
+    ...(conversationId ? { conversation_id: conversationId } : {}),
   }, { timeout: 190_000 }) as unknown as Promise<ToolEnvelope<KnowledgeAnswer>>
+}
+
+export function listKnowledgeConversations(knowledgeBaseId: string, limit = 30) {
+  return callTool('list_knowledge_conversations', {
+    knowledge_base_id: knowledgeBaseId,
+    limit,
+  }) as unknown as Promise<ToolEnvelope<{ conversations: KnowledgeConversationSummary[] }>>
+}
+
+export function getKnowledgeConversation(conversationId: string) {
+  return callTool('get_knowledge_conversation', {
+    conversation_id: conversationId,
+  }) as unknown as Promise<ToolEnvelope<KnowledgeConversationDetail>>
 }
 
 export function listKnowledgeTasks(knowledgeBaseId?: string) {
@@ -224,6 +271,7 @@ export function saveAgentRuntimeProfile(profile: RuntimeProfile) {
     profile_id: profile.id,
     executable: profile.executable,
     model: profile.model,
+    provider_config: profile.provider_config ?? null,
     enabled: profile.enabled,
     expected_revision: profile.revision,
   }) as unknown as Promise<ToolEnvelope<RuntimeProfile>>

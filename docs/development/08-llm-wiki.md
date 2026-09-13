@@ -1,9 +1,9 @@
 # 阅境轩·书籍知识库（Book Wiki）— 开发设计文档 v3
 
 > **文档编号**: DEV-08
-> **版本**: v3.0
+> **版本**: v3.1
 > **状态**: MVP 2 已落地，后台 Worker 与知识变更集待实现
-> **最后更新**: 2026-09-12
+> **最后更新**: 2026-09-13
 > **对应需求**: [REQ-08](../requirement/08-llm-wiki.md)
 > **关联需求**: [REQ-10 阅境轩书架](../requirement/10-reader-bookshelf.md)
 
@@ -11,13 +11,13 @@
 
 ## 0. 当前实施状态（2026-09-12）
 
-首个可运行纵切已经完成：书架 JSON 可无损迁移到正规表；每本书可建立独立知识库；Markdown 文件夹可扫描为带文件和行号引用的数据库章节实体；五个新页面已接通真实 API；研究任务、书籍配置文档和 Runtime Profile 均保存到 SQLite。自然语言检索目前采用轻量查询规整与数据库正文召回。知识问答已经通过官方 Rust SDK 接入 DeepSeek Harness ACP v1：后端先召回当前书籍的数据库证据，再启动一次性 ACP 会话生成带 `[S#]` 来源编号的回答，并把输入、输出和失败状态记录到 `agent_runs`。前端会把编号映射为可定位、可打开的证据卡片，不使用不安全的 HTML 注入。
+首个可运行纵切已经完成：书架 JSON 可无损迁移到正规表；每本书可建立独立知识库；Markdown 文件夹可扫描为带文件和行号引用的数据库章节实体；五个新页面已接通真实 API；研究任务、书籍配置文档和 Runtime Profile 均保存到 SQLite。自然语言检索目前采用轻量查询规整与数据库正文召回。知识问答已经通过官方 Rust SDK 接入 DeepSeek Harness ACP v1：后端先召回当前书籍的数据库证据，再启动一次性 ACP 会话生成带 `[S#]` 来源编号的回答，并把输入、输出和失败状态记录到 `agent_runs`。迁移 014 增加会话、范围、消息和消息引用表；前端会恢复最近会话并允许切换历史，继续提问时把最近消息作为追问上下文。回答正文仍以纯文本分段展示，来源正文仅在用户点击后通过共享安全 Markdown 渲染链路显示于预览弹窗。
 
 研究任务已经形成首个执行闭环：草稿由用户显式点击运行；后端在单书边界内召回证据，通过同一只读 Harness Patch 生成带引用报告，持久化任务状态、报告和 `agent_runs` 审计记录；失败任务可重试，已完成报告刷新页面后仍能恢复来源映射。当前执行采用同步请求，不冒充后台队列，也不会自动修改正式知识实体。
 
 当前不会伪造 Agent 结果。未检测到 Harness 时，知识问答降级为展示真实命中的证据；PDF 只完成来源登记并明确标记为等待版面提取。PDF 版面提取、结构化论断/关系生成、耐久化任务 Worker、取消与进度事件、审核、备份、导出和旧后端清理仍按本文后续阶段实施。
 
-本地开发使用固定版本命令 `npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp`。调用前必须在 Harness Web 的 Models 页面保存密钥，或在启动 ObsidianBrain 的环境中提供 `DEEPSEEK_API_KEY`；密钥不写入 Runtime Profile 或知识库数据库。配置页将“启动命令检测”和需要一次最小模型请求的“连接验证”明确分开。模型字段留空时使用 Harness Profile 默认值，填写后通过 ACP `session/set_config_option` 覆盖。所有 `session/request_permission` 默认返回取消；问答和任务会话使用独立临时空目录，并物化专用 Patch 关闭 Bash、PowerShell、文件系统、联网、Skill、任务和子 Agent 工具，避免书籍原文件或主机环境暴露给模型。
+本地开发使用固定版本命令 `npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp`。模型路由不与 Harness 品牌绑定：默认可沿用 Harness Profile，也可在 Runtime Profile 中保存供应商 ID、显示名、协议、Base URL、模型 ID 与 API Key 环境变量名。后端在每次运行的临时目录中生成 `llm-pi-ai` Provider Patch，并通过 ACP 的 JSON 模型选择值 `[provider, model]` 切换路由。真实密钥只从启动环境或 Harness 凭据服务读取，不进入 Runtime Profile、知识库数据库、日志或生成 Patch。配置页将“启动命令检测”和需要一次最小模型请求的“连接验证”明确分开。所有 `session/request_permission` 默认返回取消；问答和任务会话使用独立临时空目录，并在供应商 Patch 之后应用专用安全 Patch，关闭 Bash、PowerShell、文件系统、联网、Skill、任务和子 Agent 工具，避免书籍原文件或主机环境暴露给模型。
 
 ---
 
@@ -546,6 +546,8 @@ pub trait AgentHarness: Send + Sync {
 
 默认不挂载任意 Bash、无限制网络、全盘文件搜索、自修改和与知识任务无关的开发工具。
 
+模型供应商通过 Harness 的通用 `llm-pi-ai` 适配器注入，当前允许 `openai-completions`、`openai-responses` 与 `anthropic-messages` 三种明确协议。Provider Patch 只包含供应商元数据和凭据环境变量名；API Key 值永不物化到临时文件。ACP 模型选项使用 Harness 公布的 JSON 路由值 `[provider, model]`，不能只传模型名。
+
 #### 工具桥
 
 Sidecar 插件通过 `127.0.0.1` 调用后端专用端点，使用 Run Capability Bearer Token。插件不获取数据库路径。
@@ -643,6 +645,8 @@ Sidecar 插件通过 `127.0.0.1` 调用后端专用端点，使用 Run Capabilit
 
 对话和消息保存在 ObsidianBrain SQLite。Harness Session ID 仅为一次运行的诊断关联，不作为恢复对话的唯一依据。
 
+当前实现使用 `knowledge_conversations`、`knowledge_conversation_scopes`、`knowledge_messages` 和 `knowledge_message_citations`。每次成功问答在同一事务中写入用户消息、助手消息及有序来源；页面加载时按知识库列出会话并恢复最近一项。继续会话时最多取最近八条消息辅助理解指代，但这些历史消息不能替代本轮召回的数据库证据。
+
 ### 11.2 单次问答
 
 ```text
@@ -662,6 +666,9 @@ Agent 回答只能引用工具返回的 entry/span ID。后端在保存前验证
 
 ### 11.4 阅读跳转
 
+- 问答页点击 `[S#]` 或来源卡片时，先读取实体详情并打开可关闭的来源预览弹窗。
+- 预览复用阅境轩安全 Markdown 渲染管线，并展示实体引用的路径和行号。
+- 只有用户点击弹窗中的明确操作后才切换页面，避免核对来源时丢失当前问答上下文。
 - PDF：`book_id + source_document_id + page_number`。
 - Markdown：`book_id + relative_path + heading/anchor`。
 - 前端通过 Reader 路由状态打开书籍，再执行定位。

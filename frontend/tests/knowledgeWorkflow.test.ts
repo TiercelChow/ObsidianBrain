@@ -8,14 +8,55 @@ async function source(path: string) {
   return readFile(new URL(path, frontendRoot), 'utf8')
 }
 
-test('knowledge chat maps answer citations to numbered evidence cards without v-html', async () => {
-  const chat = await source('src/views/knowledge/KnowledgeChat.vue')
+test('knowledge chat persists conversations and restores their cited messages', async () => {
+  const [chat, api] = await Promise.all([
+    source('src/views/knowledge/KnowledgeChat.vue'),
+    source('src/api/knowledge.ts'),
+  ])
 
   assert.match(chat, /parseKnowledgeCitations/)
-  assert.match(chat, /focusEvidence\(message, segment\.sourceIndex\)/)
+  assert.match(chat, /listKnowledgeConversations/)
+  assert.match(chat, /getKnowledgeConversation/)
+  assert.match(chat, /activeConversationId\.value \|\| undefined/)
+  assert.match(api, /list_knowledge_conversations/)
+  assert.match(api, /get_knowledge_conversation/)
+  assert.match(api, /conversation_id: string/)
+})
+
+test('knowledge chat previews numbered sources before an explicit workspace navigation', async () => {
+  const chat = await source('src/views/knowledge/KnowledgeChat.vue')
+
+  assert.match(chat, /previewEvidence\(message, segment\.sourceIndex\)/)
   assert.match(chat, /S\{\{ evidenceIndex \+ 1 \}\}/)
+  assert.match(chat, /<MotionModal[^>]+aria-label="来源预览"/)
+  assert.match(chat, /getKnowledgeEntry/)
+  assert.match(chat, /在 Wiki 工作台打开/)
   assert.match(chat, /本次会话已切换为书内证据检索模式/)
-  assert.doesNotMatch(chat, /v-html/)
+  assert.match(chat, /class="source-markdown markdown-body" v-html="sourceHtml"/)
+})
+
+test('knowledge thinking label loops as a reduced-motion aware typewriter', async () => {
+  const [chat, typewriter] = await Promise.all([
+    source('src/views/knowledge/KnowledgeChat.vue'),
+    source('src/composables/useTypewriterLoop.ts'),
+  ])
+
+  assert.match(chat, /useTypewriterLoop/)
+  assert.match(chat, /正在梳理关键线索/)
+  assert.match(typewriter, /prefers-reduced-motion: reduce/)
+  assert.match(typewriter, /phrase\.slice\(0, characterIndex\)/)
+})
+
+test('knowledge dropdowns use shared system visuals with layout-only utility classes', async () => {
+  const files = await Promise.all([
+    source('src/views/knowledge/KnowledgeChat.vue'),
+    source('src/views/knowledge/WikiWorkspace.vue'),
+    source('src/views/knowledge/KnowledgeTasks.vue'),
+    source('src/views/knowledge/WikiSettings.vue'),
+  ])
+
+  assert.ok(files.every(file => file.includes('knowledge-select')))
+  assert.ok(files.every(file => !file.includes(':deep(.el-select)')))
 })
 
 test('knowledge tasks expose explicit run retry and persisted result actions', async () => {
@@ -38,4 +79,19 @@ test('runtime settings keep save and paid connection verification as separate ac
   assert.match(settings, />保存</)
   assert.match(settings, /verifyAgentRuntime/)
   assert.doesNotMatch(settings, /保存并检测/)
+})
+
+test('runtime settings support an OpenAI-compatible provider without storing its key', async () => {
+  const [settings, api] = await Promise.all([
+    source('src/views/knowledge/WikiSettings.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+
+  assert.match(settings, /第三方模型供应商/)
+  assert.match(settings, /API Base URL/)
+  assert.match(settings, /API Key 环境变量/)
+  assert.match(settings, /CUSTOM_LLM_API_KEY/)
+  assert.doesNotMatch(settings, /DEEPSEEK_API_KEY/)
+  assert.match(api, /provider_config: profile\.provider_config \?\? null/)
+  assert.doesNotMatch(api, /api_key:/)
 })

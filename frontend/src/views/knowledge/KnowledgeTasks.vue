@@ -5,7 +5,7 @@
     </template>
 
     <div class="task-filter knowledge-toolbar">
-      <el-select v-model="filterBaseId" placeholder="全部知识库" clearable @change="loadTasks">
+      <el-select v-model="filterBaseId" class="knowledge-select is-responsive" placeholder="全部知识库" clearable @change="loadTasks">
         <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
       </el-select>
       <button class="mobile-create-task" type="button" aria-label="新建研究任务" :disabled="!bases.length" @click="openCreate"><el-icon><Plus /></el-icon></button>
@@ -44,12 +44,12 @@
       <div class="knowledge-modal-card">
         <div class="knowledge-modal-head"><h3>新建研究任务</h3><p>任务严格绑定一本书，不会跨库读取。</p></div>
         <div class="knowledge-modal-body">
-          <el-select v-model="draft.knowledgeBaseId" placeholder="选择知识库">
+          <el-select v-model="draft.knowledgeBaseId" class="knowledge-select is-fluid" placeholder="选择知识库">
             <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
           </el-select>
           <el-input v-model="draft.title" :maxlength="200" show-word-limit placeholder="要研究或核实的问题" />
           <el-input v-model="draft.description" type="textarea" :rows="4" :maxlength="4000" show-word-limit placeholder="补充目标、范围和期望结果" />
-          <el-select v-model="draft.taskType">
+          <el-select v-model="draft.taskType" class="knowledge-select is-fluid">
             <el-option label="专题研究" value="research" />
             <el-option label="知识刷新" value="refresh" />
             <el-option label="事实审核" value="review" />
@@ -234,7 +234,6 @@ onMounted(loadData)
 
 <style scoped>
 .task-filter { margin-bottom: 12px; }
-.task-filter :deep(.el-select) { width: 230px; }
 .task-summary { color: var(--text-faint); font-size: 12px; }
 .research-task-list { display: grid; gap: 9px; }
 .research-task { display: grid; grid-template-columns: 52px minmax(0, 1fr) 76px; align-items: center; gap: 15px; padding: 16px 17px; animation: task-in var(--motion-normal) var(--ease-spring-gentle) both; animation-delay: calc(var(--order) * 30ms); }
@@ -266,7 +265,6 @@ onMounted(loadData)
 @keyframes task-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @media (max-width: 768px) {
   .task-filter { display: grid; grid-template-columns: minmax(0, 1fr) 46px; align-items: stretch; }
-  .task-filter :deep(.el-select) { width: 100%; }
   .mobile-create-task { width: 46px; min-height: 46px; display: grid; place-items: center; border: 0; border-radius: 14px; background: var(--accent); color: white; font-size: 18px; box-shadow: 0 7px 18px color-mix(in srgb, var(--accent) 22%, transparent); }
   .task-summary { grid-column: 1 / -1; }
   .research-task { grid-template-columns: 44px minmax(0, 1fr) 42px; gap: 10px; padding: 14px; }
