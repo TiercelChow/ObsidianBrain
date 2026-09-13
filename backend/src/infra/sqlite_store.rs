@@ -90,6 +90,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "persistent knowledge conversations and messages",
         sql: include_str!("../../migrations/014_knowledge_conversations.sql"),
     },
+    Migration {
+        version: 15,
+        description: "auditable agent token usage",
+        sql: include_str!("../../migrations/015_agent_token_usage.sql"),
+    },
 ];
 
 impl SqliteStore {

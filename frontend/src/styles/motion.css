@@ -124,6 +124,40 @@ select:focus-visible,
   transform-origin: center top;
 }
 
+/* One attached select material shared by Task Center and Knowledge pages. */
+.system-select-popper.el-popper {
+  z-index: 2501 !important;
+  margin: 0 !important;
+  overflow: hidden;
+  border-radius: 0 0 14px 14px !important;
+  border-top-color: color-mix(in srgb, var(--border-glass) 42%, transparent) !important;
+  background: var(--bg-glass-strong) !important;
+  box-shadow: var(--shadow-lg), var(--inset-highlight) !important;
+  backdrop-filter: blur(30px) saturate(1.65) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(1.65) !important;
+}
+.system-select-popper.el-popper[data-popper-placement^='top'] {
+  border-radius: 14px 14px 0 0 !important;
+  border-top-color: var(--border-glass) !important;
+  border-bottom-color: color-mix(in srgb, var(--border-glass) 42%, transparent) !important;
+}
+.system-select-popper .el-popper__arrow { display: none !important; }
+.system-select-popper .el-select-dropdown__list { padding: 5px !important; }
+.system-select-popper .el-select-dropdown__item {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 9px;
+}
+.system-select-popper .el-select-dropdown__item.selected {
+  background: color-mix(in srgb, var(--accent) 10%, transparent) !important;
+}
+.system-toolbar-popper .el-select-dropdown__item {
+  justify-content: center;
+  padding: 0 28px 0 10px;
+}
+
 @media (hover: hover) and (pointer: fine) {
   .el-button:not(.is-disabled):hover,
   .glass-btn:not(:disabled):hover {
@@ -189,6 +223,12 @@ select:focus-visible,
   .el-message,
   .reader-page:fullscreen .markdown-body h1:first-of-type {
     background: var(--bg-glass-strong) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .system-select-popper.el-popper {
+    background: var(--bg-primary) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
   }

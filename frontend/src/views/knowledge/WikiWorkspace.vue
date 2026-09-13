@@ -5,7 +5,7 @@
     </template>
 
     <div class="wiki-toolbar knowledge-toolbar">
-      <el-select v-model="activeBaseId" class="knowledge-select is-responsive" placeholder="选择一本书" @change="onBaseChanged">
+      <el-select v-model="activeBaseId" class="knowledge-select is-responsive" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择一本书" @change="onBaseChanged">
         <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
       </el-select>
       <label class="knowledge-search">

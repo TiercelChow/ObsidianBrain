@@ -9,12 +9,17 @@ async function source(path: string) {
 }
 
 test('knowledge chat persists conversations and restores their cited messages', async () => {
-  const [chat, api] = await Promise.all([
+  const [chat, answer, api] = await Promise.all([
     source('src/views/knowledge/KnowledgeChat.vue'),
+    source('src/components/knowledge/KnowledgeAnswerMarkdown.vue'),
     source('src/api/knowledge.ts'),
   ])
 
-  assert.match(chat, /parseKnowledgeCitations/)
+  assert.match(chat, /KnowledgeAnswerMarkdown/)
+  assert.match(answer, /renderMarkdownDocument/)
+  assert.match(answer, /data-source-index/)
+  assert.match(chat, /revealAssistantAnswer/)
+  assert.match(chat, /requestAnimationFrame/)
   assert.match(chat, /listKnowledgeConversations/)
   assert.match(chat, /getKnowledgeConversation/)
   assert.match(chat, /activeConversationId\.value \|\| undefined/)
@@ -26,7 +31,7 @@ test('knowledge chat persists conversations and restores their cited messages', 
 test('knowledge chat previews numbered sources before an explicit workspace navigation', async () => {
   const chat = await source('src/views/knowledge/KnowledgeChat.vue')
 
-  assert.match(chat, /previewEvidence\(message, segment\.sourceIndex\)/)
+  assert.match(chat, /previewEvidence\(message, sourceIndex\)/)
   assert.match(chat, /S\{\{ evidenceIndex \+ 1 \}\}/)
   assert.match(chat, /<MotionModal[^>]+aria-label="来源预览"/)
   assert.match(chat, /getKnowledgeEntry/)
@@ -48,7 +53,9 @@ test('knowledge thinking label loops as a reduced-motion aware typewriter', asyn
 })
 
 test('knowledge dropdowns use shared system visuals with layout-only utility classes', async () => {
-  const files = await Promise.all([
+  const [motion, tasks, ...files] = await Promise.all([
+    source('src/styles/motion.css'),
+    source('src/views/Tasks.vue'),
     source('src/views/knowledge/KnowledgeChat.vue'),
     source('src/views/knowledge/WikiWorkspace.vue'),
     source('src/views/knowledge/KnowledgeTasks.vue'),
@@ -56,7 +63,24 @@ test('knowledge dropdowns use shared system visuals with layout-only utility cla
   ])
 
   assert.ok(files.every(file => file.includes('knowledge-select')))
+  assert.ok(files.every(file => file.includes('system-select-popper')))
+  assert.match(tasks, /system-select-popper/)
+  assert.match(motion, /\.system-select-popper\.el-popper/)
   assert.ok(files.every(file => !file.includes(':deep(.el-select)')))
+})
+
+test('wiki settings expose token usage filters and estimated usage disclosure', async () => {
+  const [settings, api] = await Promise.all([
+    source('src/views/knowledge/WikiSettings.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+
+  assert.match(settings, /Token 用量/)
+  assert.match(settings, /usageDateRange/)
+  assert.match(settings, /usageCaller/)
+  assert.match(settings, /当前 Harness ACP 未上报精确 token/)
+  assert.match(api, /get_agent_usage_stats/)
+  assert.match(api, /usage_source/)
 })
 
 test('knowledge tasks expose explicit run retry and persisted result actions', async () => {

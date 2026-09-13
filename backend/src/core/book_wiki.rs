@@ -13,7 +13,7 @@ use crate::infra::book_wiki_store::{
 };
 use crate::infra::deepseek_harness::{AgentPromptRequest, AgentRuntime};
 use crate::models::book_wiki::{
-    ConfigDocument, KnowledgeAnswer, KnowledgeBaseSummary, KnowledgeEntryDetail,
+    AgentTokenUsage, ConfigDocument, KnowledgeAnswer, KnowledgeBaseSummary, KnowledgeEntryDetail,
     KnowledgeEntrySummary, KnowledgeMessage, KnowledgeTask, KnowledgeTaskExecution, RuntimeProfile,
     RuntimeVerification,
 };
@@ -290,13 +290,17 @@ impl BookWikiService {
         profile: &RuntimeProfile,
         prompt: String,
     ) -> Result<(String, String), BrainError> {
+        let input_tokens = estimate_token_count(&prompt);
         let run = self
             .store
             .start_agent_run(base_id, "deepseek_harness", task_type, input)?;
         match self.invoke_runtime(profile, prompt).await {
             Ok(answer) => {
-                self.store
-                    .complete_agent_run(&run.id, &serde_json::json!({ "answer": &answer }))?;
+                self.store.complete_agent_run_with_usage(
+                    &run.id,
+                    &serde_json::json!({ "answer": &answer }),
+                    &AgentTokenUsage::estimated(input_tokens, estimate_token_count(&answer)),
+                )?;
                 Ok((run.id, answer))
             }
             Err(error) => {
@@ -881,6 +885,17 @@ fn hash_text(content: &str) -> String {
     hex::encode(Sha256::digest(content.as_bytes()))
 }
 
+fn estimate_token_count(content: &str) -> i64 {
+    let (cjk, non_cjk) = content.chars().fold((0_u64, 0_u64), |(cjk, non_cjk), ch| {
+        if matches!(ch as u32, 0x3400..=0x4dbf | 0x4e00..=0x9fff | 0xf900..=0xfaff) {
+            (cjk + 1, non_cjk)
+        } else {
+            (cjk, non_cjk + ch.len_utf8() as u64)
+        }
+    });
+    ((cjk as f64 / 2.0) + (non_cjk as f64 / 4.0)).ceil() as i64
+}
+
 fn hash_file(path: &Path) -> Result<String, BrainError> {
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
@@ -906,6 +921,12 @@ mod tests {
     use crate::models::book_wiki::{BookKind, ReaderBook, RuntimeProviderConfig};
     use async_trait::async_trait;
     use std::sync::Arc;
+
+    #[test]
+    fn test_estimate_token_count_handles_mixed_cjk_and_ascii() {
+        assert_eq!(estimate_token_count("测试abcd"), 2);
+        assert_eq!(estimate_token_count(""), 0);
+    }
 
     #[test]
     fn test_build_provider_patch_configures_openai_compatible_route_without_secret() {

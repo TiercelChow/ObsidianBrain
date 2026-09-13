@@ -35,7 +35,7 @@
         <el-select
           v-model="kindFilter"
           aria-label="任务类型"
-          popper-class="task-select-popper task-toolbar-popper"
+          popper-class="system-select-popper system-toolbar-popper"
           placement="bottom-start"
           :offset="0"
           :fit-input-width="true"
@@ -47,7 +47,7 @@
         <el-select
           v-model="statusFilter"
           aria-label="任务状态"
-          popper-class="task-select-popper task-toolbar-popper"
+          popper-class="system-select-popper system-toolbar-popper"
           placement="bottom-start"
           :offset="0"
           :fit-input-width="true"
@@ -432,7 +432,7 @@
             <span>重要程度</span>
             <el-select
               v-model="form.importance"
-              popper-class="task-select-popper"
+              popper-class="system-select-popper"
               placement="bottom-start"
               :offset="0"
               :fit-input-width="true"
@@ -444,7 +444,7 @@
             <span>状态</span>
             <el-select
               v-model="statusForm.status"
-              popper-class="task-select-popper"
+              popper-class="system-select-popper"
               placement="bottom-start"
               :offset="0"
               :fit-input-width="true"
@@ -460,7 +460,7 @@
             <span>父任务</span>
             <el-select
               v-model="moveForm.parentId"
-              popper-class="task-select-popper"
+              popper-class="system-select-popper"
               placement="bottom-start"
               :offset="0"
               :fit-input-width="true"
@@ -1239,16 +1239,6 @@ onMounted(async () => {
 .archive-dialog-actions .confirm { border: 0; background: var(--accent); color: white; box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 22%, transparent); }
 .archive-dialog-actions .confirm:disabled { opacity: .55; cursor: wait; }
 
-:global(.task-select-popper.el-popper) { z-index: 2501 !important; margin: 0 !important; border-radius: 0 0 14px 14px !important; border-top-color: color-mix(in srgb, var(--border-glass) 42%, transparent) !important; overflow: hidden; box-shadow: var(--shadow-lg), var(--inset-highlight) !important; backdrop-filter: blur(30px) saturate(1.65) !important; -webkit-backdrop-filter: blur(30px) saturate(1.65) !important; }
-:global(.task-select-popper.el-popper[data-popper-placement^='top']) { border-radius: 14px 14px 0 0 !important; border-top-color: var(--border-glass) !important; border-bottom-color: color-mix(in srgb, var(--border-glass) 42%, transparent) !important; }
-:global(.task-select-popper .el-popper__arrow) { display: none !important; }
-:global(.task-select-popper .el-select-dropdown__list) { padding: 5px !important; }
-:global(.task-select-popper .el-select-dropdown__item) { min-height: 38px; display: flex; align-items: center; border-radius: 9px; padding: 0 10px; }
-/* Toolbar popper: center each option on the trigger's text axis (which stops
-   short of the caret) so the selected label's left edge lines up exactly with
-   the closed trigger's text. Extra right padding cancels the caret zone. */
-:global(.task-toolbar-popper .el-select-dropdown__item) { justify-content: center; padding: 0 28px 0 10px; }
-:global(.task-select-popper .el-select-dropdown__item.selected) { background: color-mix(in srgb, var(--accent) 10%, transparent) !important; }
 :global(.task-date-popper.el-popper) { z-index: 2501 !important; }
 :global(.el-message) { z-index: 2600 !important; }
 
@@ -1421,6 +1411,6 @@ onMounted(async () => {
 @media (prefers-reduced-motion: reduce) {
   .task-workspace, .list-controls, .task-list-scroll, .task-list-rail, .switch-indicator, .task-card, .mini-progress i, .progress-track i, .check-field input, .check-field input::after, .error-banner-enter-active, .error-banner-leave-active, .task-card-enter-active, .task-card-leave-active { transition-duration: 1ms !important; }.task-skeletons span, .detail-loading span { animation: none !important; }
 }
-@media (prefers-reduced-transparency: reduce) { .glass-surface, .task-sheet, .archive-dialog { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--bg-primary); }:global(.task-select-popper.el-popper), :global(.task-date-popper.el-popper) { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background: var(--bg-primary) !important; } }
+@media (prefers-reduced-transparency: reduce) { .glass-surface, .task-sheet, .archive-dialog { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--bg-primary); }:global(.task-date-popper.el-popper) { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background: var(--bg-primary) !important; } }
 @media (prefers-contrast: more) { .task-card.selected, .progress-overview, .detail-section, .check-field input { border-color: var(--text-muted); } }
 </style>

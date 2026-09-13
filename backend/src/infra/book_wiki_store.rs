@@ -1,16 +1,17 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
-use chrono::Utc;
+use chrono::{NaiveDate, Utc};
 use rusqlite::{params, OptionalExtension};
 
 use crate::error::BrainError;
 use crate::infra::sqlite_store::SqliteStore;
 use crate::models::book_wiki::{
-    AgentRun, BookKind, BookKnowledgeCard, ConfigDocument, KnowledgeBaseSummary, KnowledgeCitation,
-    KnowledgeConversationDetail, KnowledgeConversationSummary, KnowledgeEntryDetail,
-    KnowledgeEntrySummary, KnowledgeMessage, KnowledgeTask, ReaderBook, RuntimeProfile,
-    RuntimeProviderConfig,
+    AgentRun, AgentTokenUsage, AgentUsageCaller, AgentUsagePoint, AgentUsageStats,
+    AgentUsageTotals, BookKind, BookKnowledgeCard, ConfigDocument, KnowledgeBaseSummary,
+    KnowledgeCitation, KnowledgeConversationDetail, KnowledgeConversationSummary,
+    KnowledgeEntryDetail, KnowledgeEntrySummary, KnowledgeMessage, KnowledgeTask, ReaderBook,
+    RuntimeProfile, RuntimeProviderConfig,
 };
 
 const LEGACY_BOOKS_KEY: &str = "reader_books";
@@ -1274,15 +1275,58 @@ impl BookWikiStore {
         run_id: &str,
         output: &serde_json::Value,
     ) -> Result<AgentRun, BrainError> {
+        self.complete_agent_run_with_usage(run_id, output, &AgentTokenUsage::default())
+    }
+
+    pub fn complete_agent_run_with_usage(
+        &self,
+        run_id: &str,
+        output: &serde_json::Value,
+        usage: &AgentTokenUsage,
+    ) -> Result<AgentRun, BrainError> {
+        if !matches!(
+            usage.usage_source.as_str(),
+            "unavailable" | "estimated" | "measured"
+        ) {
+            return Err(BrainError::KnowledgeValidation(
+                "未知的 Token 用量来源".to_string(),
+            ));
+        }
+        if [
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.reasoning_tokens,
+            usage.cache_read_tokens,
+            usage.cache_write_tokens,
+        ]
+        .iter()
+        .any(|value| *value < 0)
+        {
+            return Err(BrainError::KnowledgeValidation(
+                "Token 用量不能为负数".to_string(),
+            ));
+        }
         let output_json = serde_json::to_string(output)
             .map_err(|error| BrainError::Internal(format!("Agent 输出序列化失败: {error}")))?;
         let now = Utc::now().to_rfc3339();
         let updated = self.db.with_connection(|conn| {
             Ok(conn.execute(
                 "UPDATE agent_runs
-                 SET status = 'completed', output_json = ?2, error = NULL, finished_at = ?3
+                 SET status = 'completed', output_json = ?2, error = NULL, finished_at = ?3,
+                     input_tokens = ?4, output_tokens = ?5, reasoning_tokens = ?6,
+                     cache_read_tokens = ?7, cache_write_tokens = ?8, usage_source = ?9
                  WHERE id = ?1 AND status = 'running'",
-                params![run_id, output_json, now],
+                params![
+                    run_id,
+                    output_json,
+                    now,
+                    usage.input_tokens,
+                    usage.output_tokens,
+                    usage.reasoning_tokens,
+                    usage.cache_read_tokens,
+                    usage.cache_write_tokens,
+                    usage.usage_source,
+                ],
             )?)
         })?;
         if updated == 0 {
@@ -1291,6 +1335,70 @@ impl BookWikiStore {
             ));
         }
         self.get_agent_run(run_id)
+    }
+
+    pub fn get_agent_usage_stats(
+        &self,
+        start_date: &str,
+        end_date: &str,
+        caller: Option<&str>,
+    ) -> Result<AgentUsageStats, BrainError> {
+        let start = NaiveDate::parse_from_str(start_date, "%Y-%m-%d").map_err(|_| {
+            BrainError::KnowledgeValidation("start_date 必须为 YYYY-MM-DD".to_string())
+        })?;
+        let end = NaiveDate::parse_from_str(end_date, "%Y-%m-%d").map_err(|_| {
+            BrainError::KnowledgeValidation("end_date 必须为 YYYY-MM-DD".to_string())
+        })?;
+        if start > end {
+            return Err(BrainError::KnowledgeValidation(
+                "Token 统计开始日期不能晚于结束日期".to_string(),
+            ));
+        }
+        if let Some(value) = caller {
+            if !matches!(value, "knowledge_qa" | "knowledge_task") {
+                return Err(BrainError::KnowledgeValidation(
+                    "caller 仅支持 knowledge_qa 或 knowledge_task".to_string(),
+                ));
+            }
+        }
+
+        let rows = self.db.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT date(finished_at, 'localtime'),
+                        CASE
+                            WHEN task_type = 'knowledge_qa' THEN 'knowledge_qa'
+                            WHEN task_type LIKE 'knowledge_task_%' THEN 'knowledge_task'
+                            ELSE task_type
+                        END,
+                        input_tokens, output_tokens, reasoning_tokens,
+                        cache_read_tokens, cache_write_tokens, usage_source
+                 FROM agent_runs
+                 WHERE status = 'completed'
+                   AND date(finished_at, 'localtime') BETWEEN ?1 AND ?2
+                   AND (?3 IS NULL OR
+                        CASE
+                            WHEN task_type = 'knowledge_qa' THEN 'knowledge_qa'
+                            WHEN task_type LIKE 'knowledge_task_%' THEN 'knowledge_task'
+                            ELSE task_type
+                        END = ?3)
+                 ORDER BY finished_at ASC",
+            )?;
+            let mapped = stmt.query_map(params![start_date, end_date, caller], |row| {
+                Ok(AgentUsageRow {
+                    date: row.get(0)?,
+                    caller: row.get(1)?,
+                    input_tokens: row.get(2)?,
+                    output_tokens: row.get(3)?,
+                    reasoning_tokens: row.get(4)?,
+                    cache_read_tokens: row.get(5)?,
+                    cache_write_tokens: row.get(6)?,
+                    usage_source: row.get(7)?,
+                })
+            })?;
+            mapped.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        })?;
+
+        Ok(aggregate_agent_usage(start_date, end_date, caller, rows))
     }
 
     pub fn fail_agent_run(&self, run_id: &str, error: &str) -> Result<AgentRun, BrainError> {
@@ -1379,6 +1487,77 @@ impl BookWikiStore {
         })?;
         run_id.map(|run_id| self.get_agent_run(&run_id)).transpose()
     }
+}
+
+#[derive(Clone, Debug)]
+struct AgentUsageRow {
+    date: String,
+    caller: String,
+    input_tokens: i64,
+    output_tokens: i64,
+    reasoning_tokens: i64,
+    cache_read_tokens: i64,
+    cache_write_tokens: i64,
+    usage_source: String,
+}
+
+fn aggregate_agent_usage(
+    start_date: &str,
+    end_date: &str,
+    caller: Option<&str>,
+    rows: Vec<AgentUsageRow>,
+) -> AgentUsageStats {
+    let mut totals = AgentUsageTotals::default();
+    let mut daily = BTreeMap::<String, AgentUsageTotals>::new();
+    let mut by_caller = BTreeMap::<String, AgentUsageTotals>::new();
+    let mut has_measured = false;
+    let mut has_estimated = false;
+
+    for row in rows {
+        has_measured |= row.usage_source == "measured";
+        has_estimated |= row.usage_source == "estimated";
+        accumulate_usage(&mut totals, &row);
+        accumulate_usage(daily.entry(row.date.clone()).or_default(), &row);
+        accumulate_usage(by_caller.entry(row.caller.clone()).or_default(), &row);
+    }
+
+    let usage_source = match (has_measured, has_estimated) {
+        (true, true) => "mixed",
+        (true, false) => "measured",
+        (false, true) => "estimated",
+        (false, false) => "unavailable",
+    }
+    .to_string();
+
+    AgentUsageStats {
+        start_date: start_date.to_string(),
+        end_date: end_date.to_string(),
+        caller: caller.map(str::to_string),
+        usage_source,
+        totals,
+        daily: daily
+            .into_iter()
+            .map(|(date, totals)| AgentUsagePoint { date, totals })
+            .collect(),
+        by_caller: by_caller
+            .into_iter()
+            .map(|(caller, totals)| AgentUsageCaller { caller, totals })
+            .collect(),
+    }
+}
+
+fn accumulate_usage(total: &mut AgentUsageTotals, row: &AgentUsageRow) {
+    if row.usage_source == "unavailable" {
+        total.unreported_runs += 1;
+        return;
+    }
+    total.runs += 1;
+    total.input_tokens += row.input_tokens;
+    total.output_tokens += row.output_tokens;
+    total.reasoning_tokens += row.reasoning_tokens;
+    total.cache_read_tokens += row.cache_read_tokens;
+    total.cache_write_tokens += row.cache_write_tokens;
+    total.total_tokens += row.input_tokens + row.output_tokens;
 }
 
 fn load_message_evidence(
@@ -1877,6 +2056,73 @@ mod tests {
         assert_eq!(completed.status, "completed");
         assert_eq!(completed.output.unwrap()["answer"], "测试回答");
         assert!(completed.finished_at.is_some());
+    }
+
+    #[test]
+    fn test_agent_usage_stats_filter_completed_runs_by_caller_and_date() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-usage", "/tmp/book-usage")])
+            .unwrap();
+        let base = store.initialize_base("book-usage").unwrap();
+
+        let qa_run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({"question": "核心主题"}),
+            )
+            .unwrap();
+        store
+            .complete_agent_run_with_usage(
+                &qa_run.id,
+                &serde_json::json!({"answer": "回答"}),
+                &AgentTokenUsage::estimated(120, 48),
+            )
+            .unwrap();
+
+        let task_run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_task_research",
+                &serde_json::json!({"knowledge_task_id": "task-1"}),
+            )
+            .unwrap();
+        store
+            .complete_agent_run_with_usage(
+                &task_run.id,
+                &serde_json::json!({"answer": "研究结果"}),
+                &AgentTokenUsage::estimated(200, 90),
+            )
+            .unwrap();
+
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let all = store.get_agent_usage_stats(&today, &today, None).unwrap();
+        assert_eq!(all.totals.runs, 2);
+        assert_eq!(all.totals.input_tokens, 320);
+        assert_eq!(all.totals.output_tokens, 138);
+        assert_eq!(all.totals.total_tokens, 458);
+        assert_eq!(all.by_caller.len(), 2);
+
+        let qa = store
+            .get_agent_usage_stats(&today, &today, Some("knowledge_qa"))
+            .unwrap();
+        assert_eq!(qa.totals.runs, 1);
+        assert_eq!(qa.totals.total_tokens, 168);
+        assert_eq!(qa.by_caller[0].caller, "knowledge_qa");
+        assert_eq!(qa.usage_source, "estimated");
+    }
+
+    #[test]
+    fn test_agent_usage_stats_rejects_reversed_date_range() {
+        let (store, _dir) = test_store();
+        let error = store
+            .get_agent_usage_stats("2026-09-13", "2026-09-01", None)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("开始日期"));
     }
 
     #[test]

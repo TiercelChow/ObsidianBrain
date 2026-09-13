@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::{Duration, Local};
 use serde_json::{json, Value};
 
 use crate::error::BrainError;
@@ -509,6 +510,59 @@ impl ToolHandler for GetBookWikiSettingsHandler {
             "runtime_profiles": health,
             "documents": ctx.book_wiki_service.store().list_config_documents(base_id)?
         }))
+    }
+}
+
+pub struct GetAgentUsageStatsHandler;
+
+#[async_trait]
+impl ToolHandler for GetAgentUsageStatsHandler {
+    fn name(&self) -> &str {
+        "get_agent_usage_stats"
+    }
+
+    fn description(&self) -> &str {
+        "按日期与调用方汇总 Agent Token 用量，并标明实测或估算来源"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "start_date": { "type": "string", "description": "YYYY-MM-DD" },
+                "end_date": { "type": "string", "description": "YYYY-MM-DD" },
+                "caller": {
+                    "type": "string",
+                    "enum": ["knowledge_qa", "knowledge_task"]
+                }
+            },
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let today = Local::now().date_naive();
+        let default_start = today - Duration::days(29);
+        let start_date = args
+            .get("start_date")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| default_start.format("%Y-%m-%d").to_string());
+        let end_date = args
+            .get("end_date")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| today.format("%Y-%m-%d").to_string());
+        serde_json::to_value(ctx.book_wiki_service.store().get_agent_usage_stats(
+            &start_date,
+            &end_date,
+            args.get("caller").and_then(Value::as_str),
+        )?)
+        .map_err(|error| BrainError::Internal(format!("Token 统计序列化失败: {error}")))
     }
 }
 

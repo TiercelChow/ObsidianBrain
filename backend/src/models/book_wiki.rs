@@ -222,6 +222,77 @@ pub struct KnowledgeTaskExecution {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct AgentTokenUsage {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub reasoning_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub usage_source: String,
+}
+
+impl Default for AgentTokenUsage {
+    fn default() -> Self {
+        Self {
+            input_tokens: 0,
+            output_tokens: 0,
+            reasoning_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            usage_source: "unavailable".to_string(),
+        }
+    }
+}
+
+impl AgentTokenUsage {
+    pub fn estimated(input_tokens: i64, output_tokens: i64) -> Self {
+        Self {
+            input_tokens,
+            output_tokens,
+            usage_source: "estimated".to_string(),
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+pub struct AgentUsageTotals {
+    pub runs: i64,
+    pub unreported_runs: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub reasoning_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub total_tokens: i64,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct AgentUsagePoint {
+    pub date: String,
+    #[serde(flatten)]
+    pub totals: AgentUsageTotals,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct AgentUsageCaller {
+    pub caller: String,
+    #[serde(flatten)]
+    pub totals: AgentUsageTotals,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct AgentUsageStats {
+    pub start_date: String,
+    pub end_date: String,
+    pub caller: Option<String>,
+    pub usage_source: String,
+    pub totals: AgentUsageTotals,
+    pub daily: Vec<AgentUsagePoint>,
+    pub by_caller: Vec<AgentUsageCaller>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct AgentRun {
     pub id: String,
     pub knowledge_base_id: Option<String>,

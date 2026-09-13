@@ -154,6 +154,35 @@ export interface KnowledgeTaskExecution {
   evidence: KnowledgeEntrySummary[]
 }
 
+export interface AgentUsageTotals {
+  runs: number
+  unreported_runs: number
+  input_tokens: number
+  output_tokens: number
+  reasoning_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  total_tokens: number
+}
+
+export interface AgentUsagePoint extends AgentUsageTotals {
+  date: string
+}
+
+export interface AgentUsageCaller extends AgentUsageTotals {
+  caller: 'knowledge_qa' | 'knowledge_task' | string
+}
+
+export interface AgentUsageStats {
+  start_date: string
+  end_date: string
+  caller?: string | null
+  usage_source: 'unavailable' | 'estimated' | 'measured' | 'mixed'
+  totals: AgentUsageTotals
+  daily: AgentUsagePoint[]
+  by_caller: AgentUsageCaller[]
+}
+
 export function listBookKnowledgeBases() {
   return callTool('list_book_knowledge_bases') as unknown as Promise<
     ToolEnvelope<{ items: BookKnowledgeCard[] }>
@@ -256,6 +285,18 @@ export function getBookWikiSettings(knowledgeBaseId?: string) {
   }) as unknown as Promise<
     ToolEnvelope<{ runtime_profiles: RuntimeHealth[]; documents: ConfigDocument[] }>
   >
+}
+
+export function getAgentUsageStats(options: {
+  startDate: string
+  endDate: string
+  caller?: 'knowledge_qa' | 'knowledge_task'
+}) {
+  return callTool('get_agent_usage_stats', {
+    start_date: options.startDate,
+    end_date: options.endDate,
+    ...(options.caller ? { caller: options.caller } : {}),
+  }) as unknown as Promise<ToolEnvelope<AgentUsageStats>>
 }
 
 export function saveBookWikiConfigDocument(document: ConfigDocument) {

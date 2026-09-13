@@ -6,6 +6,11 @@
         <el-select
           v-model="activeBaseId"
           class="knowledge-select is-fluid"
+          popper-class="system-select-popper"
+          placement="bottom-start"
+          :offset="0"
+          :fit-input-width="true"
+          :disabled="searching"
           placeholder="选择一本书"
           @change="changeKnowledgeBase"
         >
@@ -19,7 +24,7 @@
         <section class="conversation-history" aria-label="问答历史">
           <header>
             <span>历史问答</span>
-            <button type="button" :disabled="!activeBaseId" @click="newConversation()">
+            <button type="button" :disabled="!activeBaseId || searching" @click="newConversation()">
               <el-icon><Plus /></el-icon><span>新对话</span>
             </button>
           </header>
@@ -29,6 +34,7 @@
               :key="conversation.id"
               type="button"
               :class="{ active: conversation.id === activeConversationId }"
+              :disabled="searching"
               @click="openConversation(conversation.id)"
             >
               <strong>{{ conversation.title }}</strong>
@@ -66,18 +72,13 @@
             <div class="message" :class="message.role">
               <span class="message-role">{{ message.role === 'user' ? '你' : '知识库' }}</span>
               <p v-if="message.role === 'user'">{{ message.content }}</p>
-              <p v-else>
-                <template v-for="(segment, segmentIndex) in answerSegments(message)" :key="segmentIndex">
-                  <button
-                    v-if="segment.sourceIndex !== undefined"
-                    class="answer-citation"
-                    type="button"
-                    :aria-label="`预览来源 ${segment.sourceIndex + 1}`"
-                    @click="previewEvidence(message, segment.sourceIndex)"
-                  >{{ segment.text }}</button>
-                  <span v-else>{{ segment.text }}</span>
-                </template>
-              </p>
+              <KnowledgeAnswerMarkdown
+                v-else
+                :content="message.content"
+                :evidence-count="message.evidence?.length ?? 0"
+                :streaming="streamingMessageId === message.id"
+                @citation="sourceIndex => previewEvidence(message, sourceIndex)"
+              />
             </div>
             <div v-if="message.evidence?.length" class="evidence-grid">
               <button
@@ -93,7 +94,7 @@
               </button>
             </div>
           </template>
-          <div v-if="searching" class="searching-bubble" role="status" aria-live="polite">
+          <div v-if="searching && !streamingMessageId" class="searching-bubble" role="status" aria-live="polite">
             <i></i><i></i><i></i><span>{{ thinkingText }}<b aria-hidden="true"></b></span>
           </div>
         </div>
@@ -150,10 +151,10 @@ import { ElMessage } from 'element-plus'
 import { ArrowRight, ChatDotRound, Close, Loading, Lock, Plus, Top } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
+import KnowledgeAnswerMarkdown from '@/components/knowledge/KnowledgeAnswerMarkdown.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { useTypewriterLoop } from '@/composables/useTypewriterLoop'
-import { parseKnowledgeCitations } from '@/utils/knowledgeCitations'
 import {
   askBookKnowledge,
   getBookWikiSettings,
@@ -184,6 +185,7 @@ const activeConversationId = ref('')
 const draft = ref('')
 const messages = ref<ChatMessage[]>([])
 const searching = ref(false)
+const streamingMessageId = ref('')
 const historyLoading = ref(false)
 const runtimeReady = ref(false)
 const runtimeMessage = ref('DeepSeek Harness 尚未连接；当前只返回真实命中的书内证据。')
@@ -196,6 +198,7 @@ const sourceMarkdownRef = ref<HTMLElement | null>(null)
 let localMessageId = 0
 let historyRequestId = 0
 let sourceRequestId = 0
+let revealFrame = 0
 
 const activeBase = computed(() => bases.value.find(base => base.id === activeBaseId.value))
 const starterQuestions = ['这本书的核心主题是什么？', '找出与架构相关的章节', '有哪些内容提到了性能优化？']
@@ -315,12 +318,11 @@ async function ask(question: string) {
       const response = await askBookKnowledge(activeBaseId.value, value, activeConversationId.value || undefined)
       if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || 'Harness 回答失败')
       activeConversationId.value = response.result.conversation_id
-      messages.value.push({
-        id: `run-${response.result.run_id}`,
-        role: 'assistant',
-        content: response.result.answer,
-        evidence: response.result.evidence,
-      })
+      await revealAssistantAnswer(
+        `run-${response.result.run_id}`,
+        response.result.answer,
+        response.result.evidence,
+      )
       replaceChatQuery()
       await refreshConversationList()
       return
@@ -343,6 +345,40 @@ async function ask(question: string) {
     searching.value = false
     await scrollToBottom()
   }
+}
+
+async function revealAssistantAnswer(id: string, answer: string, evidence: KnowledgeEntrySummary[]) {
+  window.cancelAnimationFrame(revealFrame)
+  messages.value.push({ id, role: 'assistant', content: '', evidence })
+  const message = messages.value[messages.value.length - 1]
+  streamingMessageId.value = id
+  const characters = Array.from(answer)
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  if (reduceMotion || characters.length < 12) {
+    message.content = answer
+    streamingMessageId.value = ''
+    return
+  }
+
+  await new Promise<void>((resolve) => {
+    let cursor = 0
+    let frameCount = 0
+    const reveal = () => {
+      const remaining = characters.length - cursor
+      const batchSize = Math.min(28, Math.max(2, Math.ceil(remaining / 72)))
+      cursor = Math.min(characters.length, cursor + batchSize)
+      message.content = characters.slice(0, cursor).join('')
+      frameCount += 1
+      if (frameCount % 5 === 0) void scrollToBottom(false)
+      if (cursor < characters.length) {
+        revealFrame = window.requestAnimationFrame(reveal)
+      } else {
+        streamingMessageId.value = ''
+        resolve()
+      }
+    }
+    revealFrame = window.requestAnimationFrame(reveal)
+  })
 }
 
 async function appendEvidenceFallback(question: string, harnessError = '') {
@@ -395,10 +431,6 @@ function openSourceWorkspace() {
   router.push({ path: '/knowledge/wiki', query: { base: activeBaseId.value, entry: sourceDetail.value.id } })
 }
 
-function answerSegments(message: ChatMessage) {
-  return parseKnowledgeCitations(message.content, message.evidence?.length ?? 0)
-}
-
 function formatConversationTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
@@ -427,6 +459,7 @@ onMounted(loadContext)
 onBeforeUnmount(() => {
   ++historyRequestId
   ++sourceRequestId
+  window.cancelAnimationFrame(revealFrame)
   cleanup()
 })
 </script>
@@ -466,10 +499,8 @@ onBeforeUnmount(() => {
 .message { max-width: 78%; display: grid; gap: 5px; margin-bottom: 16px; }
 .message.user { margin-left: auto; justify-items: end; }
 .message-role { color: var(--text-faint); font-size: 10px; }
-.message p { padding: 11px 14px; border-radius: 16px 16px 16px 5px; background: var(--bg-glass-subtle); color: var(--text-secondary); font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
+.message > p { padding: 11px 14px; border-radius: 16px 16px 16px 5px; background: var(--bg-glass-subtle); color: var(--text-secondary); font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
 .message.user p { border-radius: 16px 16px 5px 16px; background: var(--accent); color: white; }
-.answer-citation { display: inline-flex; align-items: center; margin: 0 2px; padding: 1px 5px; border: 0; border-radius: 6px; background: var(--accent-light); color: var(--accent); font: inherit; font-size: 11px; font-weight: 720; line-height: 1.5; vertical-align: .08em; cursor: pointer; }
-.answer-citation:hover { box-shadow: inset 0 0 0 1px var(--accent-border); }
 .evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: -6px 0 22px; }
 .evidence-grid button { min-width: 0; display: grid; gap: 5px; padding: 13px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); color: var(--text-primary); text-align: left; cursor: pointer; transition: var(--transition-interactive); }
 .evidence-grid button:hover { border-color: var(--accent-border); transform: translateY(-1px); }

@@ -5,7 +5,7 @@
     </template>
 
     <div class="task-filter knowledge-toolbar">
-      <el-select v-model="filterBaseId" class="knowledge-select is-responsive" placeholder="全部知识库" clearable @change="loadTasks">
+      <el-select v-model="filterBaseId" class="knowledge-select is-responsive" popper-class="system-select-popper system-toolbar-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="全部知识库" clearable @change="loadTasks">
         <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
       </el-select>
       <button class="mobile-create-task" type="button" aria-label="新建研究任务" :disabled="!bases.length" @click="openCreate"><el-icon><Plus /></el-icon></button>
@@ -44,12 +44,12 @@
       <div class="knowledge-modal-card">
         <div class="knowledge-modal-head"><h3>新建研究任务</h3><p>任务严格绑定一本书，不会跨库读取。</p></div>
         <div class="knowledge-modal-body">
-          <el-select v-model="draft.knowledgeBaseId" class="knowledge-select is-fluid" placeholder="选择知识库">
+          <el-select v-model="draft.knowledgeBaseId" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库">
             <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
           </el-select>
           <el-input v-model="draft.title" :maxlength="200" show-word-limit placeholder="要研究或核实的问题" />
           <el-input v-model="draft.description" type="textarea" :rows="4" :maxlength="4000" show-word-limit placeholder="补充目标、范围和期望结果" />
-          <el-select v-model="draft.taskType" class="knowledge-select is-fluid">
+          <el-select v-model="draft.taskType" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true">
             <el-option label="专题研究" value="research" />
             <el-option label="知识刷新" value="refresh" />
             <el-option label="事实审核" value="review" />

@@ -11,7 +11,7 @@
 
 ## 0. 当前实施状态（2026-09-12）
 
-首个可运行纵切已经完成：书架 JSON 可无损迁移到正规表；每本书可建立独立知识库；Markdown 文件夹可扫描为带文件和行号引用的数据库章节实体；五个新页面已接通真实 API；研究任务、书籍配置文档和 Runtime Profile 均保存到 SQLite。自然语言检索目前采用轻量查询规整与数据库正文召回。知识问答已经通过官方 Rust SDK 接入 DeepSeek Harness ACP v1：后端先召回当前书籍的数据库证据，再启动一次性 ACP 会话生成带 `[S#]` 来源编号的回答，并把输入、输出和失败状态记录到 `agent_runs`。迁移 014 增加会话、范围、消息和消息引用表；前端会恢复最近会话并允许切换历史，继续提问时把最近消息作为追问上下文。回答正文仍以纯文本分段展示，来源正文仅在用户点击后通过共享安全 Markdown 渲染链路显示于预览弹窗。
+首个可运行纵切已经完成：书架 JSON 可无损迁移到正规表；每本书可建立独立知识库；Markdown 文件夹可扫描为带文件和行号引用的数据库章节实体；五个新页面已接通真实 API；研究任务、书籍配置文档和 Runtime Profile 均保存到 SQLite。自然语言检索目前采用轻量查询规整与数据库正文召回。知识问答已经通过官方 Rust SDK 接入 DeepSeek Harness ACP v1：后端先召回当前书籍的数据库证据，再启动一次性 ACP 会话生成带 `[S#]` 来源编号的回答，并把输入、输出和失败状态记录到 `agent_runs`。迁移 014 增加会话、范围、消息和消息引用表；前端会恢复最近会话并允许切换历史，继续提问时把最近消息作为追问上下文。回答正文已复用阅境轩的安全 Markdown 解析核心，GFM、代码和公式可以在消息气泡内渲染，文本来源编号在渲染后转换为可访问的预览按钮。
 
 研究任务已经形成首个执行闭环：草稿由用户显式点击运行；后端在单书边界内召回证据，通过同一只读 Harness Patch 生成带引用报告，持久化任务状态、报告和 `agent_runs` 审计记录；失败任务可重试，已完成报告刷新页面后仍能恢复来源映射。当前执行采用同步请求，不冒充后台队列，也不会自动修改正式知识实体。
 
@@ -647,6 +647,8 @@ Sidecar 插件通过 `127.0.0.1` 调用后端专用端点，使用 Run Capabilit
 
 当前实现使用 `knowledge_conversations`、`knowledge_conversation_scopes`、`knowledge_messages` 和 `knowledge_message_citations`。每次成功问答在同一事务中写入用户消息、助手消息及有序来源；页面加载时按知识库列出会话并恢复最近一项。继续会话时最多取最近八条消息辅助理解指代，但这些历史消息不能替代本轮召回的数据库证据。
 
+当前 DeepSeek Harness ACP bridge 只在回答提交后发送 committed assistant message，不暴露供应商 token delta。前端收到 committed answer 后使用 `requestAnimationFrame` 做可中断的渐进呈现，并对 Markdown 重渲染节流；这改善阅读反馈，但不伪装成更短的模型首 Token 延迟。待 ACP bridge 提供真实增量事件后，保持消息组件不变，把传输层替换为 SSE 增量即可。`prefers-reduced-motion` 下直接显示完整回答。
+
 ### 11.2 单次问答
 
 ```text
@@ -672,6 +674,12 @@ Agent 回答只能引用工具返回的 entry/span ID。后端在保存前验证
 - PDF：`book_id + source_document_id + page_number`。
 - Markdown：`book_id + relative_path + heading/anchor`。
 - 前端通过 Reader 路由状态打开书籍，再执行定位。
+
+### 11.5 Token 用量统计
+
+迁移 015 在 `agent_runs` 增加输入、输出、推理、缓存读写 Token 与 `usage_source`。所有聚合只读取已完成运行，按 `finished_at` 日期和归一化调用方筛选：`knowledge_qa` 对应知识问答，`knowledge_task_*` 聚合为研究任务。
+
+当前 ACP bridge 不转发供应商 Usage，因此问答和研究任务使用与 LLM 客户端一致的中英文启发式估算，并保存为 `estimated`；迁移前运行保持 `unavailable`，统计页单列为未上报。后续 Runtime Adapter 若收到真实 Usage，应写入 `measured`，无需改变统计 API。`total_tokens` 只计算输入加输出，推理和缓存桶作为明细展示，避免重复计数。
 
 ---
 
