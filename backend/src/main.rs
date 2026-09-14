@@ -445,6 +445,7 @@ async fn run_server_async(
         book_wiki_service,
         start_time,
     });
+    ctx.book_wiki_service.clone().start_task_worker()?;
     register_all_tools(&tool_registry, ctx.clone()).await;
     tracing::info!("已注册 {} 个工具", ctx.tool_registry.count().await);
 

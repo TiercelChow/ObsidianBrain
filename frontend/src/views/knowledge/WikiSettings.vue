@@ -5,7 +5,7 @@
         <button :class="{ active: section === 'runtime' }" @click="section = 'runtime'"><el-icon><Cpu /></el-icon><span><strong>Agent Runtime</strong><small>执行器与模型</small></span></button>
         <button :class="{ active: section === 'usage' }" @click="section = 'usage'"><el-icon><DataAnalysis /></el-icon><span><strong>Token 用量</strong><small>调用趋势与来源</small></span></button>
         <button :class="{ active: section === 'documents' }" @click="section = 'documents'"><el-icon><Document /></el-icon><span><strong>配置文档</strong><small>数据库中的 Markdown</small></span></button>
-        <button :class="{ active: section === 'skills' }" @click="section = 'skills'"><el-icon><MagicStick /></el-icon><span><strong>Skills</strong><small>下一阶段接入</small></span></button>
+        <button :class="{ active: section === 'skills' }" @click="section = 'skills'"><el-icon><MagicStick /></el-icon><span><strong>Skills</strong><small>版本化能力</small></span></button>
       </aside>
 
       <section class="settings-main knowledge-surface">
@@ -103,35 +103,76 @@
         </template>
 
         <template v-else>
-          <header class="settings-section-head"><div><span>能力扩展</span><h2>Skills</h2><p>按知识库启用可审计、可版本化的 Agent 能力。</p></div></header>
-          <div class="skills-preview">
-            <div><el-icon><Search /></el-icon><strong>书内检索</strong><span>只读访问实体、论断与引用</span><em>内置</em></div>
-            <div><el-icon><EditPen /></el-icon><strong>知识变更集</strong><span>提交候选修改，交由后端校验</span><em>规划中</em></div>
-            <div><el-icon><Files /></el-icon><strong>PDF 摄入</strong><span>版面提取、分块与引用定位</span><em>规划中</em></div>
+          <header class="settings-section-head split skills-head">
+            <div><span>能力扩展</span><h2>Skills</h2><p>指令保存在 SQLite 并按版本审计；启用范围严格绑定当前书籍。</p></div>
+            <div class="skills-actions">
+              <el-select v-model="activeBaseId" class="knowledge-select is-compact is-responsive" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库" @change="loadSkills"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" /></el-select>
+              <input ref="skillArchiveInput" class="visually-hidden" type="file" accept=".zip,application/zip" @change="importSkillArchive" />
+              <el-button :loading="importingSkill" @click="skillArchiveInput?.click()"><el-icon><UploadFilled /></el-icon>导入 ZIP</el-button>
+              <el-button type="primary" @click="openSkillEditor()"><el-icon><Plus /></el-icon>新增 Skill</el-button>
+            </div>
+          </header>
+          <div v-if="!activeBaseId" class="knowledge-empty"><strong>选择一本书</strong><span>Skill 的启用状态不会跨知识库共享。</span></div>
+          <div v-else-if="skillsLoading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
+          <div v-else class="skills-grid">
+            <article v-for="skill in skills" :key="skill.id" class="skill-card">
+              <header>
+                <div class="skill-symbol"><el-icon><MagicStick /></el-icon></div>
+                <div><h3>{{ skill.name }}</h3><code>{{ skill.slug }}</code></div>
+                <el-switch :model-value="skill.enabled" :loading="savingSkillId === skill.id" @change="toggleSkill(skill, Boolean($event))" />
+              </header>
+              <p>{{ skill.description || '没有补充说明' }}</p>
+              <div class="skill-badges"><span>{{ skill.source_type === 'builtin' ? '内置' : '自定义' }}</span><span>Revision {{ skill.revision }}</span><span>只读知识</span></div>
+              <footer>
+                <el-select v-model="skill.usage_scope" class="knowledge-select is-compact" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" :disabled="savingSkillId === skill.id" @change="updateSkillScope(skill)">
+                  <el-option label="问答与研究" value="both" /><el-option label="仅问答" value="qa" /><el-option label="仅研究" value="research" />
+                </el-select>
+                <el-button v-if="skill.source_type === 'custom'" text @click="openSkillEditor(skill)">编辑</el-button>
+              </footer>
+            </article>
           </div>
         </template>
       </section>
     </div>
+
+    <MotionModal v-model="skillEditorVisible" aria-label="编辑 Wiki Skill">
+      <div class="knowledge-modal-card">
+        <div class="knowledge-modal-head"><h3>{{ skillDraft.id ? '编辑 Skill' : '新增 Skill' }}</h3><p>当前版本只允许 Markdown 指令，不执行脚本，也不会获得文件或 Shell 权限。</p></div>
+        <div class="knowledge-modal-body skill-editor-form">
+          <el-input v-model="skillDraft.name" :maxlength="100" placeholder="名称，例如：论证图谱" />
+          <el-input v-model="skillDraft.slug" :disabled="Boolean(skillDraft.id)" :maxlength="64" placeholder="唯一标识，例如：argument-map" />
+          <el-input v-model="skillDraft.description" type="textarea" :rows="2" :maxlength="500" show-word-limit placeholder="说明这个 Skill 解决什么问题" />
+          <el-input v-model="skillDraft.instructions" type="textarea" :rows="8" :maxlength="12000" show-word-limit placeholder="写明分析步骤、质量要求与输出格式" />
+        </div>
+        <div class="knowledge-modal-actions"><el-button @click="skillEditorVisible = false">取消</el-button><el-button type="primary" :loading="savingSkill" :disabled="!skillDraft.name.trim() || !skillDraft.slug.trim() || !skillDraft.instructions.trim()" @click="saveSkill">保存版本</el-button></div>
+      </div>
+    </MotionModal>
   </KnowledgePageShell>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Cpu, DataAnalysis, Document, EditPen, Files, InfoFilled, Loading, MagicStick, Search } from '@element-plus/icons-vue'
+import { Cpu, DataAnalysis, Document, InfoFilled, Loading, MagicStick, Plus, UploadFilled } from '@element-plus/icons-vue'
+import MotionModal from '@/components/motion/MotionModal.vue'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import {
   getBookWikiSettings,
   getAgentUsageStats,
+  importWikiSkillArchive,
   listBookKnowledgeBases,
+  listWikiSkills,
   saveAgentRuntimeProfile,
   saveBookWikiConfigDocument,
+  saveCustomWikiSkill,
+  setWikiSkillBinding,
   verifyAgentRuntime,
   type ConfigDocument,
   type AgentUsageStats,
   type KnowledgeBaseSummary,
   type RuntimeHealth,
   type RuntimeProfile,
+  type WikiSkill,
 } from '@/api/knowledge'
 
 const section = ref<'runtime' | 'usage' | 'documents' | 'skills'>('runtime')
@@ -149,6 +190,14 @@ const usageLoading = ref(false)
 const usageCaller = ref<'' | 'knowledge_qa' | 'knowledge_task'>('')
 const usageDateRange = ref<[string, string]>(defaultUsageRange())
 const usageStats = ref<AgentUsageStats | null>(null)
+const skills = ref<WikiSkill[]>([])
+const skillsLoading = ref(false)
+const savingSkillId = ref('')
+const savingSkill = ref(false)
+const importingSkill = ref(false)
+const skillArchiveInput = ref<HTMLInputElement | null>(null)
+const skillEditorVisible = ref(false)
+const skillDraft = reactive({ id: '', slug: '', name: '', description: '', instructions: '', revision: 0 })
 const activeDocument = computed(() => documents.value.find(document => document.id === activeDocumentId.value))
 const usageDailyBars = computed(() => {
   const points = usageStats.value?.daily || []
@@ -212,10 +261,106 @@ async function initialize() {
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '知识库加载失败')
     bases.value = response.result.items.flatMap(card => card.knowledge_base ? [card.knowledge_base] : [])
     activeBaseId.value = bases.value[0]?.id || ''
-    await loadSettings()
+    await Promise.all([loadSettings(), loadSkills()])
   } catch (error) {
     ElMessage.error((error as Error).message)
   }
+}
+
+async function loadSkills() {
+  if (!activeBaseId.value) {
+    skills.value = []
+    return
+  }
+  skillsLoading.value = true
+  try {
+    const response = await listWikiSkills(activeBaseId.value)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || 'Skills 加载失败')
+    skills.value = response.result.skills
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    skillsLoading.value = false
+  }
+}
+
+function openSkillEditor(skill?: WikiSkill) {
+  Object.assign(skillDraft, skill ? {
+    id: skill.id,
+    slug: skill.slug,
+    name: skill.name,
+    description: skill.description,
+    instructions: skill.instructions,
+    revision: skill.revision,
+  } : { id: '', slug: '', name: '', description: '', instructions: '', revision: 0 })
+  skillEditorVisible.value = true
+}
+
+async function saveSkill() {
+  savingSkill.value = true
+  try {
+    const response = await saveCustomWikiSkill({
+      ...(skillDraft.id ? { skillId: skillDraft.id, expectedRevision: skillDraft.revision } : {}),
+      slug: skillDraft.slug.trim(),
+      name: skillDraft.name.trim(),
+      description: skillDraft.description.trim(),
+      instructions: skillDraft.instructions.trim(),
+    })
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || 'Skill 保存失败')
+    skillEditorVisible.value = false
+    ElMessage.success(skillDraft.id ? 'Skill 新版本已保存' : 'Skill 已创建')
+    await loadSkills()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    savingSkill.value = false
+  }
+}
+
+async function importSkillArchive(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  importingSkill.value = true
+  try {
+    const response = await importWikiSkillArchive(file)
+    ElMessage.success(`Skill「${response.skill.name}」已导入；启用前请检查内容`)
+    await loadSkills()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    importingSkill.value = false
+  }
+}
+
+async function persistSkillBinding(skill: WikiSkill, enabled: boolean) {
+  if (!activeBaseId.value) return
+  savingSkillId.value = skill.id
+  try {
+    const response = await setWikiSkillBinding({
+      knowledgeBaseId: activeBaseId.value,
+      skillId: skill.id,
+      enabled,
+      usageScope: skill.usage_scope,
+    })
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || 'Skill 配置保存失败')
+    const index = skills.value.findIndex(item => item.id === skill.id)
+    if (index >= 0) skills.value[index] = response.result
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+    await loadSkills()
+  } finally {
+    savingSkillId.value = ''
+  }
+}
+
+function toggleSkill(skill: WikiSkill, enabled: boolean) {
+  void persistSkillBinding(skill, enabled)
+}
+
+function updateSkillScope(skill: WikiSkill) {
+  void persistSkillBinding(skill, skill.enabled)
 }
 
 async function loadSettings() {
@@ -301,6 +446,7 @@ async function saveDocument() {
 
 watch(section, value => {
   if (value === 'usage' && !usageStats.value) void loadUsage()
+  if (value === 'skills' && !skills.value.length) void loadSkills()
 })
 onMounted(initialize)
 </script>
@@ -385,12 +531,22 @@ onMounted(initialize)
 .document-editor textarea:focus { border-color: var(--accent-border); }
 .document-actions { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
 .document-actions span { color: var(--text-faint); font-size: 10px; }
-.skills-preview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.skills-preview > div { display: grid; align-content: start; gap: 7px; min-height: 160px; padding: 16px; border: 1px solid var(--border-faint); border-radius: 16px; background: var(--bg-glass-subtle); }
-.skills-preview .el-icon { color: var(--accent); font-size: 23px; }
-.skills-preview strong { margin-top: 8px; font-size: 14px; }
-.skills-preview span { color: var(--text-muted); font-size: 11px; line-height: 1.5; }
-.skills-preview em { width: fit-content; margin-top: auto; padding: 3px 8px; border-radius: 999px; background: var(--accent-light); color: var(--accent); font-size: 9px; font-style: normal; }
+.skills-head { align-items: flex-start !important; }
+.skills-actions { display: flex; align-items: center; gap: 8px; }
+.skills-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.skill-card { min-width: 0; display: grid; gap: 13px; padding: 17px; border: 1px solid var(--border-faint); border-radius: 17px; background: var(--bg-glass-subtle); box-shadow: var(--inset-highlight); transition: var(--transition-interactive); }
+.skill-card:hover { border-color: var(--accent-border); transform: translateY(-1px); }
+.skill-card header { display: flex; align-items: center; gap: 10px; }
+.skill-card header > div:nth-child(2) { min-width: 0; flex: 1; display: grid; gap: 2px; }
+.skill-symbol { width: 38px; height: 38px; flex: none; display: grid; place-items: center; border-radius: 12px; background: var(--accent-light); color: var(--accent); font-size: 18px; }
+.skill-card h3 { margin: 0; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.skill-card code { overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.skill-card > p { min-height: 38px; color: var(--text-muted); font-size: 11px; line-height: 1.65; }
+.skill-badges { display: flex; flex-wrap: wrap; gap: 5px; }
+.skill-badges span { padding: 3px 7px; border-radius: 999px; background: var(--accent-light); color: var(--accent); font-size: 8px; font-weight: 650; }
+.skill-card footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border-faint); }
+.skill-card footer .knowledge-select { width: 142px; }
+.skill-editor-form { display: grid; gap: 11px; }
 @media (max-width: 768px) {
   .settings-layout { display: block; }
   .settings-nav { display: flex; margin-bottom: 10px; overflow-x: auto; }
@@ -409,7 +565,11 @@ onMounted(initialize)
   .usage-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .usage-bars { height: 190px; }
   .usage-chart-card, .usage-callers { padding: 13px; }
-  .skills-preview { grid-template-columns: 1fr; }
+  .skills-actions { width: 100%; }
+  .skills-actions .knowledge-select { min-width: 0; flex: 1; }
+  .skills-actions .el-button { flex: none; }
+  .skills-grid { grid-template-columns: 1fr; }
+  .skill-card:hover { transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .usage-bar-column > i { animation: none; }

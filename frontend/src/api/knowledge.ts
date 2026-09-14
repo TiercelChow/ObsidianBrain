@@ -1,4 +1,4 @@
-import { callTool } from '@/api'
+import api, { callTool } from '@/api'
 import type { ReaderBook, ToolEnvelope } from '@/api/reader'
 
 export interface KnowledgeBaseSummary {
@@ -19,6 +19,9 @@ export interface KnowledgeBaseSummary {
   last_synced_at?: string | null
   last_scanned_at?: string | null
   last_compiled_at?: string | null
+  compile_processed_sources: number
+  compile_total_sources: number
+  pending_review_count: number
   source_count: number
   entry_count: number
   claim_count: number
@@ -60,9 +63,43 @@ export interface KnowledgeCitation {
   quote_text?: string | null
 }
 
+export interface KnowledgeClaimSummary {
+  id: string
+  predicate: string
+  object_text?: string | null
+  claim_text: string
+  confidence?: number | null
+  verification_status: string
+  citation_count: number
+}
+
+export interface KnowledgeRelationSummary {
+  id: string
+  direction: 'incoming' | 'outgoing'
+  relation_type: string
+  related_entry_id: string
+  related_entry_title: string
+  strength?: number | null
+  evidence: string
+}
+
+export interface KnowledgeEntryVersionSummary {
+  revision: number
+  title: string
+  summary: string
+  status: string
+  created_at: string
+}
+
 export interface KnowledgeEntryDetail extends KnowledgeEntrySummary {
   content_md: string
+  aliases: string[]
+  edit_policy: string
+  revision: number
   citations: KnowledgeCitation[]
+  claims: KnowledgeClaimSummary[]
+  relations: KnowledgeRelationSummary[]
+  versions: KnowledgeEntryVersionSummary[]
 }
 
 export interface KnowledgeTask {
@@ -74,6 +111,10 @@ export interface KnowledgeTask {
   task_type: 'research' | 'refresh' | 'review'
   status: 'draft' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
   result_summary: string
+  deliverable_type: 'report' | 'presentation'
+  artifact_state: 'not_requested' | 'pending' | 'ready' | 'failed'
+  knowledge_change_state: 'none' | 'proposed' | 'applied' | 'rejected'
+  cancel_requested: boolean
   created_at: string
   updated_at: string
 }
@@ -156,6 +197,24 @@ export interface KnowledgeTaskExecution {
   task: KnowledgeTask
   run_id: string
   evidence: KnowledgeEntrySummary[]
+  artifacts: KnowledgeArtifact[]
+}
+
+export interface KnowledgeArtifact {
+  id: string
+  knowledge_base_id: string
+  knowledge_task_id?: string | null
+  agent_run_id?: string | null
+  skill_id?: string | null
+  artifact_type: 'pptx' | 'pdf' | 'image' | 'report'
+  title: string
+  relative_path: string
+  mime_type: string
+  content_hash: string
+  size_bytes: number
+  validation_state: 'pending' | 'valid' | 'warning' | 'invalid'
+  validation_message: string
+  created_at: string
 }
 
 export interface AgentUsageTotals {
@@ -187,6 +246,82 @@ export interface AgentUsageStats {
   by_caller: AgentUsageCaller[]
 }
 
+export interface WikiSkill {
+  id: string
+  slug: string
+  name: string
+  description: string
+  source_type: 'builtin' | 'custom'
+  status: 'ready' | 'invalid' | 'unavailable'
+  permissions: string[]
+  requirements: string[]
+  revision: number
+  instructions: string
+  enabled: boolean
+  usage_scope: 'qa' | 'research' | 'both'
+  updated_at: string
+}
+
+export interface AgentRunEvent {
+  run_id: string
+  sequence: number
+  event_type: string
+  phase?: string | null
+  message: string
+  payload: Record<string, unknown>
+  created_at: string
+}
+
+export interface KnowledgeChange {
+  id: string
+  ordinal: number
+  operation: 'create' | 'update' | 'merge' | 'split' | 'archive' | 'restore'
+  object_type: 'entry' | 'claim' | 'relation'
+  object_id: string
+  expected_revision?: number | null
+  before?: Record<string, unknown> | null
+  after: Record<string, unknown>
+}
+
+export interface KnowledgeChangeSet {
+  id: string
+  knowledge_base_id: string
+  agent_run_id?: string | null
+  title: string
+  reason: string
+  risk_level: 'low' | 'medium' | 'high'
+  status: 'proposed' | 'approved' | 'rejected' | 'applied' | 'conflicted'
+  created_at: string
+  resolved_at?: string | null
+  resolved_by?: string | null
+  changes: KnowledgeChange[]
+}
+
+export interface SemanticCompileResult {
+  knowledge_base: KnowledgeBaseSummary
+  change_set: KnowledgeChangeSet
+  processed_sources: number
+  total_sources: number
+}
+
+export interface KnowledgeHealthIssue {
+  code: string
+  severity: 'warning' | 'error'
+  title: string
+  detail: string
+  object_ids: string[]
+}
+
+export interface KnowledgeHealthReport {
+  knowledge_base_id: string
+  state: 'healthy' | 'warning' | 'error'
+  semantic_entry_count: number
+  source_span_count: number
+  pending_review_count: number
+  issues: KnowledgeHealthIssue[]
+  generated_at: string
+}
+
 export function listBookKnowledgeBases() {
   return callTool('list_book_knowledge_bases') as unknown as Promise<
     ToolEnvelope<{ items: BookKnowledgeCard[] }>
@@ -212,6 +347,31 @@ export function getBookKnowledgeBase(knowledgeBaseId: string) {
   }) as unknown as Promise<ToolEnvelope<KnowledgeBaseSummary>>
 }
 
+export function compileBookKnowledgeBase(knowledgeBaseId: string) {
+  return callTool('compile_book_knowledge_base', {
+    knowledge_base_id: knowledgeBaseId,
+  }, { timeout: 900_000 }) as unknown as Promise<ToolEnvelope<SemanticCompileResult>>
+}
+
+export function listKnowledgeChangeSets(knowledgeBaseId: string, status?: KnowledgeChangeSet['status']) {
+  return callTool('list_knowledge_change_sets', {
+    knowledge_base_id: knowledgeBaseId,
+    ...(status ? { status } : {}),
+  }) as unknown as Promise<ToolEnvelope<{ change_sets: KnowledgeChangeSet[] }>>
+}
+
+export function resolveKnowledgeChangeSet(
+  changeSetId: string,
+  decision: 'approve' | 'reject',
+  note = '',
+) {
+  return callTool('resolve_knowledge_change_set', {
+    change_set_id: changeSetId,
+    decision,
+    note,
+  }) as unknown as Promise<ToolEnvelope<KnowledgeChangeSet>>
+}
+
 export function listKnowledgeEntries(
   knowledgeBaseId: string,
   options: { query?: string; entryType?: string; limit?: number } = {},
@@ -230,12 +390,25 @@ export function getKnowledgeEntry(entryId: string) {
   >
 }
 
+export function lintBookKnowledgeBase(knowledgeBaseId: string) {
+  return callTool('lint_book_knowledge_base', {
+    knowledge_base_id: knowledgeBaseId,
+  }) as unknown as Promise<ToolEnvelope<KnowledgeHealthReport>>
+}
+
 export function askBookKnowledge(knowledgeBaseId: string, question: string, conversationId?: string) {
   return callTool('ask_book_knowledge', {
     knowledge_base_id: knowledgeBaseId,
     question,
     ...(conversationId ? { conversation_id: conversationId } : {}),
   }, { timeout: 190_000 }) as unknown as Promise<ToolEnvelope<KnowledgeAnswer>>
+}
+
+export function saveKnowledgeAnswer(knowledgeBaseId: string, runId: string) {
+  return callTool('save_knowledge_answer', {
+    knowledge_base_id: knowledgeBaseId,
+    run_id: runId,
+  }) as unknown as Promise<ToolEnvelope<KnowledgeChangeSet>>
 }
 
 export function listKnowledgeConversations(knowledgeBaseId: string, limit = 30) {
@@ -262,25 +435,37 @@ export function createKnowledgeTask(input: {
   title: string
   description?: string
   taskType?: KnowledgeTask['task_type']
+  deliverableType?: KnowledgeTask['deliverable_type']
 }) {
   return callTool('create_knowledge_task', {
     knowledge_base_id: input.knowledgeBaseId,
     title: input.title,
     description: input.description ?? '',
     task_type: input.taskType ?? 'research',
+    deliverable_type: input.deliverableType ?? 'report',
   }) as unknown as Promise<ToolEnvelope<KnowledgeTask>>
 }
 
 export function executeKnowledgeTask(taskId: string) {
   return callTool('execute_knowledge_task', {
     task_id: taskId,
-  }, { timeout: 190_000 }) as unknown as Promise<ToolEnvelope<KnowledgeTaskExecution>>
+  }) as unknown as Promise<ToolEnvelope<KnowledgeTask>>
 }
 
 export function getKnowledgeTaskResult(taskId: string) {
   return callTool('get_knowledge_task_result', {
     task_id: taskId,
   }) as unknown as Promise<ToolEnvelope<KnowledgeTaskExecution>>
+}
+
+export function cancelKnowledgeTask(taskId: string) {
+  return callTool('cancel_knowledge_task', { task_id: taskId }) as unknown as Promise<
+    ToolEnvelope<KnowledgeTask>
+  >
+}
+
+export function knowledgeArtifactDownloadUrl(artifactId: string) {
+  return `/v1/knowledge/artifacts/${encodeURIComponent(artifactId)}`
 }
 
 export function getBookWikiSettings(knowledgeBaseId?: string) {
@@ -301,6 +486,59 @@ export function getAgentUsageStats(options: {
     end_date: options.endDate,
     ...(options.caller ? { caller: options.caller } : {}),
   }) as unknown as Promise<ToolEnvelope<AgentUsageStats>>
+}
+
+export function listWikiSkills(knowledgeBaseId?: string) {
+  return callTool('list_wiki_skills', {
+    ...(knowledgeBaseId ? { knowledge_base_id: knowledgeBaseId } : {}),
+  }) as unknown as Promise<ToolEnvelope<{ skills: WikiSkill[] }>>
+}
+
+export function saveCustomWikiSkill(input: {
+  skillId?: string
+  slug: string
+  name: string
+  description: string
+  instructions: string
+  expectedRevision?: number
+}) {
+  return callTool('save_custom_wiki_skill', {
+    ...(input.skillId ? { skill_id: input.skillId } : {}),
+    slug: input.slug,
+    name: input.name,
+    description: input.description,
+    instructions: input.instructions,
+    ...(input.expectedRevision ? { expected_revision: input.expectedRevision } : {}),
+  }) as unknown as Promise<ToolEnvelope<WikiSkill>>
+}
+
+export function importWikiSkillArchive(file: File) {
+  const form = new FormData()
+  form.append('archive', file)
+  return api.post('/knowledge/skills/import', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120_000,
+  }) as unknown as Promise<{ skill: WikiSkill }>
+}
+
+export function setWikiSkillBinding(input: {
+  knowledgeBaseId: string
+  skillId: string
+  enabled: boolean
+  usageScope: WikiSkill['usage_scope']
+}) {
+  return callTool('set_wiki_skill_binding', {
+    knowledge_base_id: input.knowledgeBaseId,
+    skill_id: input.skillId,
+    enabled: input.enabled,
+    usage_scope: input.usageScope,
+  }) as unknown as Promise<ToolEnvelope<WikiSkill>>
+}
+
+export function getAgentRunEvents(runId: string) {
+  return callTool('get_agent_run_events', { run_id: runId }) as unknown as Promise<
+    ToolEnvelope<{ events: AgentRunEvent[] }>
+  >
 }
 
 export function saveBookWikiConfigDocument(document: ConfigDocument) {

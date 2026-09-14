@@ -75,6 +75,9 @@ pub struct KnowledgeBaseSummary {
     pub last_synced_at: Option<String>,
     pub last_scanned_at: Option<String>,
     pub last_compiled_at: Option<String>,
+    pub compile_processed_sources: i64,
+    pub compile_total_sources: i64,
+    pub pending_review_count: i64,
     pub source_count: i64,
     pub entry_count: i64,
     pub claim_count: i64,
@@ -116,7 +119,44 @@ pub struct KnowledgeEntryDetail {
     #[serde(flatten)]
     pub entry: KnowledgeEntrySummary,
     pub content_md: String,
+    pub aliases: Vec<String>,
+    pub edit_policy: String,
+    pub revision: i64,
     pub citations: Vec<KnowledgeCitation>,
+    pub claims: Vec<KnowledgeClaimSummary>,
+    pub relations: Vec<KnowledgeRelationSummary>,
+    pub versions: Vec<KnowledgeEntryVersionSummary>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeClaimSummary {
+    pub id: String,
+    pub predicate: String,
+    pub object_text: Option<String>,
+    pub claim_text: String,
+    pub confidence: Option<f64>,
+    pub verification_status: String,
+    pub citation_count: i64,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeRelationSummary {
+    pub id: String,
+    pub direction: String,
+    pub relation_type: String,
+    pub related_entry_id: String,
+    pub related_entry_title: String,
+    pub strength: Option<f64>,
+    pub evidence: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeEntryVersionSummary {
+    pub revision: i64,
+    pub title: String,
+    pub summary: String,
+    pub status: String,
+    pub created_at: String,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -129,6 +169,10 @@ pub struct KnowledgeTask {
     pub task_type: String,
     pub status: String,
     pub result_summary: String,
+    pub deliverable_type: String,
+    pub artifact_state: String,
+    pub knowledge_change_state: String,
+    pub cancel_requested: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -223,6 +267,7 @@ pub struct KnowledgeTaskExecution {
     pub task: KnowledgeTask,
     pub run_id: String,
     pub evidence: Vec<KnowledgeEntrySummary>,
+    pub artifacts: Vec<KnowledgeArtifact>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -309,4 +354,117 @@ pub struct AgentRun {
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct AgentRunEvent {
+    pub run_id: String,
+    pub sequence: i64,
+    pub event_type: String,
+    pub phase: Option<String>,
+    pub message: String,
+    pub payload: Value,
+    pub created_at: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct WikiSkill {
+    pub id: String,
+    pub slug: String,
+    pub name: String,
+    pub description: String,
+    pub source_type: String,
+    pub status: String,
+    pub permissions: Vec<String>,
+    pub requirements: Vec<String>,
+    pub revision: i64,
+    pub instructions: String,
+    pub enabled: bool,
+    pub usage_scope: String,
+    pub updated_at: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct SourceSpanSnapshot {
+    pub id: String,
+    pub source_document_id: String,
+    pub source_version_id: String,
+    pub source_path: String,
+    pub heading: Option<String>,
+    pub line_start: Option<i64>,
+    pub line_end: Option<i64>,
+    pub content: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeChange {
+    pub id: String,
+    pub ordinal: i64,
+    pub operation: String,
+    pub object_type: String,
+    pub object_id: String,
+    pub expected_revision: Option<i64>,
+    pub before: Option<Value>,
+    pub after: Value,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeChangeSet {
+    pub id: String,
+    pub knowledge_base_id: String,
+    pub agent_run_id: Option<String>,
+    pub title: String,
+    pub reason: String,
+    pub risk_level: String,
+    pub status: String,
+    pub created_at: String,
+    pub resolved_at: Option<String>,
+    pub resolved_by: Option<String>,
+    pub changes: Vec<KnowledgeChange>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct SemanticCompileResult {
+    pub knowledge_base: KnowledgeBaseSummary,
+    pub change_set: KnowledgeChangeSet,
+    pub processed_sources: i64,
+    pub total_sources: i64,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeArtifact {
+    pub id: String,
+    pub knowledge_base_id: String,
+    pub knowledge_task_id: Option<String>,
+    pub agent_run_id: Option<String>,
+    pub skill_id: Option<String>,
+    pub artifact_type: String,
+    pub title: String,
+    pub relative_path: String,
+    pub mime_type: String,
+    pub content_hash: String,
+    pub size_bytes: i64,
+    pub validation_state: String,
+    pub validation_message: String,
+    pub created_at: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeHealthIssue {
+    pub code: String,
+    pub severity: String,
+    pub title: String,
+    pub detail: String,
+    pub object_ids: Vec<String>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeHealthReport {
+    pub knowledge_base_id: String,
+    pub state: String,
+    pub semantic_entry_count: i64,
+    pub source_span_count: i64,
+    pub pending_review_count: i64,
+    pub issues: Vec<KnowledgeHealthIssue>,
+    pub generated_at: String,
 }

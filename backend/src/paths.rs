@@ -41,6 +41,13 @@ pub fn thumbnails_dir() -> PathBuf {
     data_dir().join("thumbnails")
 }
 
+/// Directory containing generated knowledge deliverables such as PPTX files.
+pub fn artifacts_dir() -> PathBuf {
+    let dir = data_dir().join("artifacts");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
 /// Path to the PID file (for daemon management).
 pub fn pid_file() -> PathBuf {
     data_dir().join("obsidian-brain.pid")

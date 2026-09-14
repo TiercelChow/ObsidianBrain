@@ -29,7 +29,10 @@ test('knowledge chat persists conversations and restores their cited messages', 
 })
 
 test('knowledge chat previews numbered sources before an explicit workspace navigation', async () => {
-  const chat = await source('src/views/knowledge/KnowledgeChat.vue')
+  const [chat, api] = await Promise.all([
+    source('src/views/knowledge/KnowledgeChat.vue'),
+    source('src/api/knowledge.ts'),
+  ])
 
   assert.match(chat, /previewEvidence\(message, sourceIndex\)/)
   assert.match(chat, /S\{\{ evidenceIndex \+ 1 \}\}/)
@@ -38,6 +41,9 @@ test('knowledge chat previews numbered sources before an explicit workspace navi
   assert.match(chat, /在 Wiki 工作台打开/)
   assert.match(chat, /本次会话已切换为书内证据检索模式/)
   assert.match(chat, /class="source-markdown markdown-body" v-html="sourceHtml"/)
+  assert.match(chat, /保存到 Wiki/)
+  assert.match(chat, /saveKnowledgeAnswer/)
+  assert.match(api, /save_knowledge_answer/)
 })
 
 test('knowledge thinking label loops as a reduced-motion aware typewriter', async () => {
@@ -83,7 +89,25 @@ test('wiki settings expose token usage filters and estimated usage disclosure', 
   assert.match(api, /usage_source/)
 })
 
-test('knowledge tasks expose explicit run retry and persisted result actions', async () => {
+test('wiki settings manage versioned skills per book and keep execution instruction-only', async () => {
+  const [settings, api] = await Promise.all([
+    source('src/views/knowledge/WikiSettings.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+
+  assert.match(settings, /新增 Skill/)
+  assert.match(settings, /当前版本只允许 Markdown 指令/)
+  assert.match(settings, /导入 ZIP/)
+  assert.match(settings, /importWikiSkillArchive/)
+  assert.match(settings, /skill\.usage_scope/)
+  assert.match(settings, /setWikiSkillBinding/)
+  assert.match(api, /list_wiki_skills/)
+  assert.match(api, /save_custom_wiki_skill/)
+  assert.match(api, /set_wiki_skill_binding/)
+  assert.match(api, /knowledge\/skills\/import/)
+})
+
+test('knowledge tasks expose durable execution controls and real presentation artifacts', async () => {
   const [view, api] = await Promise.all([
     source('src/views/knowledge/KnowledgeTasks.vue'),
     source('src/api/knowledge.ts'),
@@ -92,8 +116,14 @@ test('knowledge tasks expose explicit run retry and persisted result actions', a
   assert.match(view, /executeKnowledgeTask/)
   assert.match(view, /getKnowledgeTaskResult/)
   assert.match(view, /重新运行/)
+  assert.match(view, /cancelKnowledgeTask/)
+  assert.match(view, /演示文稿/)
+  assert.match(view, /knowledgeArtifactDownloadUrl/)
+  assert.match(view, /任务已进入后台队列，可以离开此页面/)
   assert.match(api, /execute_knowledge_task/)
   assert.match(api, /get_knowledge_task_result/)
+  assert.match(api, /cancel_knowledge_task/)
+  assert.match(api, /knowledge\/artifacts/)
 })
 
 test('knowledge pages distinguish source synchronization from wiki compilation', async () => {
@@ -107,6 +137,11 @@ test('knowledge pages distinguish source synchronization from wiki compilation',
   assert.match(bases, /Wiki ·/)
   assert.match(bases, /章节索引/)
   assert.match(workspace, /compileLabel/)
+  assert.match(workspace, /可核验论断/)
+  assert.match(workspace, /知识关系/)
+  assert.match(workspace, /版本历史/)
+  assert.match(workspace, /知识体检/)
+  assert.match(workspace, /批准并应用/)
   assert.match(api, /compile_mode: 'chapter' \| 'smart'/)
   assert.match(api, /compile_state: 'not_started' \| 'outdated' \| 'compiling' \| 'ready' \| 'failed'/)
 })

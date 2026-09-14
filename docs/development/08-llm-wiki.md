@@ -1,25 +1,29 @@
 # 阅境轩·书籍知识库（Book Wiki）— 开发设计文档 v3
 
 > **文档编号**: DEV-08
-> **版本**: v3.1
-> **状态**: MVP 2 已落地，后台 Worker 与知识变更集待实现
-> **最后更新**: 2026-09-13
+> **版本**: v3.3
+> **状态**: Markdown 语义 Wiki、审核、后台研究与 PPTX 纵切已落地
+> **最后更新**: 2026-09-14
 > **对应需求**: [REQ-08](../requirement/08-llm-wiki.md)
 > **关联需求**: [REQ-10 阅境轩书架](../requirement/10-reader-bookshelf.md)
 
 ---
 
-## 0. 当前实施状态（2026-09-12）
+## 0. 当前实施状态（2026-09-14）
 
-首个可运行纵切已经完成：书架 JSON 可无损迁移到正规表；每本书可建立独立知识库；Markdown 文件夹可扫描为带文件和行号引用的数据库章节实体；五个新页面已接通真实 API；研究任务、书籍配置文档和 Runtime Profile 均保存到 SQLite。自然语言检索目前采用轻量查询规整与数据库正文召回。知识问答已经通过官方 Rust SDK 接入 DeepSeek Harness ACP v1：后端先召回当前书籍的数据库证据，再启动一次性 ACP 会话生成带 `[S#]` 来源编号的回答，并把输入、输出和失败状态记录到 `agent_runs`。迁移 014 增加会话、范围、消息和消息引用表；前端会恢复最近会话并允许切换历史，继续提问时把最近消息作为追问上下文。回答正文已复用阅境轩的安全 Markdown 解析核心，GFM、代码和公式可以在消息气泡内渲染，文本来源编号在渲染后转换为可访问的预览按钮。
+迁移 016–018 已把章节索引升级所需的数据边界补齐。来源同步采用文档版本和不可变片段，重复同步保持 revision 幂等，文件更新不会级联删除旧证据；会话与成果引用保存当时的实体/路径快照。旧知识库继续保持 `chapter/not_started`，只有用户点击智能编译才会发生模型调用。
 
-迁移 016 开始为语义 Wiki 重构保护现有数据：来源同步不再删除全部章节实体；来源版本片段采用版本化身份并保留旧片段；对话引用保存当时的实体摘要快照；重复同步保持条目 revision 幂等；缺失来源从当前检索隐藏但历史内容仍可按 ID 读取。`knowledge_bases` 新增 `compile_mode` 和 `compile_state`，前端分别展示“来源同步”和“Wiki 编译”状态。迁移后已有知识库保持 `chapter/not_started`，不会把章节索引误报为智能 Wiki，也不会自动触发付费建库。语义摄入、变更审核和 Skill 执行仍属于下一实现阶段。
+`compile_semantic_wiki` 按当前来源分批执行，超长章节会继续切块而不是静默截断。每批读取已有语义 Wiki 和前批候选，归并概念、别名、论断与关系；无效 JSON 仅重试一次。模型结果必须通过服务端 entry type、字段长度、当前 span 引用和数量限制校验，再写入 `knowledge_change_sets`。批准时再次校验来源与 expected revision，并在一个 SQLite 事务中写入条目、论断、关系、引用和版本；人工保护条目的修改始终为高风险。
 
-研究任务已经形成首个执行闭环：草稿由用户显式点击运行；后端在单书边界内召回证据，通过同一只读 Harness Patch 生成带引用报告，持久化任务状态、报告和 `agent_runs` 审计记录；失败任务可重试，已完成报告刷新页面后仍能恢复来源映射。当前执行采用同步请求，不冒充后台队列，也不会自动修改正式知识实体。
+问答和研究检索把正式语义条目排在 `source_section` 前，同时保留章节兜底。问答会话、Markdown 回答和来源预览可恢复，用户可把完成回答保存为待审核 `synthesis` 候选。确定性 lint 会检查来源、语义层、实体引用、论断直接证据和重复标题，不调用模型、不修改知识。
 
-当前不会伪造 Agent 结果。未检测到 Harness 时，知识问答降级为展示真实命中的证据；PDF 只完成来源登记并明确标记为等待版面提取。PDF 版面提取、结构化论断/关系生成、耐久化任务 Worker、取消与进度事件、审核、备份、导出和旧后端清理仍按本文后续阶段实施。
+研究任务由进程内单 Worker 从 SQLite 耐久队列领取。排队后 HTTP 立即返回；页面离开不会停止任务。支持取消请求、失败/取消后重试，以及服务启动时把中断的 running 任务恢复为 queued（已请求取消的恢复为 cancelled）。运行事件和估算 Token 继续写入数据库。ACP 当前一次返回完整文本，因此前端逐字动画不等同于真实传输 delta，事件读取接口也没有冒充 SSE。
 
-本地开发使用固定版本命令 `npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp`。模型路由不与 Harness 品牌绑定：默认可沿用 Harness Profile，也可在 Runtime Profile 中保存供应商 ID、显示名、协议、Base URL、模型 ID 与 API Key 环境变量名。后端在每次运行的临时目录中生成 `llm-pi-ai` Provider Patch，并通过 ACP 的 JSON 模型选择值 `[provider, model]` 切换路由。真实密钥只从启动环境或 Harness 凭据服务读取，不进入 Runtime Profile、知识库数据库、日志或生成 Patch。配置页将“启动命令检测”和需要一次最小模型请求的“连接验证”明确分开。所有 `session/request_permission` 默认返回取消；问答和任务会话使用独立临时空目录，并在供应商 Patch 之后应用专用安全 Patch，关闭 Bash、PowerShell、文件系统、联网、Skill、任务和子 Agent 工具，避免书籍原文件或主机环境暴露给模型。
+迁移 017 的 Skill Registry 支持内置 Skill、自定义 Markdown 指令和安全 ZIP 导入。ZIP 限制文件数、单文件/展开大小，拒绝路径穿越、符号链接、二进制与脚本；所有文本资源版本化存入 SQLite。运行时只注入当前书籍、当前用途已启用的指令，不开放 Harness 自带 Skill、文件、Shell、Web 或子 Agent 权限。
+
+研究任务可以选择 `presentation` 交付物。受控 Rust 生成器把报告转为可编辑 OOXML `.pptx`，生成后检查核心包、关系和页数，二进制文件存入应用受管 artifacts 目录，SQLite 保存哈希、大小、Run/Skill 和引用快照。前端恢复报告后可以下载成果。若生产环境没有 Office/Keynote/LibreOffice 渲染依赖，状态明确为“结构已验证，视觉预览未校验”；开发验证已使用 LibreOffice 实际打开并转为 PDF。
+
+本地开发仍使用固定命令 `npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp`。Runtime Profile 可将 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 兼容供应商注入 Harness；真实密钥只从用户指定的环境变量读取。剩余 P2 是 PDF 正文/页码抽取、扫描件 OCR、显式授权的外部研究、脚本型 Skill 沙箱、原生 Usage/delta 适配和跨平台 Office 人工验收。
 
 ---
 
@@ -43,7 +47,7 @@
 │ Vue 3                                                        │
 │ 书架 │ 知识库 │ Wiki 工作台 │ 问答 │ 研究任务 │ 配置         │
 └──────────────────────────┬───────────────────────────────────┘
-                           │ HTTP + SSE
+                           │ HTTP + 持久化状态轮询（SSE 预留）
 ┌──────────────────────────▼───────────────────────────────────┐
 │ Axum API / Tool Registry                                     │
 ├──────────────────────────────────────────────────────────────┤
@@ -520,6 +524,8 @@ pub trait AgentHarness: Send + Sync {
 
 ### 8.3 DeepSeek Harness Adapter
 
+> 下述 Sidecar、Run Capability 和原生事件流是目标架构。当前落地版通过官方 ACP stdio 为每次调用创建隔离临时目录，Rust 服务在调用前完成范围限定与检索，并把确定的证据作为不可信数据注入提示词；尚未向模型开放 HTTP 工具桥。
+
 #### 部署
 
 - Node Sidecar 与应用版本一起固定，不运行 `npx latest`。
@@ -532,7 +538,7 @@ pub trait AgentHarness: Send + Sync {
 - Rust 启动 Sidecar 并通过 ACP JSON-RPC/stdio 通信。
 - 每个运行创建独立 Session 和绝对临时 `cwd`。
 - ACP 管理提示、一次性审批和取消。
-- 工具产生的进度写入 ObsidianBrain `agent_run_events`，前端通过 SSE 消费。
+- 工具产生的进度写入 ObsidianBrain `agent_run_events`，目标前端通过 SSE 消费；当前前端使用任务状态轮询恢复。
 - Harness 会话日志只作诊断，不作为问答或任务的权威存储。
 
 #### 专用 Profile
@@ -584,7 +590,7 @@ Sidecar 插件通过 `127.0.0.1` 调用后端专用端点，使用 Run Capabilit
 
 ## 9. Agent 工具契约
 
-首版向 Harness 提供：
+以下是后续向 Harness 开放的受控工具契约；当前安全 Profile 保持全部 Harness 工具关闭，由 Rust 服务在运行前完成等价的单书只读检索，并只接受结构化候选进入审核流程：
 
 | 工具 | 权限 | 说明 |
 |---|---|---|
@@ -653,6 +659,8 @@ Sidecar 插件通过 `127.0.0.1` 调用后端专用端点，使用 Run Capabilit
 
 ### 11.2 单次问答
 
+> 当前已落地链路为“Rust 限定范围并召回 → ACP 一次生成 → 保存回答/引用”。下图中的 Agent 按需继续检索与 SSE 增量属于适配器升级目标。
+
 ```text
 保存用户消息
   → 确定显式知识库范围
@@ -693,6 +701,8 @@ Agent 回答只能引用工具返回的 entry/span ID。后端在保存前验证
 
 ### 12.2 Worker
 
+当前 v1 Worker 为单进程、全局并发 1 的 SQLite 队列，按更新时间和创建时间领取；启动时恢复中断状态，模型调用结束后检查取消标记。租约、多进程竞争、自动退避和调用中的 ACP 主动中断仍是后续增强项。
+
 - 数据库队列按优先级和创建时间领取任务。
 - 使用租约字段避免重复领取。
 - 默认全局并发 1，可配置到 2；同一本书默认最多一个写任务。
@@ -707,7 +717,9 @@ Agent 回答只能引用工具返回的 entry/span ID。后端在保存前验证
 
 ## 13. API 设计
 
-面向前端提供资源型 HTTP API；面向 Harness 提供小而稳定的 Tool API。不要让前端页面复用 Agent Tool Envelope。
+当前页面继续复用已有 Tool API Envelope；Skill ZIP 上传和成果下载使用资源型 HTTP 端点。下面列出的是逐步迁移后的目标资源 API，不代表每条路由已经存在。
+
+当前新增 Tool 包括 `compile_book_knowledge_base`、`list_knowledge_change_sets`、`resolve_knowledge_change_set`、`lint_book_knowledge_base`、`save_knowledge_answer`、`cancel_knowledge_task`、`list_wiki_skills`、`save_custom_wiki_skill`、`set_wiki_skill_binding` 和 `get_agent_run_events`；研究任务的 execute Tool 只负责入队。资源端点为 `POST /v1/knowledge/skills/import` 与 `GET /v1/knowledge/artifacts/:artifact_id`。
 
 ### 13.1 前端 API
 
@@ -752,6 +764,8 @@ POST   /v1/wiki-skills/import
 列表接口统一支持 cursor、limit、query、sort 和结构化 filters。
 
 ### 13.2 SSE
+
+本节仍为目标协议。当前只有有序、持久化的 `agent_run_events` 和读取 Tool，研究任务页面通过状态轮询断线恢复；不得把前端逐字动画称为真实 SSE 流式输出。
 
 事件至少包括：
 

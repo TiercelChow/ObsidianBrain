@@ -1,6 +1,8 @@
 <template>
   <KnowledgePageShell title="Wiki 工作台" subtitle="浏览数据库实体，并沿引用回到书中原文">
     <template #actions>
+      <el-button v-if="activeBase?.pending_review_count" type="primary" @click="openReviews"><el-icon><Checked /></el-icon>审核 {{ activeBase.pending_review_count }}</el-button>
+      <el-button v-if="activeBase" :loading="linting" @click="runLint"><el-icon><DataAnalysis /></el-icon>知识体检</el-button>
       <el-button v-if="activeBase" :loading="syncing" @click="syncActive"><el-icon><Refresh /></el-icon>同步来源</el-button>
     </template>
 
@@ -75,7 +77,32 @@
           </header>
           <div v-if="detailLoading" class="detail-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
           <template v-else-if="detail">
+            <div class="entity-meta-strip">
+              <span>Revision {{ detail.revision }}</span>
+              <span>{{ detail.edit_policy === 'human_protected' ? '人工保护' : '可由审核变更' }}</span>
+              <span v-if="detail.confidence != null">置信度 {{ Math.round(detail.confidence * 100) }}%</span>
+              <span v-for="alias in detail.aliases" :key="alias">别名 · {{ alias }}</span>
+            </div>
             <div ref="markdownRef" class="entity-markdown markdown-body" v-html="renderedHtml"></div>
+            <section v-if="detail.claims.length" class="entity-structure-section">
+              <h3>可核验论断 <span>{{ detail.claims.length }}</span></h3>
+              <div class="claim-list">
+                <article v-for="claim in detail.claims" :key="claim.id" class="structure-card">
+                  <header><strong>{{ claim.predicate }}</strong><span>{{ claim.verification_status }}</span></header>
+                  <p>{{ claim.claim_text }}</p>
+                  <footer><span v-if="claim.object_text">对象 · {{ claim.object_text }}</span><span>{{ claim.citation_count }} 条证据</span></footer>
+                </article>
+              </div>
+            </section>
+            <section v-if="detail.relations.length" class="entity-structure-section">
+              <h3>知识关系 <span>{{ detail.relations.length }}</span></h3>
+              <div class="relation-list">
+                <article v-for="relation in detail.relations" :key="relation.id" class="structure-card relation-card">
+                  <header><span>{{ relation.direction === 'outgoing' ? '指向' : '来自' }}</span><strong>{{ relation.related_entry_title }}</strong></header>
+                  <p>{{ relation.relation_type }}<template v-if="relation.evidence"> · {{ relation.evidence }}</template></p>
+                </article>
+              </div>
+            </section>
             <section class="citation-section">
               <h3>来源引用 <span>{{ detail.citations.length }}</span></h3>
               <div v-for="citation in detail.citations" :key="citation.id" class="citation-card">
@@ -83,6 +110,16 @@
                 <span v-if="citation.line_start">第 {{ citation.line_start }}–{{ citation.line_end }} 行</span>
                 <p v-if="citation.quote_text">{{ citation.quote_text }}</p>
               </div>
+            </section>
+            <section v-if="detail.versions.length" class="entity-structure-section version-section">
+              <h3>版本历史 <span>{{ detail.versions.length }}</span></h3>
+              <ol class="version-list">
+                <li v-for="version in detail.versions" :key="version.revision">
+                  <b>Revision {{ version.revision }}</b>
+                  <span>{{ version.title }}</span>
+                  <time>{{ formatTime(version.created_at) }}</time>
+                </li>
+              </ol>
             </section>
           </template>
         </template>
@@ -93,24 +130,61 @@
         </div>
       </article>
     </section>
+
+    <MotionModal v-model="reviewVisible" aria-label="审核 Wiki 变更" size="wide">
+      <div class="knowledge-modal-card review-modal">
+        <div class="knowledge-modal-head"><div><h3>审核语义 Wiki 变更</h3><p>批准后在一个事务中写入正式条目、论断、关系、版本和引用。</p></div><span v-if="activeReview" class="knowledge-status" :class="`is-${activeReview.risk_level === 'high' ? 'warning' : 'draft'}`">{{ activeReview.risk_level }} risk</span></div>
+        <div v-if="activeReview" class="review-content">
+          <div class="review-summary"><strong>{{ activeReview.title }}</strong><span>{{ activeReview.reason }}</span></div>
+          <article v-for="change in activeReview.changes" :key="change.id" class="review-change">
+            <header><span>{{ change.operation === 'create' ? '新增' : '更新' }}</span><strong>{{ String(change.after.title || change.object_id) }}</strong><code>{{ String(change.after.entry_type || '') }}</code></header>
+            <p>{{ String(change.after.summary || '') }}</p>
+            <div><span>引用 {{ Array.isArray(change.after.citations) ? change.after.citations.length : 0 }}</span><span v-if="change.expected_revision">基于 Revision {{ change.expected_revision }}</span></div>
+          </article>
+          <el-input v-model="reviewNote" type="textarea" :rows="2" :maxlength="2000" placeholder="可选：记录审核说明" />
+        </div>
+        <div v-else class="knowledge-empty"><strong>没有待审核变更</strong><span>智能编译生成的候选会显示在这里。</span></div>
+        <div class="knowledge-modal-actions"><el-button @click="reviewVisible = false">稍后处理</el-button><template v-if="activeReview"><el-button :loading="resolvingReview" @click="resolveReview('reject')">驳回</el-button><el-button type="primary" :loading="resolvingReview" @click="resolveReview('approve')">批准并应用</el-button></template></div>
+      </div>
+    </MotionModal>
+
+    <MotionModal v-model="healthVisible" aria-label="知识库体检结果">
+      <div class="knowledge-modal-card health-modal">
+        <div class="knowledge-modal-head"><div><h3>知识库体检</h3><p>检查数据库结构与证据完整性，不调用模型，也不会修改知识。</p></div><span v-if="healthReport" class="knowledge-status" :class="healthReport.state === 'healthy' ? 'is-healthy' : 'is-warning'">{{ healthReport.state === 'healthy' ? '健康' : '需处理' }}</span></div>
+        <template v-if="healthReport">
+          <div class="health-counts"><span><b>{{ healthReport.semantic_entry_count }}</b>主题</span><span><b>{{ healthReport.source_span_count }}</b>片段</span><span><b>{{ healthReport.pending_review_count }}</b>待审核</span></div>
+          <div v-if="healthReport.issues.length" class="health-issues">
+            <article v-for="issue in healthReport.issues" :key="issue.code + issue.title" :class="`is-${issue.severity}`"><strong>{{ issue.title }}</strong><p>{{ issue.detail }}</p></article>
+          </div>
+          <div v-else class="knowledge-empty"><strong>没有发现结构问题</strong><span>主题知识、引用和论断证据结构完整。</span></div>
+        </template>
+        <div class="knowledge-modal-actions"><el-button type="primary" @click="healthVisible = false">完成</el-button></div>
+      </div>
+    </MotionModal>
   </KnowledgePageShell>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, Document, Loading, Refresh, Search, Tickets } from '@element-plus/icons-vue'
+import { ArrowLeft, Checked, DataAnalysis, Document, Loading, Refresh, Search, Tickets } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
+import MotionModal from '@/components/motion/MotionModal.vue'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import {
   getKnowledgeEntry,
+  lintBookKnowledgeBase,
   listBookKnowledgeBases,
+  listKnowledgeChangeSets,
   listKnowledgeEntries,
+  resolveKnowledgeChangeSet,
   syncBookKnowledgeBase,
   type KnowledgeBaseSummary,
   type KnowledgeEntryDetail,
   type KnowledgeEntrySummary,
+  type KnowledgeChangeSet,
+  type KnowledgeHealthReport,
 } from '@/api/knowledge'
 
 const route = useRoute()
@@ -127,6 +201,14 @@ const loadingBases = ref(false)
 const loadingEntries = ref(false)
 const detailLoading = ref(false)
 const syncing = ref(false)
+const pendingReviews = ref<KnowledgeChangeSet[]>([])
+const activeReview = ref<KnowledgeChangeSet | null>(null)
+const reviewVisible = ref(false)
+const reviewNote = ref('')
+const resolvingReview = ref(false)
+const linting = ref(false)
+const healthVisible = ref(false)
+const healthReport = ref<KnowledgeHealthReport | null>(null)
 let searchTimer = 0
 
 const activeBase = computed(() => bases.value.find(base => base.id === activeBaseId.value))
@@ -148,7 +230,14 @@ async function loadBases() {
     bases.value = response.result.items.flatMap(card => card.knowledge_base ? [card.knowledge_base] : [])
     const requested = String(route.query.base || '')
     activeBaseId.value = bases.value.some(base => base.id === requested) ? requested : (bases.value[0]?.id || '')
-    if (activeBaseId.value) await loadEntries(String(route.query.entry || ''))
+    if (activeBaseId.value) {
+      await Promise.all([loadEntries(String(route.query.entry || '')), loadReviews()])
+      const requestedReview = String(route.query.review || '')
+      if (requestedReview) {
+        activeReview.value = pendingReviews.value.find(item => item.id === requestedReview) || null
+        reviewVisible.value = Boolean(activeReview.value)
+      }
+    }
   } catch (error) {
     ElMessage.error((error as Error).message)
   } finally {
@@ -201,7 +290,51 @@ async function onBaseChanged() {
   selectedEntry.value = null
   detail.value = null
   router.replace({ query: { base: activeBaseId.value } })
-  await loadEntries()
+  await Promise.all([loadEntries(), loadReviews()])
+}
+
+async function loadReviews() {
+  if (!activeBaseId.value) return
+  const response = await listKnowledgeChangeSets(activeBaseId.value, 'proposed')
+  if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '审核列表加载失败')
+  pendingReviews.value = response.result.change_sets
+}
+
+function openReviews() {
+  activeReview.value = pendingReviews.value[0] || null
+  reviewNote.value = ''
+  reviewVisible.value = true
+}
+
+async function resolveReview(decision: 'approve' | 'reject') {
+  if (!activeReview.value) return
+  resolvingReview.value = true
+  try {
+    const response = await resolveKnowledgeChangeSet(activeReview.value.id, decision, reviewNote.value)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '审核处理失败')
+    ElMessage.success(decision === 'approve' ? '知识变更已原子应用' : '知识变更已驳回')
+    reviewVisible.value = false
+    await loadBases()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    resolvingReview.value = false
+  }
+}
+
+async function runLint() {
+  if (!activeBaseId.value) return
+  linting.value = true
+  try {
+    const response = await lintBookKnowledgeBase(activeBaseId.value)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '知识体检失败')
+    healthReport.value = response.result
+    healthVisible.value = true
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    linting.value = false
+  }
 }
 
 async function syncActive() {
@@ -225,6 +358,12 @@ function entryTypeLabel(type: string) {
 
 function syncLabel(status: string) {
   return ({ clean: '已同步', outdated: '待同步', failed: '同步失败', scanning: '扫描中' } as Record<string, string>)[status] || status
+}
+
+function formatTime(value: string) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  }).format(new Date(value))
 }
 
 onMounted(loadBases)
@@ -257,7 +396,29 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); cleanup() })
 .entry-detail-head p { color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; }
 .detail-loading { min-height: 300px; display: grid; place-content: center; color: var(--accent); font-size: 24px; }
 .detail-symbol { width: 62px; height: 62px; display: grid; place-items: center; border-radius: 20px; background: var(--accent-light); color: var(--accent); font-size: 27px; }
+.entity-meta-strip { display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 18px; }
+.entity-meta-strip span { padding: 5px 9px; border: 1px solid var(--border-faint); border-radius: 999px; background: var(--bg-glass-subtle); color: var(--text-muted); font-size: 10px; }
 .entity-markdown { color: var(--text-secondary); font-size: 15px; line-height: 1.8; overflow-wrap: anywhere; }
+.review-modal { max-height: min(780px, calc(100dvh - 48px)); }
+.review-content { display: grid; gap: 10px; max-height: min(560px, 62dvh); overflow: auto; padding: 0 2px; }
+.review-summary { display: grid; gap: 4px; padding: 12px; border-radius: 13px; background: var(--accent-light); }
+.review-summary strong { font-size: 14px; }
+.review-summary span { color: var(--text-muted); font-size: 11px; }
+.review-change { display: grid; gap: 8px; padding: 13px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); }
+.review-change header { display: flex; align-items: center; gap: 8px; }
+.review-change header span { padding: 3px 7px; border-radius: 999px; background: var(--accent-light); color: var(--accent); font-size: 9px; }
+.review-change header strong { flex: 1; font-size: 13px; }
+.review-change header code { color: var(--text-faint); font-family: var(--font-mono); font-size: 9px; }
+.review-change p { color: var(--text-muted); font-size: 11px; line-height: 1.6; }
+.review-change > div { display: flex; gap: 12px; color: var(--text-faint); font-size: 9px; }
+.health-counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.health-counts span { display: grid; gap: 3px; padding: 12px; border-radius: 13px; background: var(--bg-glass-subtle); color: var(--text-faint); font-size: 10px; }
+.health-counts b { color: var(--text-primary); font-size: 20px; }
+.health-issues { display: grid; gap: 8px; max-height: 48dvh; overflow: auto; }
+.health-issues article { padding: 12px 14px; border: 1px solid color-mix(in srgb, #ff9f0a 25%, transparent); border-radius: 13px; background: color-mix(in srgb, #ff9f0a 7%, transparent); }
+.health-issues article.is-error { border-color: color-mix(in srgb, #ff3b30 25%, transparent); background: color-mix(in srgb, #ff3b30 7%, transparent); }
+.health-issues strong { font-size: 12px; }
+.health-issues p { margin-top: 4px; color: var(--text-muted); font-size: 11px; line-height: 1.55; }
 .entity-markdown :deep(h1), .entity-markdown :deep(h2), .entity-markdown :deep(h3) { margin: 1.4em 0 .6em; color: var(--text-primary); }
 .entity-markdown :deep(p) { margin: .8em 0; }
 .entity-markdown :deep(pre) { overflow: auto; margin: 1em 0; padding: 15px; border-radius: 13px; background: var(--code-block-bg); color: var(--code-block-text); }
@@ -272,6 +433,22 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); cleanup() })
 .citation-card > div { display: flex; align-items: center; gap: 7px; font-size: 12px; }
 .citation-card > span { color: var(--text-faint); font-size: 10px; }
 .citation-card p { color: var(--text-muted); font-size: 11px; }
+.entity-structure-section { margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-faint); }
+.entity-structure-section h3 { margin: 0 0 12px; color: var(--text-primary); font-size: 15px; }
+.entity-structure-section h3 span { color: var(--text-faint); font-size: 11px; }
+.claim-list, .relation-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 8px; }
+.structure-card { display: grid; gap: 7px; padding: 12px 14px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); }
+.structure-card header, .structure-card footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.structure-card header strong { color: var(--text-primary); font-size: 12px; }
+.structure-card header span, .structure-card footer { color: var(--text-faint); font-size: 9px; }
+.structure-card p { color: var(--text-muted); font-size: 11px; line-height: 1.55; }
+.relation-card header { justify-content: flex-start; }
+.relation-card header > span { color: var(--accent); }
+.version-list { display: grid; gap: 0; padding: 0; list-style: none; }
+.version-list li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 2px; border-bottom: 1px solid var(--border-faint); font-size: 10px; }
+.version-list b { color: var(--accent); font-size: 10px; }
+.version-list span { overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.version-list time { color: var(--text-faint); }
 .mobile-back { display: none; }
 .mobile-sync-button { display: none; }
 @media (max-width: 768px) {

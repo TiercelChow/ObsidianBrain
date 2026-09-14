@@ -28,6 +28,7 @@ futures = "0.3"
 agent-client-protocol = "2.1.0"
 shell-words = "1"
 tempfile = "3"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 pulldown-cmark = "0.10"
 gray_matter = "0.2"

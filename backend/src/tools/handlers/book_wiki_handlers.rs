@@ -122,6 +122,118 @@ impl ToolHandler for SyncBookKnowledgeBaseHandler {
 
 pub struct GetBookKnowledgeBaseHandler;
 
+pub struct CompileBookKnowledgeBaseHandler;
+
+#[async_trait]
+impl ToolHandler for CompileBookKnowledgeBaseHandler {
+    fn name(&self) -> &str {
+        "compile_book_knowledge_base"
+    }
+
+    fn description(&self) -> &str {
+        "分批分析当前来源，生成跨章节语义 Wiki 变更集供用户审核"
+    }
+
+    fn input_schema(&self) -> Value {
+        required_id_schema("knowledge_base_id")
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let result = ctx
+            .book_wiki_service
+            .compile_semantic_wiki(required_string(&args, "knowledge_base_id")?)
+            .await?;
+        serde_json::to_value(result)
+            .map_err(|error| BrainError::Internal(format!("语义编译结果序列化失败: {error}")))
+    }
+}
+
+pub struct ListKnowledgeChangeSetsHandler;
+
+#[async_trait]
+impl ToolHandler for ListKnowledgeChangeSetsHandler {
+    fn name(&self) -> &str {
+        "list_knowledge_change_sets"
+    }
+
+    fn description(&self) -> &str {
+        "列出一本书的语义 Wiki 候选变更与审核状态"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": { "type": "string" },
+                "status": {
+                    "type": "string",
+                    "enum": ["proposed", "approved", "rejected", "applied", "conflicted"]
+                }
+            },
+            "required": ["knowledge_base_id"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        Ok(json!({
+            "change_sets": ctx.book_wiki_service.store().list_change_sets(
+                required_string(&args, "knowledge_base_id")?,
+                args.get("status").and_then(Value::as_str),
+            )?
+        }))
+    }
+}
+
+pub struct ResolveKnowledgeChangeSetHandler;
+
+#[async_trait]
+impl ToolHandler for ResolveKnowledgeChangeSetHandler {
+    fn name(&self) -> &str {
+        "resolve_knowledge_change_set"
+    }
+
+    fn description(&self) -> &str {
+        "批准并原子应用语义知识变更，或驳回候选且保留审核记录"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "change_set_id": { "type": "string" },
+                "decision": { "type": "string", "enum": ["approve", "reject"] },
+                "note": { "type": "string", "maxLength": 2000 }
+            },
+            "required": ["change_set_id", "decision"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let decision = required_string(&args, "decision")?;
+        let change_set = ctx.book_wiki_service.store().resolve_change_set(
+            required_string(&args, "change_set_id")?,
+            decision == "approve",
+            args.get("note").and_then(Value::as_str).unwrap_or(""),
+        )?;
+        serde_json::to_value(change_set)
+            .map_err(|error| BrainError::Internal(format!("审核结果序列化失败: {error}")))
+    }
+}
+
 #[async_trait]
 impl ToolHandler for GetBookKnowledgeBaseHandler {
     fn name(&self) -> &str {
@@ -195,6 +307,36 @@ impl ToolHandler for ListKnowledgeEntriesHandler {
 
 pub struct GetKnowledgeEntryHandler;
 
+pub struct LintBookKnowledgeBaseHandler;
+
+#[async_trait]
+impl ToolHandler for LintBookKnowledgeBaseHandler {
+    fn name(&self) -> &str {
+        "lint_book_knowledge_base"
+    }
+
+    fn description(&self) -> &str {
+        "检查一本书的来源覆盖、主题引用、论断证据和重复主题"
+    }
+
+    fn input_schema(&self) -> Value {
+        required_id_schema("knowledge_base_id")
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(
+            ctx.book_wiki_service
+                .store()
+                .lint_knowledge_base(required_string(&args, "knowledge_base_id")?)?,
+        )
+        .map_err(|error| BrainError::Internal(format!("知识体检结果序列化失败: {error}")))
+    }
+}
+
 #[async_trait]
 impl ToolHandler for GetKnowledgeEntryHandler {
     fn name(&self) -> &str {
@@ -221,6 +363,43 @@ impl ToolHandler for GetKnowledgeEntryHandler {
 }
 
 pub struct AskBookKnowledgeHandler;
+
+pub struct SaveKnowledgeAnswerHandler;
+
+#[async_trait]
+impl ToolHandler for SaveKnowledgeAnswerHandler {
+    fn name(&self) -> &str {
+        "save_knowledge_answer"
+    }
+
+    fn description(&self) -> &str {
+        "把已完成且有当前来源引用的问答结论保存为待审核 Wiki 变更"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": { "type": "string" },
+                "run_id": { "type": "string" }
+            },
+            "required": ["knowledge_base_id", "run_id"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(ctx.book_wiki_service.save_answer_to_wiki(
+            required_string(&args, "knowledge_base_id")?,
+            required_string(&args, "run_id")?,
+        )?)
+        .map_err(|error| BrainError::Internal(format!("问答变更序列化失败: {error}")))
+    }
+}
 
 pub struct ListKnowledgeConversationsHandler;
 
@@ -388,6 +567,11 @@ impl ToolHandler for CreateKnowledgeTaskHandler {
                     "type": "string",
                     "enum": ["research", "refresh", "review"],
                     "default": "research"
+                },
+                "deliverable_type": {
+                    "type": "string",
+                    "enum": ["report", "presentation"],
+                    "default": "report"
                 }
             },
             "required": ["knowledge_base_id", "title"],
@@ -400,7 +584,7 @@ impl ToolHandler for CreateKnowledgeTaskHandler {
     }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
-        let task = ctx.book_wiki_service.store().create_task(
+        let task = ctx.book_wiki_service.store().create_task_with_deliverable(
             required_string(&args, "knowledge_base_id")?,
             required_string(&args, "title")?,
             args.get("description")
@@ -409,6 +593,9 @@ impl ToolHandler for CreateKnowledgeTaskHandler {
             args.get("task_type")
                 .and_then(Value::as_str)
                 .unwrap_or("research"),
+            args.get("deliverable_type")
+                .and_then(Value::as_str)
+                .unwrap_or("report"),
         )?;
         serde_json::to_value(task)
             .map_err(|error| BrainError::Internal(format!("结果序列化失败: {error}")))
@@ -446,6 +633,36 @@ impl ToolHandler for GetKnowledgeTaskResultHandler {
 
 pub struct ExecuteKnowledgeTaskHandler;
 
+pub struct CancelKnowledgeTaskHandler;
+
+#[async_trait]
+impl ToolHandler for CancelKnowledgeTaskHandler {
+    fn name(&self) -> &str {
+        "cancel_knowledge_task"
+    }
+
+    fn description(&self) -> &str {
+        "请求取消尚未结束的研究任务；当前模型调用完成后不会继续生成成果或写入结果"
+    }
+
+    fn input_schema(&self) -> Value {
+        required_id_schema("task_id")
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(
+            ctx.book_wiki_service
+                .store()
+                .request_task_cancel(required_string(&args, "task_id")?)?,
+        )
+        .map_err(|error| BrainError::Internal(format!("取消结果序列化失败: {error}")))
+    }
+}
+
 #[async_trait]
 impl ToolHandler for ExecuteKnowledgeTaskHandler {
     fn name(&self) -> &str {
@@ -453,7 +670,7 @@ impl ToolHandler for ExecuteKnowledgeTaskHandler {
     }
 
     fn description(&self) -> &str {
-        "使用当前书籍的数据库证据执行研究任务，并保存带引用的结果"
+        "将研究任务加入持久化后台队列，立即返回当前状态"
     }
 
     fn input_schema(&self) -> Value {
@@ -467,14 +684,172 @@ impl ToolHandler for ExecuteKnowledgeTaskHandler {
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
         let result = ctx
             .book_wiki_service
-            .execute_task(required_string(&args, "task_id")?)
-            .await?;
+            .queue_task(required_string(&args, "task_id")?)?;
         serde_json::to_value(result)
-            .map_err(|error| BrainError::Internal(format!("结果序列化失败: {error}")))
+            .map_err(|error| BrainError::Internal(format!("排队结果序列化失败: {error}")))
     }
 }
 
 pub struct GetBookWikiSettingsHandler;
+
+pub struct ListWikiSkillsHandler;
+
+#[async_trait]
+impl ToolHandler for ListWikiSkillsHandler {
+    fn name(&self) -> &str {
+        "list_wiki_skills"
+    }
+
+    fn description(&self) -> &str {
+        "列出数据库中版本化保存的 Wiki Skills 及当前书籍的启用范围"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": { "type": "string" }
+            },
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        Ok(json!({
+            "skills": ctx.book_wiki_service.store().list_wiki_skills(
+                args.get("knowledge_base_id").and_then(Value::as_str)
+            )?
+        }))
+    }
+}
+
+pub struct SaveCustomWikiSkillHandler;
+
+#[async_trait]
+impl ToolHandler for SaveCustomWikiSkillHandler {
+    fn name(&self) -> &str {
+        "save_custom_wiki_skill"
+    }
+
+    fn description(&self) -> &str {
+        "创建或更新一个只包含受控 Markdown 指令的自定义 Wiki Skill"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "skill_id": { "type": "string" },
+                "slug": { "type": "string", "minLength": 1, "maxLength": 64 },
+                "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+                "description": { "type": "string", "maxLength": 500 },
+                "instructions": { "type": "string", "minLength": 1, "maxLength": 12000 },
+                "expected_revision": { "type": "integer", "minimum": 1 }
+            },
+            "required": ["slug", "name", "description", "instructions"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let skill = ctx.book_wiki_service.store().save_custom_wiki_skill(
+            args.get("skill_id").and_then(Value::as_str),
+            required_string(&args, "slug")?,
+            required_string(&args, "name")?,
+            args.get("description")
+                .and_then(Value::as_str)
+                .unwrap_or(""),
+            required_string(&args, "instructions")?,
+            args.get("expected_revision").and_then(Value::as_i64),
+        )?;
+        serde_json::to_value(skill)
+            .map_err(|error| BrainError::Internal(format!("Skill 序列化失败: {error}")))
+    }
+}
+
+pub struct SetWikiSkillBindingHandler;
+
+#[async_trait]
+impl ToolHandler for SetWikiSkillBindingHandler {
+    fn name(&self) -> &str {
+        "set_wiki_skill_binding"
+    }
+
+    fn description(&self) -> &str {
+        "为一本书启用或停用 Wiki Skill，并限制到问答或研究任务"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": { "type": "string" },
+                "skill_id": { "type": "string" },
+                "enabled": { "type": "boolean" },
+                "usage_scope": {
+                    "type": "string",
+                    "enum": ["qa", "research", "both"]
+                }
+            },
+            "required": ["knowledge_base_id", "skill_id", "enabled", "usage_scope"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let skill = ctx.book_wiki_service.store().set_wiki_skill_binding(
+            required_string(&args, "knowledge_base_id")?,
+            required_string(&args, "skill_id")?,
+            args.get("enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            required_string(&args, "usage_scope")?,
+        )?;
+        serde_json::to_value(skill)
+            .map_err(|error| BrainError::Internal(format!("Skill 绑定序列化失败: {error}")))
+    }
+}
+
+pub struct GetAgentRunEventsHandler;
+
+#[async_trait]
+impl ToolHandler for GetAgentRunEventsHandler {
+    fn name(&self) -> &str {
+        "get_agent_run_events"
+    }
+
+    fn description(&self) -> &str {
+        "按序读取 Agent 运行的持久化进度、完成或失败事件"
+    }
+
+    fn input_schema(&self) -> Value {
+        required_id_schema("run_id")
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        Ok(json!({
+            "events": ctx.book_wiki_service.store().list_agent_run_events(
+                required_string(&args, "run_id")?
+            )?
+        }))
+    }
+}
 
 #[async_trait]
 impl ToolHandler for GetBookWikiSettingsHandler {

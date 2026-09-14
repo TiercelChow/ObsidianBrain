@@ -54,6 +54,10 @@
             <span><strong>{{ card.knowledge_base.claim_count }}</strong> 论断</span>
             <span><strong>{{ card.knowledge_base.task_count }}</strong> 任务</span>
           </div>
+          <div v-if="card.knowledge_base?.compile_state === 'compiling'" class="compile-progress">
+            <i :style="{ width: compileProgress(card.knowledge_base) }"></i>
+            <span>{{ card.knowledge_base.compile_processed_sources }}/{{ card.knowledge_base.compile_total_sources }} 个来源</span>
+          </div>
           <div v-else class="book-uninitialized">
             尚未初始化。创建后，Markdown 章节将进入数据库并保留来源引用。
           </div>
@@ -67,6 +71,11 @@
             >建立知识库</el-button>
             <template v-else>
               <el-button type="primary" @click="openWiki(card.knowledge_base.id)">打开 Wiki</el-button>
+              <el-button
+                v-if="card.book.kind === 'folder' && card.knowledge_base.sync_state === 'clean'"
+                :loading="compilingBaseId === card.knowledge_base.id"
+                @click="compileWiki(card)"
+              ><el-icon><MagicStick /></el-icon>{{ card.knowledge_base.compile_state === 'ready' ? '增量编译' : '智能编译' }}</el-button>
               <el-button
                 :loading="busyBookId === card.book.id"
                 @click="sync(card)"
@@ -95,10 +104,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Collection, Document, FolderOpened, Loading, Refresh } from '@element-plus/icons-vue'
+import { Collection, Document, FolderOpened, Loading, MagicStick, Refresh } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import {
+  compileBookKnowledgeBase,
   initializeBookKnowledgeBase,
   listBookKnowledgeBases,
   syncBookKnowledgeBase,
@@ -109,6 +119,7 @@ const router = useRouter()
 const cards = ref<BookKnowledgeCard[]>([])
 const loading = ref(false)
 const busyBookId = ref('')
+const compilingBaseId = ref('')
 
 const initializedCount = computed(() => cards.value.filter(card => card.knowledge_base).length)
 const entryCount = computed(() => cards.value.reduce((sum, card) => sum + (card.knowledge_base?.entry_count ?? 0), 0))
@@ -163,6 +174,22 @@ async function sync(card: BookKnowledgeCard) {
   }
 }
 
+async function compileWiki(card: BookKnowledgeCard) {
+  if (!card.knowledge_base) return
+  compilingBaseId.value = card.knowledge_base.id
+  try {
+    const response = await compileBookKnowledgeBase(card.knowledge_base.id)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '智能编译失败')
+    ElMessage.success(`已分析 ${response.result.processed_sources} 个来源，请审核知识变更`)
+    await router.push({ path: '/knowledge/wiki', query: { base: card.knowledge_base.id, review: response.result.change_set.id } })
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+    await loadCards()
+  } finally {
+    compilingBaseId.value = ''
+  }
+}
+
 function openWiki(baseId: string) {
   router.push({ path: '/knowledge/wiki', query: { base: baseId } })
 }
@@ -186,6 +213,11 @@ function compileStatusLabel(base: NonNullable<BookKnowledgeCard['knowledge_base'
     not_started: '待编译', outdated: '待更新', compiling: '编译中', ready: '智能 Wiki', failed: '编译失败',
   }
   return labels[base.compile_state] || base.compile_state
+}
+
+function compileProgress(base: NonNullable<BookKnowledgeCard['knowledge_base']>) {
+  if (!base.compile_total_sources) return '0%'
+  return `${Math.round((base.compile_processed_sources / base.compile_total_sources) * 100)}%`
 }
 
 onMounted(loadCards)
@@ -212,6 +244,9 @@ onMounted(loadCards)
 .book-path { overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .book-stats { display: flex; flex-wrap: wrap; gap: 7px 14px; margin-top: 14px; color: var(--text-muted); font-size: 11px; }
 .book-stats strong { color: var(--text-primary); font-size: 14px; font-variant-numeric: tabular-nums; }
+.compile-progress { position: relative; height: 22px; display: flex; align-items: center; margin-top: 10px; overflow: hidden; border-radius: 8px; background: var(--bg-glass-subtle); }
+.compile-progress i { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--accent-light); transition: width var(--motion-normal) var(--ease-emphasized); }
+.compile-progress span { position: relative; z-index: 1; padding: 0 8px; color: var(--text-muted); font-size: 9px; }
 .book-uninitialized { margin-top: 13px; padding: 9px 11px; border-radius: 10px; background: var(--bg-glass-subtle); color: var(--text-faint); font-size: 11px; line-height: 1.55; }
 .book-actions { display: flex; align-items: center; gap: 7px; margin-top: 15px; }
 .book-actions .el-button + .el-button { margin-left: 0; }

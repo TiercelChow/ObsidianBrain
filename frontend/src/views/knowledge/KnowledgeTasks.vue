@@ -21,9 +21,9 @@
           <h2>{{ task.title }}</h2>
           <p>{{ task.description || '没有补充任务说明' }}</p>
           <p v-if="task.result_summary" class="task-result-preview">{{ task.result_summary }}</p>
-          <footer><span>{{ typeLabel(task.task_type) }}</span><time>{{ formatDate(task.updated_at) }}</time></footer>
+          <footer><span>{{ typeLabel(task.task_type) }}</span><span>{{ task.deliverable_type === 'presentation' ? 'PPTX 演示文稿' : '研究报告' }}</span><span v-if="task.knowledge_change_state === 'proposed'">待知识审核</span><time>{{ formatDate(task.updated_at) }}</time></footer>
         </div>
-        <button class="task-action" type="button" :aria-label="taskActionLabel(task)" :disabled="task.status === 'running' || task.status === 'queued' || task.status === 'cancelled' || Boolean(executingTaskId) || Boolean(loadingResultId)" @click="runOrOpen(task)">
+        <button class="task-action" type="button" :class="{ 'is-cancel': task.status === 'running' || task.status === 'queued' }" :aria-label="taskActionLabel(task)" :disabled="(Boolean(executingTaskId) && executingTaskId !== task.id) || Boolean(loadingResultId)" @click="runOrOpen(task)">
           <el-icon :class="{ 'is-loading': task.status === 'running' || executingTaskId === task.id || loadingResultId === task.id }">
             <Loading v-if="task.status === 'running' || executingTaskId === task.id || loadingResultId === task.id" />
             <View v-else-if="task.status === 'completed'" />
@@ -54,6 +54,10 @@
             <el-option label="知识刷新" value="refresh" />
             <el-option label="事实审核" value="review" />
           </el-select>
+          <el-select v-model="draft.deliverableType" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true">
+            <el-option label="研究报告" value="report" />
+            <el-option label="PPTX 演示文稿" value="presentation" />
+          </el-select>
         </div>
         <div class="knowledge-modal-actions">
           <el-button @click="createVisible = false">取消</el-button>
@@ -69,11 +73,16 @@
           <span class="knowledge-status" :class="`is-${activeTask.status}`">{{ statusLabel(activeTask.status) }}</span>
         </div>
         <div class="task-result-content">
-          <template v-for="(segment, index) in activeResultSegments" :key="index">
-            <button v-if="segment.sourceIndex !== undefined" type="button" @click="openEvidence(segment.sourceIndex)">{{ segment.text }}</button>
-            <span v-else>{{ segment.text }}</span>
-          </template>
+          <KnowledgeAnswerMarkdown :content="activeTask.result_summary" :evidence-count="activeEvidence.length" @citation="openEvidence" />
         </div>
+        <div v-if="activeArtifacts.length" class="task-artifacts">
+          <a v-for="artifact in activeArtifacts" :key="artifact.id" :href="knowledgeArtifactDownloadUrl(artifact.id)" download>
+            <span class="artifact-icon"><el-icon><Download /></el-icon></span>
+            <span><b>{{ artifact.title }}</b><small>{{ formatBytes(artifact.size_bytes) }} · {{ artifact.validation_message }}</small></span>
+            <em>下载</em>
+          </a>
+        </div>
+        <button v-if="activeTask.knowledge_change_state === 'proposed'" class="review-result-link" type="button" @click="openTaskReview(activeTask)">研究结论已作为候选保存，前往 Wiki 工作台审核</button>
         <div v-if="activeEvidence.length" class="task-result-evidence">
           <button v-for="(entry, index) in activeEvidence" :key="entry.id" type="button" @click="openEvidence(index)">
             <b>S{{ index + 1 }}</b><span>{{ entry.title }}</span><small>{{ entry.source_path || '数据库实体' }}</small>
@@ -89,23 +98,26 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { DataAnalysis, Loading, Operation, Plus, Refresh, Select, VideoPlay, View } from '@element-plus/icons-vue'
+import { DataAnalysis, Download, Loading, Operation, Plus, Refresh, Select, VideoPlay, View } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import MotionModal from '@/components/motion/MotionModal.vue'
+import KnowledgeAnswerMarkdown from '@/components/knowledge/KnowledgeAnswerMarkdown.vue'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import {
   createKnowledgeTask,
+  cancelKnowledgeTask,
   executeKnowledgeTask,
   getKnowledgeTaskResult,
   listBookKnowledgeBases,
   listKnowledgeTasks,
+  knowledgeArtifactDownloadUrl,
+  type KnowledgeArtifact,
   type KnowledgeBaseSummary,
   type KnowledgeEntrySummary,
   type KnowledgeTask,
 } from '@/api/knowledge'
-import { parseKnowledgeCitations } from '@/utils/knowledgeCitations'
 
 const router = useRouter()
 const bases = ref<KnowledgeBaseSummary[]>([])
@@ -119,8 +131,9 @@ const createVisible = ref(false)
 const resultVisible = ref(false)
 const activeTask = ref<KnowledgeTask | null>(null)
 const activeEvidence = ref<KnowledgeEntrySummary[]>([])
-const draft = reactive({ knowledgeBaseId: '', title: '', description: '', taskType: 'research' as KnowledgeTask['task_type'] })
-const activeResultSegments = computed(() => parseKnowledgeCitations(activeTask.value?.result_summary || '', activeEvidence.value.length))
+const activeArtifacts = ref<KnowledgeArtifact[]>([])
+const draft = reactive({ knowledgeBaseId: '', title: '', description: '', taskType: 'research' as KnowledgeTask['task_type'], deliverableType: 'report' as KnowledgeTask['deliverable_type'] })
+let viewActive = true
 
 async function loadData() {
   try {
@@ -151,6 +164,7 @@ function openCreate() {
   draft.title = ''
   draft.description = ''
   draft.taskType = 'research'
+  draft.deliverableType = 'report'
   createVisible.value = true
 }
 
@@ -170,26 +184,67 @@ async function createTask() {
 }
 
 function runOrOpen(task: KnowledgeTask) {
+  if (task.status === 'running' || task.status === 'queued') {
+    void cancelTask(task)
+    return
+  }
   if (task.status === 'completed') openResult(task)
   else runTask(task)
 }
 
 async function runTask(task: KnowledgeTask) {
   executingTaskId.value = task.id
+  const index = tasks.value.findIndex(item => item.id === task.id)
   try {
     const response = await executeKnowledgeTask(task.id)
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '任务执行失败')
-    const index = tasks.value.findIndex(item => item.id === task.id)
-    if (index >= 0) tasks.value[index] = response.result.task
-    activeTask.value = response.result.task
-    activeEvidence.value = response.result.evidence
+    if (index >= 0) tasks.value[index] = response.result
+    ElMessage.info('任务已进入后台队列，可以离开此页面')
+    const completed = await waitForTask(task.id)
+    if (!completed) return
+    if (completed.status === 'cancelled') {
+      ElMessage.info('任务已取消')
+      return
+    }
+    if (completed.status === 'failed') throw new Error(completed.result_summary || '任务执行失败')
+    const result = await getKnowledgeTaskResult(task.id)
+    if (result.status !== 'success' || !result.result) throw new Error(result.error?.message || '报告加载失败')
+    activeTask.value = result.result.task
+    activeEvidence.value = result.result.evidence
+    activeArtifacts.value = result.result.artifacts
     resultVisible.value = true
-    ElMessage.success('研究报告已生成')
+    ElMessage.success(result.result.artifacts.length ? '报告与演示文稿已生成' : '研究报告已生成')
   } catch (error) {
     ElMessage.error((error as Error).message)
     await loadTasks()
   } finally {
     executingTaskId.value = ''
+  }
+}
+
+async function waitForTask(taskId: string) {
+  while (viewActive) {
+    await new Promise(resolve => window.setTimeout(resolve, 1200))
+    if (!viewActive) return null
+    const response = await listKnowledgeTasks(filterBaseId.value || undefined)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '任务状态读取失败')
+    tasks.value = response.result.tasks
+    const current = tasks.value.find(item => item.id === taskId)
+    if (!current) throw new Error('任务已不存在')
+    if (['completed', 'failed', 'cancelled'].includes(current.status)) return current
+  }
+  return null
+}
+
+async function cancelTask(task: KnowledgeTask) {
+  try {
+    const response = await cancelKnowledgeTask(task.id)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '取消失败')
+    const index = tasks.value.findIndex(item => item.id === task.id)
+    if (index >= 0) tasks.value[index] = response.result
+    ElMessage.info(response.result.status === 'cancelled' ? '任务已取消' : '已请求取消，当前模型调用结束后停止')
+  } catch (error) {
+    ElMessage.error((error as Error).message)
   }
 }
 
@@ -200,6 +255,7 @@ async function openResult(task: KnowledgeTask) {
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '报告加载失败')
     activeTask.value = response.result.task
     activeEvidence.value = response.result.evidence
+    activeArtifacts.value = response.result.artifacts
     resultVisible.value = true
   } catch (error) {
     ElMessage.error((error as Error).message)
@@ -215,21 +271,27 @@ function openEvidence(sourceIndex: number) {
   router.push({ path: '/knowledge/wiki', query: { base: entry.knowledge_base_id, entry: entry.id } })
 }
 
+function openTaskReview(task: KnowledgeTask) {
+  resultVisible.value = false
+  router.push({ path: '/knowledge/wiki', query: { base: task.knowledge_base_id } })
+}
+
 function taskIcon(type: KnowledgeTask['task_type']) { return type === 'refresh' ? Refresh : type === 'review' ? Select : DataAnalysis }
 function typeLabel(type: KnowledgeTask['task_type']) { return ({ research: '专题研究', refresh: '知识刷新', review: '事实审核' })[type] }
 function statusLabel(status: KnowledgeTask['status']) { return ({ draft: '草稿', queued: '排队中', running: '执行中', completed: '已完成', failed: '失败', cancelled: '已取消' })[status] }
 function taskActionLabel(task: KnowledgeTask) {
-  if (task.status === 'running' || executingTaskId.value === task.id) return '执行中'
+  if (task.status === 'running' || task.status === 'queued') return '取消'
   if (loadingResultId.value === task.id) return '加载中'
-  if (task.status === 'queued') return '等待执行'
-  if (task.status === 'cancelled') return '已取消'
+  if (task.status === 'cancelled') return '重试'
   if (task.status === 'completed') return '查看'
   if (task.status === 'failed') return '重试'
   return '运行'
 }
+function formatBytes(bytes: number) { return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB` }
 function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
 
-onMounted(loadData)
+onMounted(() => { viewActive = true; void loadData() })
+onBeforeUnmount(() => { viewActive = false })
 </script>
 
 <style scoped>
@@ -248,14 +310,24 @@ onMounted(loadData)
 .task-main footer { display: flex; gap: 12px; margin-top: 9px; color: var(--text-faint); font-size: 10px; }
 .task-action { min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; border: 1px solid var(--accent-border); border-radius: 11px; background: var(--accent-light); color: var(--accent); font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
 .task-action:disabled { opacity: .48; cursor: default; }
+.task-action.is-cancel { border-color: color-mix(in srgb, var(--danger, #ff3b30) 25%, transparent); background: color-mix(in srgb, var(--danger, #ff3b30) 9%, transparent); color: var(--danger, #d9342b); }
 .task-empty-symbol { width: 62px; height: 62px; display: grid; place-items: center; border-radius: 20px; background: var(--accent-light); color: var(--accent); font-size: 27px; }
 .mobile-create-task { display: none; }
 .task-result-modal { width: min(720px, calc(100vw - 28px)); }
 .task-result-modal .knowledge-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .task-result-heading > span { color: var(--accent); font-size: 10px; font-weight: 680; }
 .task-result-heading h3 { margin-top: 5px; }
-.task-result-content { max-height: min(48vh, 430px); overflow: auto; padding: 16px; border-radius: 14px; background: var(--bg-glass-subtle); color: var(--text-secondary); font-size: 13px; line-height: 1.75; white-space: pre-wrap; }
-.task-result-content button { display: inline-flex; margin: 0 2px; padding: 1px 5px; border: 0; border-radius: 6px; background: var(--accent-light); color: var(--accent); font: inherit; font-size: 11px; font-weight: 720; cursor: pointer; }
+.task-result-content { max-height: min(48vh, 430px); overflow: auto; }
+.task-result-content :deep(.knowledge-answer-markdown) { border-radius: 14px; }
+.task-artifacts { display: grid; gap: 7px; }
+.task-artifacts a { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--accent-border); border-radius: 13px; background: var(--accent-light); color: var(--text-primary); text-decoration: none; }
+.artifact-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; background: var(--accent); color: white; font-size: 18px; }
+.task-artifacts a > span:nth-child(2) { min-width: 0; display: grid; gap: 3px; }
+.task-artifacts b, .task-artifacts small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-artifacts b { font-size: 12px; }
+.task-artifacts small { color: var(--text-faint); font-size: 9px; }
+.task-artifacts em { color: var(--accent); font-size: 11px; font-style: normal; font-weight: 700; }
+.review-result-link { width: 100%; padding: 10px 12px; border: 0; border-radius: 11px; background: var(--accent-light); color: var(--accent); font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
 .task-result-evidence { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .task-result-evidence button { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; align-items: center; padding: 10px; border: 1px solid var(--border-faint); border-radius: 11px; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
 .task-result-evidence b { grid-row: 1 / 3; padding: 3px 6px; border-radius: 6px; background: var(--accent-light); color: var(--accent); font-size: 9px; }

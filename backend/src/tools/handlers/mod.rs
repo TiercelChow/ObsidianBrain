@@ -115,9 +115,21 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(GetBookKnowledgeBaseHandler))
         .await;
     registry
+        .register(Arc::new(CompileBookKnowledgeBaseHandler))
+        .await;
+    registry
+        .register(Arc::new(ListKnowledgeChangeSetsHandler))
+        .await;
+    registry
+        .register(Arc::new(ResolveKnowledgeChangeSetHandler))
+        .await;
+    registry
         .register(Arc::new(ListKnowledgeEntriesHandler))
         .await;
     registry.register(Arc::new(GetKnowledgeEntryHandler)).await;
+    registry
+        .register(Arc::new(LintBookKnowledgeBaseHandler))
+        .await;
     registry
         .register(Arc::new(ListKnowledgeConversationsHandler))
         .await;
@@ -125,6 +137,9 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(GetKnowledgeConversationHandler))
         .await;
     registry.register(Arc::new(AskBookKnowledgeHandler)).await;
+    registry
+        .register(Arc::new(SaveKnowledgeAnswerHandler))
+        .await;
     registry.register(Arc::new(ListKnowledgeTasksHandler)).await;
     registry
         .register(Arc::new(CreateKnowledgeTaskHandler))
@@ -136,8 +151,19 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(ExecuteKnowledgeTaskHandler))
         .await;
     registry
+        .register(Arc::new(CancelKnowledgeTaskHandler))
+        .await;
+    registry
         .register(Arc::new(GetBookWikiSettingsHandler))
         .await;
+    registry.register(Arc::new(ListWikiSkillsHandler)).await;
+    registry
+        .register(Arc::new(SaveCustomWikiSkillHandler))
+        .await;
+    registry
+        .register(Arc::new(SetWikiSkillBindingHandler))
+        .await;
+    registry.register(Arc::new(GetAgentRunEventsHandler)).await;
     registry.register(Arc::new(GetAgentUsageStatsHandler)).await;
     registry
         .register(Arc::new(SaveBookWikiConfigDocumentHandler))

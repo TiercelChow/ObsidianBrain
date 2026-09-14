@@ -31,11 +31,11 @@ test('product site describes installation, configuration and module usage', asyn
 test('product site describes the database-native Book Wiki workflow and current limits', async () => {
   const html = await read('index.html')
 
-  for (const phrase of ['每本书一个独立知识库', '结构化实体', '带引用问答', '可执行研究任务', 'SQLite']) {
+  for (const phrase of ['每本书一个独立知识库', '跨章节归并', '人工审核', 'PPTX', 'SQLite']) {
     assert.match(html, new RegExp(phrase), `missing Book Wiki phrase: ${phrase}`)
   }
 
-  assert.match(html, /PDF[^。]*等待版面提取/)
+  assert.match(html, /PDF[^。]*正文抽取仍在计划中/)
   assert.doesNotMatch(html, /观察领域分布、孤岛、枢纽、尘封和新生内容/)
 })
 

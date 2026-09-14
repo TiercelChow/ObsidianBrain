@@ -79,6 +79,9 @@
                 :streaming="streamingMessageId === message.id"
                 @citation="sourceIndex => previewEvidence(message, sourceIndex)"
               />
+              <button v-if="message.role === 'assistant' && message.runId" class="save-answer" type="button" :disabled="savingRunId === message.runId" @click="saveAnswer(message)">
+                <el-icon :class="{ 'is-loading': savingRunId === message.runId }"><Loading v-if="savingRunId === message.runId" /><Checked v-else /></el-icon>{{ savingRunId === message.runId ? '正在生成候选' : '保存到 Wiki' }}
+              </button>
             </div>
             <div v-if="message.evidence?.length" class="evidence-grid">
               <button
@@ -148,7 +151,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ArrowRight, ChatDotRound, Close, Loading, Lock, Plus, Top } from '@element-plus/icons-vue'
+import { ArrowRight, ChatDotRound, Checked, Close, Loading, Lock, Plus, Top } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import KnowledgeAnswerMarkdown from '@/components/knowledge/KnowledgeAnswerMarkdown.vue'
@@ -163,6 +166,7 @@ import {
   listBookKnowledgeBases,
   listKnowledgeConversations,
   listKnowledgeEntries,
+  saveKnowledgeAnswer,
   type KnowledgeBaseSummary,
   type KnowledgeConversationSummary,
   type KnowledgeEntryDetail,
@@ -174,6 +178,7 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   evidence?: KnowledgeEntrySummary[]
+  runId?: string
 }
 
 const route = useRoute()
@@ -195,6 +200,7 @@ const sourceLoading = ref(false)
 const sourceDetail = ref<KnowledgeEntryDetail | null>(null)
 const sourceHtml = ref('')
 const sourceMarkdownRef = ref<HTMLElement | null>(null)
+const savingRunId = ref('')
 let localMessageId = 0
 let historyRequestId = 0
 let sourceRequestId = 0
@@ -270,6 +276,7 @@ async function openConversation(conversationId: string, parentRequestId?: number
       role: message.role,
       content: message.content,
       evidence: message.evidence,
+      runId: message.run_id || undefined,
     }))
     replaceChatQuery()
     await scrollToBottom(false)
@@ -322,6 +329,7 @@ async function ask(question: string) {
         `run-${response.result.run_id}`,
         response.result.answer,
         response.result.evidence,
+        response.result.run_id,
       )
       replaceChatQuery()
       await refreshConversationList()
@@ -347,9 +355,9 @@ async function ask(question: string) {
   }
 }
 
-async function revealAssistantAnswer(id: string, answer: string, evidence: KnowledgeEntrySummary[]) {
+async function revealAssistantAnswer(id: string, answer: string, evidence: KnowledgeEntrySummary[], runId: string) {
   window.cancelAnimationFrame(revealFrame)
-  messages.value.push({ id, role: 'assistant', content: '', evidence })
+  messages.value.push({ id, role: 'assistant', content: '', evidence, runId })
   const message = messages.value[messages.value.length - 1]
   streamingMessageId.value = id
   const characters = Array.from(answer)
@@ -379,6 +387,21 @@ async function revealAssistantAnswer(id: string, answer: string, evidence: Knowl
     }
     revealFrame = window.requestAnimationFrame(reveal)
   })
+}
+
+async function saveAnswer(message: ChatMessage) {
+  if (!message.runId || !activeBaseId.value) return
+  savingRunId.value = message.runId
+  try {
+    const response = await saveKnowledgeAnswer(activeBaseId.value, message.runId)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '保存失败')
+    ElMessage.success('已生成待审核知识候选')
+    await router.push({ path: '/knowledge/wiki', query: { base: activeBaseId.value, review: response.result.id } })
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    savingRunId.value = ''
+  }
 }
 
 async function appendEvidenceFallback(question: string, harnessError = '') {
@@ -501,6 +524,9 @@ onBeforeUnmount(() => {
 .message-role { color: var(--text-faint); font-size: 10px; }
 .message > p { padding: 11px 14px; border-radius: 16px 16px 16px 5px; background: var(--bg-glass-subtle); color: var(--text-secondary); font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
 .message.user p { border-radius: 16px 16px 5px 16px; background: var(--accent); color: white; }
+.save-answer { width: fit-content; display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; border: 0; border-radius: 9px; background: transparent; color: var(--accent); font: inherit; font-size: 10px; font-weight: 650; cursor: pointer; }
+.save-answer:hover { background: var(--accent-light); }
+.save-answer:disabled { opacity: .55; cursor: default; }
 .evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: -6px 0 22px; }
 .evidence-grid button { min-width: 0; display: grid; gap: 5px; padding: 13px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); color: var(--text-primary); text-align: left; cursor: pointer; transition: var(--transition-interactive); }
 .evidence-grid button:hover { border-color: var(--accent-border); transform: translateY(-1px); }

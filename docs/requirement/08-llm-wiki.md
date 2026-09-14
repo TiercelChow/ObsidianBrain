@@ -1,11 +1,23 @@
 # 阅境轩·书籍知识库（Book Wiki）— 需求设计文档 v3
 
 > **文档编号**: REQ-08
-> **版本**: v3.0
-> **状态**: 方案确认
-> **最后更新**: 2026-09-12
+> **版本**: v3.1
+> **状态**: Markdown 语义闭环与成果型研究任务已落地；PDF 语义抽取仍在 P2
+> **最后更新**: 2026-09-14
 > **上游模块**: 阅境轩书架（REQ-10）
 > **替代范围**: 原知识库、Wiki 看板、Wiki 工作台、知识探索、外部摄入五个页面及旧 Wiki 工作流
+
+---
+
+## 0. 当前交付状态
+
+截至 2026-09-14，Markdown 书籍已经完成本需求的第一阶段闭环：来源同步保留不可变版本与历史引用；智能编译跨文件归并语义主题并形成结构化变更集；用户审核后才原子写入条目、论断、关系、引用和版本。Wiki 工作台可查看这些结构并执行确定性的知识体检。
+
+问答会优先检索语义条目、再使用当前章节证据兜底，会话和引用可恢复，回答可以显式保存为待审核知识候选。研究任务已改为持久化后台队列，支持取消、重试和服务重启恢复，可交付 Markdown 报告或由受控 Rust 生成器生成的真实 PPTX；成果文件与知识回写分别记录状态。
+
+Skill Registry 已在 SQLite 中保存内置、自定义和 ZIP 导入的版本化指令包，并按书籍与问答/研究用途绑定。当前安全级别仅支持 UTF-8 指令与参考文本，不执行脚本，不开放任意文件、Shell 或网络访问。Agent Runtime 仍通过受限 DeepSeek Harness ACP 调用任意已配置的兼容模型供应商。
+
+尚未完成的 P2 能力包括 PDF 正文与页码证据抽取、扫描件 OCR、经用户单独授权的外部研究、通用脚本型 Skill，以及运行时原生 token/文本 delta 不可用时无法提供的实测用量和真实后端流式输出。这些限制必须在界面和文档中如实展示。
 
 ---
 
@@ -385,7 +397,7 @@ draft → queued → running → waiting_review → completed
 - 依赖工具检查
 - 运行历史和最近使用时间
 
-首版内置：`book-ingest`、`book-query`、`book-lint`、`book-research`、`book-synthesis`、`markdown-collection`、`pdf-extract`。
+当前已内置：`book-ingest`、`book-query`、`book-lint`、`book-research`、`book-presentation`。`book-synthesis`、`markdown-collection` 与真正具备页码证据能力的 `pdf-extract` 属于后续扩展，不能只注册名称便宣称支持。
 
 #### 处理策略
 

@@ -100,6 +100,16 @@ const MIGRATIONS: &[Migration] = &[
         description: "safe source versions and separate wiki compilation state",
         sql: include_str!("../../migrations/016_book_wiki_source_safety.sql"),
     },
+    Migration {
+        version: 17,
+        description: "versioned wiki skills and durable agent run events",
+        sql: include_str!("../../migrations/017_wiki_skills_and_run_events.sql"),
+    },
+    Migration {
+        version: 18,
+        description: "semantic wiki change sets, entry versions, and artifacts",
+        sql: include_str!("../../migrations/018_semantic_wiki_changes_and_artifacts.sql"),
+    },
 ];
 
 impl SqliteStore {
@@ -834,6 +844,40 @@ mod tests {
     }
 
     #[test]
+    fn test_migrations_017_and_018_seed_versioned_instruction_skills() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("skills.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+
+        store
+            .with_connection(|conn| {
+                let counts: (i64, i64, i64) = conn.query_row(
+                    "SELECT
+                        (SELECT COUNT(*) FROM skills WHERE source_type = 'builtin'),
+                        (SELECT COUNT(*) FROM skill_versions),
+                        (SELECT COUNT(*) FROM skill_files WHERE relative_path = 'SKILL.md')",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?;
+                assert_eq!(counts, (5, 5, 5));
+                let current: String = conn.query_row(
+                    "SELECT current_version_id FROM skills WHERE id = 'skill-book-query'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(current, "skill-version-book-query-v1");
+                let presentation: String = conn.query_row(
+                    "SELECT current_version_id FROM skills WHERE id = 'skill-book-presentation'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(presentation, "skill-version-book-presentation-v1");
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
     fn test_migration_016_backfills_compile_state_and_message_evidence_snapshot() {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("upgrade.db");
@@ -959,6 +1003,11 @@ mod tests {
             "knowledge_conversation_scopes",
             "knowledge_messages",
             "knowledge_message_citations",
+            "skills",
+            "skill_versions",
+            "skill_files",
+            "knowledge_base_skill_bindings",
+            "agent_run_events",
         ] {
             let exists: bool = conn
                 .query_row(
