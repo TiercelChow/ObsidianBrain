@@ -397,6 +397,18 @@ pub struct SourceSpanSnapshot {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct SourceDocumentSummary {
+    pub id: String,
+    pub knowledge_base_id: String,
+    pub relative_path: String,
+    pub title: String,
+    pub current_version_id: String,
+    pub sync_status: String,
+    pub span_count: i64,
+    pub updated_at: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct KnowledgeChange {
     pub id: String,
     pub ordinal: i64,

@@ -23,9 +23,9 @@
         class="book-wiki-card knowledge-surface"
         :style="{ '--order': index }"
       >
-        <div class="book-cover" :class="`is-${card.book.kind}`">
-          <el-icon><component :is="card.book.kind === 'pdf' ? Document : FolderOpened" /></el-icon>
-          <span>{{ card.book.kind === 'pdf' ? 'PDF' : 'MD' }}</span>
+        <div class="book-cover">
+          <el-icon><FolderOpened /></el-icon>
+          <span>MD</span>
         </div>
         <div class="book-card-main">
           <div class="book-card-title-row">
@@ -95,7 +95,7 @@
     <div v-else class="knowledge-empty knowledge-surface">
       <div class="empty-orb"><el-icon><Collection /></el-icon></div>
       <strong>书架还是空的</strong>
-      <span>先在阅境轩加入 Markdown 文件夹或 PDF，再回来为它建立知识库。</span>
+      <span>这里只显示阅境轩中的 Markdown 文件夹；先加入一个文集，再回来建立知识库。</span>
       <el-button type="primary" @click="$router.push('/reader')">前往阅境轩</el-button>
     </div>
   </KnowledgePageShell>
@@ -104,7 +104,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Collection, Document, FolderOpened, Loading, MagicStick, Refresh } from '@element-plus/icons-vue'
+import { Collection, FolderOpened, Loading, MagicStick, Refresh } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import {
@@ -137,7 +137,7 @@ async function loadCards() {
   try {
     const response = await listBookKnowledgeBases()
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '知识库加载失败')
-    cards.value = response.result.items
+    cards.value = response.result.items.filter(card => card.book.kind === 'folder')
   } catch (error) {
     ElMessage.error((error as Error).message)
   } finally {
@@ -232,7 +232,6 @@ onMounted(loadCards)
 .book-wiki-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .book-wiki-card { min-width: 0; display: grid; grid-template-columns: 82px 1fr; gap: 18px; padding: 19px; animation: knowledge-card-in var(--motion-slow) var(--ease-spring-gentle) both; animation-delay: calc(var(--order) * 36ms); }
 .book-cover { height: 108px; display: grid; place-content: center; justify-items: center; gap: 8px; border-radius: 15px 12px 12px 15px; background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 78%, #9b7bff), color-mix(in srgb, var(--accent) 56%, #263b9d)); color: white; box-shadow: 7px 8px 20px color-mix(in srgb, var(--accent) 18%, transparent), inset -5px 0 10px rgba(0,0,0,.1), inset 1px 0 rgba(255,255,255,.3); }
-.book-cover.is-pdf { background: linear-gradient(145deg, #ff6b63, #c83432); }
 .book-cover .el-icon { font-size: 27px; }
 .book-cover span { font-size: 10px; font-weight: 760; letter-spacing: .12em; opacity: .8; }
 .book-card-main { min-width: 0; }

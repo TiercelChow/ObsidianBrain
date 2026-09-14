@@ -3,15 +3,19 @@ use std::process::Command;
 use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
-    InitializeRequest, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SetSessionConfigOptionRequest,
+    CancelNotification, ContentBlock, ContentChunk, InitializeRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, ToolCallStatus,
 };
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ConnectionTo};
+use agent_client_protocol::util::MatchDispatch;
+use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ConnectionTo, SessionMessage};
 use async_trait::async_trait;
 
 use crate::error::BrainError;
 use crate::models::book_wiki::{RuntimeHealth, RuntimeProfile};
+
+pub const AGENT_RUNTIME_CANCELLED: &str = "OBSIDIANBRAIN_AGENT_RUNTIME_CANCELLED";
 
 #[derive(Clone, Debug)]
 pub struct AgentPromptRequest {
@@ -23,9 +27,49 @@ pub struct AgentPromptRequest {
     pub credential_env: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum AgentRuntimeEvent {
+    TextDelta {
+        delta: String,
+    },
+    Thinking,
+    ToolStarted {
+        tool_call_id: String,
+        title: String,
+        kind: String,
+    },
+    ToolFinished {
+        tool_call_id: String,
+        title: Option<String>,
+        status: String,
+    },
+    UsageContext {
+        used: u64,
+        size: u64,
+    },
+}
+
 #[async_trait]
 pub trait AgentRuntime: Send + Sync {
     async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError>;
+
+    async fn prompt_with_events(
+        &self,
+        request: AgentPromptRequest,
+        _events: Option<tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+        mut cancel: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<String, BrainError> {
+        tokio::select! {
+            result = self.prompt(request) => result,
+            changed = cancel.changed() => {
+                if changed.is_ok() && *cancel.borrow() {
+                    Err(BrainError::KnowledgeValidation("Agent 运行已取消".to_string()))
+                } else {
+                    Err(BrainError::Internal("Agent 取消通道意外关闭".to_string()))
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -46,11 +90,14 @@ impl DeepSeekHarnessRuntime {
     pub fn with_timeout(timeout: Duration) -> Self {
         Self { timeout }
     }
-}
 
-#[async_trait]
-impl AgentRuntime for DeepSeekHarnessRuntime {
-    async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+    #[allow(unused_assignments)]
+    async fn run_prompt(
+        &self,
+        request: AgentPromptRequest,
+        events: Option<tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+        cancel: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<String, BrainError> {
         if request.command.trim().is_empty() {
             return Err(harness_error("ACP 启动命令为空"));
         }
@@ -83,7 +130,7 @@ impl AgentRuntime for DeepSeekHarnessRuntime {
                 async move |request: RequestPermissionRequest, responder, _connection| {
                     tracing::warn!(
                         session_id = %request.session_id,
-                        "DeepSeek Harness 请求额外权限，已按只读策略拒绝"
+                        "DeepSeek Harness 请求额外权限，已按受控工具策略拒绝"
                     );
                     responder.respond(RequestPermissionResponse::new(
                         RequestPermissionOutcome::Cancelled,
@@ -101,6 +148,7 @@ impl AgentRuntime for DeepSeekHarnessRuntime {
                     .build_session(&cwd)
                     .block_task()
                     .run_until(async move |mut session| {
+                        let mut cancel = cancel;
                         if !model.trim().is_empty() {
                             session
                                 .connection()
@@ -113,7 +161,46 @@ impl AgentRuntime for DeepSeekHarnessRuntime {
                                 .await?;
                         }
                         session.send_prompt(prompt)?;
-                        session.read_to_string().await
+                        let mut output = String::new();
+                        let mut cancel_channel_closed = false;
+                        loop {
+                            tokio::select! {
+                                update = session.read_update() => {
+                                    match update? {
+                                        SessionMessage::SessionMessage(dispatch) => {
+                                            MatchDispatch::new(dispatch)
+                                                .if_notification(async |notification: SessionNotification| {
+                                                    handle_session_update(
+                                                        notification.update,
+                                                        &mut output,
+                                                        events.as_ref(),
+                                                    );
+                                                    Ok(())
+                                                })
+                                                .await
+                                                .otherwise_ignore()?;
+                                        }
+                                        SessionMessage::StopReason(_) => break,
+                                        _ => {}
+                                    }
+                                }
+                                changed = cancel.changed(), if !cancel_channel_closed => {
+                                    match changed {
+                                        Ok(()) if *cancel.borrow() => {
+                                            session.connection().send_notification(
+                                                CancelNotification::new(session.session_id().clone()),
+                                            )?;
+                                            return Err(agent_client_protocol::util::internal_error(
+                                                AGENT_RUNTIME_CANCELLED,
+                                            ));
+                                        }
+                                        Ok(()) => {}
+                                        Err(_) => cancel_channel_closed = true,
+                                    }
+                                }
+                            }
+                        }
+                        Ok(output)
                     })
                     .await
             });
@@ -122,15 +209,98 @@ impl AgentRuntime for DeepSeekHarnessRuntime {
             .await
             .map_err(|_| harness_error("DeepSeek Harness 在 180 秒内没有完成回答"))?
             .map_err(|error| {
-                harness_error(acp_error_message(
-                    &error.to_string(),
-                    request.credential_env.as_deref(),
-                ))
+                if error.to_string().contains(AGENT_RUNTIME_CANCELLED) {
+                    BrainError::KnowledgeValidation("Agent 运行已取消".to_string())
+                } else {
+                    harness_error(acp_error_message(
+                        &error.to_string(),
+                        request.credential_env.as_deref(),
+                    ))
+                }
             })?;
         if answer.trim().is_empty() {
             return Err(harness_error("DeepSeek Harness 返回了空回答"));
         }
         Ok(answer)
+    }
+}
+
+#[async_trait]
+impl AgentRuntime for DeepSeekHarnessRuntime {
+    async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+        let (_cancel_guard, cancel) = tokio::sync::watch::channel(false);
+        self.run_prompt(request, None, cancel).await
+    }
+
+    async fn prompt_with_events(
+        &self,
+        request: AgentPromptRequest,
+        events: Option<tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+        cancel: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<String, BrainError> {
+        self.run_prompt(request, events, cancel).await
+    }
+}
+
+fn handle_session_update(
+    update: SessionUpdate,
+    output: &mut String,
+    events: Option<&tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+) {
+    match update {
+        SessionUpdate::AgentMessageChunk(ContentChunk {
+            content: ContentBlock::Text(text),
+            ..
+        }) => {
+            output.push_str(&text.text);
+            emit_event(events, AgentRuntimeEvent::TextDelta { delta: text.text });
+        }
+        SessionUpdate::AgentThoughtChunk(_) => {
+            emit_event(events, AgentRuntimeEvent::Thinking);
+        }
+        SessionUpdate::ToolCall(tool) => {
+            emit_event(
+                events,
+                AgentRuntimeEvent::ToolStarted {
+                    tool_call_id: tool.tool_call_id.to_string(),
+                    title: tool.title,
+                    kind: format!("{:?}", tool.kind).to_ascii_lowercase(),
+                },
+            );
+        }
+        SessionUpdate::ToolCallUpdate(update) => {
+            if let Some(status) = update.fields.status {
+                if matches!(status, ToolCallStatus::Completed | ToolCallStatus::Failed) {
+                    emit_event(
+                        events,
+                        AgentRuntimeEvent::ToolFinished {
+                            tool_call_id: update.tool_call_id.to_string(),
+                            title: update.fields.title,
+                            status: format!("{status:?}").to_ascii_lowercase(),
+                        },
+                    );
+                }
+            }
+        }
+        SessionUpdate::UsageUpdate(usage) => {
+            emit_event(
+                events,
+                AgentRuntimeEvent::UsageContext {
+                    used: usage.used,
+                    size: usage.size,
+                },
+            );
+        }
+        _ => {}
+    }
+}
+
+fn emit_event(
+    events: Option<&tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+    event: AgentRuntimeEvent,
+) {
+    if let Some(events) = events {
+        let _ = events.send(event);
     }
 }
 
@@ -287,6 +457,51 @@ mod tests {
 
         assert!(message.contains("CUSTOM_LLM_API_KEY"));
         assert!(!message.contains("internal data"));
+    }
+
+    #[test]
+    fn test_handle_session_update_emits_text_thought_and_usage_events() {
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let mut output = String::new();
+
+        handle_session_update(
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                agent_client_protocol::schema::v1::TextContent::new("答案"),
+            ))),
+            &mut output,
+            Some(&events),
+        );
+        handle_session_update(
+            SessionUpdate::AgentThoughtChunk(ContentChunk::new(ContentBlock::Text(
+                agent_client_protocol::schema::v1::TextContent::new("不应落库的推理"),
+            ))),
+            &mut output,
+            Some(&events),
+        );
+        handle_session_update(
+            SessionUpdate::UsageUpdate(agent_client_protocol::schema::v1::UsageUpdate::new(
+                128, 4096,
+            )),
+            &mut output,
+            Some(&events),
+        );
+
+        assert_eq!(output, "答案");
+        assert_eq!(
+            received.try_recv().unwrap(),
+            AgentRuntimeEvent::TextDelta {
+                delta: "答案".to_string()
+            }
+        );
+        assert_eq!(received.try_recv().unwrap(), AgentRuntimeEvent::Thinking);
+        assert_eq!(
+            received.try_recv().unwrap(),
+            AgentRuntimeEvent::UsageContext {
+                used: 128,
+                size: 4096
+            }
+        );
+        assert!(received.try_recv().is_err());
     }
 
     #[tokio::test]

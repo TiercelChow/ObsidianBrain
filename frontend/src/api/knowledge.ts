@@ -132,7 +132,7 @@ export interface ConfigDocument {
 export interface RuntimeProfile {
   id: string
   name: string
-  runtime: 'deepseek_harness' | 'claude_code'
+  runtime: 'deepseek_harness'
   executable: string
   model: string
   provider_config?: RuntimeProviderConfig | null
@@ -272,6 +272,31 @@ export interface AgentRunEvent {
   created_at: string
 }
 
+export interface AgentRun {
+  id: string
+  knowledge_base_id?: string | null
+  runtime: 'deepseek_harness'
+  task_type: string
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
+  input: Record<string, unknown>
+  output?: Record<string, unknown> | null
+  error?: string | null
+  started_at?: string | null
+  finished_at?: string | null
+  created_at: string
+}
+
+export type KnowledgeChatStreamEvent =
+  | { type: 'evidence'; evidence: KnowledgeEntrySummary[] }
+  | { type: 'run_started'; run_id: string }
+  | { type: 'text_delta'; run_id: string; delta: string }
+  | { type: 'phase'; run_id: string; message: string }
+  | { type: 'tool_started'; run_id: string; title: string; kind: string }
+  | { type: 'tool_finished'; run_id: string; title?: string | null; status: string }
+  | { type: 'usage'; run_id: string; context_used: number; context_size: number }
+  | { type: 'completed'; result: KnowledgeAnswer }
+  | { type: 'error'; message: string }
+
 export interface KnowledgeChange {
   id: string
   ordinal: number
@@ -402,6 +427,63 @@ export function askBookKnowledge(knowledgeBaseId: string, question: string, conv
     question,
     ...(conversationId ? { conversation_id: conversationId } : {}),
   }, { timeout: 190_000 }) as unknown as Promise<ToolEnvelope<KnowledgeAnswer>>
+}
+
+export async function streamBookKnowledge(
+  knowledgeBaseId: string,
+  question: string,
+  conversationId: string | undefined,
+  onEvent: (event: KnowledgeChatStreamEvent) => void,
+  signal?: AbortSignal,
+) {
+  const response = await fetch('/v1/knowledge/chat/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify({
+      knowledge_base_id: knowledgeBaseId,
+      question,
+      ...(conversationId ? { conversation_id: conversationId } : {}),
+    }),
+    signal,
+  })
+  if (!response.ok) {
+    const detail = await response.text()
+    throw new Error(detail || `问答流连接失败 (${response.status})`)
+  }
+  if (!response.body) throw new Error('当前环境不支持流式响应')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let completed: KnowledgeAnswer | undefined
+
+  const consumeBlock = (block: string) => {
+    const data = block
+      .split('\n')
+      .filter(line => line.startsWith('data:'))
+      .map(line => line.slice(5).trimStart())
+      .join('\n')
+    if (!data) return
+    const event = JSON.parse(data) as KnowledgeChatStreamEvent
+    onEvent(event)
+    if (event.type === 'completed') completed = event.result
+    if (event.type === 'error') throw new Error(event.message)
+  }
+
+  while (true) {
+    const { value, done } = await reader.read()
+    buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, '\n')
+    let boundary = buffer.indexOf('\n\n')
+    while (boundary >= 0) {
+      consumeBlock(buffer.slice(0, boundary))
+      buffer = buffer.slice(boundary + 2)
+      boundary = buffer.indexOf('\n\n')
+    }
+    if (done) break
+  }
+  if (buffer.trim()) consumeBlock(buffer)
+  if (!completed) throw new Error('问答流在完成前意外关闭')
+  return completed
 }
 
 export function saveKnowledgeAnswer(knowledgeBaseId: string, runId: string) {
@@ -538,6 +620,12 @@ export function setWikiSkillBinding(input: {
 export function getAgentRunEvents(runId: string) {
   return callTool('get_agent_run_events', { run_id: runId }) as unknown as Promise<
     ToolEnvelope<{ events: AgentRunEvent[] }>
+  >
+}
+
+export function getKnowledgeTaskActivity(taskId: string) {
+  return callTool('get_knowledge_task_activity', { task_id: taskId }) as unknown as Promise<
+    ToolEnvelope<{ run?: AgentRun | null; events: AgentRunEvent[] }>
   >
 }
 

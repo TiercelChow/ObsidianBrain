@@ -110,6 +110,16 @@ const MIGRATIONS: &[Migration] = &[
         description: "semantic wiki change sets, entry versions, and artifacts",
         sql: include_str!("../../migrations/018_semantic_wiki_changes_and_artifacts.sql"),
     },
+    Migration {
+        version: 19,
+        description: "incremental semantic compile checkpoints and ranked FTS",
+        sql: include_str!("../../migrations/019_incremental_compile_and_fts.sql"),
+    },
+    Migration {
+        version: 20,
+        description: "short-lived scoped capabilities for agent knowledge tools",
+        sql: include_str!("../../migrations/020_agent_run_capabilities.sql"),
+    },
 ];
 
 impl SqliteStore {
@@ -1008,6 +1018,11 @@ mod tests {
             "skill_files",
             "knowledge_base_skill_bindings",
             "agent_run_events",
+            "knowledge_compile_checkpoints",
+            "knowledge_entries_fts",
+            "source_spans_fts",
+            "agent_run_capabilities",
+            "agent_run_capability_scopes",
         ] {
             let exists: bool = conn
                 .query_row(

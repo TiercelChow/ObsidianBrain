@@ -6,8 +6,10 @@ use axum::Router;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
+use crate::api::handlers::agent_mcp::agent_mcp;
 use crate::api::handlers::health::health_check;
 use crate::api::handlers::knowledge_artifact::download_knowledge_artifact;
+use crate::api::handlers::knowledge_chat::stream_knowledge_chat;
 use crate::api::handlers::knowledge_skill::upload_wiki_skill_archive;
 use crate::api::handlers::reader_file::serve_reader_file;
 use crate::api::handlers::tool_handler::{call_tool, list_tools};
@@ -33,6 +35,8 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
         .route("/vault/images/*path", get(serve_vault_image))
         .route("/vault/thumbnails/*path", get(serve_thumbnail))
         .route("/reader/raw", get(serve_reader_file))
+        .route("/knowledge/agent-mcp", post(agent_mcp))
+        .route("/knowledge/chat/stream", post(stream_knowledge_chat))
         .route(
             "/knowledge/artifacts/:artifact_id",
             get(download_knowledge_artifact),

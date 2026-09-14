@@ -1,9 +1,9 @@
 # 阅境轩·书籍知识库（Book Wiki）— 需求设计文档 v3
 
 > **文档编号**: REQ-08
-> **版本**: v3.1
-> **状态**: Markdown 语义闭环与成果型研究任务已落地；PDF 语义抽取仍在 P2
-> **最后更新**: 2026-09-14
+> **版本**: v3.5
+> **状态**: 增量语义编译、FTS 与 DeepSeek Harness 受控工具链已落地
+> **最后更新**: 2026-09-15
 > **上游模块**: 阅境轩书架（REQ-10）
 > **替代范围**: 原知识库、Wiki 看板、Wiki 工作台、知识探索、外部摄入五个页面及旧 Wiki 工作流
 
@@ -13,11 +13,13 @@
 
 截至 2026-09-14，Markdown 书籍已经完成本需求的第一阶段闭环：来源同步保留不可变版本与历史引用；智能编译跨文件归并语义主题并形成结构化变更集；用户审核后才原子写入条目、论断、关系、引用和版本。Wiki 工作台可查看这些结构并执行确定性的知识体检。
 
-问答会优先检索语义条目、再使用当前章节证据兜底，会话和引用可恢复，回答可以显式保存为待审核知识候选。研究任务已改为持久化后台队列，支持取消、重试和服务重启恢复，可交付 Markdown 报告或由受控 Rust 生成器生成的真实 PPTX；成果文件与知识回写分别记录状态。
+问答会优先检索语义条目、再使用当前章节证据兜底，会话和引用可恢复，回答可以显式保存为待审核知识候选。研究任务已改为持久化后台队列，支持取消、重试和服务重启恢复，可交付 Markdown 报告或由受控 Rust 生成器生成的真实 PPTX；PPTX 完成结构校验后提供下载，成果文件与知识回写分别记录状态。
 
-Skill Registry 已在 SQLite 中保存内置、自定义和 ZIP 导入的版本化指令包，并按书籍与问答/研究用途绑定。当前安全级别仅支持 UTF-8 指令与参考文本，不执行脚本，不开放任意文件、Shell 或网络访问。Agent Runtime 仍通过受限 DeepSeek Harness ACP 调用任意已配置的兼容模型供应商。
+Skill Registry 已在 SQLite 中保存内置、自定义和 ZIP 导入的版本化指令包，并按书籍与问答/研究用途绑定。当前安全级别仅支持 UTF-8 指令与参考文本，不执行脚本，不开放任意文件、Shell 或网络访问。Agent Runtime 通过受限 DeepSeek Harness ACP 调用已配置的兼容模型供应商。每次运行只获得短时、按 Run、知识库和工具白名单绑定的能力令牌，通过本机 MCP 工具网关按需读取来源与实体；令牌仅以哈希保存并在运行结束时撤销。
 
-尚未完成的 P2 能力包括 PDF 正文与页码证据抽取、扫描件 OCR、经用户单独授权的外部研究、通用脚本型 Skill，以及运行时原生 token/文本 delta 不可用时无法提供的实测用量和真实后端流式输出。这些限制必须在界面和文档中如实展示。
+Book Wiki 正式限定为 Markdown 文件夹，不规划 PDF 抽取或 OCR；PDF 仅保留在阅境轩阅读功能中。Agent Runtime 正式限定为 DeepSeek Harness，不再规划第二套 Runtime Adapter。问答现通过专用 SSE 接口消费 ACP 原生文本增量、工具阶段和上下文 Usage，断开问答流会中止对应运行；研究任务取消会立即发送 ACP 取消通知。供应商没有报告精确输入/输出 Token 时，统计仍明确标记为估算值，不用上下文占用伪装精确计费数据。
+
+语义编译现按来源文档保存最近成功分析的版本检查点。首次构建读取全书，后续只把新增或内容变化的 Markdown 来源交给 Runtime；候选被驳回时释放对应检查点，允许重新分析。实体和当前来源片段已使用带中文二元组的 FTS5 索引，标题、别名、摘要、正文按权重排序，并保留兼容模糊查询作为降级路径。
 
 ---
 
@@ -25,7 +27,7 @@ Skill Registry 已在 SQLite 中保存内置、自定义和 ZIP 导入的版本�
 
 ### 1.1 一句话定义
 
-以阅境轩书架为入口，把每一本 PDF 或 Markdown 文集维护为一个相互隔离、可持续演化的 LLM Wiki 知识库。
+以阅境轩书架为入口，把每一个 Markdown 文集维护为一个相互隔离、可持续演化的 LLM Wiki 知识库。
 
 ### 1.2 核心关系
 
@@ -43,7 +45,7 @@ Agent Harness 负责分析、问答和研究任务的执行
 
 | LLM Wiki 原则 | 本产品实现 |
 |---|---|
-| 原始资料保持可追溯 | 阅境轩书籍路径只读；记录来源版本、哈希、页码、标题与行号 |
+| 原始资料保持可追溯 | 阅境轩 Markdown 文集路径只读；记录来源版本、哈希、标题与行号 |
 | 知识持续积累 | 结构化实体、论断、关系、引用和综合内容写入 SQLite |
 | Purpose 决定方向 | 每个知识库有独立 purpose 配置文档 |
 | Schema 约束结构 | 每个知识库有独立 schema 配置文档和实体类型约束 |
@@ -53,10 +55,10 @@ Agent Harness 负责分析、问答和研究任务的执行
 ### 1.4 核心价值
 
 1. 阅读不再止于打开文件，而会逐步形成可检索、可验证的书籍知识体系。
-2. 每个回答都能回到原书的具体页码、文件、标题或文本片段。
+2. 每个回答都能回到原书的具体文件、标题、行号或文本片段。
 3. 知识以数据库实体管理，支持筛选、合并、版本、图谱和结构化检索。
 4. 长时间摄入、研究和维护由成熟 Agent Harness 执行，不在业务层重复实现 Agent Loop。
-5. 知识内容、业务状态和安全边界由 ObsidianBrain 掌控，Agent Runtime 可以替换。
+5. 知识内容、业务状态和安全边界由 ObsidianBrain 掌控，DeepSeek Harness 只负责执行 Agent 工作流。
 
 ---
 
@@ -65,14 +67,14 @@ Agent Harness 负责分析、问答和研究任务的执行
 ### 2.1 首版范围
 
 - 将现有书架条目升级为稳定的书籍身份。
-- 为 PDF 或 Markdown 文件夹建立一对一知识库。
+- 为 Markdown 文件夹建立一对一知识库；PDF 不进入 Book Wiki。
 - 管理知识库的初始化、同步、暂停、健康、审核、归档和删除。
 - 从原书提取来源文档和可定位片段。
 - 生成并维护实体、论断、关系、引用、综合内容和版本历史。
 - 提供单书问答、显式跨书问答和回答回写。
 - 提供可由 Agent 执行的研究任务。
 - 提供 LLM、Harness、配置文档、Skill、模板和安全策略管理。
-- 首个 Agent Runtime 接入 DeepSeek Harness，同时保留 Claude Code Adapter 边界。
+- Agent Runtime 仅接入 DeepSeek Harness，并继续支持其兼容的模型供应商。
 - 支持桌面与手机端完整操作。
 
 ### 2.2 明确非目标
@@ -82,7 +84,7 @@ Agent Harness 负责分析、问答和研究任务的执行
 - 不让 Agent 直接修改 SQLite、原始书籍或正式知识实体。
 - 不在第一阶段实现任意网站爬取、通用 RAG 平台或多人协作权限系统。
 - 不把研究任务和现有个人待办强行合并；只提供可选关联。
-- 不承诺首版支持 EPUB、Word、PPT 等阅境轩当前不支持的格式。
+- 不支持 PDF、EPUB、Word 等非 Markdown 来源进入 Book Wiki；PPTX 只作为可下载研究成果。
 
 ---
 
@@ -106,7 +108,7 @@ Agent Harness 负责分析、问答和研究任务的执行
 
 ### 4.1 书籍（Reader Book）
 
-阅境轩中的阅读对象：一个 Markdown 文件夹或一个 PDF 文件。书籍可以尚未启用知识库。
+阅境轩中的阅读对象仍可以是 Markdown 文件夹或 PDF 文件；只有 Markdown 文件夹可以启用知识库。
 
 ### 4.2 知识库（Knowledge Base）
 
@@ -114,7 +116,6 @@ Agent Harness 负责分析、问答和研究任务的执行
 
 ### 4.3 来源文档与来源片段
 
-- PDF 书：整本 PDF 是来源文档，页面或页面内段落是来源片段。
 - Markdown 文集：每个 Markdown 文件是来源文档，标题区块或分段是来源片段。
 - 每个片段必须能够跳回阅境轩中的原位置。
 
@@ -261,7 +262,7 @@ healthy | warning | needs_review
 
 - 概览：全书目的、概览、关键概念、健康和最近变化。
 - 实体：按类型和状态浏览知识条目。
-- 来源：查看文件、PDF 页和抽取状态。
+- 来源：查看 Markdown 文件、标题片段和同步状态。
 - 图谱：查看关系；手机默认先显示洞察列表，再进入全屏图谱。
 - 审核：查看 Agent 变更差异并批准、驳回或编辑。
 - 运行：查看任务步骤、工具调用、Token、耗时和错误。
@@ -355,8 +356,6 @@ draft → queued → running → waiting_review → completed
 #### Agent Runtime
 
 - DeepSeek Harness
-- Claude Code
-- 后续自定义 Harness
 - 可执行程序、版本和健康检查
 - Profile、最大轮次、并发、超时和取消策略
 - 沙箱、网络、Shell、文件系统和审批策略
@@ -384,7 +383,6 @@ draft → queued → running → waiting_review → completed
 - `schema.md`
 - `instructions.md`
 - `AGENTS.md`
-- `CLAUDE.md`
 
 每次保存形成版本；支持差异、恢复和模板重置。
 
@@ -397,12 +395,11 @@ draft → queued → running → waiting_review → completed
 - 依赖工具检查
 - 运行历史和最近使用时间
 
-当前已内置：`book-ingest`、`book-query`、`book-lint`、`book-research`、`book-presentation`。`book-synthesis`、`markdown-collection` 与真正具备页码证据能力的 `pdf-extract` 属于后续扩展，不能只注册名称便宣称支持。
+当前已内置：`book-ingest`、`book-query`、`book-lint`、`book-research`、`book-presentation`。`book-synthesis` 与 `markdown-collection` 属于后续扩展。
 
 #### 处理策略
 
 - 来源变化检测与自动同步
-- PDF 文本提取和可选 OCR
 - 分块策略
 - 低风险自动应用范围
 - 高风险强制审核范围
@@ -435,7 +432,7 @@ draft → queued → running → waiting_review → completed
 - 添加为知识候选
 - 创建研究任务
 
-PDF 带入页码，Markdown 带入文件和标题。阅读页不常驻复杂 Wiki 面板，避免压缩正文。
+Markdown 带入文件、标题和选中文字。阅读页不常驻复杂 Wiki 面板，避免压缩正文；PDF 阅读不显示这些 Book Wiki 操作。
 
 ### 7.3 删除关系
 
@@ -452,7 +449,7 @@ PDF 带入页码，Markdown 带入文件和标题。阅读页不常驻复杂 Wik
 
 | 数据 | 权威存储 |
 |---|---|
-| 原始 PDF / Markdown | 用户本地文件 |
+| 原始 Markdown | 用户本地文件 |
 | 来源版本和抽取片段 | SQLite |
 | 知识条目正文 | SQLite Markdown 字段 |
 | 论断、关系和引用 | SQLite 结构化表 |
@@ -494,10 +491,7 @@ PDF 带入页码，Markdown 带入文件和标题。阅读页不常驻复杂 Wik
 
 Harness 是 Agent 执行环境，模型是推理提供方。配置和运行记录必须分别保存。
 
-首版正式支持：
-
-- DeepSeek Harness Adapter
-- Claude Code Adapter
+正式支持 DeepSeek Harness Adapter，不再维护第二套 Runtime 适配器。
 
 ### 9.2 DeepSeek Harness
 
@@ -506,16 +500,6 @@ Harness 是 Agent 执行环境，模型是推理提供方。配置和运行记�
 - 通过 ACP/stdio 管理会话、提示、审批和取消。
 - 通过 ObsidianBrain 专用工具插件访问知识能力。
 - 不使用 Harness 自身存储作为产品业务事实来源。
-
-### 9.3 Claude Code
-
-- 通过 Agent SDK 或非交互 CLI 运行。
-- 使用显式工作目录、Skill、MCP、权限和输出格式。
-- 不自动继承用户目录中与本次知识任务无关的配置。
-
-### 9.4 统一行为
-
-两种 Runtime 必须遵循同一业务工具契约、变更集契约和审核策略。切换 Runtime 不迁移知识数据。
 
 ---
 
@@ -597,15 +581,15 @@ Harness 是 Agent 执行环境，模型是推理提供方。配置和运行记�
 
 1. 书架中每本书最多绑定一个知识库，数据库层强制唯一。
 2. 两本书同时建库时，实体、会话、检索和 Agent 工具访问完全隔离。
-3. PDF 来源引用可跳到正确页码；Markdown 引用可跳到正确文件和标题。
-4. 修改 Markdown 文件或替换 PDF 后，知识库进入 `outdated`，增量同步只处理变化来源。
+3. Markdown 引用可跳到正确文件、标题和行号。
+4. 修改 Markdown 文件后，知识库进入 `outdated`，增量同步只处理变化来源。
 5. Agent 生成实体、论断、关系和引用后，必须通过结构校验与事务写入。
 6. 高风险变更未经审核不能改变正式知识。
 7. 实体支持全文检索、类型筛选、来源筛选、状态筛选和关系导航。
 8. 问答回答包含可点击引用；证据不足时不能伪造来源。
 9. 研究任务支持排队、进度、取消、失败重试和审核后继续。
 10. 配置页可以管理继承关系、配置文档、Skill 和不同任务模型。
-11. 切换 DeepSeek Harness 与 Claude Code 不需要迁移知识数据。
+11. DeepSeek Harness 可使用 OpenAI/Anthropic 兼容协议接入第三方模型供应商，而不迁移知识数据。
 12. 删除知识库不影响书籍和原始文件；删除书籍时必须明确选择知识库处置方式。
 13. 数据库备份可恢复出实体、引用、配置、对话、任务和版本。
 14. 桌面和手机端均能完成建库、搜索、问答、审核和任务管理主流程。
@@ -620,7 +604,7 @@ Harness 是 Agent 执行环境，模型是推理提供方。配置和运行记�
 
 ### Phase B：摄入闭环
 
-Markdown/PDF 抽取、增量检测、变更集、审核、实体/论断/关系/引用和 FTS。
+Markdown 抽取、增量检测、变更集、审核、实体/论断/关系/引用和 FTS。
 
 ### Phase C：DeepSeek Harness
 
@@ -630,9 +614,9 @@ Sidecar、专用 Profile、工具桥、Skill 物化、运行队列、进度、�
 
 知识库、Wiki 工作台、书籍问答、研究任务、Wiki 配置及阅境轩联动。
 
-### Phase E：Claude Code 与导出
+### Phase E：导出与恢复
 
-Claude Code Adapter、跨书查询、Markdown/JSON 导出和完整恢复验证。
+跨书查询、Markdown/JSON 导出和完整恢复验证。
 
 ### Phase F：旧模块移除
 
@@ -645,9 +629,12 @@ Claude Code Adapter、跨书查询、Markdown/JSON 导出和完整恢复验证�
 | 版本 | 日期 | 说明 |
 |---|---|---|
 | v2.0 | 2026-06-24 | 全 Vault Wiki 看板、工作台、探索和外部摄入方案 |
-| v3.0 | 2026-09-12 | 重构为阅境轩每书一库；SQLite 为生成知识唯一事实来源；引入实体、论断、关系、审核、研究任务及 DeepSeek Harness/Claude Code 双 Runtime |
+| v3.0 | 2026-09-12 | 重构为阅境轩每书一库；SQLite 为生成知识唯一事实来源；引入实体、论断、关系、审核、研究任务及 Agent Runtime |
 | v3.1 | 2026-09-13 | 明确问答历史持久化、最近会话恢复与来源预览后再跳转的交互要求 |
 | v3.2 | 2026-09-13 | 补充问答 Markdown 渲染、渐进输出与可筛选 Token 用量统计要求 |
+| v3.3 | 2026-09-14 | Book Wiki 收敛为 Markdown 来源、DeepSeek Harness 单 Runtime；PPTX 以生成和下载为交付标准 |
+| v3.4 | 2026-09-15 | 增加按来源版本的增量语义编译检查点，以及实体/来源片段 FTS5 中文检索与加权排序 |
+| v3.5 | 2026-09-15 | 增加 Run Capability、本机 MCP 知识工具网关、ACP 原生事件、SSE 问答流与主动取消 |
 
 ## 16. 参考资料
 
@@ -656,4 +643,3 @@ Claude Code Adapter、跨书查询、Markdown/JSON 导出和完整恢复验证�
 - [DeepSeek Harness 官方介绍](https://deepseek.com/harness/en/)
 - [DeepSeek Harness ACP](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md)
 - [DeepSeek Harness Skill 子系统](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/skills.md)
-- [Claude Code 程序化运行](https://code.claude.com/docs/en/headless)

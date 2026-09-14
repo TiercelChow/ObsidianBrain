@@ -20,6 +20,9 @@
           <div class="task-topline"><span>{{ task.book_name }}</span><span class="knowledge-status" :class="`is-${task.status}`">{{ statusLabel(task.status) }}</span></div>
           <h2>{{ task.title }}</h2>
           <p>{{ task.description || '没有补充任务说明' }}</p>
+          <div v-if="task.status === 'running' && taskActivity[task.id]" class="task-live" role="status">
+            <i></i><span>{{ taskActivity[task.id] }}</span>
+          </div>
           <p v-if="task.result_summary" class="task-result-preview">{{ task.result_summary }}</p>
           <footer><span>{{ typeLabel(task.task_type) }}</span><span>{{ task.deliverable_type === 'presentation' ? 'PPTX 演示文稿' : '研究报告' }}</span><span v-if="task.knowledge_change_state === 'proposed'">待知识审核</span><time>{{ formatDate(task.updated_at) }}</time></footer>
         </div>
@@ -110,6 +113,7 @@ import {
   cancelKnowledgeTask,
   executeKnowledgeTask,
   getKnowledgeTaskResult,
+  getKnowledgeTaskActivity,
   listBookKnowledgeBases,
   listKnowledgeTasks,
   knowledgeArtifactDownloadUrl,
@@ -132,6 +136,7 @@ const resultVisible = ref(false)
 const activeTask = ref<KnowledgeTask | null>(null)
 const activeEvidence = ref<KnowledgeEntrySummary[]>([])
 const activeArtifacts = ref<KnowledgeArtifact[]>([])
+const taskActivity = ref<Record<string, string>>({})
 const draft = reactive({ knowledgeBaseId: '', title: '', description: '', taskType: 'research' as KnowledgeTask['task_type'], deliverableType: 'report' as KnowledgeTask['deliverable_type'] })
 let viewActive = true
 
@@ -139,7 +144,9 @@ async function loadData() {
   try {
     const response = await listBookKnowledgeBases()
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '知识库加载失败')
-    bases.value = response.result.items.flatMap(card => card.knowledge_base ? [card.knowledge_base] : [])
+    bases.value = response.result.items.flatMap(card => (
+      card.book.kind === 'folder' && card.knowledge_base ? [card.knowledge_base] : []
+    ))
     await loadTasks()
   } catch (error) {
     ElMessage.error((error as Error).message)
@@ -231,9 +238,19 @@ async function waitForTask(taskId: string) {
     tasks.value = response.result.tasks
     const current = tasks.value.find(item => item.id === taskId)
     if (!current) throw new Error('任务已不存在')
+    if (current.status === 'running') await refreshTaskActivity(taskId)
     if (['completed', 'failed', 'cancelled'].includes(current.status)) return current
   }
   return null
+}
+
+async function refreshTaskActivity(taskId: string) {
+  const response = await getKnowledgeTaskActivity(taskId)
+  if (response.status !== 'success' || !response.result) return
+  const latest = [...response.result.events]
+    .reverse()
+    .find(event => event.message && event.event_type !== 'run.text_delta')
+  if (latest) taskActivity.value[taskId] = latest.message
 }
 
 async function cancelTask(task: KnowledgeTask) {
@@ -242,7 +259,7 @@ async function cancelTask(task: KnowledgeTask) {
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '取消失败')
     const index = tasks.value.findIndex(item => item.id === task.id)
     if (index >= 0) tasks.value[index] = response.result
-    ElMessage.info(response.result.status === 'cancelled' ? '任务已取消' : '已请求取消，当前模型调用结束后停止')
+    ElMessage.info(response.result.status === 'cancelled' ? '任务已取消' : '已发送中断请求，Harness 正在停止')
   } catch (error) {
     ElMessage.error((error as Error).message)
   }
@@ -307,6 +324,8 @@ onBeforeUnmount(() => { viewActive = false })
 .task-main h2 { margin: 5px 0 4px; font-size: 16px; }
 .task-main > p { overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .task-main > p.task-result-preview { margin-top: 6px; color: var(--text-faint); font-size: 11px; }
+.task-live { display: flex; align-items: center; gap: 7px; margin-top: 7px; color: var(--accent); font-size: 11px; font-weight: 620; }
+.task-live i { width: 6px; height: 6px; flex: none; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 24%, transparent); animation: task-live-pulse 1.4s ease-out infinite; }
 .task-main footer { display: flex; gap: 12px; margin-top: 9px; color: var(--text-faint); font-size: 10px; }
 .task-action { min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; border: 1px solid var(--accent-border); border-radius: 11px; background: var(--accent-light); color: var(--accent); font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
 .task-action:disabled { opacity: .48; cursor: default; }
@@ -335,6 +354,7 @@ onBeforeUnmount(() => { viewActive = false })
 .task-result-evidence span { font-size: 11px; font-weight: 650; }
 .task-result-evidence small { color: var(--text-faint); font-size: 9px; }
 @keyframes task-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes task-live-pulse { 60%, 100% { box-shadow: 0 0 0 7px transparent; } }
 @media (max-width: 768px) {
   .task-filter { display: grid; grid-template-columns: minmax(0, 1fr) 46px; align-items: stretch; }
   .mobile-create-task { width: 46px; min-height: 46px; display: grid; place-items: center; border: 0; border-radius: 14px; background: var(--accent); color: white; font-size: 18px; box-shadow: 0 7px 18px color-mix(in srgb, var(--accent) 22%, transparent); }

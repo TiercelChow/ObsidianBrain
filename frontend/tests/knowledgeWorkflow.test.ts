@@ -18,14 +18,17 @@ test('knowledge chat persists conversations and restores their cited messages', 
   assert.match(chat, /KnowledgeAnswerMarkdown/)
   assert.match(answer, /renderMarkdownDocument/)
   assert.match(answer, /data-source-index/)
-  assert.match(chat, /revealAssistantAnswer/)
-  assert.match(chat, /requestAnimationFrame/)
+  assert.match(chat, /streamBookKnowledge/)
+  assert.match(chat, /event\.type === 'text_delta'/)
+  assert.doesNotMatch(chat, /revealAssistantAnswer/)
   assert.match(chat, /listKnowledgeConversations/)
   assert.match(chat, /getKnowledgeConversation/)
   assert.match(chat, /activeConversationId\.value \|\| undefined/)
   assert.match(api, /list_knowledge_conversations/)
   assert.match(api, /get_knowledge_conversation/)
   assert.match(api, /conversation_id: string/)
+  assert.match(api, /knowledge\/chat\/stream/)
+  assert.match(api, /text\/event-stream/)
 })
 
 test('knowledge chat previews numbered sources before an explicit workspace navigation', async () => {
@@ -117,12 +120,15 @@ test('knowledge tasks expose durable execution controls and real presentation ar
   assert.match(view, /getKnowledgeTaskResult/)
   assert.match(view, /重新运行/)
   assert.match(view, /cancelKnowledgeTask/)
+  assert.match(view, /getKnowledgeTaskActivity/)
+  assert.match(view, /task-live/)
   assert.match(view, /演示文稿/)
   assert.match(view, /knowledgeArtifactDownloadUrl/)
   assert.match(view, /任务已进入后台队列，可以离开此页面/)
   assert.match(api, /execute_knowledge_task/)
   assert.match(api, /get_knowledge_task_result/)
   assert.match(api, /cancel_knowledge_task/)
+  assert.match(api, /get_knowledge_task_activity/)
   assert.match(api, /knowledge\/artifacts/)
 })
 
@@ -144,6 +150,19 @@ test('knowledge pages distinguish source synchronization from wiki compilation',
   assert.match(workspace, /批准并应用/)
   assert.match(api, /compile_mode: 'chapter' \| 'smart'/)
   assert.match(api, /compile_state: 'not_started' \| 'outdated' \| 'compiling' \| 'ready' \| 'failed'/)
+})
+
+test('Book Wiki only exposes Markdown folders while Reader keeps PDF support', async () => {
+  const [bases, api] = await Promise.all([
+    source('src/views/knowledge/KnowledgeBases.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+
+  assert.match(bases, /filter\(card => card\.book\.kind === 'folder'\)/)
+  assert.match(bases, /只显示阅境轩中的 Markdown 文件夹/)
+  assert.doesNotMatch(bases, /card\.book\.kind === 'pdf'/)
+  assert.match(api, /runtime: 'deepseek_harness'/)
+  assert.doesNotMatch(api, /runtime: 'deepseek_harness' \| 'claude_code'/)
 })
 
 test('runtime settings keep save and paid connection verification as separate actions', async () => {

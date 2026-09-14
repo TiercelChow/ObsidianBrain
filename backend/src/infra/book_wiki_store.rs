@@ -13,16 +13,32 @@ use crate::models::book_wiki::{
     KnowledgeClaimSummary, KnowledgeConversationDetail, KnowledgeConversationSummary,
     KnowledgeEntryDetail, KnowledgeEntrySummary, KnowledgeEntryVersionSummary,
     KnowledgeHealthIssue, KnowledgeHealthReport, KnowledgeMessage, KnowledgeRelationSummary,
-    KnowledgeTask, ReaderBook, RuntimeProfile, RuntimeProviderConfig, SourceSpanSnapshot,
-    WikiSkill,
+    KnowledgeTask, ReaderBook, RuntimeProfile, RuntimeProviderConfig, SourceDocumentSummary,
+    SourceSpanSnapshot, WikiSkill,
 };
 
 const LEGACY_BOOKS_KEY: &str = "reader_books";
 const BOOKS_MIGRATED_KEY: &str = "reader_books_table_migrated";
+const KNOWLEDGE_FTS_CONTENT_VERSION_KEY: &str = "knowledge_fts_content_v2";
 
 #[derive(Clone)]
 pub struct BookWikiStore {
     db: Arc<SqliteStore>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IssuedAgentCapability {
+    pub token: String,
+    pub run_id: String,
+    pub expires_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentCapabilityGrant {
+    pub run_id: String,
+    pub knowledge_base_ids: Vec<String>,
+    pub allowed_tools: Vec<String>,
+    pub expires_at: String,
 }
 
 #[derive(Clone, Debug)]
@@ -55,6 +71,106 @@ pub struct MarkdownSourceDraft {
 impl BookWikiStore {
     pub fn new(db: Arc<SqliteStore>) -> Self {
         Self { db }
+    }
+
+    fn ensure_knowledge_fts_current(&self) -> Result<(), BrainError> {
+        if self
+            .db
+            .get_state(KNOWLEDGE_FTS_CONTENT_VERSION_KEY)?
+            .is_some()
+        {
+            return Ok(());
+        }
+
+        self.db.transaction(|conn| {
+            let already_rebuilt = conn
+                .query_row(
+                    "SELECT value FROM app_state WHERE key = ?1",
+                    params![KNOWLEDGE_FTS_CONTENT_VERSION_KEY],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            if already_rebuilt.is_some() {
+                return Ok(());
+            }
+
+            let entries = {
+                let mut stmt = conn.prepare(
+                    "SELECT id, knowledge_base_id, title, aliases_json, summary, content_md
+                     FROM knowledge_entries",
+                )?;
+                let rows = stmt.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                })?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
+            conn.execute("DELETE FROM knowledge_entries_fts", [])?;
+            for (entry_id, base_id, title, aliases, summary, content_md) in entries {
+                let cjk_terms = knowledge_fts_cjk_terms(&[
+                    title.as_str(),
+                    aliases.as_str(),
+                    summary.as_str(),
+                    content_md.as_str(),
+                ]);
+                conn.execute(
+                    "INSERT INTO knowledge_entries_fts
+                     (entry_id, knowledge_base_id, title, aliases, summary, content_md, tags,
+                      cjk_terms)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', ?7)",
+                    params![entry_id, base_id, title, aliases, summary, content_md, cjk_terms],
+                )?;
+            }
+
+            let spans = {
+                let mut stmt = conn.prepare(
+                    "SELECT ss.id, ss.knowledge_base_id, sd.title, ss.heading, ss.content
+                     FROM source_spans ss
+                     JOIN source_versions sv ON sv.id = ss.source_version_id
+                     JOIN source_documents sd ON sd.id = sv.source_document_id
+                     WHERE sd.sync_status = 'current'
+                       AND sd.current_version_id = ss.source_version_id",
+                )?;
+                let rows = stmt.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                })?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
+            conn.execute("DELETE FROM source_spans_fts", [])?;
+            for (span_id, base_id, source_title, heading, content) in spans {
+                let heading_text = heading.as_deref().unwrap_or_default();
+                let cjk_terms = knowledge_fts_cjk_terms(&[
+                    source_title.as_str(),
+                    heading_text,
+                    content.as_str(),
+                ]);
+                conn.execute(
+                    "INSERT INTO source_spans_fts
+                     (span_id, knowledge_base_id, source_title, heading, content, cjk_terms)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![span_id, base_id, source_title, heading, content, cjk_terms],
+                )?;
+            }
+            conn.execute(
+                "INSERT INTO app_state (key, value, updated_at)
+                 VALUES (?1, '1', CURRENT_TIMESTAMP)
+                 ON CONFLICT(key) DO UPDATE SET value = '1', updated_at = CURRENT_TIMESTAMP",
+                params![KNOWLEDGE_FTS_CONTENT_VERSION_KEY],
+            )?;
+            Ok(())
+        })
     }
 
     pub fn ensure_reader_books_migrated(&self) -> Result<(), BrainError> {
@@ -269,6 +385,7 @@ impl BookWikiStore {
         let books = self.list_reader_books()?;
         books
             .into_iter()
+            .filter(|book| book.kind == BookKind::Folder)
             .map(|book| {
                 let knowledge_base = self.get_base_by_book_id(&book.id)?;
                 Ok(BookKnowledgeCard {
@@ -281,21 +398,24 @@ impl BookWikiStore {
 
     pub fn initialize_base(&self, book_id: &str) -> Result<KnowledgeBaseSummary, BrainError> {
         self.ensure_reader_books_migrated()?;
-        let book_exists = self.db.with_connection(|conn| {
-            Ok(conn
-                .query_row(
-                    "SELECT 1 FROM reader_books WHERE id = ?1 AND shelf_state = 'active'",
-                    params![book_id],
-                    |_| Ok(()),
-                )
-                .optional()?
-                .is_some())
-        })?;
-        if !book_exists {
-            return Err(BrainError::KnowledgeNotFound(book_id.to_string()));
-        }
         if let Some(existing) = self.get_base_by_book_id(book_id)? {
             return Ok(existing);
+        }
+        let book_kind = self.db.with_connection(|conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT kind FROM reader_books WHERE id = ?1 AND shelf_state = 'active'",
+                    params![book_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?)
+        })?;
+        let book_kind =
+            book_kind.ok_or_else(|| BrainError::KnowledgeNotFound(book_id.to_string()))?;
+        if book_kind != "folder" {
+            return Err(BrainError::KnowledgeValidation(
+                "书籍知识库仅支持 Markdown 文件夹；PDF 仍可在阅境轩中阅读".to_string(),
+            ));
         }
 
         let base_id = uuid::Uuid::new_v4().to_string();
@@ -439,6 +559,10 @@ impl BookWikiStore {
                  )",
                 params![base_id],
             )?;
+            conn.execute(
+                "DELETE FROM source_spans_fts WHERE knowledge_base_id = ?1",
+                params![base_id],
+            )?;
 
             for source in sources {
                 conn.execute(
@@ -566,14 +690,37 @@ impl BookWikiStore {
                     )?;
                     conn.execute(
                         "INSERT INTO knowledge_entries_fts
-                         (entry_id, knowledge_base_id, title, summary, content_md)
-                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                         (entry_id, knowledge_base_id, title, aliases, summary, content_md, tags,
+                          cjk_terms)
+                         VALUES (?1, ?2, ?3, '', ?4, ?5, '', ?6)",
                         params![
                             entry_id,
                             base_id,
                             section.title,
                             section.summary,
                             section.content_md,
+                            knowledge_fts_cjk_terms(&[
+                                section.title.as_str(),
+                                section.summary.as_str(),
+                                section.content_md.as_str(),
+                            ]),
+                        ],
+                    )?;
+                    conn.execute(
+                        "INSERT INTO source_spans_fts
+                         (span_id, knowledge_base_id, source_title, heading, content, cjk_terms)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![
+                            span_id,
+                            base_id,
+                            source.title,
+                            section.title,
+                            section.content_md,
+                            knowledge_fts_cjk_terms(&[
+                                source.title.as_str(),
+                                section.title.as_str(),
+                                section.content_md.as_str(),
+                            ]),
                         ],
                     )?;
                     conn.execute(
@@ -632,50 +779,74 @@ impl BookWikiStore {
         })
     }
 
-    pub fn register_pdf_source(
+    pub fn list_current_source_documents(
         &self,
         base_id: &str,
-        path: &str,
-        title: &str,
-        hash: &str,
-        size: i64,
-        modified_at: Option<&str>,
-    ) -> Result<(), BrainError> {
-        let now = Utc::now().to_rfc3339();
-        let source_id = stable_id("source", &format!("{base_id}:{path}"));
-        let version_id = stable_id("version", &format!("{source_id}:{hash}"));
-        self.db.transaction(|conn| {
-            conn.execute(
-                "INSERT INTO source_documents
-                 (id, knowledge_base_id, source_type, original_path, relative_path, title,
-                  mime_type, current_version_id, sync_status, extraction_status, created_at, updated_at)
-                 VALUES (?1, ?2, 'pdf', ?3, ?3, ?4, 'application/pdf', ?5,
-                         'current', 'pending_harness', ?6, ?6)
-                 ON CONFLICT(knowledge_base_id, original_path) DO UPDATE SET
-                    title = excluded.title,
-                    current_version_id = excluded.current_version_id,
-                    sync_status = 'current',
-                    extraction_status = 'pending_harness',
-                    updated_at = excluded.updated_at",
-                params![source_id, base_id, path, title, version_id, now],
+    ) -> Result<Vec<SourceDocumentSummary>, BrainError> {
+        self.get_base(base_id)?;
+        self.db.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT sd.id, sd.knowledge_base_id, sd.relative_path, sd.title,
+                        sd.current_version_id, sd.sync_status,
+                        (SELECT COUNT(*) FROM source_spans ss
+                         WHERE ss.source_version_id = sd.current_version_id),
+                        sd.updated_at
+                 FROM source_documents sd
+                 WHERE sd.knowledge_base_id = ?1 AND sd.sync_status = 'current'
+                   AND sd.current_version_id IS NOT NULL
+                 ORDER BY sd.ordinal, sd.relative_path COLLATE NOCASE",
             )?;
-            conn.execute(
-                "INSERT OR IGNORE INTO source_versions
-                 (id, source_document_id, content_hash, size_bytes, modified_at,
-                  extraction_version, extraction_status, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'pending-harness', 'pending_harness', ?6)",
-                params![version_id, source_id, hash, size, modified_at, now],
-            )?;
-            conn.execute(
-                "UPDATE knowledge_bases
-                 SET sync_state = 'outdated', health_state = 'warning',
-                     last_error = NULL, last_scanned_at = ?2,
-                     revision = revision + 1, updated_at = ?2
-                 WHERE id = ?1",
-                params![base_id, now],
-            )?;
-            Ok(())
+            let rows = stmt.query_map(params![base_id], |row| {
+                Ok(SourceDocumentSummary {
+                    id: row.get(0)?,
+                    knowledge_base_id: row.get(1)?,
+                    relative_path: row.get(2)?,
+                    title: row.get(3)?,
+                    current_version_id: row.get(4)?,
+                    sync_status: row.get(5)?,
+                    span_count: row.get(6)?,
+                    updated_at: row.get(7)?,
+                })
+            })?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
         })
+    }
+
+    pub fn get_current_source_span(
+        &self,
+        base_id: &str,
+        span_id: &str,
+    ) -> Result<SourceSpanSnapshot, BrainError> {
+        self.get_base(base_id)?;
+        self.db
+            .with_connection(|conn| {
+                conn.query_row(
+                    "SELECT ss.id, sd.id, ss.source_version_id, sd.relative_path, ss.heading,
+                            ss.line_start, ss.line_end, ss.content
+                     FROM source_spans ss
+                     JOIN source_versions sv ON sv.id = ss.source_version_id
+                     JOIN source_documents sd ON sd.id = sv.source_document_id
+                     WHERE ss.id = ?2 AND ss.knowledge_base_id = ?1
+                       AND sd.knowledge_base_id = ?1 AND sd.sync_status = 'current'
+                       AND sd.current_version_id = ss.source_version_id",
+                    params![base_id, span_id],
+                    |row| {
+                        Ok(SourceSpanSnapshot {
+                            id: row.get(0)?,
+                            source_document_id: row.get(1)?,
+                            source_version_id: row.get(2)?,
+                            source_path: row.get(3)?,
+                            heading: row.get(4)?,
+                            line_start: row.get(5)?,
+                            line_end: row.get(6)?,
+                            content: row.get(7)?,
+                        })
+                    },
+                )
+                .optional()
+                .map_err(Into::into)
+            })?
+            .ok_or_else(|| BrainError::KnowledgeNotFound(span_id.to_string()))
     }
 
     pub fn list_current_source_spans(
@@ -708,6 +879,194 @@ impl BookWikiStore {
                 })
             })?;
             rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        })
+    }
+
+    pub fn list_source_spans_pending_compile(
+        &self,
+        base_id: &str,
+    ) -> Result<Vec<SourceSpanSnapshot>, BrainError> {
+        self.get_base(base_id)?;
+        self.db.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT ss.id, sd.id, ss.source_version_id, sd.relative_path, ss.heading,
+                        ss.line_start, ss.line_end, ss.content
+                 FROM source_spans ss
+                 JOIN source_versions sv ON sv.id = ss.source_version_id
+                 JOIN source_documents sd ON sd.id = sv.source_document_id
+                 LEFT JOIN knowledge_compile_checkpoints checkpoint
+                   ON checkpoint.knowledge_base_id = ss.knowledge_base_id
+                  AND checkpoint.source_document_id = sd.id
+                 WHERE ss.knowledge_base_id = ?1
+                   AND sd.sync_status = 'current'
+                   AND sd.current_version_id = ss.source_version_id
+                   AND (checkpoint.source_version_id IS NULL
+                        OR checkpoint.source_version_id != ss.source_version_id)
+                 ORDER BY sd.ordinal, ss.ordinal",
+            )?;
+            let rows = stmt.query_map(params![base_id], |row| {
+                Ok(SourceSpanSnapshot {
+                    id: row.get(0)?,
+                    source_document_id: row.get(1)?,
+                    source_version_id: row.get(2)?,
+                    source_path: row.get(3)?,
+                    heading: row.get(4)?,
+                    line_start: row.get(5)?,
+                    line_end: row.get(6)?,
+                    content: row.get(7)?,
+                })
+            })?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        })
+    }
+
+    pub fn search_source_spans(
+        &self,
+        base_id: &str,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<SourceSpanSnapshot>, BrainError> {
+        self.get_base(base_id)?;
+        self.ensure_knowledge_fts_current()?;
+        let limit = limit.clamp(1, 200) as i64;
+        let fts_query = knowledge_fts_query(Some(query));
+        let patterns = knowledge_query_patterns(Some(query));
+        self.db.with_connection(|conn| {
+            let mut spans = Vec::new();
+            let mut seen = HashSet::new();
+            if let Some(fts_query) = fts_query.as_deref() {
+                let mut stmt = conn.prepare(
+                    "SELECT ss.id, sd.id, ss.source_version_id, sd.relative_path, ss.heading,
+                            ss.line_start, ss.line_end, ss.content
+                     FROM source_spans_fts
+                     JOIN source_spans ss ON ss.id = source_spans_fts.span_id
+                     JOIN source_versions sv ON sv.id = ss.source_version_id
+                     JOIN source_documents sd ON sd.id = sv.source_document_id
+                     WHERE source_spans_fts MATCH ?2
+                       AND source_spans_fts.knowledge_base_id = ?1
+                       AND ss.knowledge_base_id = ?1
+                       AND sd.sync_status = 'current'
+                       AND sd.current_version_id = ss.source_version_id
+                     ORDER BY bm25(source_spans_fts, 0.0, 0.0, 4.0, 12.0, 1.0, 2.0),
+                              sd.ordinal, ss.ordinal
+                     LIMIT ?3",
+                )?;
+                let rows = stmt.query_map(params![base_id, fts_query, limit], |row| {
+                    Ok(SourceSpanSnapshot {
+                        id: row.get(0)?,
+                        source_document_id: row.get(1)?,
+                        source_version_id: row.get(2)?,
+                        source_path: row.get(3)?,
+                        heading: row.get(4)?,
+                        line_start: row.get(5)?,
+                        line_end: row.get(6)?,
+                        content: row.get(7)?,
+                    })
+                })?;
+                for row in rows {
+                    let span = row?;
+                    if seen.insert(span.id.clone()) {
+                        spans.push(span);
+                    }
+                }
+            }
+
+            let mut fallback_stmt = conn.prepare(
+                "SELECT ss.id, sd.id, ss.source_version_id, sd.relative_path, ss.heading,
+                        ss.line_start, ss.line_end, ss.content
+                 FROM source_spans ss
+                 JOIN source_versions sv ON sv.id = ss.source_version_id
+                 JOIN source_documents sd ON sd.id = sv.source_document_id
+                 WHERE ss.knowledge_base_id = ?1
+                   AND sd.sync_status = 'current'
+                   AND sd.current_version_id = ss.source_version_id
+                   AND (sd.title LIKE ?2 OR ss.heading LIKE ?2 OR ss.content LIKE ?2)
+                 ORDER BY CASE WHEN ss.heading LIKE ?2 THEN 0
+                               WHEN sd.title LIKE ?2 THEN 1 ELSE 2 END,
+                          sd.ordinal, ss.ordinal
+                 LIMIT ?3",
+            )?;
+            for pattern in patterns {
+                let remaining = limit - spans.len() as i64;
+                if remaining <= 0 {
+                    break;
+                }
+                let rows =
+                    fallback_stmt.query_map(params![base_id, pattern, remaining], |row| {
+                        Ok(SourceSpanSnapshot {
+                            id: row.get(0)?,
+                            source_document_id: row.get(1)?,
+                            source_version_id: row.get(2)?,
+                            source_path: row.get(3)?,
+                            heading: row.get(4)?,
+                            line_start: row.get(5)?,
+                            line_end: row.get(6)?,
+                            content: row.get(7)?,
+                        })
+                    })?;
+                for row in rows {
+                    let span = row?;
+                    if seen.insert(span.id.clone()) {
+                        spans.push(span);
+                    }
+                }
+            }
+            Ok(spans)
+        })
+    }
+
+    pub fn record_compile_checkpoints(
+        &self,
+        base_id: &str,
+        spans: &[SourceSpanSnapshot],
+        change_set_id: &str,
+    ) -> Result<(), BrainError> {
+        let versions = spans
+            .iter()
+            .map(|span| {
+                (
+                    span.source_document_id.clone(),
+                    span.source_version_id.clone(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        if versions.is_empty() {
+            return Ok(());
+        }
+        let now = Utc::now().to_rfc3339();
+        self.db.transaction(|conn| {
+            for (source_document_id, source_version_id) in &versions {
+                let is_current = conn.query_row(
+                    "SELECT COUNT(*) = 1 FROM source_documents
+                     WHERE id = ?1 AND knowledge_base_id = ?2
+                       AND sync_status = 'current' AND current_version_id = ?3",
+                    params![source_document_id, base_id, source_version_id],
+                    |row| row.get::<_, bool>(0),
+                )?;
+                if !is_current {
+                    return Err(BrainError::KnowledgeValidation(format!(
+                        "来源 {source_document_id} 已变化，请重新运行智能编译"
+                    )));
+                }
+                conn.execute(
+                    "INSERT INTO knowledge_compile_checkpoints
+                     (knowledge_base_id, source_document_id, source_version_id,
+                      last_change_set_id, compiled_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)
+                     ON CONFLICT(knowledge_base_id, source_document_id) DO UPDATE SET
+                        source_version_id = excluded.source_version_id,
+                        last_change_set_id = excluded.last_change_set_id,
+                        compiled_at = excluded.compiled_at",
+                    params![
+                        base_id,
+                        source_document_id,
+                        source_version_id,
+                        change_set_id,
+                        now,
+                    ],
+                )?;
+            }
+            Ok(())
         })
     }
 
@@ -788,32 +1147,34 @@ impl BookWikiStore {
         entry_type: Option<&str>,
         limit: usize,
     ) -> Result<Vec<KnowledgeEntrySummary>, BrainError> {
+        self.ensure_knowledge_fts_current()?;
         let limit = limit.clamp(1, 200) as i64;
         let patterns = knowledge_query_patterns(query);
+        let fts_query = knowledge_fts_query(query);
         let entry_type = entry_type.filter(|value| !value.trim().is_empty());
         self.db.with_connection(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT ke.id, ke.knowledge_base_id, ke.entry_type, ke.slug, ke.title,
-                        ke.summary, ke.status, ke.confidence, sd.relative_path, ke.updated_at
-                 FROM knowledge_entries ke
-                 LEFT JOIN source_documents sd ON sd.id = ke.origin_document_id
-                 WHERE ke.knowledge_base_id = ?1
-                   AND ke.status NOT IN ('archived', 'stale')
-                   AND (?2 IS NULL OR ke.entry_type = ?2)
-                   AND (ke.title LIKE ?3 OR ke.summary LIKE ?3 OR ke.content_md LIKE ?3)
-                 ORDER BY CASE WHEN ke.entry_type = 'source_section' THEN 1 ELSE 0 END,
-                          sd.ordinal, ke.title COLLATE NOCASE
-                 LIMIT ?4",
-            )?;
             let mut entries = Vec::new();
             let mut seen = HashSet::new();
-            for pattern in patterns {
-                let remaining = limit - entries.len() as i64;
-                if remaining <= 0 {
-                    break;
-                }
+            if let Some(fts_query) = fts_query.as_deref() {
+                let mut stmt = conn.prepare(
+                    "SELECT ke.id, ke.knowledge_base_id, ke.entry_type, ke.slug, ke.title,
+                            ke.summary, ke.status, ke.confidence, sd.relative_path, ke.updated_at
+                     FROM knowledge_entries_fts
+                     JOIN knowledge_entries ke ON ke.id = knowledge_entries_fts.entry_id
+                     LEFT JOIN source_documents sd ON sd.id = ke.origin_document_id
+                     WHERE knowledge_entries_fts MATCH ?3
+                       AND knowledge_entries_fts.knowledge_base_id = ?1
+                       AND ke.knowledge_base_id = ?1
+                       AND ke.status NOT IN ('archived', 'stale')
+                       AND (?2 IS NULL OR ke.entry_type = ?2)
+                     ORDER BY CASE WHEN ke.entry_type = 'source_section' THEN 1 ELSE 0 END,
+                              bm25(knowledge_entries_fts, 0.0, 0.0, 12.0, 8.0, 4.0, 1.0,
+                                   1.0, 2.0),
+                              sd.ordinal, ke.title COLLATE NOCASE
+                     LIMIT ?4",
+                )?;
                 let rows =
-                    stmt.query_map(params![base_id, entry_type, pattern, remaining], |row| {
+                    stmt.query_map(params![base_id, entry_type, fts_query, limit], |row| {
                         Ok(KnowledgeEntrySummary {
                             id: row.get(0)?,
                             knowledge_base_id: row.get(1)?,
@@ -834,6 +1195,50 @@ impl BookWikiStore {
                     }
                 }
             }
+
+            let mut fallback_stmt = conn.prepare(
+                "SELECT ke.id, ke.knowledge_base_id, ke.entry_type, ke.slug, ke.title,
+                        ke.summary, ke.status, ke.confidence, sd.relative_path, ke.updated_at
+                 FROM knowledge_entries ke
+                 LEFT JOIN source_documents sd ON sd.id = ke.origin_document_id
+                 WHERE ke.knowledge_base_id = ?1
+                   AND ke.status NOT IN ('archived', 'stale')
+                   AND (?2 IS NULL OR ke.entry_type = ?2)
+                   AND (ke.title LIKE ?3 OR ke.summary LIKE ?3 OR ke.content_md LIKE ?3)
+                 ORDER BY CASE WHEN ke.entry_type = 'source_section' THEN 1 ELSE 0 END,
+                          sd.ordinal, ke.title COLLATE NOCASE
+                 LIMIT ?4",
+            )?;
+            for pattern in patterns {
+                let remaining = limit - entries.len() as i64;
+                if remaining <= 0 {
+                    break;
+                }
+                let rows = fallback_stmt.query_map(
+                    params![base_id, entry_type, pattern, remaining],
+                    |row| {
+                        Ok(KnowledgeEntrySummary {
+                            id: row.get(0)?,
+                            knowledge_base_id: row.get(1)?,
+                            entry_type: row.get(2)?,
+                            slug: row.get(3)?,
+                            title: row.get(4)?,
+                            summary: row.get(5)?,
+                            status: row.get(6)?,
+                            confidence: row.get(7)?,
+                            source_path: row.get(8)?,
+                            updated_at: row.get(9)?,
+                        })
+                    },
+                )?;
+                for row in rows {
+                    let entry = row?;
+                    if seen.insert(entry.id.clone()) {
+                        entries.push(entry);
+                    }
+                }
+            }
+            entries.sort_by_key(|entry| entry.entry_type == "source_section");
             Ok(entries)
         })
     }
@@ -863,8 +1268,7 @@ impl BookWikiStore {
                     code: "no-source-spans".to_string(),
                     severity: "error".to_string(),
                     title: "没有可引用的来源片段".to_string(),
-                    detail: "请先同步 Markdown 来源；PDF 需要完成文本抽取后才能参与语义编译。"
-                        .to_string(),
+                    detail: "请先同步 Markdown 来源，再运行智能编译。".to_string(),
                     object_ids: Vec::new(),
                 });
             }
@@ -1460,6 +1864,11 @@ impl BookWikiStore {
                      SET status = 'rejected', note = ?2, resolved_at = ?3
                      WHERE change_set_id = ?1",
                     params![change_set_id, note.trim(), now],
+                )?;
+                conn.execute(
+                    "DELETE FROM knowledge_compile_checkpoints
+                     WHERE last_change_set_id = ?1",
+                    params![change_set_id],
                 )?;
                 if let Some(task_id) = related_task_id.as_deref() {
                     conn.execute(
@@ -2657,7 +3066,9 @@ impl BookWikiStore {
         self.db.with_connection(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, name, runtime, executable, model, enabled, config_json, revision, updated_at
-                 FROM agent_runtime_profiles ORDER BY name",
+                 FROM agent_runtime_profiles
+                 WHERE runtime = 'deepseek_harness'
+                 ORDER BY name",
             )?;
             let rows = stmt.query_map([], |row| {
                 Ok((
@@ -2700,6 +3111,11 @@ impl BookWikiStore {
         enabled: bool,
         expected_revision: i64,
     ) -> Result<RuntimeProfile, BrainError> {
+        if profile_id != "runtime-deepseek-harness" {
+            return Err(BrainError::KnowledgeValidation(
+                "书籍知识库仅支持 DeepSeek Harness 运行时".to_string(),
+            ));
+        }
         if executable.trim().is_empty() {
             return Err(BrainError::KnowledgeValidation(
                 "运行时可执行文件不能为空".to_string(),
@@ -2773,6 +3189,177 @@ impl BookWikiStore {
             Ok(())
         })?;
         self.get_agent_run(&id)
+    }
+
+    pub fn issue_agent_run_capability(
+        &self,
+        run_id: &str,
+        knowledge_base_ids: &[String],
+        allowed_tools: &[String],
+        ttl_seconds: i64,
+    ) -> Result<IssuedAgentCapability, BrainError> {
+        let run = self.get_agent_run(run_id)?;
+        if run.status != "running" {
+            return Err(BrainError::KnowledgeValidation(
+                "只能为正在运行的 Agent 签发能力令牌".to_string(),
+            ));
+        }
+        if knowledge_base_ids.is_empty() || allowed_tools.is_empty() {
+            return Err(BrainError::KnowledgeValidation(
+                "Agent 能力令牌必须包含知识库范围和工具权限".to_string(),
+            ));
+        }
+        let mut scopes = knowledge_base_ids.to_vec();
+        scopes.sort();
+        scopes.dedup();
+        if let Some(run_base_id) = run.knowledge_base_id.as_deref() {
+            if !scopes.iter().any(|base_id| base_id == run_base_id) {
+                return Err(BrainError::KnowledgeValidation(
+                    "Agent 能力范围必须包含运行所属知识库".to_string(),
+                ));
+            }
+        }
+        for base_id in &scopes {
+            self.get_base(base_id)?;
+        }
+        let mut tools = allowed_tools
+            .iter()
+            .map(|tool| tool.trim().to_string())
+            .filter(|tool| !tool.is_empty())
+            .collect::<Vec<_>>();
+        tools.sort();
+        tools.dedup();
+        if tools.is_empty() {
+            return Err(BrainError::KnowledgeValidation(
+                "Agent 能力令牌必须包含工具权限".to_string(),
+            ));
+        }
+
+        use sha2::{Digest, Sha256};
+        let token = format!(
+            "obw_{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        );
+        let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now();
+        let expires_at = (now + chrono::Duration::seconds(ttl_seconds.max(0))).to_rfc3339();
+        let created_at = now.to_rfc3339();
+        let tools_json = serde_json::to_string(&tools)
+            .map_err(|error| BrainError::Internal(format!("Agent 工具权限序列化失败: {error}")))?;
+        self.db.transaction(|conn| {
+            conn.execute(
+                "INSERT INTO agent_run_capabilities
+                 (id, run_id, token_hash, allowed_tools_json, expires_at, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![id, run_id, token_hash, tools_json, expires_at, created_at],
+            )?;
+            for base_id in &scopes {
+                conn.execute(
+                    "INSERT INTO agent_run_capability_scopes
+                     (capability_id, knowledge_base_id) VALUES (?1, ?2)",
+                    params![id, base_id],
+                )?;
+            }
+            Ok(())
+        })?;
+        Ok(IssuedAgentCapability {
+            token,
+            run_id: run_id.to_string(),
+            expires_at,
+        })
+    }
+
+    pub fn validate_agent_run_capability(
+        &self,
+        token: &str,
+        tool: &str,
+    ) -> Result<AgentCapabilityGrant, BrainError> {
+        let grant = self.validate_agent_run_token(token)?;
+        if !grant.allowed_tools.iter().any(|allowed| allowed == tool) {
+            return Err(BrainError::KnowledgeValidation(format!(
+                "Agent 能力令牌没有 {tool} 工具权限"
+            )));
+        }
+        Ok(grant)
+    }
+
+    pub fn validate_agent_run_token(
+        &self,
+        token: &str,
+    ) -> Result<AgentCapabilityGrant, BrainError> {
+        use sha2::{Digest, Sha256};
+        if !token.starts_with("obw_") || token.len() < 32 {
+            return Err(BrainError::KnowledgeValidation(
+                "Agent 能力令牌无效".to_string(),
+            ));
+        }
+        let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
+        let capability = self.db.with_connection(|conn| {
+            conn.query_row(
+                "SELECT arc.id, arc.run_id, arc.allowed_tools_json, arc.expires_at,
+                        arc.revoked_at, ar.status
+                 FROM agent_run_capabilities arc
+                 JOIN agent_runs ar ON ar.id = arc.run_id
+                 WHERE arc.token_hash = ?1",
+                params![token_hash],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+        })?;
+        let (capability_id, run_id, tools_json, expires_at, revoked_at, run_status) = capability
+            .ok_or_else(|| BrainError::KnowledgeValidation("Agent 能力令牌无效".to_string()))?;
+        if revoked_at.is_some() || run_status != "running" {
+            return Err(BrainError::KnowledgeValidation(
+                "Agent 能力令牌无效或已撤销".to_string(),
+            ));
+        }
+        let expiry = chrono::DateTime::parse_from_rfc3339(&expires_at)
+            .map_err(|error| BrainError::Internal(format!("能力令牌过期时间损坏: {error}")))?
+            .with_timezone(&Utc);
+        if expiry <= Utc::now() {
+            return Err(BrainError::KnowledgeValidation(
+                "Agent 能力令牌已过期".to_string(),
+            ));
+        }
+        let allowed_tools = parse_string_list(&tools_json, "Agent 工具权限")?;
+        let knowledge_base_ids = self.db.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT knowledge_base_id FROM agent_run_capability_scopes
+                 WHERE capability_id = ?1 ORDER BY knowledge_base_id",
+            )?;
+            let rows = stmt.query_map(params![capability_id], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        })?;
+        Ok(AgentCapabilityGrant {
+            run_id,
+            knowledge_base_ids,
+            allowed_tools,
+            expires_at,
+        })
+    }
+
+    pub fn revoke_agent_run_capabilities(&self, run_id: &str) -> Result<(), BrainError> {
+        let now = Utc::now().to_rfc3339();
+        self.db.with_connection(|conn| {
+            conn.execute(
+                "UPDATE agent_run_capabilities SET revoked_at = ?2
+                 WHERE run_id = ?1 AND revoked_at IS NULL",
+                params![run_id, now],
+            )?;
+            Ok(())
+        })
     }
 
     pub fn append_agent_run_event(
@@ -2908,6 +3495,11 @@ impl BookWikiStore {
                     "{}",
                     &now,
                 )?;
+                conn.execute(
+                    "UPDATE agent_run_capabilities SET revoked_at = ?2
+                     WHERE run_id = ?1 AND revoked_at IS NULL",
+                    params![run_id, now],
+                )?;
             }
             Ok(updated)
         })?;
@@ -3007,6 +3599,46 @@ impl BookWikiStore {
                     &payload,
                     &now,
                 )?;
+                conn.execute(
+                    "UPDATE agent_run_capabilities SET revoked_at = ?2
+                     WHERE run_id = ?1 AND revoked_at IS NULL",
+                    params![run_id, now],
+                )?;
+            }
+            Ok(updated)
+        })?;
+        if updated == 0 {
+            return Err(BrainError::KnowledgeValidation(
+                "Agent 运行不存在或已结束".to_string(),
+            ));
+        }
+        self.get_agent_run(run_id)
+    }
+
+    pub fn cancel_agent_run(&self, run_id: &str) -> Result<AgentRun, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        let updated = self.db.transaction(|conn| {
+            let updated = conn.execute(
+                "UPDATE agent_runs
+                 SET status = 'cancelled', error = NULL, finished_at = ?2
+                 WHERE id = ?1 AND status = 'running'",
+                params![run_id, now],
+            )?;
+            if updated > 0 {
+                insert_agent_run_event(
+                    conn,
+                    run_id,
+                    "run.cancelled",
+                    Some("cancelled"),
+                    "Agent 运行已取消",
+                    "{}",
+                    &now,
+                )?;
+                conn.execute(
+                    "UPDATE agent_run_capabilities SET revoked_at = ?2
+                     WHERE run_id = ?1 AND revoked_at IS NULL",
+                    params![run_id, now],
+                )?;
             }
             Ok(updated)
         })?;
@@ -3077,6 +3709,25 @@ impl BookWikiStore {
                    AND task_type LIKE 'knowledge_task_%'
                    AND json_extract(input_json, '$.knowledge_task_id') = ?1
                  ORDER BY finished_at DESC, created_at DESC
+                 LIMIT 1",
+                params![task_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(Into::into)
+        })?;
+        run_id.map(|run_id| self.get_agent_run(&run_id)).transpose()
+    }
+
+    pub fn get_latest_task_run(&self, task_id: &str) -> Result<Option<AgentRun>, BrainError> {
+        self.get_task(task_id)?;
+        let run_id = self.db.with_connection(|conn| {
+            conn.query_row(
+                "SELECT id
+                 FROM agent_runs
+                 WHERE task_type LIKE 'knowledge_task_%'
+                   AND json_extract(input_json, '$.knowledge_task_id') = ?1
+                 ORDER BY created_at DESC
                  LIMIT 1",
                 params![task_id],
                 |row| row.get::<_, String>(0),
@@ -3422,6 +4073,8 @@ fn validate_agent_event_type(value: &str) -> Result<(), BrainError> {
         "run.started"
             | "run.phase_changed"
             | "run.progress"
+            | "run.text_delta"
+            | "run.usage"
             | "run.tool_started"
             | "run.tool_finished"
             | "run.review_required"
@@ -3684,14 +4337,16 @@ fn apply_entry_change(
     )?;
     conn.execute(
         "INSERT INTO knowledge_entries_fts
-         (entry_id, knowledge_base_id, title, summary, content_md)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+         (entry_id, knowledge_base_id, title, aliases, summary, content_md, tags, cjk_terms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', ?7)",
         params![
             change.object_id,
             change_set.knowledge_base_id,
             title,
+            aliases,
             summary,
             content_md,
+            knowledge_fts_cjk_terms(&[title, aliases.as_str(), summary, content_md,]),
         ],
     )?;
 
@@ -3894,9 +4549,9 @@ pub fn stable_id(prefix: &str, value: &str) -> String {
     format!("{prefix}-{}", &hex::encode(digest)[..24])
 }
 
-fn knowledge_query_patterns(query: Option<&str>) -> Vec<String> {
+fn knowledge_query_candidates(query: Option<&str>) -> Vec<String> {
     let Some(raw) = query.map(str::trim).filter(|value| !value.is_empty()) else {
-        return vec!["%".to_string()];
+        return Vec::new();
     };
 
     let mut candidates = vec![raw.to_string()];
@@ -3954,8 +4609,98 @@ fn knowledge_query_patterns(query: Option<&str>) -> Vec<String> {
         .into_iter()
         .filter(|candidate| seen.insert(candidate.clone()))
         .take(8)
+        .collect()
+}
+
+fn knowledge_query_patterns(query: Option<&str>) -> Vec<String> {
+    let candidates = knowledge_query_candidates(query);
+    if candidates.is_empty() {
+        return vec!["%".to_string()];
+    }
+    candidates
+        .into_iter()
         .map(|candidate| format!("%{candidate}%"))
         .collect()
+}
+
+fn knowledge_fts_query(query: Option<&str>) -> Option<String> {
+    let mut terms = Vec::new();
+    let mut seen = HashSet::new();
+    for candidate in knowledge_query_candidates(query) {
+        for term in knowledge_search_terms(&candidate) {
+            if seen.insert(term.clone()) {
+                terms.push(format!("\"{}\"", term.replace('"', "\"\"")));
+            }
+        }
+    }
+    (!terms.is_empty()).then(|| terms.into_iter().take(32).collect::<Vec<_>>().join(" OR "))
+}
+
+fn knowledge_fts_cjk_terms(values: &[&str]) -> String {
+    values
+        .iter()
+        .flat_map(|value| cjk_terms(value, false))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn knowledge_search_terms(value: &str) -> Vec<String> {
+    let mut terms = cjk_terms(value, true);
+    let mut ascii = String::new();
+    for character in value.chars() {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            ascii.push(character.to_ascii_lowercase());
+        } else if !ascii.is_empty() {
+            if ascii.chars().count() >= 2 {
+                terms.push(std::mem::take(&mut ascii));
+            } else {
+                ascii.clear();
+            }
+        }
+    }
+    if ascii.chars().count() >= 2 {
+        terms.push(ascii);
+    }
+    terms
+}
+
+fn cjk_terms(value: &str, include_full_run: bool) -> Vec<String> {
+    fn flush(run: &mut Vec<char>, terms: &mut Vec<String>, include_full_run: bool) {
+        if run.is_empty() {
+            return;
+        }
+        if include_full_run {
+            terms.push(run.iter().collect());
+        }
+        if run.len() == 1 {
+            terms.push(run[0].to_string());
+        } else {
+            terms.extend(
+                run.windows(2)
+                    .map(|window| window.iter().collect::<String>()),
+            );
+        }
+        run.clear();
+    }
+
+    let mut terms = Vec::new();
+    let mut run = Vec::new();
+    for character in value.chars() {
+        if is_cjk(character) {
+            run.push(character);
+        } else {
+            flush(&mut run, &mut terms, include_full_run);
+        }
+    }
+    flush(&mut run, &mut terms, include_full_run);
+    terms
+}
+
+fn is_cjk(character: char) -> bool {
+    matches!(
+        character as u32,
+        0x3400..=0x4dbf | 0x4e00..=0x9fff | 0xf900..=0xfaff
+    )
 }
 
 #[cfg(test)]
@@ -4449,6 +5194,110 @@ mod tests {
     }
 
     #[test]
+    fn test_list_entries_fts_prioritizes_title_match_before_body_match() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-fts", "/tmp/book-fts")])
+            .unwrap();
+        let base = store.initialize_base("book-fts").unwrap();
+        let body_match = MarkdownSourceDraft {
+            id: "source-body-match".to_string(),
+            version_id: "version-body-match".to_string(),
+            original_path: "/tmp/book-fts/body.md".to_string(),
+            relative_path: "body.md".to_string(),
+            title: "正文命中".to_string(),
+            ordinal: 0,
+            content_hash: "body-document-hash".to_string(),
+            size_bytes: 20,
+            modified_at: None,
+            sections: vec![SourceSectionDraft {
+                id: "span-body-match".to_string(),
+                entry_id: "entry-body-match".to_string(),
+                slug: "body-match".to_string(),
+                title: "其他主题".to_string(),
+                summary: "普通摘要".to_string(),
+                content_md: "分层架构".to_string(),
+                line_start: 1,
+                line_end: 1,
+                content_hash: "body-section-hash".to_string(),
+            }],
+        };
+        let title_match = MarkdownSourceDraft {
+            id: "source-title-match".to_string(),
+            version_id: "version-title-match".to_string(),
+            original_path: "/tmp/book-fts/title.md".to_string(),
+            relative_path: "title.md".to_string(),
+            title: "标题命中".to_string(),
+            ordinal: 1,
+            content_hash: "title-document-hash".to_string(),
+            size_bytes: 20,
+            modified_at: None,
+            sections: vec![SourceSectionDraft {
+                id: "span-title-match".to_string(),
+                entry_id: "entry-title-match".to_string(),
+                slug: "title-match".to_string(),
+                title: "分层架构".to_string(),
+                summary: "普通摘要".to_string(),
+                content_md: "其他正文".to_string(),
+                line_start: 1,
+                line_end: 1,
+                content_hash: "title-section-hash".to_string(),
+            }],
+        };
+        store
+            .sync_markdown_sources(&base.id, &[body_match, title_match])
+            .unwrap();
+
+        let entries = store
+            .list_entries(&base.id, Some("分层架构"), None, 20)
+            .unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].id, "entry-title-match");
+        assert_eq!(entries[1].id, "entry-body-match");
+    }
+
+    #[test]
+    fn test_search_source_spans_fts_prioritizes_heading_and_isolates_books() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[
+                sample_book("book-source-fts", "/tmp/book-source-fts"),
+                sample_book("book-source-other", "/tmp/book-source-other"),
+            ])
+            .unwrap();
+        let base = store.initialize_base("book-source-fts").unwrap();
+        let other_base = store.initialize_base("book-source-other").unwrap();
+        let mut body_match = sample_source("source-body", "entry-source-body", "span-source-body");
+        body_match.ordinal = 0;
+        body_match.sections[0].title = "其他主题".to_string();
+        body_match.sections[0].content_md = "分层架构".to_string();
+        let mut heading_match = sample_source(
+            "source-heading",
+            "entry-source-heading",
+            "span-source-heading",
+        );
+        heading_match.ordinal = 1;
+        heading_match.sections[0].title = "分层架构".to_string();
+        heading_match.sections[0].content_md = "其他正文".to_string();
+        let mut foreign = sample_source("source-foreign", "entry-foreign", "span-foreign");
+        foreign.sections[0].title = "分层架构".to_string();
+        store
+            .sync_markdown_sources(&base.id, &[body_match, heading_match])
+            .unwrap();
+        store
+            .sync_markdown_sources(&other_base.id, &[foreign])
+            .unwrap();
+
+        let spans = store.search_source_spans(&base.id, "分层架构", 20).unwrap();
+
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].id, "span-source-heading");
+        assert_eq!(spans[1].id, "span-source-body");
+        assert!(spans.iter().all(|span| span.id != "span-foreign"));
+    }
+
+    #[test]
     fn test_agent_run_records_completed_output() {
         let (store, _dir) = test_store();
         store
@@ -4478,6 +5327,81 @@ mod tests {
         assert_eq!(events[0].sequence, 1);
         assert_eq!(events[1].event_type, "run.completed");
         assert_eq!(events[1].sequence, 2);
+    }
+
+    #[test]
+    fn test_agent_run_capability_is_hashed_scoped_expiring_and_revocable() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-capability", "/tmp/book-capability")])
+            .unwrap();
+        let base = store.initialize_base("book-capability").unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        let issued = store
+            .issue_agent_run_capability(
+                &run.id,
+                std::slice::from_ref(&base.id),
+                &["book_get_context".to_string()],
+                300,
+            )
+            .unwrap();
+
+        let grant = store
+            .validate_agent_run_capability(&issued.token, "book_get_context")
+            .unwrap();
+        assert_eq!(grant.run_id, run.id);
+        assert_eq!(grant.knowledge_base_ids, vec![base.id.clone()]);
+        assert_eq!(grant.allowed_tools, vec!["book_get_context"]);
+        let stored_token: String = store
+            .db
+            .with_connection(|conn| {
+                conn.query_row(
+                    "SELECT token_hash FROM agent_run_capabilities WHERE run_id = ?1",
+                    params![run.id],
+                    |row| row.get(0),
+                )
+                .map_err(Into::into)
+            })
+            .unwrap();
+        assert_ne!(stored_token, issued.token);
+        assert!(store
+            .validate_agent_run_capability(&issued.token, "knowledge_get_entry")
+            .unwrap_err()
+            .to_string()
+            .contains("工具权限"));
+        assert!(store
+            .validate_agent_run_capability("invalid-token", "book_get_context")
+            .unwrap_err()
+            .to_string()
+            .contains("能力令牌"));
+
+        store.revoke_agent_run_capabilities(&run.id).unwrap();
+        assert!(store
+            .validate_agent_run_capability(&issued.token, "book_get_context")
+            .unwrap_err()
+            .to_string()
+            .contains("能力令牌"));
+
+        let expired = store
+            .issue_agent_run_capability(
+                &run.id,
+                std::slice::from_ref(&base.id),
+                &["book_get_context".to_string()],
+                0,
+            )
+            .unwrap();
+        assert!(store
+            .validate_agent_run_capability(&expired.token, "book_get_context")
+            .unwrap_err()
+            .to_string()
+            .contains("过期"));
     }
 
     #[test]
@@ -4723,6 +5647,63 @@ mod tests {
     }
 
     #[test]
+    fn test_rejecting_semantic_change_set_reopens_source_compile_checkpoint() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-reject", "/tmp/book-reject")])
+            .unwrap();
+        let base = store.initialize_base("book-reject").unwrap();
+        store
+            .sync_markdown_sources(
+                &base.id,
+                &[sample_source(
+                    "reject",
+                    "source-entry-reject",
+                    "span-reject",
+                )],
+            )
+            .unwrap();
+        let spans = store.list_source_spans_pending_compile(&base.id).unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_compile",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        let change_set = store
+            .create_semantic_change_set(
+                &base.id,
+                &run.id,
+                "待驳回变更",
+                "测试检查点恢复",
+                "rejected-checkpoint",
+                &[semantic_candidate("span-reject", "待驳回主题")],
+            )
+            .unwrap();
+        store
+            .record_compile_checkpoints(&base.id, &spans, &change_set.id)
+            .unwrap();
+        assert!(store
+            .list_source_spans_pending_compile(&base.id)
+            .unwrap()
+            .is_empty());
+
+        store
+            .resolve_change_set(&change_set.id, false, "需要重新分析")
+            .unwrap();
+
+        assert_eq!(
+            store
+                .list_source_spans_pending_compile(&base.id)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
     fn test_lint_reports_missing_semantic_layer_without_modifying_sources() {
         let (store, _dir) = test_store();
         store
@@ -4840,6 +5821,49 @@ mod tests {
         let events = store.list_agent_run_events(&run.id).unwrap();
         assert_eq!(events[1].event_type, "run.failed");
         assert_eq!(events[1].payload["error"], "认证失败");
+    }
+
+    #[test]
+    fn test_cancel_agent_run_marks_terminal_event_and_revokes_capability() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-cancel-run", "/tmp/book-cancel-run")])
+            .unwrap();
+        let base = store.initialize_base("book-cancel-run").unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_task_research",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        let capability = store
+            .issue_agent_run_capability(
+                &run.id,
+                std::slice::from_ref(&base.id),
+                &["book_get_context".to_string()],
+                300,
+            )
+            .unwrap();
+
+        let cancelled = store.cancel_agent_run(&run.id).unwrap();
+
+        assert_eq!(cancelled.status, "cancelled");
+        assert_eq!(
+            store
+                .list_agent_run_events(&run.id)
+                .unwrap()
+                .last()
+                .unwrap()
+                .event_type,
+            "run.cancelled"
+        );
+        assert!(store
+            .validate_agent_run_token(&capability.token)
+            .unwrap_err()
+            .to_string()
+            .contains("无效"));
     }
 
     #[test]

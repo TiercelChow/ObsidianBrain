@@ -1,9 +1,9 @@
 # 阅境轩·书籍知识库（Book Wiki）— 开发设计文档 v3
 
 > **文档编号**: DEV-08
-> **版本**: v3.3
-> **状态**: Markdown 语义 Wiki、审核、后台研究与 PPTX 纵切已落地
-> **最后更新**: 2026-09-14
+> **版本**: v3.5
+> **状态**: 增量语义 Wiki、FTS、受控 Harness 工具链、原生事件与 PPTX 纵切已落地
+> **最后更新**: 2026-09-15
 > **对应需求**: [REQ-08](../requirement/08-llm-wiki.md)
 > **关联需求**: [REQ-10 阅境轩书架](../requirement/10-reader-bookshelf.md)
 
@@ -15,28 +15,32 @@
 
 `compile_semantic_wiki` 按当前来源分批执行，超长章节会继续切块而不是静默截断。每批读取已有语义 Wiki 和前批候选，归并概念、别名、论断与关系；无效 JSON 仅重试一次。模型结果必须通过服务端 entry type、字段长度、当前 span 引用和数量限制校验，再写入 `knowledge_change_sets`。批准时再次校验来源与 expected revision，并在一个 SQLite 事务中写入条目、论断、关系、引用和版本；人工保护条目的修改始终为高风险。
 
+迁移 019 增加 `knowledge_compile_checkpoints`、新版 `knowledge_entries_fts` 和 `source_spans_fts`。编译只读取检查点缺失或版本不同的当前来源，变更集创建成功后记录文档版本；驳回候选会删除其检查点，避免来源被永久跳过。FTS 写入与来源/实体事务同步，连续中文同时写入二元组，查询按标题、别名、摘要和正文加权；升级数据库在首次检索时一次性重建旧内容索引。
+
 问答和研究检索把正式语义条目排在 `source_section` 前，同时保留章节兜底。问答会话、Markdown 回答和来源预览可恢复，用户可把完成回答保存为待审核 `synthesis` 候选。确定性 lint 会检查来源、语义层、实体引用、论断直接证据和重复标题，不调用模型、不修改知识。
 
-研究任务由进程内单 Worker 从 SQLite 耐久队列领取。排队后 HTTP 立即返回；页面离开不会停止任务。支持取消请求、失败/取消后重试，以及服务启动时把中断的 running 任务恢复为 queued（已请求取消的恢复为 cancelled）。运行事件和估算 Token 继续写入数据库。ACP 当前一次返回完整文本，因此前端逐字动画不等同于真实传输 delta，事件读取接口也没有冒充 SSE。
+研究任务由进程内单 Worker 从 SQLite 耐久队列领取。排队后 HTTP 立即返回；页面离开不会停止任务。支持主动 ACP 取消、失败/取消后重试，以及服务启动时把中断的 running 任务恢复为 queued（已请求取消的恢复为 cancelled）。文本增量、思考阶段、工具开始/结束和上下文 Usage 会写入有序运行事件；任务页面按任务读取最近运行的真实阶段。
+
+迁移 020 增加 `agent_run_capabilities` 与知识库范围表。能力令牌采用高熵随机值，SQLite 只保存 SHA-256，验证同时检查 Run 仍在运行、过期时间、知识库范围和工具白名单。Harness 通过 `@deepseek-ai/dsh-mcp-client` 的 `streamable-http` 配置访问 `127.0.0.1` 专用 MCP 端点；问答、摄入和研究使用不同的最小工具集，未知字段、跨书访问、过期或已撤销令牌均被拒绝。
 
 迁移 017 的 Skill Registry 支持内置 Skill、自定义 Markdown 指令和安全 ZIP 导入。ZIP 限制文件数、单文件/展开大小，拒绝路径穿越、符号链接、二进制与脚本；所有文本资源版本化存入 SQLite。运行时只注入当前书籍、当前用途已启用的指令，不开放 Harness 自带 Skill、文件、Shell、Web 或子 Agent 权限。
 
-研究任务可以选择 `presentation` 交付物。受控 Rust 生成器把报告转为可编辑 OOXML `.pptx`，生成后检查核心包、关系和页数，二进制文件存入应用受管 artifacts 目录，SQLite 保存哈希、大小、Run/Skill 和引用快照。前端恢复报告后可以下载成果。若生产环境没有 Office/Keynote/LibreOffice 渲染依赖，状态明确为“结构已验证，视觉预览未校验”；开发验证已使用 LibreOffice 实际打开并转为 PDF。
+研究任务可以选择 `presentation` 交付物。受控 Rust 生成器把报告转为可编辑 OOXML `.pptx`，生成后检查核心包、关系和页数，二进制文件存入应用受管 artifacts 目录，SQLite 保存哈希、大小、Run/Skill 和引用快照。前端恢复报告后可以直接下载成果；当前产品不提供 PPTX 应用内预览。
 
-本地开发仍使用固定命令 `npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp`。Runtime Profile 可将 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 兼容供应商注入 Harness；真实密钥只从用户指定的环境变量读取。剩余 P2 是 PDF 正文/页码抽取、扫描件 OCR、显式授权的外部研究、脚本型 Skill 沙箱、原生 Usage/delta 适配和跨平台 Office 人工验收。
+本地开发仍使用固定命令 `npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp`。Runtime Profile 可将 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 兼容供应商注入 Harness；真实密钥只从用户指定的环境变量读取。Book Wiki 只处理 Markdown 文件夹并固定使用 DeepSeek Harness。ACP 的 `UsageUpdate` 只作为真实上下文占用展示；供应商未上报输入/输出明细时，计费统计继续标为 `estimated`。剩余 P2 是显式授权的外部研究和脚本型 Skill 沙箱。
 
 ---
 
 ## 1. 架构目标
 
-实现一套数据库原生、每书隔离、Agent Runtime 可替换的书籍知识系统。
+实现一套数据库原生、每书隔离、由 DeepSeek Harness 驱动的 Markdown 书籍知识系统。
 
 必须坚持四个边界：
 
 1. 原书是只读来源，不是 Agent 工作区。
 2. SQLite 是生成知识的唯一事实来源，不与 Markdown Wiki 双写。
 3. Rust 后端拥有业务状态、校验、事务、审核和权限。
-4. DeepSeek Harness / Claude Code 只负责 Agent 执行，不拥有知识数据。
+4. DeepSeek Harness 只负责 Agent 执行，不拥有知识数据。
 
 ---
 
@@ -47,7 +51,7 @@
 │ Vue 3                                                        │
 │ 书架 │ 知识库 │ Wiki 工作台 │ 问答 │ 研究任务 │ 配置         │
 └──────────────────────────┬───────────────────────────────────┘
-                           │ HTTP + 持久化状态轮询（SSE 预留）
+                           │ HTTP + SSE + 持久化状态轮询
 ┌──────────────────────────▼───────────────────────────────────┐
 │ Axum API / Tool Registry                                     │
 ├──────────────────────────────────────────────────────────────┤
@@ -63,8 +67,7 @@
 │ Harness Adapters           │ Process/Sandbox    │ Event Stream │
 └───────────────┬───────────────────────────────┬───────────────┘
                 │                               │
-        local source files            DeepSeek Harness Sidecar
-        PDF / Markdown                or Claude Code process
+        Markdown source files         DeepSeek Harness Sidecar
 ```
 
 ---
@@ -95,12 +98,10 @@ backend/src/
 │   ├── knowledge_fts.rs
 │   ├── source_extractors/
 │   │   ├── mod.rs
-│   │   ├── markdown.rs
-│   │   └── pdf.rs
+│   │   └── markdown.rs
 │   ├── harness/
 │   │   ├── mod.rs
 │   │   ├── deepseek.rs
-│   │   ├── claude_code.rs
 │   │   ├── acp.rs
 │   │   ├── process.rs
 │   │   └── workspace.rs
@@ -129,7 +130,7 @@ sidecars/deepseek-harness/
     └── obsidianbrain-knowledge-tools/
 ```
 
-`core` 不依赖 DeepSeek Harness 或 Claude Code 的具体类型；具体执行器只存在于 `infra/harness`。
+`core` 不依赖 DeepSeek Harness 的进程实现类型；具体执行器只存在于 `infra/harness`。
 
 ---
 
@@ -154,7 +155,7 @@ sidecars/deepseek-harness/
 |---|---|
 | `id` | 沿用旧 ReaderBook ID |
 | `path` | 规范化绝对路径，唯一 |
-| `kind` | folder / pdf |
+| `kind` | Reader 兼容 folder / pdf；Book Wiki 初始化仅允许 folder |
 | `name` | 书名 |
 | `description` | 描述 |
 | `category` | 类别 |
@@ -199,7 +200,7 @@ CREATE TABLE knowledge_bases (
 #### `source_documents`
 
 - `id`, `knowledge_base_id`
-- `source_type`: pdf / markdown
+- `source_type`: markdown；数据库旧约束中的 `pdf` 仅为已发布迁移兼容，不再产生新记录
 - `original_path`, `relative_path`
 - `title`, `mime_type`, `ordinal`
 - `current_version_id`
@@ -416,15 +417,7 @@ pub trait SourceExtractor: Send + Sync {
 - 相同内容哈希直接复用旧来源版本和片段。
 - 删除文件时标记来源缺失，相关知识进入影响评估，不立即级联删除。
 
-### 6.3 PDF
-
-- 使用现有 Range 流式端点服务阅读，不把整份 PDF 读入前端内存。
-- 后端抽取按页保留页码、文本顺序和内容哈希。
-- 扫描型 PDF 进入 `needs_ocr`，由配置的 OCR Provider 处理。
-- 公式、表格和图片无法可靠抽取时保留警告，不生成伪造文本。
-- 替换 PDF 后以文件哈希产生新版本，旧引用继续指向旧版本并标记可能过时。
-
-### 6.4 增量同步
+### 6.3 增量同步
 
 ```text
 扫描书籍
@@ -524,7 +517,7 @@ pub trait AgentHarness: Send + Sync {
 
 ### 8.3 DeepSeek Harness Adapter
 
-> 下述 Sidecar、Run Capability 和原生事件流是目标架构。当前落地版通过官方 ACP stdio 为每次调用创建隔离临时目录，Rust 服务在调用前完成范围限定与检索，并把确定的证据作为不可信数据注入提示词；尚未向模型开放 HTTP 工具桥。
+> 当前落地版通过官方 ACP stdio 为每次调用创建隔离临时目录，同时注入短时 Run Capability 和本机 MCP 工具桥。Rust 服务继续预召回一组确定证据作为低延迟上下文，Harness 也可以在同一本书范围内按需继续检索；所有正式写入仍必须进入结构化变更集和人工审核。
 
 #### 部署
 
@@ -560,15 +553,7 @@ pub trait AgentHarness: Send + Sync {
 
 Sidecar 插件通过 `127.0.0.1` 调用后端专用端点，使用 Run Capability Bearer Token。插件不获取数据库路径。
 
-### 8.4 Claude Code Adapter
-
-- 优先 Agent SDK，CLI 作为兼容后备。
-- 使用隔离模式，不加载未声明的全局配置。
-- 显式传入工作目录、模型、最大轮次、Skill 和工具权限。
-- 使用 MCP 或同一 HTTP Tool Bridge 调用知识工具。
-- 会话输出映射为统一 `AgentEvent`。
-
-### 8.5 临时工作区物化
+### 8.4 临时工作区物化
 
 ```text
 <temp>/obsidianbrain-agent-runs/{run-id}/
@@ -576,9 +561,7 @@ Sidecar 插件通过 `127.0.0.1` 调用后端专用端点，使用 Run Capabilit
 ├── schema.md
 ├── instructions.md
 ├── AGENTS.md
-├── CLAUDE.md
 ├── .agents/skills/.../SKILL.md
-├── .claude/skills/.../SKILL.md
 └── outputs/
 ```
 
@@ -655,11 +638,11 @@ Sidecar 插件通过 `127.0.0.1` 调用后端专用端点，使用 Run Capabilit
 
 当前实现使用 `knowledge_conversations`、`knowledge_conversation_scopes`、`knowledge_messages` 和 `knowledge_message_citations`。每次成功问答在同一事务中写入用户消息、助手消息及有序来源；页面加载时按知识库列出会话并恢复最近一项。继续会话时最多取最近八条消息辅助理解指代，但这些历史消息不能替代本轮召回的数据库证据。
 
-当前 DeepSeek Harness ACP bridge 只在回答提交后发送 committed assistant message，不暴露供应商 token delta。前端收到 committed answer 后使用 `requestAnimationFrame` 做可中断的渐进呈现，并对 Markdown 重渲染节流；这改善阅读反馈，但不伪装成更短的模型首 Token 延迟。待 ACP bridge 提供真实增量事件后，保持消息组件不变，把传输层替换为 SSE 增量即可。`prefers-reduced-motion` 下直接显示完整回答。
+DeepSeek Harness Adapter 读取 ACP `AgentMessageChunk`，后端在保存同一增量事件的同时通过 `/v1/knowledge/chat/stream` 发送 SSE。前端把 delta 直接追加到 Markdown 消息，完成事件再以最终答案校正正文与来源；不再对完整回答做二次播放动画。`AgentThoughtChunk` 只映射为“正在分析”阶段，不保存或展示模型内部推理文本。
 
 ### 11.2 单次问答
 
-> 当前已落地链路为“Rust 限定范围并召回 → ACP 一次生成 → 保存回答/引用”。下图中的 Agent 按需继续检索与 SSE 增量属于适配器升级目标。
+> 当前链路为“Rust 限定范围并预召回 → Capability 授权同书工具 → ACP 按需检索并流式生成 → 保存回答/引用”。
 
 ```text
 保存用户消息
@@ -681,7 +664,6 @@ Agent 回答只能引用工具返回的 entry/span ID。后端在保存前验证
 - 问答页点击 `[S#]` 或来源卡片时，先读取实体详情并打开可关闭的来源预览弹窗。
 - 预览复用阅境轩安全 Markdown 渲染管线，并展示实体引用的路径和行号。
 - 只有用户点击弹窗中的明确操作后才切换页面，避免核对来源时丢失当前问答上下文。
-- PDF：`book_id + source_document_id + page_number`。
 - Markdown：`book_id + relative_path + heading/anchor`。
 - 前端通过 Reader 路由状态打开书籍，再执行定位。
 
@@ -701,7 +683,7 @@ Agent 回答只能引用工具返回的 entry/span ID。后端在保存前验证
 
 ### 12.2 Worker
 
-当前 v1 Worker 为单进程、全局并发 1 的 SQLite 队列，按更新时间和创建时间领取；启动时恢复中断状态，模型调用结束后检查取消标记。租约、多进程竞争、自动退避和调用中的 ACP 主动中断仍是后续增强项。
+当前 v1 Worker 为单进程、全局并发 1 的 SQLite 队列，按更新时间和创建时间领取；启动时恢复中断状态。运行中取消会通过 watch 通道立即发送 ACP `session/cancel`，ActiveSession 退出后 Harness 子进程组随连接回收。租约、多进程竞争和自动退避仍是后续增强项。
 
 - 数据库队列按优先级和创建时间领取任务。
 - 使用租约字段避免重复领取。
@@ -765,7 +747,7 @@ POST   /v1/wiki-skills/import
 
 ### 13.2 SSE
 
-本节仍为目标协议。当前只有有序、持久化的 `agent_run_events` 和读取 Tool，研究任务页面通过状态轮询断线恢复；不得把前端逐字动画称为真实 SSE 流式输出。
+问答已通过 SSE 消费原生增量；研究任务继续使用持久化 `agent_run_events` 和状态轮询，以便离开页面后恢复。SSE 连接断开会触发运行取消，持久化事件仍是审计和恢复事实来源。
 
 事件至少包括：
 
@@ -888,7 +870,7 @@ Wiki 工作台三栏可伸缩；列表压缩为窄轨时保留搜索、类型和
 - 配置继承和版本冲突
 - 路径规范化与知识库隔离
 - 来源哈希和增量差异
-- Markdown/PDF Span 定位
+- Markdown Span 定位
 - Mutation Schema 和领域校验
 - 风险分级和自动审核策略
 - FTS 查询规范化与中文二元组
@@ -916,14 +898,14 @@ Wiki 工作台三栏可伸缩；列表压缩为窄轨时保留搜索、类型和
 - 重复提交幂等
 - Skill 与配置快照物化
 
-真实 DeepSeek Harness 和 Claude Code 只进入可选集成测试，不让普通单测依赖网络和真实密钥。
+真实 DeepSeek Harness 只进入可选集成测试，不让普通单测依赖网络和真实密钥。
 
 ### 19.4 前端与端到端
 
 - 五个页面主路径
 - 两本书隔离
 - 书架建库与状态同步
-- PDF/Markdown 引用跳转
+- Markdown 引用跳转
 - 问答流式、断线重连和引用
 - 审核批准/驳回/冲突
 - 任务取消和重试
@@ -956,8 +938,8 @@ Wiki 工作台三栏可伸缩；列表压缩为窄轨时保留搜索、类型和
 
 ### Phase E：能力完整
 
-- 问答、研究任务、Claude Code、导出恢复。
-- 门槛：双 Harness 契约一致；导出与备份可恢复。
+- 问答、研究任务和导出恢复。
+- 门槛：DeepSeek Harness 契约稳定；导出与备份可恢复。
 
 ### Phase F：清理
 
@@ -972,7 +954,6 @@ Wiki 工作台三栏可伸缩；列表压缩为窄轨时保留搜索、类型和
 |---|---|
 | DeepSeek Harness 仍处 Developer Preview | 固定版本、Sidecar 隔离、适配层、契约测试，禁止业务类型依赖其内部模型 |
 | 数据库成为不可重建事实来源 | 在线备份、迁移前快照、版本表、JSON/Markdown 导出 |
-| PDF 抽取质量不足 | 页级引用、质量标记、可选 OCR、失败不生成伪知识 |
 | Agent 输出不稳定 | 严格 Schema、受控工具、两阶段处理、变更集和事务校验 |
 | 不同书籍数据串联 | 能力令牌、每表 knowledge_base_id、复合唯一约束和跨库测试 |
 | 长任务占用资源 | 队列、同书写任务互斥、并发上限、取消、超时和进程组回收 |
@@ -988,9 +969,9 @@ Wiki 工作台三栏可伸缩；列表压缩为窄轨时保留搜索、类型和
 - 书籍与知识库一对一且隔离。
 - SQLite 是所有生成知识的唯一事实来源。
 - 实体、论断、关系、引用和版本可在页面完整查看与管理。
-- PDF 和 Markdown 引用可以稳定跳回阅境轩。
+- Markdown 引用可以稳定跳回阅境轩。
 - Agent 无法直接写数据库或越权访问其他书籍。
-- DeepSeek Harness 和 Claude Code 至少通过统一契约测试，DeepSeek Harness 完成正式接入。
+- DeepSeek Harness 完成正式接入并通过契约测试。
 - 问答和研究任务可追溯到来源、配置和 Skill 版本。
 - 审核、幂等、取消、恢复、备份和导出均经过验证。
 - 旧知识五页面和旧 Wiki 工作流完成退役。

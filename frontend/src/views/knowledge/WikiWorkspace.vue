@@ -227,7 +227,9 @@ async function loadBases() {
   try {
     const response = await listBookKnowledgeBases()
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '加载失败')
-    bases.value = response.result.items.flatMap(card => card.knowledge_base ? [card.knowledge_base] : [])
+    bases.value = response.result.items.flatMap(card => (
+      card.book.kind === 'folder' && card.knowledge_base ? [card.knowledge_base] : []
+    ))
     const requested = String(route.query.base || '')
     activeBaseId.value = bases.value.some(base => base.id === requested) ? requested : (bases.value[0]?.id || '')
     if (activeBaseId.value) {

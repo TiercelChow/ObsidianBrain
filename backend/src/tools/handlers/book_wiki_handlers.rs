@@ -642,7 +642,7 @@ impl ToolHandler for CancelKnowledgeTaskHandler {
     }
 
     fn description(&self) -> &str {
-        "请求取消尚未结束的研究任务；当前模型调用完成后不会继续生成成果或写入结果"
+        "取消尚未结束的研究任务；运行中的 DeepSeek Harness ACP 会话会立即收到中断请求"
     }
 
     fn input_schema(&self) -> Value {
@@ -656,7 +656,6 @@ impl ToolHandler for CancelKnowledgeTaskHandler {
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
         serde_json::to_value(
             ctx.book_wiki_service
-                .store()
                 .request_task_cancel(required_string(&args, "task_id")?)?,
         )
         .map_err(|error| BrainError::Internal(format!("取消结果序列化失败: {error}")))
@@ -823,6 +822,42 @@ impl ToolHandler for SetWikiSkillBindingHandler {
 }
 
 pub struct GetAgentRunEventsHandler;
+
+pub struct GetKnowledgeTaskActivityHandler;
+
+#[async_trait]
+impl ToolHandler for GetKnowledgeTaskActivityHandler {
+    fn name(&self) -> &str {
+        "get_knowledge_task_activity"
+    }
+
+    fn description(&self) -> &str {
+        "读取研究任务最近一次 Agent 运行及其原生进度事件"
+    }
+
+    fn input_schema(&self) -> Value {
+        required_id_schema("task_id")
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let run = ctx
+            .book_wiki_service
+            .store()
+            .get_latest_task_run(required_string(&args, "task_id")?)?;
+        let events = match &run {
+            Some(run) => ctx
+                .book_wiki_service
+                .store()
+                .list_agent_run_events(&run.id)?,
+            None => Vec::new(),
+        };
+        Ok(json!({ "run": run, "events": events }))
+    }
+}
 
 #[async_trait]
 impl ToolHandler for GetAgentRunEventsHandler {

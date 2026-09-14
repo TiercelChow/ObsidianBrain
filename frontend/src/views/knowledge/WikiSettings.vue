@@ -259,7 +259,9 @@ async function initialize() {
   try {
     const response = await listBookKnowledgeBases()
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '知识库加载失败')
-    bases.value = response.result.items.flatMap(card => card.knowledge_base ? [card.knowledge_base] : [])
+    bases.value = response.result.items.flatMap(card => (
+      card.book.kind === 'folder' && card.knowledge_base ? [card.knowledge_base] : []
+    ))
     activeBaseId.value = bases.value[0]?.id || ''
     await Promise.all([loadSettings(), loadSkills()])
   } catch (error) {

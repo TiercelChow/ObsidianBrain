@@ -381,10 +381,16 @@ async fn run_server_async(
     let task_service = Arc::new(TaskService::new(Arc::new(SqliteTaskIndexStore::new(
         db.clone(),
     ))));
-    let book_wiki_service = Arc::new(BookWikiService::new(
-        BookWikiStore::new(db.clone()),
-        Arc::new(DeepSeekHarnessRuntime::default()),
-    ));
+    let book_wiki_service = Arc::new(
+        BookWikiService::new(
+            BookWikiStore::new(db.clone()),
+            Arc::new(DeepSeekHarnessRuntime::default()),
+        )
+        .with_agent_tool_gateway(format!(
+            "http://127.0.0.1:{}/v1/knowledge/agent-mcp",
+            addr.port()
+        )),
+    );
 
     let llm: Arc<dyn crate::infra::llm_client::LlmProvider> =
         crate::infra::llm_client::LlmClientFactory::create(&config.llm)

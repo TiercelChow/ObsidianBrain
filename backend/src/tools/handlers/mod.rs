@@ -164,6 +164,9 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(SetWikiSkillBindingHandler))
         .await;
     registry.register(Arc::new(GetAgentRunEventsHandler)).await;
+    registry
+        .register(Arc::new(GetKnowledgeTaskActivityHandler))
+        .await;
     registry.register(Arc::new(GetAgentUsageStatsHandler)).await;
     registry
         .register(Arc::new(SaveBookWikiConfigDocumentHandler))

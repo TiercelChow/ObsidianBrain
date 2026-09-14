@@ -9,12 +9,13 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use crate::core::agent_tool_gateway::AGENT_KNOWLEDGE_TOOLS;
 use crate::core::presentation::{render_pptx, spec_from_report, validate_pptx};
 use crate::error::BrainError;
 use crate::infra::book_wiki_store::{
     stable_id, BookWikiStore, MarkdownSourceDraft, SourceSectionDraft,
 };
-use crate::infra::deepseek_harness::{AgentPromptRequest, AgentRuntime};
+use crate::infra::deepseek_harness::{AgentPromptRequest, AgentRuntime, AgentRuntimeEvent};
 use crate::models::book_wiki::{
     AgentTokenUsage, ConfigDocument, KnowledgeAnswer, KnowledgeBaseSummary, KnowledgeChangeSet,
     KnowledgeEntryDetail, KnowledgeEntrySummary, KnowledgeMessage, KnowledgeTask,
@@ -24,6 +25,8 @@ use crate::models::book_wiki::{
 
 const MAX_MARKDOWN_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_SCAN_DEPTH: usize = 24;
+const NO_SEMANTIC_SOURCE_CHANGES: &str = "Markdown 来源没有变化，无需重复编译";
+const DEFAULT_AGENT_TOOL_GATEWAY: &str = "http://127.0.0.1:9876/v1/knowledge/agent-mcp";
 const KNOWLEDGE_QA_HARNESS_PATCH: &str =
     include_str!("../../config/deepseek-harness-knowledge-qa.patch.yml");
 const SKIP_DIRECTORIES: &[&str] = &[
@@ -41,7 +44,10 @@ pub struct BookWikiService {
     store: BookWikiStore,
     runtime: Arc<dyn AgentRuntime>,
     artifact_root: PathBuf,
+    agent_tool_gateway_url: String,
     task_notify: Arc<tokio::sync::Notify>,
+    active_run_cancellations:
+        Arc<std::sync::Mutex<HashMap<String, tokio::sync::watch::Sender<bool>>>>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -53,14 +59,61 @@ pub struct SyncKnowledgeBaseResult {
     pub message: String,
 }
 
+#[derive(Serialize, Clone, Debug)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum KnowledgeChatStreamEvent {
+    Evidence {
+        evidence: Vec<KnowledgeEntrySummary>,
+    },
+    RunStarted {
+        run_id: String,
+    },
+    TextDelta {
+        run_id: String,
+        delta: String,
+    },
+    Phase {
+        run_id: String,
+        message: String,
+    },
+    ToolStarted {
+        run_id: String,
+        title: String,
+        kind: String,
+    },
+    ToolFinished {
+        run_id: String,
+        title: Option<String>,
+        status: String,
+    },
+    Usage {
+        run_id: String,
+        context_used: u64,
+        context_size: u64,
+    },
+    Completed {
+        result: KnowledgeAnswer,
+    },
+    Error {
+        message: String,
+    },
+}
+
 impl BookWikiService {
     pub fn new(store: BookWikiStore, runtime: Arc<dyn AgentRuntime>) -> Self {
         Self {
             store,
             runtime,
             artifact_root: crate::paths::artifacts_dir(),
+            agent_tool_gateway_url: DEFAULT_AGENT_TOOL_GATEWAY.to_string(),
             task_notify: Arc::new(tokio::sync::Notify::new()),
+            active_run_cancellations: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
+    }
+
+    pub fn with_agent_tool_gateway(mut self, url: impl Into<String>) -> Self {
+        self.agent_tool_gateway_url = url.into();
+        self
     }
 
     #[cfg(test)]
@@ -78,6 +131,28 @@ impl BookWikiService {
         base_id: &str,
         question: &str,
         conversation_id: Option<&str>,
+    ) -> Result<KnowledgeAnswer, BrainError> {
+        self.ask_inner(base_id, question, conversation_id, None)
+            .await
+    }
+
+    pub async fn ask_streaming(
+        &self,
+        base_id: &str,
+        question: &str,
+        conversation_id: Option<&str>,
+        events: tokio::sync::mpsc::UnboundedSender<KnowledgeChatStreamEvent>,
+    ) -> Result<KnowledgeAnswer, BrainError> {
+        self.ask_inner(base_id, question, conversation_id, Some(&events))
+            .await
+    }
+
+    async fn ask_inner(
+        &self,
+        base_id: &str,
+        question: &str,
+        conversation_id: Option<&str>,
+        stream: Option<&tokio::sync::mpsc::UnboundedSender<KnowledgeChatStreamEvent>>,
     ) -> Result<KnowledgeAnswer, BrainError> {
         let question = question.trim();
         if question.is_empty() {
@@ -121,6 +196,13 @@ impl BookWikiService {
             .iter()
             .map(|entry| self.store.get_entry(&entry.id))
             .collect::<Result<Vec<_>, _>>()?;
+        if let Some(stream) = stream {
+            stream
+                .send(KnowledgeChatStreamEvent::Evidence {
+                    evidence: evidence.clone(),
+                })
+                .map_err(|_| BrainError::KnowledgeValidation("问答流已由客户端关闭".to_string()))?;
+        }
         let documents = self.store.list_config_documents(Some(base_id))?;
         let skills = self.store.enabled_wiki_skills(base_id, "qa")?;
         let profile = self.active_runtime_profile()?;
@@ -140,7 +222,7 @@ impl BookWikiService {
             "model": &profile.model,
         });
         let (run_id, answer) = self
-            .run_audited(base_id, "knowledge_qa", &input, &profile, prompt)
+            .run_audited(base_id, "knowledge_qa", &input, &profile, prompt, stream)
             .await?;
         let conversation_id = self.store.save_conversation_exchange(
             base_id,
@@ -180,9 +262,13 @@ impl BookWikiService {
             ));
         }
 
+        let (_cancel_guard, cancel) = tokio::sync::watch::channel(false);
         self.invoke_runtime(
             &profile,
             "这是一次 ObsidianBrain ACP 连接检测。不要调用任何工具，只回复 READY。".to_string(),
+            None,
+            None,
+            cancel,
         )
         .await?;
         Ok(RuntimeVerification {
@@ -266,6 +352,18 @@ impl BookWikiService {
     pub fn queue_task(&self, task_id: &str) -> Result<KnowledgeTask, BrainError> {
         let task = self.store.queue_task_execution(task_id)?;
         self.task_notify.notify_one();
+        Ok(task)
+    }
+
+    pub fn request_task_cancel(&self, task_id: &str) -> Result<KnowledgeTask, BrainError> {
+        let task = self.store.request_task_cancel(task_id)?;
+        let cancellations = self
+            .active_run_cancellations
+            .lock()
+            .map_err(|_| BrainError::Internal("Agent 取消状态锁已损坏".to_string()))?;
+        if let Some(cancel) = cancellations.get(task_id) {
+            let _ = cancel.send(true);
+        }
         Ok(task)
     }
 
@@ -434,7 +532,7 @@ impl BookWikiService {
             &relative_path,
             &hash,
             size,
-            "warning",
+            "valid",
             &validation.message,
             evidence,
         )?;
@@ -554,6 +652,7 @@ impl BookWikiService {
                 &input,
                 &profile,
                 prompt,
+                None,
             )
             .await?;
         Ok((run_id, answer, evidence))
@@ -578,11 +677,35 @@ impl BookWikiService {
         input: &serde_json::Value,
         profile: &RuntimeProfile,
         prompt: String,
+        stream: Option<&tokio::sync::mpsc::UnboundedSender<KnowledgeChatStreamEvent>>,
     ) -> Result<(String, String), BrainError> {
         let input_tokens = estimate_token_count(&prompt);
         let run = self
             .store
             .start_agent_run(base_id, "deepseek_harness", task_type, input)?;
+        if let Some(stream) = stream {
+            if stream
+                .send(KnowledgeChatStreamEvent::RunStarted {
+                    run_id: run.id.clone(),
+                })
+                .is_err()
+            {
+                self.store.cancel_agent_run(&run.id)?;
+                return Err(BrainError::KnowledgeValidation(
+                    "问答流已由客户端关闭".to_string(),
+                ));
+            }
+        }
+        let allowed_tools = agent_tools_for_task_type(task_type)
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let capability = self.store.issue_agent_run_capability(
+            &run.id,
+            &[base_id.to_string()],
+            &allowed_tools,
+            300,
+        )?;
         self.store.append_agent_run_event(
             &run.id,
             "run.phase_changed",
@@ -590,7 +713,64 @@ impl BookWikiService {
             "正在调用受限的 DeepSeek Harness 运行时",
             &serde_json::json!({ "runtime_profile_id": profile.id }),
         )?;
-        match self.invoke_runtime(profile, prompt).await {
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        let cancellation_key = input
+            .get("knowledge_task_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        if let Some(key) = cancellation_key.as_deref() {
+            self.active_run_cancellations
+                .lock()
+                .map_err(|_| BrainError::Internal("Agent 取消状态锁已损坏".to_string()))?
+                .insert(key.to_string(), cancel_tx.clone());
+        }
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let runtime = self.invoke_runtime(
+            profile,
+            prompt,
+            Some(&capability.token),
+            Some(event_tx),
+            cancel_rx,
+        );
+        tokio::pin!(runtime);
+        let mut thinking_recorded = false;
+        let runtime_result = loop {
+            tokio::select! {
+                result = &mut runtime => break result,
+                event = event_rx.recv() => {
+                    let Some(event) = event else { continue };
+                    if matches!(event, AgentRuntimeEvent::Thinking) && thinking_recorded {
+                        continue;
+                    }
+                    thinking_recorded |= matches!(event, AgentRuntimeEvent::Thinking);
+                    if let Some(stream_event) = chat_stream_event(&run.id, &event) {
+                        if stream.is_some_and(|stream| stream.send(stream_event).is_err()) {
+                            let _ = cancel_tx.send(true);
+                        }
+                    }
+                    persist_runtime_event(&self.store, &run.id, event)?;
+                }
+            }
+        };
+        while let Ok(event) = event_rx.try_recv() {
+            if !matches!(event, AgentRuntimeEvent::Thinking) || !thinking_recorded {
+                thinking_recorded |= matches!(event, AgentRuntimeEvent::Thinking);
+                if let Some(stream_event) = chat_stream_event(&run.id, &event) {
+                    if stream.is_some_and(|stream| stream.send(stream_event).is_err()) {
+                        let _ = cancel_tx.send(true);
+                    }
+                }
+                persist_runtime_event(&self.store, &run.id, event)?;
+            }
+        }
+        if let Some(key) = cancellation_key.as_deref() {
+            self.active_run_cancellations
+                .lock()
+                .map_err(|_| BrainError::Internal("Agent 取消状态锁已损坏".to_string()))?
+                .remove(key);
+        }
+        drop(cancel_tx);
+        match runtime_result {
             Ok(answer) => {
                 self.store.complete_agent_run_with_usage(
                     &run.id,
@@ -600,7 +780,12 @@ impl BookWikiService {
                 Ok((run.id, answer))
             }
             Err(error) => {
-                if let Err(store_error) = self.store.fail_agent_run(&run.id, &error.to_string()) {
+                let store_result = if is_cancelled_agent_error(&error) {
+                    self.store.cancel_agent_run(&run.id)
+                } else {
+                    self.store.fail_agent_run(&run.id, &error.to_string())
+                };
+                if let Err(store_error) = store_result {
                     tracing::error!(
                         run_id = %run.id,
                         error = %store_error,
@@ -616,6 +801,9 @@ impl BookWikiService {
         &self,
         profile: &RuntimeProfile,
         prompt: String,
+        capability_token: Option<&str>,
+        events: Option<tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+        cancel: tokio::sync::watch::Receiver<bool>,
     ) -> Result<String, BrainError> {
         let workspace = tempfile::Builder::new()
             .prefix("obsidianbrain-harness-")
@@ -629,20 +817,35 @@ impl BookWikiService {
             std::fs::write(&provider_patch_path, provider_patch)?;
             patch_paths.push(provider_patch_path);
         }
+        if let Some(token) = capability_token {
+            let tool_patch_path = workspace
+                .path()
+                .join("obsidianbrain-agent-tools.patch.json");
+            std::fs::write(
+                &tool_patch_path,
+                build_agent_mcp_patch(&self.agent_tool_gateway_url, token)?,
+            )?;
+            restrict_secret_file_permissions(&tool_patch_path)?;
+            patch_paths.push(tool_patch_path);
+        }
         patch_paths.push(safety_patch_path);
         let model = runtime_model_selector(profile)?;
         self.runtime
-            .prompt(AgentPromptRequest {
-                command: profile.executable.clone(),
-                model,
-                cwd: workspace.path().to_path_buf(),
-                prompt,
-                patch_paths,
-                credential_env: profile
-                    .provider_config
-                    .as_ref()
-                    .map(|provider| provider.api_key_env.clone()),
-            })
+            .prompt_with_events(
+                AgentPromptRequest {
+                    command: profile.executable.clone(),
+                    model,
+                    cwd: workspace.path().to_path_buf(),
+                    prompt,
+                    patch_paths,
+                    credential_env: profile
+                        .provider_config
+                        .as_ref()
+                        .map(|provider| provider.api_key_env.clone()),
+                },
+                events,
+                cancel,
+            )
             .await
     }
 
@@ -661,10 +864,9 @@ impl BookWikiService {
 
         let result = match base.book_kind.as_str() {
             "folder" => self.sync_markdown_folder(&base),
-            "pdf" => self.sync_pdf(&base),
-            kind => Err(BrainError::KnowledgeValidation(format!(
-                "不支持的书籍类型: {kind}"
-            ))),
+            _ => Err(BrainError::KnowledgeValidation(
+                "书籍知识库仅支持 Markdown 文件夹；PDF 仍可在阅境轩中阅读".to_string(),
+            )),
         };
 
         if let Err(error) = &result {
@@ -681,6 +883,13 @@ impl BookWikiService {
     ) -> Result<SemanticCompileResult, BrainError> {
         let result = self.compile_semantic_wiki_inner(base_id).await;
         if let Err(error) = &result {
+            if matches!(
+                error,
+                BrainError::KnowledgeValidation(message)
+                    if message == NO_SEMANTIC_SOURCE_CHANGES
+            ) {
+                return result;
+            }
             let base = self.store.get_base(base_id)?;
             let _ = self.store.set_compile_state(
                 base_id,
@@ -703,10 +912,15 @@ impl BookWikiService {
                 "请先完成来源同步，再进行智能 Wiki 编译".to_string(),
             ));
         }
-        let spans = self.store.list_current_source_spans(base_id)?;
+        let spans = self.store.list_source_spans_pending_compile(base_id)?;
         if spans.is_empty() {
+            if self.store.list_current_source_spans(base_id)?.is_empty() {
+                return Err(BrainError::KnowledgeValidation(
+                    "当前书籍没有可编译的文本来源".to_string(),
+                ));
+            }
             return Err(BrainError::KnowledgeValidation(
-                "当前书籍没有可编译的文本来源".to_string(),
+                NO_SEMANTIC_SOURCE_CHANGES.to_string(),
             ));
         }
         let source_ids = spans
@@ -756,6 +970,7 @@ impl BookWikiService {
                     &input,
                     &profile,
                     prompt.clone(),
+                    None,
                 )
                 .await?;
             let parsed = match parse_semantic_candidates(&answer) {
@@ -780,6 +995,7 @@ impl BookWikiService {
                             &retry_input,
                             &profile,
                             retry_prompt,
+                            None,
                         )
                         .await?;
                     run_id = retry_run_id;
@@ -809,11 +1025,13 @@ impl BookWikiService {
         let run_id = last_run_id.ok_or_else(|| {
             BrainError::KnowledgeValidation("没有执行任何语义编译批次".to_string())
         })?;
-        let source_fingerprint = spans
+        let mut source_versions = spans
             .iter()
-            .map(|span| span.source_version_id.as_str())
-            .collect::<Vec<_>>()
-            .join(":");
+            .map(|span| span.source_version_id.clone())
+            .collect::<Vec<_>>();
+        source_versions.sort();
+        source_versions.dedup();
+        let source_fingerprint = source_versions.join(":");
         let idempotency_key = stable_id(
             "semantic-compile",
             &format!("{base_id}:{source_fingerprint}"),
@@ -826,6 +1044,8 @@ impl BookWikiService {
             &idempotency_key,
             &candidates,
         )?;
+        self.store
+            .record_compile_checkpoints(base_id, &spans, &change_set.id)?;
         let knowledge_base = self.store.get_base(base_id)?;
         Ok(SemanticCompileResult {
             knowledge_base,
@@ -910,42 +1130,103 @@ impl BookWikiService {
             message,
         })
     }
-
-    fn sync_pdf(&self, base: &KnowledgeBaseSummary) -> Result<SyncKnowledgeBaseResult, BrainError> {
-        let path = PathBuf::from(&base.book_path);
-        if !path.is_file() {
-            return Err(BrainError::KnowledgeValidation(format!(
-                "PDF 文件不存在或不可访问: {}",
-                path.display()
-            )));
-        }
-        let metadata = std::fs::metadata(&path)?;
-        let hash = hash_file(&path)?;
-        self.store.register_pdf_source(
-            &base.id,
-            &base.book_path,
-            &base.book_name,
-            &hash,
-            metadata.len() as i64,
-            metadata
-                .modified()
-                .ok()
-                .map(system_time_to_rfc3339)
-                .as_deref(),
-        )?;
-        Ok(SyncKnowledgeBaseResult {
-            knowledge_base: self.store.get_base(&base.id)?,
-            scanned_sources: 1,
-            indexed_entries: 0,
-            requires_harness: true,
-            message: "PDF 来源已登记；需要接通 DeepSeek Harness 后执行版面提取与知识建模"
-                .to_string(),
-        })
-    }
 }
 
 const MAX_PROMPT_CHARS: usize = 32_000;
 const MAX_EVIDENCE_CHARS: usize = 6_000;
+
+fn persist_runtime_event(
+    store: &BookWikiStore,
+    run_id: &str,
+    event: AgentRuntimeEvent,
+) -> Result<(), BrainError> {
+    let (event_type, phase, message, payload) = match event {
+        AgentRuntimeEvent::TextDelta { delta } => (
+            "run.text_delta",
+            Some("answer"),
+            "",
+            serde_json::json!({ "delta": delta }),
+        ),
+        AgentRuntimeEvent::Thinking => (
+            "run.phase_changed",
+            Some("thinking"),
+            "模型正在分析书籍证据",
+            serde_json::json!({}),
+        ),
+        AgentRuntimeEvent::ToolStarted {
+            tool_call_id,
+            title,
+            kind,
+        } => (
+            "run.tool_started",
+            Some("tools"),
+            "Agent 正在调用知识工具",
+            serde_json::json!({
+                "tool_call_id": tool_call_id,
+                "title": title,
+                "kind": kind,
+            }),
+        ),
+        AgentRuntimeEvent::ToolFinished {
+            tool_call_id,
+            title,
+            status,
+        } => (
+            "run.tool_finished",
+            Some("tools"),
+            "Agent 知识工具调用结束",
+            serde_json::json!({
+                "tool_call_id": tool_call_id,
+                "title": title,
+                "status": status,
+            }),
+        ),
+        AgentRuntimeEvent::UsageContext { used, size } => (
+            "run.usage",
+            Some("runtime"),
+            "ACP 上下文用量已更新",
+            serde_json::json!({ "context_used": used, "context_size": size }),
+        ),
+    };
+    store.append_agent_run_event(run_id, event_type, phase, message, &payload)?;
+    Ok(())
+}
+
+fn chat_stream_event(run_id: &str, event: &AgentRuntimeEvent) -> Option<KnowledgeChatStreamEvent> {
+    match event {
+        AgentRuntimeEvent::TextDelta { delta } => Some(KnowledgeChatStreamEvent::TextDelta {
+            run_id: run_id.to_string(),
+            delta: delta.clone(),
+        }),
+        AgentRuntimeEvent::Thinking => Some(KnowledgeChatStreamEvent::Phase {
+            run_id: run_id.to_string(),
+            message: "模型正在分析书籍证据".to_string(),
+        }),
+        AgentRuntimeEvent::ToolStarted { title, kind, .. } => {
+            Some(KnowledgeChatStreamEvent::ToolStarted {
+                run_id: run_id.to_string(),
+                title: title.clone(),
+                kind: kind.clone(),
+            })
+        }
+        AgentRuntimeEvent::ToolFinished { title, status, .. } => {
+            Some(KnowledgeChatStreamEvent::ToolFinished {
+                run_id: run_id.to_string(),
+                title: title.clone(),
+                status: status.clone(),
+            })
+        }
+        AgentRuntimeEvent::UsageContext { used, size } => Some(KnowledgeChatStreamEvent::Usage {
+            run_id: run_id.to_string(),
+            context_used: *used,
+            context_size: *size,
+        }),
+    }
+}
+
+fn is_cancelled_agent_error(error: &BrainError) -> bool {
+    matches!(error, BrainError::KnowledgeValidation(message) if message == "Agent 运行已取消")
+}
 
 fn build_provider_patch(profile: &RuntimeProfile) -> Result<Option<String>, BrainError> {
     let Some(provider) = &profile.provider_config else {
@@ -987,6 +1268,80 @@ fn build_provider_patch(profile: &RuntimeProfile) -> Result<Option<String>, Brai
     ]))
     .map(Some)
     .map_err(|error| BrainError::Internal(format!("Harness 供应商 Patch 生成失败: {error}")))
+}
+
+fn agent_tools_for_task_type(task_type: &str) -> Vec<&'static str> {
+    match task_type {
+        "knowledge_qa" => vec![
+            "book_get_context",
+            "book_list_sources",
+            "book_search_sources",
+            "book_read_source_span",
+            "knowledge_search_entries",
+            "knowledge_get_entry",
+            "knowledge_get_neighbors",
+            "knowledge_create_task",
+            "knowledge_report_progress",
+        ],
+        "knowledge_ingest" => vec![
+            "book_get_context",
+            "book_list_sources",
+            "book_search_sources",
+            "book_read_source_span",
+            "knowledge_search_entries",
+            "knowledge_get_entry",
+            "knowledge_propose_changes",
+            "knowledge_report_progress",
+            "knowledge_get_review_result",
+        ],
+        task_type if task_type.starts_with("knowledge_task_") => AGENT_KNOWLEDGE_TOOLS.to_vec(),
+        _ => vec!["book_get_context", "knowledge_report_progress"],
+    }
+}
+
+fn build_agent_mcp_patch(gateway_url: &str, token: &str) -> Result<String, BrainError> {
+    let gateway_url = gateway_url.trim();
+    let is_loopback = gateway_url.starts_with("http://127.0.0.1:")
+        || gateway_url.starts_with("http://localhost:")
+        || gateway_url.starts_with("http://[::1]:");
+    if !is_loopback {
+        return Err(BrainError::KnowledgeValidation(
+            "Agent 工具网关必须使用本机回环地址".to_string(),
+        ));
+    }
+    if token.trim().is_empty() {
+        return Err(BrainError::KnowledgeValidation(
+            "Agent 工具能力令牌不能为空".to_string(),
+        ));
+    }
+    serde_json::to_string_pretty(&serde_json::json!([{
+        "id": "mcp-obsidianbrain",
+        "name": "@deepseek-ai/dsh-mcp-client",
+        "config": {
+            "serverName": "obsidianbrain",
+            "transport": "streamable-http",
+            "url": gateway_url,
+            "headers": {
+                "Authorization": format!("Bearer {token}"),
+            },
+            "toolCallTimeoutMs": 60_000,
+            "failOnStartupError": true,
+            "reconnect": { "enabled": false },
+        },
+    }]))
+    .map_err(|error| BrainError::Internal(format!("Harness MCP Patch 生成失败: {error}")))
+}
+
+fn restrict_secret_file_permissions(path: &Path) -> Result<(), BrainError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = std::fs::metadata(path)?.permissions();
+        permissions.set_mode(0o600);
+        std::fs::set_permissions(path, permissions)?;
+    }
+    Ok(())
 }
 
 fn runtime_model_selector(profile: &RuntimeProfile) -> Result<String, BrainError> {
@@ -1671,7 +2026,7 @@ mod tests {
     use crate::infra::sqlite_store::SqliteStore;
     use crate::models::book_wiki::{BookKind, ReaderBook, RuntimeProviderConfig};
     use async_trait::async_trait;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn test_estimate_token_count_handles_mixed_cjk_and_ascii() {
@@ -1717,6 +2072,47 @@ mod tests {
             r#"["aliyun-bailian","glm-5.2"]"#
         );
         assert!(!patch.contains("apiKey\""));
+    }
+
+    #[test]
+    fn test_build_agent_mcp_patch_uses_streamable_http_and_bearer_capability() {
+        let patch = build_agent_mcp_patch(
+            "http://127.0.0.1:9988/v1/knowledge/agent-mcp",
+            "obw_test_capability",
+        )
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&patch).unwrap();
+
+        assert_eq!(value[0]["name"], "@deepseek-ai/dsh-mcp-client");
+        assert_eq!(value[0]["config"]["transport"], "streamable-http");
+        assert_eq!(
+            value[0]["config"]["headers"]["Authorization"],
+            "Bearer obw_test_capability"
+        );
+        assert!(!patch.contains("claude"));
+    }
+
+    #[test]
+    fn test_build_agent_mcp_patch_rejects_non_loopback_gateway() {
+        let error = build_agent_mcp_patch(
+            "https://example.com/v1/knowledge/agent-mcp",
+            "obw_test_capability",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("回环地址"));
+    }
+
+    #[test]
+    fn test_agent_tools_follow_least_privilege_by_task_type() {
+        assert!(!agent_tools_for_task_type("knowledge_qa").contains(&"knowledge_propose_changes"));
+        assert!(
+            agent_tools_for_task_type("knowledge_ingest").contains(&"knowledge_propose_changes")
+        );
+        assert_eq!(
+            agent_tools_for_task_type("knowledge_task_research"),
+            AGENT_KNOWLEDGE_TOOLS
+        );
     }
 
     #[test]
@@ -1809,6 +2205,36 @@ mod tests {
         assert_eq!(entries.len(), 1);
     }
 
+    #[test]
+    fn test_initialize_pdf_book_wiki_is_rejected_without_creating_database_state() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pdf_path = dir.path().join("book.pdf");
+        std::fs::write(&pdf_path, b"%PDF-1.7\n").expect("pdf write");
+        let db = Arc::new(SqliteStore::new(&dir.path().join("test.db")).expect("db"));
+        let store = BookWikiStore::new(db);
+        store
+            .save_reader_books(&[ReaderBook {
+                id: "book-pdf".to_string(),
+                path: pdf_path.to_string_lossy().to_string(),
+                kind: BookKind::Pdf,
+                name: "PDF 测试书".to_string(),
+                description: String::new(),
+                category: String::new(),
+                added_at: 1,
+                progress: None,
+            }])
+            .expect("save book");
+        assert!(store.list_book_cards().expect("knowledge cards").is_empty());
+        let service = BookWikiService::new(store.clone(), Arc::new(FakeRuntime));
+
+        let error = service
+            .initialize_and_sync("book-pdf")
+            .expect_err("PDF must not enter Book Wiki");
+
+        assert!(error.to_string().contains("仅支持 Markdown 文件夹"));
+        assert!(store.get_base_by_book_id("book-pdf").unwrap().is_none());
+    }
+
     struct FakeRuntime;
 
     #[async_trait]
@@ -1863,6 +2289,33 @@ mod tests {
                 assert!(request.prompt.contains("用户: 核心架构是什么？"));
             }
             Ok("核心架构采用分层设计。[S1]".to_string())
+        }
+    }
+
+    struct RecordingRuntime {
+        prompts: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl AgentRuntime for RecordingRuntime {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            self.prompts
+                .lock()
+                .expect("recording runtime lock")
+                .push(request.prompt.clone());
+            FakeRuntime.prompt(request).await
+        }
+    }
+
+    struct BlockingRuntime {
+        started: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait]
+    impl AgentRuntime for BlockingRuntime {
+        async fn prompt(&self, _request: AgentPromptRequest) -> Result<String, BrainError> {
+            self.started.notify_one();
+            std::future::pending().await
         }
     }
 
@@ -1935,6 +2388,20 @@ mod tests {
                 .id,
             proposed.id
         );
+        let (stream, mut stream_events) = tokio::sync::mpsc::unbounded_channel();
+        let streamed = service
+            .ask_streaming(&synced.knowledge_base.id, "核心架构是什么？", None, stream)
+            .await
+            .expect("streamed answer");
+        let emitted = std::iter::from_fn(|| stream_events.try_recv().ok()).collect::<Vec<_>>();
+        assert!(matches!(
+            emitted.first(),
+            Some(KnowledgeChatStreamEvent::Evidence { evidence }) if evidence.len() == 1
+        ));
+        assert!(emitted.iter().any(|event| matches!(
+            event,
+            KnowledgeChatStreamEvent::RunStarted { run_id } if run_id == &streamed.run_id
+        )));
         let follow_up = service
             .ask(
                 &synced.knowledge_base.id,
@@ -2047,7 +2514,68 @@ mod tests {
         assert!(artifact_root
             .join(&presentation.artifacts[0].relative_path)
             .is_file());
-        assert_eq!(presentation.artifacts[0].validation_state, "warning");
+        assert_eq!(presentation.artifacts[0].validation_state, "valid");
+    }
+
+    #[tokio::test]
+    async fn test_request_task_cancel_interrupts_active_runtime() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let book_path = dir.path().join("book-cancel");
+        std::fs::create_dir(&book_path).expect("book dir");
+        std::fs::write(
+            book_path.join("source.md"),
+            "# 核心观点\n用于取消测试的证据。",
+        )
+        .expect("source write");
+        let db = Arc::new(SqliteStore::new(&dir.path().join("cancel.db")).expect("db"));
+        let store = BookWikiStore::new(db);
+        store
+            .save_reader_books(&[ReaderBook {
+                id: "book-cancel".to_string(),
+                path: book_path.to_string_lossy().to_string(),
+                kind: BookKind::Folder,
+                name: "取消测试".to_string(),
+                description: String::new(),
+                category: String::new(),
+                added_at: 1,
+                progress: None,
+            }])
+            .expect("save book");
+        let started = Arc::new(tokio::sync::Notify::new());
+        let service = Arc::new(BookWikiService::new(
+            store.clone(),
+            Arc::new(BlockingRuntime {
+                started: started.clone(),
+            }),
+        ));
+        let synced = service.initialize_and_sync("book-cancel").expect("sync");
+        let task = store
+            .create_task(
+                &synced.knowledge_base.id,
+                "研究核心观点",
+                "核心观点证据，验证运行时可中断",
+                "research",
+            )
+            .expect("task");
+        let task_id = task.id.clone();
+        let execution_service = service.clone();
+        let execution = tokio::spawn(async move { execution_service.execute_task(&task_id).await });
+        tokio::time::timeout(Duration::from_secs(2), started.notified())
+            .await
+            .expect("runtime start");
+
+        let requested = service
+            .request_task_cancel(&task.id)
+            .expect("cancel request");
+        assert!(requested.cancel_requested);
+        let error = tokio::time::timeout(Duration::from_secs(2), execution)
+            .await
+            .expect("execution stopped")
+            .expect("join")
+            .expect_err("cancelled execution");
+
+        assert!(error.to_string().contains("取消"));
+        assert_eq!(store.get_task(&task.id).unwrap().status, "cancelled");
     }
 
     #[tokio::test]
@@ -2139,5 +2667,90 @@ mod tests {
             .changes[0]
             .expected_revision;
         assert_eq!(revision, Some(1));
+    }
+
+    #[tokio::test]
+    async fn test_semantic_compile_only_sends_changed_sources_after_checkpoint() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let book_path = dir.path().join("book-incremental");
+        std::fs::create_dir(&book_path).expect("book dir");
+        std::fs::write(
+            book_path.join("stable.md"),
+            "# 稳定章节\nUNCHANGED_SOURCE_MARKER 描述长期不变的内容。",
+        )
+        .expect("stable source");
+        std::fs::write(
+            book_path.join("changing.md"),
+            "# 变化章节\nCHANGED_SOURCE_MARKER_V1 描述初始内容。",
+        )
+        .expect("changing source");
+        let db = Arc::new(SqliteStore::new(&dir.path().join("incremental.db")).expect("db"));
+        let store = BookWikiStore::new(db);
+        store
+            .save_reader_books(&[ReaderBook {
+                id: "book-incremental".to_string(),
+                path: book_path.to_string_lossy().to_string(),
+                kind: BookKind::Folder,
+                name: "增量编译测试书".to_string(),
+                description: String::new(),
+                category: String::new(),
+                added_at: 1,
+                progress: None,
+            }])
+            .expect("save book");
+        let prompts = Arc::new(Mutex::new(Vec::new()));
+        let runtime = RecordingRuntime {
+            prompts: prompts.clone(),
+        };
+        let service = BookWikiService::new(store.clone(), Arc::new(runtime));
+        let synced = service
+            .initialize_and_sync("book-incremental")
+            .expect("initial sync");
+
+        let initial = service
+            .compile_semantic_wiki(&synced.knowledge_base.id)
+            .await
+            .expect("initial compile");
+        store
+            .resolve_change_set(&initial.change_set.id, true, "确认首次构建")
+            .expect("apply initial changes");
+        prompts.lock().expect("prompt lock").clear();
+
+        std::fs::write(
+            book_path.join("changing.md"),
+            "# 变化章节\nCHANGED_SOURCE_MARKER_V2 只应分析这个新版本。",
+        )
+        .expect("updated source");
+        service
+            .sync(&synced.knowledge_base.id)
+            .expect("incremental sync");
+        let update = service
+            .compile_semantic_wiki(&synced.knowledge_base.id)
+            .await
+            .expect("incremental compile");
+
+        assert_eq!(update.total_sources, 1);
+        assert_eq!(update.processed_sources, 1);
+        let recorded = prompts.lock().expect("prompt lock").join("\n");
+        assert!(recorded.contains("CHANGED_SOURCE_MARKER_V2"));
+        assert!(!recorded.contains("UNCHANGED_SOURCE_MARKER"));
+
+        store
+            .resolve_change_set(&update.change_set.id, true, "确认增量构建")
+            .expect("apply update");
+        prompts.lock().expect("prompt lock").clear();
+        let no_change = service
+            .compile_semantic_wiki(&synced.knowledge_base.id)
+            .await
+            .expect_err("unchanged sources should not call runtime");
+        assert!(no_change.to_string().contains("没有变化"));
+        assert!(prompts.lock().expect("prompt lock").is_empty());
+        assert_eq!(
+            store
+                .get_base(&synced.knowledge_base.id)
+                .expect("base")
+                .compile_state,
+            "ready"
+        );
     }
 }

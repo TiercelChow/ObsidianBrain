@@ -236,9 +236,7 @@ pub fn validate_pptx(path: &Path) -> Result<PresentationValidation, BrainError> 
     }
     Ok(PresentationValidation {
         slide_count,
-        message: format!(
-            "文件结构完整，共 {slide_count} 页；当前环境未执行 Office/Keynote 视觉预览"
-        ),
+        message: format!("PPTX 文件结构完整，共 {slide_count} 页，可下载使用"),
     })
 }
 

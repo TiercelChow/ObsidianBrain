@@ -35,7 +35,9 @@ test('product site describes the database-native Book Wiki workflow and current 
     assert.match(html, new RegExp(phrase), `missing Book Wiki phrase: ${phrase}`)
   }
 
-  assert.match(html, /PDF[^。]*正文抽取仍在计划中/)
+  assert.match(html, /书籍知识库只处理 Markdown 文件夹/)
+  assert.match(html, /PPTX[^。]*下载/)
+  assert.doesNotMatch(html, /Claude Code/)
   assert.doesNotMatch(html, /观察领域分布、孤岛、枢纽、尘封和新生内容/)
 })
 

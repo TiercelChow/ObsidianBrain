@@ -1,4 +1,5 @@
 // 核心服务层
+pub mod agent_tool_gateway;
 pub mod book_wiki; // 阅境轩书籍知识库
 pub mod code_repo; // 代码仓管理
 pub mod inspiration; // 灵感熔炉

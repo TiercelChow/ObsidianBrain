@@ -17,7 +17,7 @@
           <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
         </el-select>
         <div v-if="activeBase" class="context-book">
-          <div class="context-book-icon">{{ activeBase.book_kind === 'pdf' ? 'PDF' : 'MD' }}</div>
+          <div class="context-book-icon">MD</div>
           <div><strong>{{ activeBase.book_name }}</strong><span>{{ activeBase.entry_count }} 个可检索实体</span></div>
         </div>
 
@@ -159,7 +159,6 @@ import MotionModal from '@/components/motion/MotionModal.vue'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { useTypewriterLoop } from '@/composables/useTypewriterLoop'
 import {
-  askBookKnowledge,
   getBookWikiSettings,
   getKnowledgeConversation,
   getKnowledgeEntry,
@@ -167,6 +166,7 @@ import {
   listKnowledgeConversations,
   listKnowledgeEntries,
   saveKnowledgeAnswer,
+  streamBookKnowledge,
   type KnowledgeBaseSummary,
   type KnowledgeConversationSummary,
   type KnowledgeEntryDetail,
@@ -191,6 +191,7 @@ const draft = ref('')
 const messages = ref<ChatMessage[]>([])
 const searching = ref(false)
 const streamingMessageId = ref('')
+const streamPhase = ref('')
 const historyLoading = ref(false)
 const runtimeReady = ref(false)
 const runtimeMessage = ref('DeepSeek Harness 尚未连接；当前只返回真实命中的书内证据。')
@@ -204,12 +205,12 @@ const savingRunId = ref('')
 let localMessageId = 0
 let historyRequestId = 0
 let sourceRequestId = 0
-let revealFrame = 0
+let askController: AbortController | null = null
 
 const activeBase = computed(() => bases.value.find(base => base.id === activeBaseId.value))
 const starterQuestions = ['这本书的核心主题是什么？', '找出与架构相关的章节', '有哪些内容提到了性能优化？']
 const { text: thinkingText } = useTypewriterLoop(searching, () => runtimeReady.value
-  ? ['正在检索书内证据', '正在梳理关键线索', '正在生成可追溯回答']
+  ? [streamPhase.value, '正在检索书内证据', '正在梳理关键线索', '正在生成可追溯回答']
   : ['正在检索书内证据', '正在整理匹配结果'])
 const { renderMarkdown, enhance, cleanup } = useMarkdownRender(() => {})
 
@@ -220,7 +221,9 @@ async function loadContext() {
       getBookWikiSettings(),
     ])
     if (cardsResponse.status !== 'success' || !cardsResponse.result) throw new Error(cardsResponse.error?.message || '知识库加载失败')
-    bases.value = cardsResponse.result.items.flatMap(card => card.knowledge_base ? [card.knowledge_base] : [])
+    bases.value = cardsResponse.result.items.flatMap(card => (
+      card.book.kind === 'folder' && card.knowledge_base ? [card.knowledge_base] : []
+    ))
     const requestedBase = String(route.query.base || '')
     activeBaseId.value = bases.value.some(base => base.id === requestedBase) ? requestedBase : (bases.value[0]?.id || '')
     const runtime = settingsResponse.result?.runtime_profiles.find(item => item.profile.runtime === 'deepseek_harness')
@@ -322,15 +325,59 @@ async function ask(question: string) {
   await scrollToBottom()
   try {
     if (runtimeReady.value) {
-      const response = await askBookKnowledge(activeBaseId.value, value, activeConversationId.value || undefined)
-      if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || 'Harness 回答失败')
-      activeConversationId.value = response.result.conversation_id
-      await revealAssistantAnswer(
-        `run-${response.result.run_id}`,
-        response.result.answer,
-        response.result.evidence,
-        response.result.run_id,
+      askController = new AbortController()
+      let streamedEvidence: KnowledgeEntrySummary[] = []
+      let assistantMessage: ChatMessage | undefined
+      const result = await streamBookKnowledge(
+        activeBaseId.value,
+        value,
+        activeConversationId.value || undefined,
+        (event) => {
+          if (event.type === 'evidence') {
+            streamedEvidence = event.evidence
+            if (assistantMessage) assistantMessage.evidence = event.evidence
+          } else if (event.type === 'run_started') {
+            assistantMessage = {
+              id: `run-${event.run_id}`,
+              role: 'assistant',
+              content: '',
+              evidence: streamedEvidence,
+              runId: event.run_id,
+            }
+            messages.value.push(assistantMessage)
+            streamingMessageId.value = assistantMessage.id
+            streamPhase.value = '正在连接书籍知识工具'
+            void scrollToBottom(false)
+          } else if (event.type === 'text_delta') {
+            if (assistantMessage) assistantMessage.content += event.delta
+            streamPhase.value = '正在生成可追溯回答'
+            void scrollToBottom(false)
+          } else if (event.type === 'phase') {
+            streamPhase.value = event.message
+          } else if (event.type === 'tool_started') {
+            streamPhase.value = `正在调用：${event.title}`
+          } else if (event.type === 'tool_finished') {
+            streamPhase.value = event.status === 'failed' ? '知识工具调用失败，正在调整' : '知识证据已返回，继续分析'
+          }
+        },
+        askController.signal,
       )
+      if (!assistantMessage) {
+        assistantMessage = {
+          id: `run-${result.run_id}`,
+          role: 'assistant',
+          content: result.answer,
+          evidence: result.evidence,
+          runId: result.run_id,
+        }
+        messages.value.push(assistantMessage)
+      } else {
+        assistantMessage.content = result.answer
+        assistantMessage.evidence = result.evidence
+        assistantMessage.runId = result.run_id
+      }
+      streamingMessageId.value = ''
+      activeConversationId.value = result.conversation_id
       replaceChatQuery()
       await refreshConversationList()
       return
@@ -339,6 +386,10 @@ async function ask(question: string) {
   } catch (error) {
     const detail = (error as Error).message
     if (runtimeReady.value) {
+      if (streamingMessageId.value) {
+        messages.value = messages.value.filter(message => message.id !== streamingMessageId.value)
+        streamingMessageId.value = ''
+      }
       runtimeReady.value = false
       runtimeMessage.value = 'Harness 本次调用失败，本次会话已切换为书内证据检索模式。'
       try {
@@ -350,43 +401,12 @@ async function ask(question: string) {
       messages.value.push({ id: `local-${++localMessageId}`, role: 'assistant', content: `检索失败：${detail}` })
     }
   } finally {
+    askController = null
+    streamPhase.value = ''
+    streamingMessageId.value = ''
     searching.value = false
     await scrollToBottom()
   }
-}
-
-async function revealAssistantAnswer(id: string, answer: string, evidence: KnowledgeEntrySummary[], runId: string) {
-  window.cancelAnimationFrame(revealFrame)
-  messages.value.push({ id, role: 'assistant', content: '', evidence, runId })
-  const message = messages.value[messages.value.length - 1]
-  streamingMessageId.value = id
-  const characters = Array.from(answer)
-  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  if (reduceMotion || characters.length < 12) {
-    message.content = answer
-    streamingMessageId.value = ''
-    return
-  }
-
-  await new Promise<void>((resolve) => {
-    let cursor = 0
-    let frameCount = 0
-    const reveal = () => {
-      const remaining = characters.length - cursor
-      const batchSize = Math.min(28, Math.max(2, Math.ceil(remaining / 72)))
-      cursor = Math.min(characters.length, cursor + batchSize)
-      message.content = characters.slice(0, cursor).join('')
-      frameCount += 1
-      if (frameCount % 5 === 0) void scrollToBottom(false)
-      if (cursor < characters.length) {
-        revealFrame = window.requestAnimationFrame(reveal)
-      } else {
-        streamingMessageId.value = ''
-        resolve()
-      }
-    }
-    revealFrame = window.requestAnimationFrame(reveal)
-  })
 }
 
 async function saveAnswer(message: ChatMessage) {
@@ -482,7 +502,7 @@ onMounted(loadContext)
 onBeforeUnmount(() => {
   ++historyRequestId
   ++sourceRequestId
-  window.cancelAnimationFrame(revealFrame)
+  askController?.abort()
   cleanup()
 })
 </script>
