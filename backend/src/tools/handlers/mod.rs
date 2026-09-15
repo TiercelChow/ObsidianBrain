@@ -115,6 +115,12 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(GetBookKnowledgeBaseHandler))
         .await;
     registry
+        .register(Arc::new(SetBookKnowledgeBaseLifecycleHandler))
+        .await;
+    registry
+        .register(Arc::new(DeleteBookKnowledgeBaseHandler))
+        .await;
+    registry
         .register(Arc::new(CompileBookKnowledgeBaseHandler))
         .await;
     registry
@@ -127,6 +133,18 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(ListKnowledgeEntriesHandler))
         .await;
     registry.register(Arc::new(GetKnowledgeEntryHandler)).await;
+    registry
+        .register(Arc::new(ProposeKnowledgeEntryEditHandler))
+        .await;
+    registry
+        .register(Arc::new(ProposeReaderSelectionHandler))
+        .await;
+    registry
+        .register(Arc::new(GetKnowledgeGraphOverviewHandler))
+        .await;
+    registry
+        .register(Arc::new(FindKnowledgeGraphPathHandler))
+        .await;
     registry
         .register(Arc::new(LintBookKnowledgeBaseHandler))
         .await;

@@ -5,6 +5,7 @@ use chrono::{Duration, Local};
 use serde_json::{json, Value};
 
 use crate::error::BrainError;
+use crate::infra::book_wiki_store::KnowledgeEntryEditProposal;
 use crate::infra::deepseek_harness::inspect_runtime_profiles;
 use crate::models::book_wiki::RuntimeProviderConfig;
 use crate::tools::traits::ToolHandler;
@@ -121,6 +122,72 @@ impl ToolHandler for SyncBookKnowledgeBaseHandler {
 }
 
 pub struct GetBookKnowledgeBaseHandler;
+
+pub struct SetBookKnowledgeBaseLifecycleHandler;
+
+#[async_trait]
+impl ToolHandler for SetBookKnowledgeBaseLifecycleHandler {
+    fn name(&self) -> &str {
+        "set_book_knowledge_base_lifecycle"
+    }
+    fn description(&self) -> &str {
+        "暂停、恢复或归档一本书的知识库"
+    }
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": { "type": "string" },
+                "lifecycle": { "type": "string", "enum": ["active", "paused", "archived"] }
+            },
+            "required": ["knowledge_base_id", "lifecycle"],
+            "additionalProperties": false
+        })
+    }
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(ctx.book_wiki_service.store().set_base_lifecycle(
+            required_string(&args, "knowledge_base_id")?,
+            required_string(&args, "lifecycle")?,
+        )?)
+        .map_err(|error| BrainError::Internal(format!("生命周期结果序列化失败: {error}")))
+    }
+}
+
+pub struct DeleteBookKnowledgeBaseHandler;
+
+#[async_trait]
+impl ToolHandler for DeleteBookKnowledgeBaseHandler {
+    fn name(&self) -> &str {
+        "delete_book_knowledge_base"
+    }
+    fn description(&self) -> &str {
+        "删除知识库生成数据；阅境轩原书和书架条目不会被删除"
+    }
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": { "type": "string" },
+                "confirmation": { "type": "string", "maxLength": 300 }
+            },
+            "required": ["knowledge_base_id", "confirmation"],
+            "additionalProperties": false
+        })
+    }
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        ctx.book_wiki_service.store().delete_base(
+            required_string(&args, "knowledge_base_id")?,
+            required_string(&args, "confirmation")?,
+        )?;
+        Ok(json!({ "deleted": true }))
+    }
+}
 
 pub struct CompileBookKnowledgeBaseHandler;
 
@@ -278,7 +345,8 @@ impl ToolHandler for ListKnowledgeEntriesHandler {
                 "knowledge_base_id": { "type": "string" },
                 "query": { "type": "string" },
                 "entry_type": { "type": "string" },
-                "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 100 }
+                "offset": { "type": "integer", "minimum": 0, "maximum": 100000, "default": 0 },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 60 }
             },
             "required": ["knowledge_base_id"],
             "additionalProperties": false
@@ -293,19 +361,192 @@ impl ToolHandler for ListKnowledgeEntriesHandler {
         let base_id = required_string(&args, "knowledge_base_id")?;
         let query = args.get("query").and_then(Value::as_str);
         let entry_type = args.get("entry_type").and_then(Value::as_str);
-        let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize;
-        Ok(json!({
-            "entries": ctx.book_wiki_service.store().list_entries(
-                base_id,
-                query,
-                entry_type,
-                limit,
-            )?
-        }))
+        let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(60) as usize;
+        let offset = args.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
+        serde_json::to_value(
+            ctx.book_wiki_service
+                .store()
+                .list_entries_page(base_id, query, entry_type, offset, limit)?,
+        )
+        .map_err(|error| BrainError::Internal(format!("实体分页结果序列化失败: {error}")))
     }
 }
 
 pub struct GetKnowledgeEntryHandler;
+
+pub struct ProposeKnowledgeEntryEditHandler;
+
+pub struct ProposeReaderSelectionHandler;
+
+#[async_trait]
+impl ToolHandler for ProposeReaderSelectionHandler {
+    fn name(&self) -> &str {
+        "propose_reader_selection"
+    }
+
+    fn description(&self) -> &str {
+        "把阅境轩 Markdown 原文中的选区提交为带当前来源引用的待审核知识候选"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": { "type": "string" },
+                "source_path": { "type": "string", "maxLength": 2000 },
+                "selection": { "type": "string", "maxLength": 5000 },
+                "title": { "type": "string", "maxLength": 1000 }
+            },
+            "required": ["knowledge_base_id", "source_path", "selection"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(ctx.book_wiki_service.store().propose_reader_selection(
+            required_string(&args, "knowledge_base_id")?,
+            required_string(&args, "source_path")?,
+            required_string(&args, "selection")?,
+            args.get("title").and_then(Value::as_str),
+        )?)
+        .map_err(|error| BrainError::Internal(format!("阅境轩知识候选序列化失败: {error}")))
+    }
+}
+
+#[async_trait]
+impl ToolHandler for ProposeKnowledgeEntryEditHandler {
+    fn name(&self) -> &str {
+        "propose_knowledge_entry_edit"
+    }
+    fn description(&self) -> &str {
+        "把人工实体编辑保存为高风险待审核变更，不直接覆盖正式知识"
+    }
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "entry_id": { "type": "string" },
+                "title": { "type": "string", "maxLength": 1000 },
+                "summary": { "type": "string", "maxLength": 1000 },
+                "content_md": { "type": "string", "maxLength": 30000 },
+                "aliases": { "type": "array", "maxItems": 30, "items": { "type": "string", "maxLength": 100 } },
+                "status": { "type": "string", "enum": ["draft", "verified", "archived"] },
+                "expected_revision": { "type": "integer", "minimum": 1 }
+            },
+            "required": ["entry_id", "title", "summary", "content_md", "aliases", "status", "expected_revision"],
+            "additionalProperties": false
+        })
+    }
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let aliases = args
+            .get("aliases")
+            .and_then(Value::as_array)
+            .ok_or_else(|| BrainError::KnowledgeValidation("aliases 必须是字符串数组".to_string()))?
+            .iter()
+            .map(|value| {
+                value.as_str().map(str::to_string).ok_or_else(|| {
+                    BrainError::KnowledgeValidation("aliases 必须是字符串数组".to_string())
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let proposal = KnowledgeEntryEditProposal {
+            title: required_string(&args, "title")?,
+            summary: required_string(&args, "summary")?,
+            content_md: required_string(&args, "content_md")?,
+            aliases: &aliases,
+            status: required_string(&args, "status")?,
+            expected_revision: args
+                .get("expected_revision")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| {
+                    BrainError::KnowledgeValidation("expected_revision 必须是正整数".to_string())
+                })?,
+        };
+        serde_json::to_value(
+            ctx.book_wiki_service
+                .store()
+                .propose_entry_edit(required_string(&args, "entry_id")?, &proposal)?,
+        )
+        .map_err(|error| BrainError::Internal(format!("实体变更序列化失败: {error}")))
+    }
+}
+
+pub struct GetKnowledgeGraphOverviewHandler;
+
+#[async_trait]
+impl ToolHandler for GetKnowledgeGraphOverviewHandler {
+    fn name(&self) -> &str {
+        "get_knowledge_graph_overview"
+    }
+    fn description(&self) -> &str {
+        "查看一本书的关系数量、孤立实体和高连接枢纽"
+    }
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": { "type": "string" },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+            },
+            "required": ["knowledge_base_id"],
+            "additionalProperties": false
+        })
+    }
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(ctx.book_wiki_service.store().get_graph_overview(
+            required_string(&args, "knowledge_base_id")?,
+            args.get("limit").and_then(Value::as_u64).unwrap_or(20) as usize,
+        )?)
+        .map_err(|error| BrainError::Internal(format!("关系洞察序列化失败: {error}")))
+    }
+}
+
+pub struct FindKnowledgeGraphPathHandler;
+
+#[async_trait]
+impl ToolHandler for FindKnowledgeGraphPathHandler {
+    fn name(&self) -> &str {
+        "find_knowledge_graph_path"
+    }
+    fn description(&self) -> &str {
+        "查找同一本书两个知识实体之间的最短关系路径"
+    }
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": { "type": "string" },
+                "from_entry_id": { "type": "string" },
+                "to_entry_id": { "type": "string" },
+                "max_depth": { "type": "integer", "minimum": 1, "maximum": 8, "default": 5 }
+            },
+            "required": ["knowledge_base_id", "from_entry_id", "to_entry_id"],
+            "additionalProperties": false
+        })
+    }
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(ctx.book_wiki_service.store().find_graph_path(
+            required_string(&args, "knowledge_base_id")?,
+            required_string(&args, "from_entry_id")?,
+            required_string(&args, "to_entry_id")?,
+            args.get("max_depth").and_then(Value::as_u64).unwrap_or(5) as usize,
+        )?)
+        .map_err(|error| BrainError::Internal(format!("关系路径序列化失败: {error}")))
+    }
+}
 
 pub struct LintBookKnowledgeBaseHandler;
 

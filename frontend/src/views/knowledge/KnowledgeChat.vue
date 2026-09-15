@@ -233,7 +233,15 @@ async function loadContext() {
     } else if (runtime) {
       runtimeMessage.value = runtime.message
     }
-    if (activeBaseId.value) await loadConversations(String(route.query.conversation || ''))
+    if (activeBaseId.value) {
+      const requestedQuestion = String(route.query.question || '').trim()
+      if (requestedQuestion) {
+        newConversation(false)
+        draft.value = requestedQuestion
+      } else {
+        await loadConversations(String(route.query.conversation || ''))
+      }
+    }
   } catch (error) {
     ElMessage.error((error as Error).message)
   }

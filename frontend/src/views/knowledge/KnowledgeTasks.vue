@@ -104,7 +104,7 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { DataAnalysis, Download, Loading, Operation, Plus, Refresh, Select, VideoPlay, View } from '@element-plus/icons-vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import KnowledgeAnswerMarkdown from '@/components/knowledge/KnowledgeAnswerMarkdown.vue'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
@@ -124,6 +124,7 @@ import {
 } from '@/api/knowledge'
 
 const router = useRouter()
+const route = useRoute()
 const bases = ref<KnowledgeBaseSummary[]>([])
 const tasks = ref<KnowledgeTask[]>([])
 const filterBaseId = ref('')
@@ -148,6 +149,13 @@ async function loadData() {
       card.book.kind === 'folder' && card.knowledge_base ? [card.knowledge_base] : []
     ))
     await loadTasks()
+    if (route.query.create === '1') {
+      openCreate()
+      const requestedBase = String(route.query.base || '')
+      if (bases.value.some(base => base.id === requestedBase)) draft.knowledgeBaseId = requestedBase
+      draft.title = String(route.query.title || '')
+      draft.description = String(route.query.description || '')
+    }
   } catch (error) {
     ElMessage.error((error as Error).message)
   }

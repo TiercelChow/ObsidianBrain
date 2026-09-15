@@ -2,8 +2,9 @@
   <KnowledgePageShell title="Wiki 工作台" subtitle="浏览数据库实体，并沿引用回到书中原文">
     <template #actions>
       <el-button v-if="activeBase?.pending_review_count" type="primary" @click="openReviews"><el-icon><Checked /></el-icon>审核 {{ activeBase.pending_review_count }}</el-button>
+      <el-button v-if="activeBase" @click="openGraph"><el-icon><Connection /></el-icon>关系洞察</el-button>
       <el-button v-if="activeBase" :loading="linting" @click="runLint"><el-icon><DataAnalysis /></el-icon>知识体检</el-button>
-      <el-button v-if="activeBase" :loading="syncing" @click="syncActive"><el-icon><Refresh /></el-icon>同步来源</el-button>
+      <el-button v-if="activeBase" :loading="syncing" :disabled="activeBase.lifecycle !== 'active' || !activeBase.source_available" @click="syncActive"><el-icon><Refresh /></el-icon>同步来源</el-button>
     </template>
 
     <div class="wiki-toolbar knowledge-toolbar">
@@ -17,6 +18,11 @@
       <button class="mobile-sync-button" type="button" :disabled="syncing" aria-label="同步来源" @click="syncActive">
         <el-icon :class="{ 'is-loading': syncing }"><Refresh /></el-icon>
       </button>
+    </div>
+
+    <div v-if="activeBase && (activeBase.lifecycle !== 'active' || !activeBase.source_available)" class="workspace-alert knowledge-surface">
+      <strong>{{ activeBase.lifecycle !== 'active' ? `知识库${activeBase.lifecycle === 'paused' ? '已暂停' : '已归档'}` : '原书目录已失效' }}</strong>
+      <span>{{ activeBase.lifecycle !== 'active' ? '当前可以继续浏览历史实体，但不能同步、问答、运行任务或提交变更。' : '当前可以浏览已有知识，但同步与智能编译已停止；请从阅境轩重新添加正确目录。' }}</span>
     </div>
 
     <div v-if="loadingBases" class="knowledge-empty knowledge-surface">
@@ -33,7 +39,7 @@
         <div class="entry-pane-head">
           <div>
             <strong>{{ activeBase?.book_name }}</strong>
-            <span>{{ entries.length >= 160 ? '显示前 160 个结果' : `${entries.length} 个结果` }}</span>
+            <span>已加载 {{ entries.length }} / {{ entryTotal }} 个结果</span>
           </div>
           <div v-if="activeBase" class="entry-statuses">
             <span class="knowledge-status" :class="`is-${activeBase.sync_state}`">
@@ -59,6 +65,7 @@
           </button>
           <div v-if="!loadingEntries && !entries.length" class="entry-empty">没有匹配的实体</div>
           <div v-if="loadingEntries" class="entry-loading"><el-icon class="is-loading"><Loading /></el-icon>检索中</div>
+          <button v-if="entryHasMore && !loadingEntries" class="entry-load-more" type="button" @click="loadMoreEntries">继续加载</button>
         </div>
       </aside>
 
@@ -73,7 +80,10 @@
               <h2>{{ selectedEntry.title }}</h2>
               <p>{{ selectedEntry.source_path || '数据库实体' }}</p>
             </div>
-            <span class="knowledge-status is-healthy">{{ selectedEntry.status === 'verified' ? '可追溯' : selectedEntry.status }}</span>
+            <div class="entry-detail-actions">
+              <el-button v-if="detail && detail.entry_type !== 'source_section' && activeBase?.lifecycle === 'active'" circle title="编辑实体" @click="openEntryEdit"><el-icon><Edit /></el-icon></el-button>
+              <span class="knowledge-status is-healthy">{{ selectedEntry.status === 'verified' ? '可追溯' : selectedEntry.status }}</span>
+            </div>
           </header>
           <div v-if="detailLoading" class="detail-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
           <template v-else-if="detail">
@@ -97,10 +107,10 @@
             <section v-if="detail.relations.length" class="entity-structure-section">
               <h3>知识关系 <span>{{ detail.relations.length }}</span></h3>
               <div class="relation-list">
-                <article v-for="relation in detail.relations" :key="relation.id" class="structure-card relation-card">
+                <button v-for="relation in detail.relations" :key="relation.id" type="button" class="structure-card relation-card" @click="selectRelatedEntry(relation.related_entry_id)">
                   <header><span>{{ relation.direction === 'outgoing' ? '指向' : '来自' }}</span><strong>{{ relation.related_entry_title }}</strong></header>
                   <p>{{ relation.relation_type }}<template v-if="relation.evidence"> · {{ relation.evidence }}</template></p>
-                </article>
+                </button>
               </div>
             </section>
             <section class="citation-section">
@@ -140,11 +150,36 @@
             <header><span>{{ change.operation === 'create' ? '新增' : '更新' }}</span><strong>{{ String(change.after.title || change.object_id) }}</strong><code>{{ String(change.after.entry_type || '') }}</code></header>
             <p>{{ String(change.after.summary || '') }}</p>
             <div><span>引用 {{ Array.isArray(change.after.citations) ? change.after.citations.length : 0 }}</span><span v-if="change.expected_revision">基于 Revision {{ change.expected_revision }}</span></div>
+            <details v-if="change.before" class="review-diff"><summary>查看变更前后</summary><div><section><b>修改前</b><pre>{{ JSON.stringify(change.before, null, 2) }}</pre></section><section><b>修改后</b><pre>{{ JSON.stringify(change.after, null, 2) }}</pre></section></div></details>
           </article>
           <el-input v-model="reviewNote" type="textarea" :rows="2" :maxlength="2000" placeholder="可选：记录审核说明" />
         </div>
         <div v-else class="knowledge-empty"><strong>没有待审核变更</strong><span>智能编译生成的候选会显示在这里。</span></div>
         <div class="knowledge-modal-actions"><el-button @click="reviewVisible = false">稍后处理</el-button><template v-if="activeReview"><el-button :loading="resolvingReview" @click="resolveReview('reject')">驳回</el-button><el-button type="primary" :loading="resolvingReview" @click="resolveReview('approve')">批准并应用</el-button></template></div>
+      </div>
+    </MotionModal>
+
+    <MotionModal v-model="editVisible" aria-label="编辑知识实体" size="wide">
+      <div class="knowledge-modal-card entry-edit-modal">
+        <div class="knowledge-modal-head"><div><h3>编辑知识实体</h3><p>保存后生成待审核变更，批准前不会覆盖当前版本。</p></div><span class="knowledge-status is-warning">人工保护</span></div>
+        <label><span>标题</span><el-input v-model="editDraft.title" :maxlength="1000" /></label>
+        <label><span>摘要</span><el-input v-model="editDraft.summary" type="textarea" :rows="3" :maxlength="1000" /></label>
+        <label><span>别名</span><el-input v-model="editDraft.aliases" placeholder="多个别名用逗号分隔" /></label>
+        <label><span>状态</span><el-select v-model="editDraft.status" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="草稿" value="draft" /><el-option label="已核验" value="verified" /><el-option label="归档实体" value="archived" /></el-select></label>
+        <label><span>Markdown 正文</span><el-input v-model="editDraft.contentMd" type="textarea" :rows="12" :maxlength="30000" /></label>
+        <div class="knowledge-modal-actions"><el-button @click="editVisible = false">取消</el-button><el-button type="primary" :loading="savingEdit" @click="submitEntryEdit">提交审核</el-button></div>
+      </div>
+    </MotionModal>
+
+    <MotionModal v-model="graphVisible" aria-label="知识关系洞察" size="wide">
+      <div class="knowledge-modal-card graph-modal">
+        <div class="knowledge-modal-head"><div><h3>知识关系洞察</h3><p>定位高连接枢纽、孤立实体，并查找两个实体之间的最短路径。</p></div><span v-if="graphOverview" class="knowledge-status is-healthy">{{ graphOverview.relation_count }} 条关系</span></div>
+        <div v-if="graphLoading" class="knowledge-empty"><el-icon class="is-loading"><Loading /></el-icon><span>正在分析关系…</span></div>
+        <template v-else-if="graphOverview">
+          <section class="graph-path-builder"><strong>关系路径</strong><div><el-select v-model="graphFromId" filterable popper-class="system-select-popper" placeholder="起点"><el-option v-for="entry in graphCandidates" :key="entry.id" :label="entry.title" :value="entry.id" /></el-select><span>→</span><el-select v-model="graphToId" filterable popper-class="system-select-popper" placeholder="终点"><el-option v-for="entry in graphCandidates" :key="entry.id" :label="entry.title" :value="entry.id" /></el-select><el-button :disabled="!graphFromId || !graphToId" @click="findPath">查找</el-button></div><div v-if="graphPath.length" class="graph-path"><button v-for="entry in graphPath" :key="entry.id" type="button" @click="openGraphEntry(entry)">{{ entry.title }}</button></div><p v-else-if="pathSearched">在 5 层关系内没有找到连接路径。</p></section>
+          <div class="graph-columns"><section><h4>连接枢纽</h4><button v-for="entry in graphOverview.bridge_entries" :key="entry.id" type="button" @click="openGraphEntry(entry)"><span>{{ entry.title }}</span><b>{{ entry.degree }} 连接</b></button><p v-if="!graphOverview.bridge_entries.length">尚无关系实体</p></section><section><h4>孤立实体</h4><button v-for="entry in graphOverview.orphan_entries" :key="entry.id" type="button" @click="openGraphEntry(entry)"><span>{{ entry.title }}</span><b>{{ entry.entry_type }}</b></button><p v-if="!graphOverview.orphan_entries.length">没有孤立实体</p></section></div>
+        </template>
+        <div class="knowledge-modal-actions"><el-button type="primary" @click="graphVisible = false">完成</el-button></div>
       </div>
     </MotionModal>
 
@@ -165,24 +200,28 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, Checked, DataAnalysis, Document, Loading, Refresh, Search, Tickets } from '@element-plus/icons-vue'
+import { ArrowLeft, Checked, Connection, DataAnalysis, Document, Edit, Loading, Refresh, Search, Tickets } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import {
+  findKnowledgeGraphPath,
+  getKnowledgeGraphOverview,
   getKnowledgeEntry,
   lintBookKnowledgeBase,
   listBookKnowledgeBases,
   listKnowledgeChangeSets,
   listKnowledgeEntries,
+  proposeKnowledgeEntryEdit,
   resolveKnowledgeChangeSet,
   syncBookKnowledgeBase,
   type KnowledgeBaseSummary,
   type KnowledgeEntryDetail,
   type KnowledgeEntrySummary,
+  type KnowledgeGraphOverview,
   type KnowledgeChangeSet,
   type KnowledgeHealthReport,
 } from '@/api/knowledge'
@@ -193,6 +232,8 @@ const bases = ref<KnowledgeBaseSummary[]>([])
 const activeBaseId = ref('')
 const query = ref('')
 const entries = ref<KnowledgeEntrySummary[]>([])
+const entryTotal = ref(0)
+const entryHasMore = ref(false)
 const selectedEntry = ref<KnowledgeEntrySummary | null>(null)
 const detail = ref<KnowledgeEntryDetail | null>(null)
 const renderedHtml = ref('')
@@ -209,9 +250,20 @@ const resolvingReview = ref(false)
 const linting = ref(false)
 const healthVisible = ref(false)
 const healthReport = ref<KnowledgeHealthReport | null>(null)
+const editVisible = ref(false)
+const savingEdit = ref(false)
+const editDraft = reactive({ title: '', summary: '', aliases: '', status: 'draft' as 'draft' | 'verified' | 'archived', contentMd: '' })
+const graphVisible = ref(false)
+const graphLoading = ref(false)
+const graphOverview = ref<KnowledgeGraphOverview | null>(null)
+const graphFromId = ref('')
+const graphToId = ref('')
+const graphPath = ref<KnowledgeEntrySummary[]>([])
+const pathSearched = ref(false)
 let searchTimer = 0
 
 const activeBase = computed(() => bases.value.find(base => base.id === activeBaseId.value))
+const graphCandidates = computed(() => entries.value.filter(entry => entry.entry_type !== 'source_section'))
 const { renderMarkdown, enhance, cleanup } = useMarkdownRender(() => {})
 
 function compileLabel(base: KnowledgeBaseSummary) {
@@ -247,13 +299,16 @@ async function loadBases() {
   }
 }
 
-async function loadEntries(preselectId = '') {
+async function loadEntries(preselectId = '', append = false) {
   if (!activeBaseId.value) return
   loadingEntries.value = true
   try {
-    const response = await listKnowledgeEntries(activeBaseId.value, { query: query.value, limit: 160 })
+    const offset = append ? entries.value.length : 0
+    const response = await listKnowledgeEntries(activeBaseId.value, { query: query.value, offset, limit: 60 })
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '实体加载失败')
-    entries.value = response.result.entries
+    entries.value = append ? [...entries.value, ...response.result.entries] : response.result.entries
+    entryTotal.value = response.result.total
+    entryHasMore.value = response.result.has_more
     const preselect = entries.value.find(entry => entry.id === preselectId)
     if (preselect) await selectEntry(preselect)
     else if (selectedEntry.value && !entries.value.some(entry => entry.id === selectedEntry.value?.id)) selectedEntry.value = null
@@ -262,6 +317,10 @@ async function loadEntries(preselectId = '') {
   } finally {
     loadingEntries.value = false
   }
+}
+
+function loadMoreEntries() {
+  void loadEntries('', true)
 }
 
 function scheduleSearch() {
@@ -281,6 +340,33 @@ async function selectEntry(entry: KnowledgeEntrySummary) {
     renderedHtml.value = await renderMarkdown(response.result.content_md, undefined, entry.id)
     await nextTick()
     if (markdownRef.value) await enhance(markdownRef.value)
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+async function selectRelatedEntry(entryId: string) {
+  const known = entries.value.find(entry => entry.id === entryId)
+  if (known) return selectEntry(known)
+  detailLoading.value = true
+  try {
+    const response = await getKnowledgeEntry(entryId)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '关联实体读取失败')
+    const entry: KnowledgeEntrySummary = {
+      id: response.result.id,
+      knowledge_base_id: response.result.knowledge_base_id,
+      entry_type: response.result.entry_type,
+      slug: response.result.slug,
+      title: response.result.title,
+      summary: response.result.summary,
+      status: response.result.status,
+      confidence: response.result.confidence,
+      source_path: response.result.source_path,
+      updated_at: response.result.updated_at,
+    }
+    await selectEntry(entry)
   } catch (error) {
     ElMessage.error((error as Error).message)
   } finally {
@@ -354,6 +440,76 @@ async function syncActive() {
   }
 }
 
+function openEntryEdit() {
+  if (!detail.value) return
+  editDraft.title = detail.value.title
+  editDraft.summary = detail.value.summary
+  editDraft.aliases = detail.value.aliases.join('，')
+  editDraft.status = detail.value.status === 'verified' || detail.value.status === 'archived' ? detail.value.status : 'draft'
+  editDraft.contentMd = detail.value.content_md
+  editVisible.value = true
+}
+
+async function submitEntryEdit() {
+  if (!detail.value) return
+  savingEdit.value = true
+  try {
+    const response = await proposeKnowledgeEntryEdit({
+      entryId: detail.value.id,
+      title: editDraft.title,
+      summary: editDraft.summary,
+      contentMd: editDraft.contentMd,
+      aliases: editDraft.aliases.split(/[，,]/).map(value => value.trim()).filter(Boolean),
+      status: editDraft.status,
+      expectedRevision: detail.value.revision,
+    })
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '实体变更提交失败')
+    editVisible.value = false
+    await loadReviews()
+    activeReview.value = pendingReviews.value.find(review => review.id === response.result?.id) || response.result
+    reviewNote.value = ''
+    reviewVisible.value = true
+    ElMessage.success('已生成待审核变更，当前实体尚未被覆盖')
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    savingEdit.value = false
+  }
+}
+
+async function openGraph() {
+  if (!activeBaseId.value) return
+  graphVisible.value = true
+  graphLoading.value = true
+  graphPath.value = []
+  pathSearched.value = false
+  try {
+    const response = await getKnowledgeGraphOverview(activeBaseId.value, 30)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '关系洞察加载失败')
+    graphOverview.value = response.result
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    graphLoading.value = false
+  }
+}
+
+async function findPath() {
+  if (!graphFromId.value || !graphToId.value) return
+  const response = await findKnowledgeGraphPath(activeBaseId.value, graphFromId.value, graphToId.value, 5)
+  if (response.status !== 'success' || !response.result) {
+    ElMessage.error(response.error?.message || '关系路径查找失败')
+    return
+  }
+  graphPath.value = response.result.entries
+  pathSearched.value = true
+}
+
+async function openGraphEntry(entry: KnowledgeEntrySummary) {
+  graphVisible.value = false
+  await selectRelatedEntry(entry.id)
+}
+
 function entryTypeLabel(type: string) {
   return type === 'source_section' ? '来源章节' : type
 }
@@ -374,6 +530,9 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); cleanup() })
 
 <style scoped>
 .wiki-toolbar { margin-bottom: 12px; }
+.workspace-alert { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; padding: 11px 14px; border-color: color-mix(in srgb, #ff9f0a 24%, var(--border-faint)); background: color-mix(in srgb, #ff9f0a 7%, var(--bg-glass)); }
+.workspace-alert strong { flex: 0 0 auto; color: #b56600; font-size: 12px; }
+.workspace-alert span { color: var(--text-muted); font-size: 11px; }
 .wiki-toolbar .knowledge-search { flex: 1; }
 .wiki-workspace { min-height: 570px; display: grid; grid-template-columns: minmax(250px, 320px) minmax(0, 1fr); gap: 12px; }
 .entry-pane, .entry-detail { min-height: 0; overflow: hidden; }
@@ -392,10 +551,12 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); cleanup() })
 .entry-summary { display: -webkit-box; overflow: hidden; color: var(--text-muted); font-size: 11px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .entry-source { overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .entry-empty, .entry-loading { display: flex; justify-content: center; gap: 7px; padding: 32px 10px; color: var(--text-faint); font-size: 12px; }
+.entry-load-more { width: calc(100% - 10px); min-height: 38px; margin: 5px; border: 0; border-radius: 11px; background: var(--bg-glass-subtle); color: var(--accent); cursor: pointer; }
 .entry-detail { max-height: calc(100vh - 208px); overflow: auto; padding: 30px clamp(22px, 4vw, 62px); }
 .entry-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border-faint); }
 .entry-detail-head h2 { margin: 6px 0 4px; font-size: clamp(24px, 3vw, 36px); font-weight: 730; }
 .entry-detail-head p { color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; }
+.entry-detail-actions { display: flex; align-items: center; gap: 9px; }
 .detail-loading { min-height: 300px; display: grid; place-content: center; color: var(--accent); font-size: 24px; }
 .detail-symbol { width: 62px; height: 62px; display: grid; place-items: center; border-radius: 20px; background: var(--accent-light); color: var(--accent); font-size: 27px; }
 .entity-meta-strip { display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 18px; }
@@ -413,6 +574,30 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); cleanup() })
 .review-change header code { color: var(--text-faint); font-family: var(--font-mono); font-size: 9px; }
 .review-change p { color: var(--text-muted); font-size: 11px; line-height: 1.6; }
 .review-change > div { display: flex; gap: 12px; color: var(--text-faint); font-size: 9px; }
+.review-diff { color: var(--text-muted); font-size: 10px; }
+.review-diff summary { width: fit-content; color: var(--accent); cursor: pointer; }
+.review-diff > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.review-diff section { min-width: 0; }
+.review-diff pre { max-height: 210px; overflow: auto; margin-top: 5px; padding: 10px; border-radius: 10px; background: var(--code-block-bg); color: var(--code-block-text); font-size: 9px; white-space: pre-wrap; }
+.entry-edit-modal { display: grid; gap: 12px; max-height: min(820px, calc(100dvh - 40px)); overflow: auto; }
+.entry-edit-modal > label { display: grid; gap: 6px; color: var(--text-muted); font-size: 11px; }
+.graph-modal { display: grid; gap: 14px; }
+.graph-path-builder { display: grid; gap: 9px; padding: 13px; border-radius: 14px; background: var(--bg-glass-subtle); }
+.graph-path-builder > strong { font-size: 12px; }
+.graph-path-builder > div:first-of-type { display: grid; grid-template-columns: 1fr auto 1fr auto; align-items: center; gap: 7px; }
+.graph-path-builder p { color: var(--text-faint); font-size: 10px; }
+.graph-path { display: flex !important; flex-wrap: wrap; align-items: center; gap: 7px; }
+.graph-path button, .graph-columns button { border: 1px solid var(--border-faint); border-radius: 10px; background: var(--bg-glass); color: var(--text-primary); cursor: pointer; }
+.graph-path button { padding: 7px 10px; }
+.graph-path button + button::before { content: '→'; margin-right: 8px; color: var(--text-faint); }
+.graph-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.graph-columns section { display: grid; align-content: start; gap: 6px; min-height: 150px; padding: 13px; border: 1px solid var(--border-faint); border-radius: 14px; }
+.graph-columns h4 { margin-bottom: 4px; font-size: 12px; }
+.graph-columns button { display: flex; justify-content: space-between; gap: 8px; padding: 9px 10px; text-align: left; }
+.graph-columns button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.graph-columns button b { flex: 0 0 auto; color: var(--accent); font-size: 9px; }
+.graph-columns p { color: var(--text-faint); font-size: 10px; }
+.relation-card { width: 100%; color: var(--text-primary); text-align: left; cursor: pointer; }
 .health-counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .health-counts span { display: grid; gap: 3px; padding: 12px; border-radius: 13px; background: var(--bg-glass-subtle); color: var(--text-faint); font-size: 10px; }
 .health-counts b { color: var(--text-primary); font-size: 20px; }
@@ -454,6 +639,10 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); cleanup() })
 .mobile-back { display: none; }
 .mobile-sync-button { display: none; }
 @media (max-width: 768px) {
+  .workspace-alert { align-items: flex-start; display: grid; }
+  .review-diff > div, .graph-columns { grid-template-columns: 1fr; }
+  .graph-path-builder > div:first-of-type { grid-template-columns: 1fr auto; }
+  .graph-path-builder > div:first-of-type > span { display: none; }
   .wiki-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 46px; align-items: stretch; }
   .wiki-toolbar .knowledge-search { grid-column: 1 / -1; grid-row: 2; }
   .mobile-sync-button { grid-column: 2; grid-row: 1; width: 46px; min-height: 46px; display: grid; place-items: center; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-glass); color: var(--accent); font-size: 17px; }

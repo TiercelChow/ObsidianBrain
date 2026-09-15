@@ -152,6 +152,33 @@ test('knowledge pages distinguish source synchronization from wiki compilation',
   assert.match(api, /compile_state: 'not_started' \| 'outdated' \| 'compiling' \| 'ready' \| 'failed'/)
 })
 
+test('wiki workspace supports reviewed edits, paged entities, and scoped graph navigation', async () => {
+  const [bases, workspace, reader, chat, tasks, api] = await Promise.all([
+    source('src/views/knowledge/KnowledgeBases.vue'),
+    source('src/views/knowledge/WikiWorkspace.vue'),
+    source('src/views/Reader.vue'),
+    source('src/views/knowledge/KnowledgeChat.vue'),
+    source('src/views/knowledge/KnowledgeTasks.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+
+  assert.match(bases, /管理知识库/)
+  assert.match(bases, /setBookKnowledgeBaseLifecycle/)
+  assert.match(bases, /原书目录已失效/)
+  assert.match(workspace, /继续加载/)
+  assert.match(workspace, /proposeKnowledgeEntryEdit/)
+  assert.match(workspace, /查看变更前后/)
+  assert.match(workspace, /关系洞察/)
+  assert.match(workspace, /findKnowledgeGraphPath/)
+  assert.match(reader, /proposeReaderSelection/)
+  assert.match(reader, /加入知识/)
+  assert.match(reader, /fileKind === 'md'/)
+  assert.match(chat, /route\.query\.question/)
+  assert.match(tasks, /route\.query\.create === '1'/)
+  assert.match(api, /source_available: boolean/)
+  assert.match(api, /has_more: boolean/)
+})
+
 test('Book Wiki only exposes Markdown folders while Reader keeps PDF support', async () => {
   const [bases, api] = await Promise.all([
     source('src/views/knowledge/KnowledgeBases.vue'),

@@ -9,6 +9,7 @@ export interface KnowledgeBaseSummary {
   book_kind: 'folder' | 'pdf'
   book_description: string
   book_category: string
+  source_available: boolean
   lifecycle: 'uninitialized' | 'active' | 'paused' | 'archived'
   sync_state: 'clean' | 'outdated' | 'scanning' | 'extracting' | 'ingesting' | 'failed'
   compile_mode: 'chapter' | 'smart'
@@ -100,6 +101,28 @@ export interface KnowledgeEntryDetail extends KnowledgeEntrySummary {
   claims: KnowledgeClaimSummary[]
   relations: KnowledgeRelationSummary[]
   versions: KnowledgeEntryVersionSummary[]
+}
+
+export interface KnowledgeEntryPage {
+  entries: KnowledgeEntrySummary[]
+  offset: number
+  limit: number
+  total: number
+  has_more: boolean
+}
+
+export interface KnowledgeBridgeEntry extends KnowledgeEntrySummary {
+  degree: number
+}
+
+export interface KnowledgeGraphOverview {
+  relation_count: number
+  orphan_entries: KnowledgeEntrySummary[]
+  bridge_entries: KnowledgeBridgeEntry[]
+}
+
+export interface KnowledgeGraphPath {
+  entries: KnowledgeEntrySummary[]
 }
 
 export interface KnowledgeTask {
@@ -372,6 +395,23 @@ export function getBookKnowledgeBase(knowledgeBaseId: string) {
   }) as unknown as Promise<ToolEnvelope<KnowledgeBaseSummary>>
 }
 
+export function setBookKnowledgeBaseLifecycle(
+  knowledgeBaseId: string,
+  lifecycle: 'active' | 'paused' | 'archived',
+) {
+  return callTool('set_book_knowledge_base_lifecycle', {
+    knowledge_base_id: knowledgeBaseId,
+    lifecycle,
+  }) as unknown as Promise<ToolEnvelope<KnowledgeBaseSummary>>
+}
+
+export function deleteBookKnowledgeBase(knowledgeBaseId: string, confirmation: string) {
+  return callTool('delete_book_knowledge_base', {
+    knowledge_base_id: knowledgeBaseId,
+    confirmation,
+  }) as unknown as Promise<ToolEnvelope<{ deleted: boolean }>>
+}
+
 export function compileBookKnowledgeBase(knowledgeBaseId: string) {
   return callTool('compile_book_knowledge_base', {
     knowledge_base_id: knowledgeBaseId,
@@ -399,20 +439,76 @@ export function resolveKnowledgeChangeSet(
 
 export function listKnowledgeEntries(
   knowledgeBaseId: string,
-  options: { query?: string; entryType?: string; limit?: number } = {},
+  options: { query?: string; entryType?: string; offset?: number; limit?: number } = {},
 ) {
   return callTool('list_knowledge_entries', {
     knowledge_base_id: knowledgeBaseId,
     ...(options.query ? { query: options.query } : {}),
     ...(options.entryType ? { entry_type: options.entryType } : {}),
-    limit: options.limit ?? 100,
-  }) as unknown as Promise<ToolEnvelope<{ entries: KnowledgeEntrySummary[] }>>
+    offset: options.offset ?? 0,
+    limit: options.limit ?? 60,
+  }) as unknown as Promise<ToolEnvelope<KnowledgeEntryPage>>
 }
 
 export function getKnowledgeEntry(entryId: string) {
   return callTool('get_knowledge_entry', { entry_id: entryId }) as unknown as Promise<
     ToolEnvelope<KnowledgeEntryDetail>
   >
+}
+
+export function proposeKnowledgeEntryEdit(input: {
+  entryId: string
+  title: string
+  summary: string
+  contentMd: string
+  aliases: string[]
+  status: 'draft' | 'verified' | 'archived'
+  expectedRevision: number
+}) {
+  return callTool('propose_knowledge_entry_edit', {
+    entry_id: input.entryId,
+    title: input.title,
+    summary: input.summary,
+    content_md: input.contentMd,
+    aliases: input.aliases,
+    status: input.status,
+    expected_revision: input.expectedRevision,
+  }) as unknown as Promise<ToolEnvelope<KnowledgeChangeSet>>
+}
+
+export function proposeReaderSelection(input: {
+  knowledgeBaseId: string
+  sourcePath: string
+  selection: string
+  title?: string
+}) {
+  return callTool('propose_reader_selection', {
+    knowledge_base_id: input.knowledgeBaseId,
+    source_path: input.sourcePath,
+    selection: input.selection,
+    ...(input.title ? { title: input.title } : {}),
+  }) as unknown as Promise<ToolEnvelope<KnowledgeChangeSet>>
+}
+
+export function getKnowledgeGraphOverview(knowledgeBaseId: string, limit = 20) {
+  return callTool('get_knowledge_graph_overview', {
+    knowledge_base_id: knowledgeBaseId,
+    limit,
+  }) as unknown as Promise<ToolEnvelope<KnowledgeGraphOverview>>
+}
+
+export function findKnowledgeGraphPath(
+  knowledgeBaseId: string,
+  fromEntryId: string,
+  toEntryId: string,
+  maxDepth = 5,
+) {
+  return callTool('find_knowledge_graph_path', {
+    knowledge_base_id: knowledgeBaseId,
+    from_entry_id: fromEntryId,
+    to_entry_id: toEntryId,
+    max_depth: maxDepth,
+  }) as unknown as Promise<ToolEnvelope<KnowledgeGraphPath>>
 }
 
 export function lintBookKnowledgeBase(knowledgeBaseId: string) {

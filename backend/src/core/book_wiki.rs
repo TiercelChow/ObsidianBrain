@@ -164,7 +164,7 @@ impl BookWikiService {
             ));
         }
 
-        let base = self.store.get_base(base_id)?;
+        let base = self.store.get_active_base(base_id)?;
         let history = if let Some(conversation_id) = conversation_id {
             let conversation = self.store.get_conversation(conversation_id)?;
             if conversation.conversation.knowledge_base_id != base_id {
@@ -283,6 +283,7 @@ impl BookWikiService {
         base_id: &str,
         run_id: &str,
     ) -> Result<KnowledgeChangeSet, BrainError> {
+        self.store.get_active_base(base_id)?;
         let run = self.store.get_agent_run(run_id)?;
         if run.knowledge_base_id.as_deref() != Some(base_id)
             || run.task_type != "knowledge_qa"
@@ -601,7 +602,7 @@ impl BookWikiService {
         task: &KnowledgeTask,
     ) -> Result<(String, String, Vec<KnowledgeEntrySummary>), BrainError> {
         let profile = self.active_runtime_profile()?;
-        let base = self.store.get_base(&task.knowledge_base_id)?;
+        let base = self.store.get_active_base(&task.knowledge_base_id)?;
         let query = format!("{} {}", task.title, task.description);
         let evidence = self
             .store
@@ -858,7 +859,7 @@ impl BookWikiService {
     }
 
     pub fn sync(&self, base_id: &str) -> Result<SyncKnowledgeBaseResult, BrainError> {
-        let base = self.store.get_base(base_id)?;
+        let base = self.store.get_syncable_base(base_id)?;
         self.store
             .set_sync_state(base_id, "scanning", &base.health_state, None)?;
 
@@ -891,6 +892,9 @@ impl BookWikiService {
                 return result;
             }
             let base = self.store.get_base(base_id)?;
+            if base.compile_state != "compiling" {
+                return result;
+            }
             let _ = self.store.set_compile_state(
                 base_id,
                 "failed",
@@ -906,7 +910,7 @@ impl BookWikiService {
         &self,
         base_id: &str,
     ) -> Result<SemanticCompileResult, BrainError> {
-        let base = self.store.get_base(base_id)?;
+        let base = self.store.get_syncable_base(base_id)?;
         if base.sync_state != "clean" {
             return Err(BrainError::KnowledgeValidation(
                 "请先完成来源同步，再进行智能 Wiki 编译".to_string(),

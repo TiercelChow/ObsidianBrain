@@ -1,8 +1,8 @@
 # 阅境轩·书籍知识库（Book Wiki）— 开发设计文档 v3
 
 > **文档编号**: DEV-08
-> **版本**: v3.5
-> **状态**: 增量语义 Wiki、FTS、受控 Harness 工具链、原生事件与 PPTX 纵切已落地
+> **版本**: v3.6
+> **状态**: 增量语义 Wiki、受控 Harness 工具链、知识工作台核心闭环与 PPTX 纵切已落地
 > **最后更新**: 2026-09-15
 > **对应需求**: [REQ-08](../requirement/08-llm-wiki.md)
 > **关联需求**: [REQ-10 阅境轩书架](../requirement/10-reader-bookshelf.md)
@@ -26,6 +26,8 @@
 迁移 017 的 Skill Registry 支持内置 Skill、自定义 Markdown 指令和安全 ZIP 导入。ZIP 限制文件数、单文件/展开大小，拒绝路径穿越、符号链接、二进制与脚本；所有文本资源版本化存入 SQLite。运行时只注入当前书籍、当前用途已启用的指令，不开放 Harness 自带 Skill、文件、Shell、Web 或子 Agent 权限。
 
 研究任务可以选择 `presentation` 交付物。受控 Rust 生成器把报告转为可编辑 OOXML `.pptx`，生成后检查核心包、关系和页数，二进制文件存入应用受管 artifacts 目录，SQLite 保存哈希、大小、Run/Skill 和引用快照。前端恢复报告后可以直接下载成果；当前产品不提供 PPTX 应用内预览。
+
+工作台读写边界已在 Store 而非仅在页面实现：`active` 才能创建任务、启动 Run、生成或处理变更集，暂停/归档保留只读查询；同步和编译还会实时检查书架路径。实体浏览返回 `offset/limit/total/has_more`，关系查询严格限定单一知识库并用有界 BFS 查找最多八层路径。人工编辑和阅境轩摘录都创建审计 Run 与 `human_protected` 高风险变更集，批准前不触碰正式实体；阅境轩摘录必须重新定位到当前 source span，无法定位时拒绝伪造引用。
 
 本地开发仍使用固定命令 `npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp`。Runtime Profile 可将 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 兼容供应商注入 Harness；真实密钥只从用户指定的环境变量读取。Book Wiki 只处理 Markdown 文件夹并固定使用 DeepSeek Harness。ACP 的 `UsageUpdate` 只作为真实上下文占用展示；供应商未上报输入/输出明细时，计费统计继续标为 `estimated`。剩余 P2 是显式授权的外部研究和脚本型 Skill 沙箱。
 

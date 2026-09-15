@@ -136,6 +136,8 @@
         class="pane pane-center"
         @scroll="onContentScroll"
         @touchmove.passive="revealMobileToolbar"
+        @mouseup="captureMarkdownSelection"
+        @touchend="captureMarkdownSelection"
       >
         <transition
           :name="transitionDir"
@@ -186,6 +188,22 @@
         </div>
       </aside>
     </div>
+
+    <transition name="selection-pop">
+      <div
+        v-if="selectionMenu.visible && fileKind === 'md'"
+        class="reader-selection-menu glass-surface"
+        :style="{ left: `${selectionMenu.left}px`, top: `${selectionMenu.top}px` }"
+        role="toolbar"
+        aria-label="选中文本操作"
+        @mousedown.prevent
+      >
+        <button type="button" @click="useSelection('ask')">问这本书</button>
+        <button type="button" @click="useSelection('explain')">解释</button>
+        <button type="button" @click="useSelection('candidate')">加入知识</button>
+        <button type="button" @click="useSelection('research')">研究任务</button>
+      </div>
+    </transition>
 
     <div
       v-if="viewMode === 'read' && mobileToolbarState.rendered"
@@ -334,6 +352,7 @@ import BookshelfView from '@/components/reader/BookshelfView.vue'
 import { getMobileReaderToolbarState, isPhoneViewport } from '@/utils/mobileLayoutPolicy'
 import { useModalEnvironment } from '@/composables/useModalEnvironment'
 import { searchReaderFiles } from '@/utils/readerFileSearch'
+import { listBookKnowledgeBases, proposeReaderSelection } from '@/api/knowledge'
 
 // Heavy, optional readers stay out of the Markdown-first route chunk.
 const MermaidViewer = defineAsyncComponent(() => import('@/components/reader/MermaidViewer.vue'))
@@ -374,6 +393,88 @@ useModalEnvironment(
 )
 const treeDrawer = ref(false)
 const tocDrawer = ref(false)
+const selectionMenu = ref({ visible: false, text: '', left: 0, top: 0 })
+
+function captureMarkdownSelection() {
+  window.setTimeout(() => {
+    if (fileKind.value !== 'md') return
+    const selection = window.getSelection()
+    const text = selection?.toString().trim() || ''
+    if (!selection || !text || selection.rangeCount === 0 || text.length > 5000) {
+      selectionMenu.value.visible = false
+      return
+    }
+    const range = selection.getRangeAt(0)
+    const article = currentMarkdownBody()
+    if (!article || !article.contains(range.commonAncestorContainer)) {
+      selectionMenu.value.visible = false
+      return
+    }
+    const rect = range.getBoundingClientRect()
+    const menuWidth = Math.min(430, window.innerWidth - 20)
+    selectionMenu.value = {
+      visible: true,
+      text,
+      left: Math.max(10, Math.min(window.innerWidth - menuWidth - 10, rect.left + rect.width / 2 - menuWidth / 2)),
+      top: Math.max(10, rect.top - 54),
+    }
+  }, 0)
+}
+
+function currentSourcePath() {
+  const root = rootPath.value.replace(/\\/g, '/').replace(/\/+$/, '')
+  const file = displayedFile.value.replace(/\\/g, '/')
+  return file.startsWith(`${root}/`) ? file.slice(root.length + 1) : file
+}
+
+async function currentKnowledgeBaseId() {
+  const bookId = currentShelfBookId.value
+  if (!bookId) throw new Error('当前目录不在阅境轩书架中')
+  const response = await listBookKnowledgeBases()
+  if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '知识库读取失败')
+  const card = response.result.items.find(item => item.book.id === bookId)
+  if (!card?.knowledge_base) throw new Error('请先为这本书建立知识库')
+  if (card.knowledge_base.lifecycle !== 'active') throw new Error('知识库已暂停或归档，请先恢复使用')
+  return card.knowledge_base.id
+}
+
+async function useSelection(action: 'ask' | 'explain' | 'candidate' | 'research') {
+  const text = selectionMenu.value.text
+  selectionMenu.value.visible = false
+  if (!text) return
+  try {
+    const base = await currentKnowledgeBaseId()
+    if (action === 'ask' || action === 'explain') {
+      const question = action === 'explain'
+        ? `请结合全书上下文解释下面这段原文，并指出它与本书核心主题的关系：\n\n> ${text}`
+        : `请结合全书回答我关于这段原文的问题：\n\n> ${text}`
+      await router.push({ path: '/knowledge/chat', query: { base, question } })
+      return
+    }
+    if (action === 'research') {
+      await router.push({
+        path: '/knowledge/tasks',
+        query: {
+          base,
+          create: '1',
+          title: `研究：${text.replace(/\s+/g, ' ').slice(0, 42)}`,
+          description: `围绕阅境轩中的这段原文开展研究，并保留书内证据：\n\n${text}`,
+        },
+      })
+      return
+    }
+    const response = await proposeReaderSelection({
+      knowledgeBaseId: base,
+      sourcePath: currentSourcePath(),
+      selection: text,
+    })
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '知识候选提交失败')
+    ElMessage.success('已加入待审核知识候选')
+    await router.push({ path: '/knowledge/wiki', query: { base, review: response.result.id } })
+  } catch (selectionError) {
+    ElMessage.error((selectionError as Error).message)
+  }
+}
 
 function openFileSearch() {
   if (!rootPath.value) {
@@ -1158,6 +1259,7 @@ function onContentScroll() {
 
 function processContentScroll() {
   contentScrollFrame = null
+  selectionMenu.value.visible = false
   revealMobileToolbar()
   scheduleProgressCapture()
   // Drive the app's mobile header + page-header collapse from the pane-center
@@ -1213,7 +1315,13 @@ onMounted(async () => {
   // change, so it's already current — this only covers the md debounce.)
   document.addEventListener('visibilitychange', onVisibilityHidden)
   window.addEventListener('pagehide', onPageHide)
-  void shelf.ensureLoaded()
+  await shelf.ensureLoaded()
+  const requestedBook = String(route.query.book || '')
+  const routeBook = requestedBook ? shelf.books.value.find(book => book.id === requestedBook) : undefined
+  if (routeBook) {
+    await openBook(routeBook)
+    return
+  }
   // Restore last opened folder + file (per-browser).
   const lastFolder = localStorage.getItem(LAST_FOLDER_KEY)
   const lastFile = localStorage.getItem(LAST_FILE_KEY)
@@ -1235,6 +1343,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pagehide', onPageHide)
   document.removeEventListener('mousemove', onFsActivity)
   document.removeEventListener('touchstart', onFsActivity)
+  selectionMenu.value.visible = false
   cancelFullscreenAnimation()
   if (fsUiTimer) clearTimeout(fsUiTimer)
   if (refreshFlashTimer) clearTimeout(refreshFlashTimer)
@@ -1254,6 +1363,11 @@ onBeforeUnmount(() => {
 }
 /* Tighter page-header spacing — the Reader is a tool page, not a content page. */
 .reader-page .page-header { margin-bottom: 6px; }
+.reader-selection-menu { position: fixed; z-index: 2600; display: flex; gap: 3px; padding: 5px; border-radius: 13px; box-shadow: var(--shadow-lg); transform-origin: center bottom; }
+.reader-selection-menu button { min-height: 34px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 11px; cursor: pointer; }
+.reader-selection-menu button:hover { background: var(--accent-light); color: var(--accent); }
+.selection-pop-enter-active, .selection-pop-leave-active { transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-spring-gentle); }
+.selection-pop-enter-from, .selection-pop-leave-to { opacity: 0; transform: translateY(6px) scale(.96); }
 
 /* Tasks-style view switch (shelf ↔ read) */
 .view-switch {
@@ -1782,6 +1896,8 @@ onBeforeUnmount(() => {
 
 /* ── Mobile ── */
 @media (max-width: 768px) {
+  .reader-selection-menu { right: 10px; left: 10px !important; top: auto !important; bottom: calc(82px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: 1fr 1fr; }
+  .reader-selection-menu button { min-height: 42px; font-size: 12px; }
   .reader-page {
     height: calc(100dvh - var(--mobile-header-height) - var(--safe-top) - 40px);
     gap: 6px;

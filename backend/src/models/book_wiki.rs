@@ -65,6 +65,7 @@ pub struct KnowledgeBaseSummary {
     pub book_kind: String,
     pub book_description: String,
     pub book_category: String,
+    pub source_available: bool,
     pub lifecycle: String,
     pub sync_state: String,
     pub compile_mode: String,
@@ -82,6 +83,34 @@ pub struct KnowledgeBaseSummary {
     pub entry_count: i64,
     pub claim_count: i64,
     pub task_count: i64,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeEntryPage {
+    pub entries: Vec<KnowledgeEntrySummary>,
+    pub offset: i64,
+    pub limit: i64,
+    pub total: i64,
+    pub has_more: bool,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeBridgeEntry {
+    #[serde(flatten)]
+    pub entry: KnowledgeEntrySummary,
+    pub degree: i64,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeGraphOverview {
+    pub relation_count: i64,
+    pub orphan_entries: Vec<KnowledgeEntrySummary>,
+    pub bridge_entries: Vec<KnowledgeBridgeEntry>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeGraphPath {
+    pub entries: Vec<KnowledgeEntrySummary>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
