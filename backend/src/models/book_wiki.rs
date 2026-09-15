@@ -114,6 +114,24 @@ pub struct KnowledgeGraphPath {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeGraphRelation {
+    pub id: String,
+    pub from_entry_id: String,
+    pub to_entry_id: String,
+    pub relation_type: String,
+    pub strength: Option<f64>,
+    pub evidence: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeGraphSnapshot {
+    pub entries: Vec<KnowledgeEntrySummary>,
+    pub relations: Vec<KnowledgeGraphRelation>,
+    pub total_entries: i64,
+    pub truncated: bool,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct BookKnowledgeCard {
     pub book: ReaderBook,
     pub knowledge_base: Option<KnowledgeBaseSummary>,

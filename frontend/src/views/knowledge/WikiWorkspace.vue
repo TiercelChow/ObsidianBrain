@@ -81,7 +81,7 @@
               <p>{{ selectedEntry.source_path || '数据库实体' }}</p>
             </div>
             <div class="entry-detail-actions">
-              <el-button v-if="detail && detail.entry_type !== 'source_section' && activeBase?.lifecycle === 'active'" circle title="编辑实体" @click="openEntryEdit"><el-icon><Edit /></el-icon></el-button>
+              <el-button v-if="detail && detail.entry_type !== 'source_section' && activeBase?.lifecycle === 'active'" circle title="调整实体" @click="openEntryEdit"><el-icon><Edit /></el-icon></el-button>
               <span class="knowledge-status is-healthy">{{ selectedEntry.status === 'verified' ? '可追溯' : selectedEntry.status }}</span>
             </div>
           </header>
@@ -147,7 +147,7 @@
         <div v-if="activeReview" class="review-content">
           <div class="review-summary"><strong>{{ activeReview.title }}</strong><span>{{ activeReview.reason }}</span></div>
           <article v-for="change in activeReview.changes" :key="change.id" class="review-change">
-            <header><span>{{ change.operation === 'create' ? '新增' : '更新' }}</span><strong>{{ String(change.after.title || change.object_id) }}</strong><code>{{ String(change.after.entry_type || '') }}</code></header>
+            <header><span>{{ changeOperationLabel(change.operation, change.expected_revision) }}</span><strong>{{ String(change.after.title || change.object_id) }}</strong><code>{{ String(change.after.entry_type || '') }}</code></header>
             <p>{{ String(change.after.summary || '') }}</p>
             <div><span>引用 {{ Array.isArray(change.after.citations) ? change.after.citations.length : 0 }}</span><span v-if="change.expected_revision">基于 Revision {{ change.expected_revision }}</span></div>
             <details v-if="change.before" class="review-diff"><summary>查看变更前后</summary><div><section><b>修改前</b><pre>{{ JSON.stringify(change.before, null, 2) }}</pre></section><section><b>修改后</b><pre>{{ JSON.stringify(change.after, null, 2) }}</pre></section></div></details>
@@ -159,15 +159,34 @@
       </div>
     </MotionModal>
 
-    <MotionModal v-model="editVisible" aria-label="编辑知识实体" size="wide">
+    <MotionModal v-model="editVisible" aria-label="调整知识实体" size="wide">
       <div class="knowledge-modal-card entry-edit-modal">
-        <div class="knowledge-modal-head"><div><h3>编辑知识实体</h3><p>保存后生成待审核变更，批准前不会覆盖当前版本。</p></div><span class="knowledge-status is-warning">人工保护</span></div>
-        <label><span>标题</span><el-input v-model="editDraft.title" :maxlength="1000" /></label>
-        <label><span>摘要</span><el-input v-model="editDraft.summary" type="textarea" :rows="3" :maxlength="1000" /></label>
-        <label><span>别名</span><el-input v-model="editDraft.aliases" placeholder="多个别名用逗号分隔" /></label>
-        <label><span>状态</span><el-select v-model="editDraft.status" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="草稿" value="draft" /><el-option label="已核验" value="verified" /><el-option label="归档实体" value="archived" /></el-select></label>
-        <label><span>Markdown 正文</span><el-input v-model="editDraft.contentMd" type="textarea" :rows="12" :maxlength="30000" /></label>
-        <div class="knowledge-modal-actions"><el-button @click="editVisible = false">取消</el-button><el-button type="primary" :loading="savingEdit" @click="submitEntryEdit">提交审核</el-button></div>
+        <div class="knowledge-modal-head"><div><h3>调整知识实体</h3><p>{{ structureModeHint }}</p></div><span class="knowledge-status is-warning">审核后生效</span></div>
+        <nav class="structure-mode-switch" aria-label="实体调整方式">
+          <button v-for="mode in structureModes" :key="mode.value" type="button" :class="{ active: editMode === mode.value }" @click="setEditMode(mode.value)">{{ mode.label }}</button>
+        </nav>
+        <template v-if="editMode === 'edit' || editMode === 'merge'">
+          <label v-if="editMode === 'merge'"><span>合并来源</span><el-select v-model="mergeSourceIds" multiple filterable remote :remote-method="searchMergeOptions" :loading="mergeOptionsLoading" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="搜索并选择要并入当前实体的知识"><el-option v-for="entry in mergeOptions" :key="entry.id" :label="`${entry.title} · ${entry.entry_type}`" :value="entry.id" /></el-select></label>
+          <label><span>{{ editMode === 'merge' ? '合并后标题' : '标题' }}</span><el-input v-model="editDraft.title" :maxlength="1000" /></label>
+          <label><span>摘要</span><el-input v-model="editDraft.summary" type="textarea" :rows="3" :maxlength="1000" /></label>
+          <label><span>别名</span><el-input v-model="editDraft.aliases" placeholder="多个别名用逗号分隔" /></label>
+          <label><span>状态</span><el-select v-model="editDraft.status" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="草稿" value="draft" /><el-option label="已核验" value="verified" /><el-option v-if="editMode === 'edit'" label="归档实体" value="archived" /></el-select></label>
+          <label><span>Markdown 正文</span><el-input v-model="editDraft.contentMd" type="textarea" :rows="editMode === 'merge' ? 9 : 12" :maxlength="30000" /></label>
+        </template>
+        <template v-else>
+          <div class="split-note">原实体会在批准后归档；每个新实体继承原始来源引用，但论断与关系需后续分别核验。</div>
+          <div class="split-parts">
+            <article v-for="(part, index) in splitParts" :key="part.key">
+              <header><strong>新实体 {{ index + 1 }}</strong><button v-if="splitParts.length > 2" type="button" @click="removeSplitPart(index)">移除</button></header>
+              <label><span>标题</span><el-input v-model="part.title" :maxlength="1000" /></label>
+              <label><span>摘要</span><el-input v-model="part.summary" type="textarea" :rows="2" :maxlength="1000" /></label>
+              <label><span>别名</span><el-input v-model="part.aliases" placeholder="多个别名用逗号分隔" /></label>
+              <label><span>Markdown 正文</span><el-input v-model="part.contentMd" type="textarea" :rows="5" :maxlength="30000" /></label>
+            </article>
+          </div>
+          <button v-if="splitParts.length < 12" class="add-split-part" type="button" @click="addSplitPart">＋ 添加一个拆分实体</button>
+        </template>
+        <div class="knowledge-modal-actions"><el-button @click="editVisible = false">取消</el-button><el-button type="primary" :loading="savingEdit" @click="submitStructureChange">生成审核候选</el-button></div>
       </div>
     </MotionModal>
 
@@ -176,6 +195,7 @@
         <div class="knowledge-modal-head"><div><h3>知识关系洞察</h3><p>定位高连接枢纽、孤立实体，并查找两个实体之间的最短路径。</p></div><span v-if="graphOverview" class="knowledge-status is-healthy">{{ graphOverview.relation_count }} 条关系</span></div>
         <div v-if="graphLoading" class="knowledge-empty"><el-icon class="is-loading"><Loading /></el-icon><span>正在分析关系…</span></div>
         <template v-else-if="graphOverview">
+          <KnowledgeGraphCanvas v-if="graphSnapshot" :snapshot="graphSnapshot" :selected-id="selectedEntry?.id" :path-ids="graphPath.map(entry => entry.id)" @select="openGraphEntry" />
           <section class="graph-path-builder"><strong>关系路径</strong><div><el-select v-model="graphFromId" filterable popper-class="system-select-popper" placeholder="起点"><el-option v-for="entry in graphCandidates" :key="entry.id" :label="entry.title" :value="entry.id" /></el-select><span>→</span><el-select v-model="graphToId" filterable popper-class="system-select-popper" placeholder="终点"><el-option v-for="entry in graphCandidates" :key="entry.id" :label="entry.title" :value="entry.id" /></el-select><el-button :disabled="!graphFromId || !graphToId" @click="findPath">查找</el-button></div><div v-if="graphPath.length" class="graph-path"><button v-for="entry in graphPath" :key="entry.id" type="button" @click="openGraphEntry(entry)">{{ entry.title }}</button></div><p v-else-if="pathSearched">在 5 层关系内没有找到连接路径。</p></section>
           <div class="graph-columns"><section><h4>连接枢纽</h4><button v-for="entry in graphOverview.bridge_entries" :key="entry.id" type="button" @click="openGraphEntry(entry)"><span>{{ entry.title }}</span><b>{{ entry.degree }} 连接</b></button><p v-if="!graphOverview.bridge_entries.length">尚无关系实体</p></section><section><h4>孤立实体</h4><button v-for="entry in graphOverview.orphan_entries" :key="entry.id" type="button" @click="openGraphEntry(entry)"><span>{{ entry.title }}</span><b>{{ entry.entry_type }}</b></button><p v-if="!graphOverview.orphan_entries.length">没有孤立实体</p></section></div>
         </template>
@@ -200,28 +220,33 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Checked, Connection, DataAnalysis, Document, Edit, Loading, Refresh, Search, Tickets } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
+import KnowledgeGraphCanvas from '@/components/knowledge/KnowledgeGraphCanvas.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import {
   findKnowledgeGraphPath,
   getKnowledgeGraphOverview,
+  getKnowledgeGraphSnapshot,
   getKnowledgeEntry,
   lintBookKnowledgeBase,
   listBookKnowledgeBases,
   listKnowledgeChangeSets,
   listKnowledgeEntries,
   proposeKnowledgeEntryEdit,
+  proposeKnowledgeEntryMerge,
+  proposeKnowledgeEntrySplit,
   resolveKnowledgeChangeSet,
   syncBookKnowledgeBase,
   type KnowledgeBaseSummary,
   type KnowledgeEntryDetail,
   type KnowledgeEntrySummary,
   type KnowledgeGraphOverview,
+  type KnowledgeGraphSnapshot,
   type KnowledgeChangeSet,
   type KnowledgeHealthReport,
 } from '@/api/knowledge'
@@ -253,17 +278,37 @@ const healthReport = ref<KnowledgeHealthReport | null>(null)
 const editVisible = ref(false)
 const savingEdit = ref(false)
 const editDraft = reactive({ title: '', summary: '', aliases: '', status: 'draft' as 'draft' | 'verified' | 'archived', contentMd: '' })
+type EditMode = 'edit' | 'merge' | 'split'
+interface SplitPartDraft { key: number; title: string; summary: string; aliases: string; contentMd: string }
+const editMode = ref<EditMode>('edit')
+const structureModes: Array<{ value: EditMode; label: string }> = [
+  { value: 'edit', label: '编辑' },
+  { value: 'merge', label: '合并' },
+  { value: 'split', label: '拆分' },
+]
+const mergeSourceIds = ref<string[]>([])
+const mergeOptions = ref<KnowledgeEntrySummary[]>([])
+const mergeOptionsLoading = ref(false)
+const splitParts = ref<SplitPartDraft[]>([])
+let splitPartKey = 0
 const graphVisible = ref(false)
 const graphLoading = ref(false)
 const graphOverview = ref<KnowledgeGraphOverview | null>(null)
+const graphSnapshot = ref<KnowledgeGraphSnapshot | null>(null)
 const graphFromId = ref('')
 const graphToId = ref('')
 const graphPath = ref<KnowledgeEntrySummary[]>([])
 const pathSearched = ref(false)
 let searchTimer = 0
+let graphReleaseTimer = 0
 
 const activeBase = computed(() => bases.value.find(base => base.id === activeBaseId.value))
-const graphCandidates = computed(() => entries.value.filter(entry => entry.entry_type !== 'source_section'))
+const graphCandidates = computed(() => graphSnapshot.value?.entries || entries.value.filter(entry => entry.entry_type !== 'source_section'))
+const structureModeHint = computed(() => ({
+  edit: '修改标题、别名、状态和正文；保存后先进入审核。',
+  merge: '把重复知识并入当前实体，批准后归档来源并迁移关系。',
+  split: '将复合知识拆成多个独立实体，同时保留原始引用。',
+})[editMode.value])
 const { renderMarkdown, enhance, cleanup } = useMarkdownRender(() => {})
 
 function compileLabel(base: KnowledgeBaseSummary) {
@@ -442,27 +487,107 @@ async function syncActive() {
 
 function openEntryEdit() {
   if (!detail.value) return
+  editMode.value = 'edit'
   editDraft.title = detail.value.title
   editDraft.summary = detail.value.summary
   editDraft.aliases = detail.value.aliases.join('，')
   editDraft.status = detail.value.status === 'verified' || detail.value.status === 'archived' ? detail.value.status : 'draft'
   editDraft.contentMd = detail.value.content_md
+  mergeSourceIds.value = []
+  mergeOptions.value = []
+  resetSplitParts()
   editVisible.value = true
+}
+
+function setEditMode(mode: EditMode) {
+  editMode.value = mode
+  if (mode === 'merge') {
+    if (editDraft.status === 'archived') editDraft.status = 'draft'
+    void searchMergeOptions('')
+  }
+}
+
+async function searchMergeOptions(search: string) {
+  if (!activeBaseId.value || !detail.value) return
+  mergeOptionsLoading.value = true
+  try {
+    const response = await listKnowledgeEntries(activeBaseId.value, { query: search.trim(), offset: 0, limit: 100 })
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '合并候选加载失败')
+    const selected = mergeOptions.value.filter(entry => mergeSourceIds.value.includes(entry.id))
+    const options = [...selected, ...response.result.entries]
+      .filter(entry => entry.entry_type !== 'source_section' && entry.id !== detail.value?.id)
+    mergeOptions.value = [...new Map(options.map(entry => [entry.id, entry])).values()]
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    mergeOptionsLoading.value = false
+  }
+}
+
+function createSplitPart(index: number): SplitPartDraft {
+  splitPartKey += 1
+  return { key: splitPartKey, title: `${detail.value?.title || '新实体'} · ${index + 1}`, summary: '', aliases: '', contentMd: '' }
+}
+
+function resetSplitParts() {
+  splitParts.value = [createSplitPart(0), createSplitPart(1)]
+}
+
+function addSplitPart() {
+  splitParts.value.push(createSplitPart(splitParts.value.length))
+}
+
+function removeSplitPart(index: number) {
+  if (splitParts.value.length > 2) splitParts.value.splice(index, 1)
 }
 
 async function submitEntryEdit() {
   if (!detail.value) return
   savingEdit.value = true
   try {
-    const response = await proposeKnowledgeEntryEdit({
-      entryId: detail.value.id,
-      title: editDraft.title,
-      summary: editDraft.summary,
-      contentMd: editDraft.contentMd,
-      aliases: editDraft.aliases.split(/[，,]/).map(value => value.trim()).filter(Boolean),
-      status: editDraft.status,
-      expectedRevision: detail.value.revision,
-    })
+    let response
+    if (editMode.value === 'edit') {
+      response = await proposeKnowledgeEntryEdit({
+        entryId: detail.value.id,
+        title: editDraft.title,
+        summary: editDraft.summary,
+        contentMd: editDraft.contentMd,
+        aliases: splitAliases(editDraft.aliases),
+        status: editDraft.status,
+        expectedRevision: detail.value.revision,
+      })
+    } else if (editMode.value === 'merge') {
+      if (!mergeSourceIds.value.length) throw new Error('至少选择一个要合并的来源实体')
+      const sourceDetails = await Promise.all(mergeSourceIds.value.map(async (entryId) => {
+        const source = await getKnowledgeEntry(entryId)
+        if (source.status !== 'success' || !source.result) throw new Error(source.error?.message || '合并来源读取失败')
+        return { entryId, expectedRevision: source.result.revision }
+      }))
+      response = await proposeKnowledgeEntryMerge({
+        targetEntryId: detail.value.id,
+        title: editDraft.title,
+        summary: editDraft.summary,
+        contentMd: editDraft.contentMd,
+        aliases: splitAliases(editDraft.aliases),
+        status: editDraft.status === 'verified' ? 'verified' : 'draft',
+        expectedRevision: detail.value.revision,
+        sources: sourceDetails,
+      })
+    } else {
+      if (splitParts.value.some(part => !part.title.trim() || !part.summary.trim() || !part.contentMd.trim())) {
+        throw new Error('请完整填写每个拆分实体的标题、摘要和正文')
+      }
+      response = await proposeKnowledgeEntrySplit({
+        entryId: detail.value.id,
+        expectedRevision: detail.value.revision,
+        parts: splitParts.value.map(part => ({
+          title: part.title.trim(),
+          summary: part.summary.trim(),
+          contentMd: part.contentMd.trim(),
+          aliases: splitAliases(part.aliases),
+        })),
+      })
+    }
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '实体变更提交失败')
     editVisible.value = false
     await loadReviews()
@@ -477,6 +602,14 @@ async function submitEntryEdit() {
   }
 }
 
+function submitStructureChange() {
+  void submitEntryEdit()
+}
+
+function splitAliases(value: string) {
+  return value.split(/[，,]/).map(alias => alias.trim()).filter(Boolean)
+}
+
 async function openGraph() {
   if (!activeBaseId.value) return
   graphVisible.value = true
@@ -484,9 +617,17 @@ async function openGraph() {
   graphPath.value = []
   pathSearched.value = false
   try {
-    const response = await getKnowledgeGraphOverview(activeBaseId.value, 30)
-    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '关系洞察加载失败')
-    graphOverview.value = response.result
+    const desktopSnapshotRequest = window.matchMedia('(max-width: 768px)').matches
+      ? Promise.resolve(null)
+      : getKnowledgeGraphSnapshot(activeBaseId.value, 120)
+    const [overviewResponse, snapshotResponse] = await Promise.all([
+      getKnowledgeGraphOverview(activeBaseId.value, 30),
+      desktopSnapshotRequest,
+    ])
+    if (overviewResponse.status !== 'success' || !overviewResponse.result) throw new Error(overviewResponse.error?.message || '关系洞察加载失败')
+    if (snapshotResponse && (snapshotResponse.status !== 'success' || !snapshotResponse.result)) throw new Error(snapshotResponse.error?.message || '关系画布加载失败')
+    graphOverview.value = overviewResponse.result
+    graphSnapshot.value = snapshotResponse?.result || null
   } catch (error) {
     ElMessage.error((error as Error).message)
   } finally {
@@ -514,6 +655,14 @@ function entryTypeLabel(type: string) {
   return type === 'source_section' ? '来源章节' : type
 }
 
+function changeOperationLabel(operation: string, expectedRevision?: number | null) {
+  if (operation === 'merge') return '合并'
+  if (operation === 'split') return expectedRevision ? '拆分原实体' : '拆分新增'
+  if (operation === 'archive') return '归档'
+  if (operation === 'restore') return '恢复'
+  return operation === 'create' ? '新增' : '更新'
+}
+
 function syncLabel(status: string) {
   return ({ clean: '已同步', outdated: '待同步', failed: '同步失败', scanning: '扫描中' } as Record<string, string>)[status] || status
 }
@@ -525,7 +674,22 @@ function formatTime(value: string) {
 }
 
 onMounted(loadBases)
-onBeforeUnmount(() => { window.clearTimeout(searchTimer); cleanup() })
+watch(graphVisible, (visible) => {
+  window.clearTimeout(graphReleaseTimer)
+  if (!visible) {
+    graphReleaseTimer = window.setTimeout(() => {
+      graphOverview.value = null
+      graphSnapshot.value = null
+      graphPath.value = []
+    }, 260)
+  }
+})
+onBeforeUnmount(() => {
+  window.clearTimeout(searchTimer)
+  window.clearTimeout(graphReleaseTimer)
+  graphSnapshot.value = null
+  cleanup()
+})
 </script>
 
 <style scoped>
@@ -581,7 +745,18 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); cleanup() })
 .review-diff pre { max-height: 210px; overflow: auto; margin-top: 5px; padding: 10px; border-radius: 10px; background: var(--code-block-bg); color: var(--code-block-text); font-size: 9px; white-space: pre-wrap; }
 .entry-edit-modal { display: grid; gap: 12px; max-height: min(820px, calc(100dvh - 40px)); overflow: auto; }
 .entry-edit-modal > label { display: grid; gap: 6px; color: var(--text-muted); font-size: 11px; }
-.graph-modal { display: grid; gap: 14px; }
+.structure-mode-switch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; border: 1px solid var(--border-faint); border-radius: 13px; background: var(--bg-glass-subtle); }
+.structure-mode-switch button { min-height: 34px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); cursor: pointer; transition: var(--transition-interactive); }
+.structure-mode-switch button.active { background: var(--bg-surface); color: var(--accent); box-shadow: var(--shadow-xs); font-weight: 650; }
+.split-note { padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, #ff9f0a 8%, var(--bg-glass-subtle)); color: var(--text-muted); font-size: 10px; line-height: 1.55; }
+.split-parts { display: grid; gap: 9px; }
+.split-parts article { display: grid; gap: 9px; padding: 12px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); }
+.split-parts article > header { display: flex; align-items: center; justify-content: space-between; }
+.split-parts article > header strong { font-size: 12px; }
+.split-parts article > header button { border: 0; background: transparent; color: #d84a42; cursor: pointer; font-size: 10px; }
+.split-parts label { display: grid; gap: 5px; color: var(--text-muted); font-size: 10px; }
+.add-split-part { min-height: 38px; border: 1px dashed var(--accent-border); border-radius: 12px; background: var(--accent-light); color: var(--accent); cursor: pointer; }
+.graph-modal { display: grid; gap: 14px; max-height: min(900px, calc(100dvh - 40px)); overflow: auto; }
 .graph-path-builder { display: grid; gap: 9px; padding: 13px; border-radius: 14px; background: var(--bg-glass-subtle); }
 .graph-path-builder > strong { font-size: 12px; }
 .graph-path-builder > div:first-of-type { display: grid; grid-template-columns: 1fr auto 1fr auto; align-items: center; gap: 7px; }
@@ -655,6 +830,7 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); cleanup() })
   .mobile-back { display: flex; align-items: center; gap: 5px; margin: -4px 0 14px; padding: 8px 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 13px; }
   .entry-detail-head { display: block; }
   .entry-detail-head .knowledge-status { margin-top: 10px; }
+  .entry-edit-modal, .graph-modal { max-height: min(86dvh, 760px); padding-top: 34px; }
 }
 @keyframes mobile-detail-in { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
 </style>

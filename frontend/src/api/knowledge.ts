@@ -125,6 +125,22 @@ export interface KnowledgeGraphPath {
   entries: KnowledgeEntrySummary[]
 }
 
+export interface KnowledgeGraphRelation {
+  id: string
+  from_entry_id: string
+  to_entry_id: string
+  relation_type: string
+  strength?: number | null
+  evidence: string
+}
+
+export interface KnowledgeGraphSnapshot {
+  entries: KnowledgeEntrySummary[]
+  relations: KnowledgeGraphRelation[]
+  total_entries: number
+  truncated: boolean
+}
+
 export interface KnowledgeTask {
   id: string
   knowledge_base_id: string
@@ -476,6 +492,48 @@ export function proposeKnowledgeEntryEdit(input: {
   }) as unknown as Promise<ToolEnvelope<KnowledgeChangeSet>>
 }
 
+export function proposeKnowledgeEntryMerge(input: {
+  targetEntryId: string
+  title: string
+  summary: string
+  contentMd: string
+  aliases: string[]
+  status: 'draft' | 'verified'
+  expectedRevision: number
+  sources: Array<{ entryId: string; expectedRevision: number }>
+}) {
+  return callTool('propose_knowledge_entry_merge', {
+    target_entry_id: input.targetEntryId,
+    title: input.title,
+    summary: input.summary,
+    content_md: input.contentMd,
+    aliases: input.aliases,
+    status: input.status,
+    expected_revision: input.expectedRevision,
+    sources: input.sources.map(source => ({
+      entry_id: source.entryId,
+      expected_revision: source.expectedRevision,
+    })),
+  }) as unknown as Promise<ToolEnvelope<KnowledgeChangeSet>>
+}
+
+export function proposeKnowledgeEntrySplit(input: {
+  entryId: string
+  expectedRevision: number
+  parts: Array<{ title: string; summary: string; contentMd: string; aliases: string[] }>
+}) {
+  return callTool('propose_knowledge_entry_split', {
+    entry_id: input.entryId,
+    expected_revision: input.expectedRevision,
+    parts: input.parts.map(part => ({
+      title: part.title,
+      summary: part.summary,
+      content_md: part.contentMd,
+      aliases: part.aliases,
+    })),
+  }) as unknown as Promise<ToolEnvelope<KnowledgeChangeSet>>
+}
+
 export function proposeReaderSelection(input: {
   knowledgeBaseId: string
   sourcePath: string
@@ -509,6 +567,13 @@ export function findKnowledgeGraphPath(
     to_entry_id: toEntryId,
     max_depth: maxDepth,
   }) as unknown as Promise<ToolEnvelope<KnowledgeGraphPath>>
+}
+
+export function getKnowledgeGraphSnapshot(knowledgeBaseId: string, limit = 120) {
+  return callTool('get_knowledge_graph_snapshot', {
+    knowledge_base_id: knowledgeBaseId,
+    limit,
+  }) as unknown as Promise<ToolEnvelope<KnowledgeGraphSnapshot>>
 }
 
 export function lintBookKnowledgeBase(knowledgeBaseId: string) {

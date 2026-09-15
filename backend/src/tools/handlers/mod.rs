@@ -137,6 +137,12 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(ProposeKnowledgeEntryEditHandler))
         .await;
     registry
+        .register(Arc::new(ProposeKnowledgeEntryMergeHandler))
+        .await;
+    registry
+        .register(Arc::new(ProposeKnowledgeEntrySplitHandler))
+        .await;
+    registry
         .register(Arc::new(ProposeReaderSelectionHandler))
         .await;
     registry
@@ -144,6 +150,9 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .await;
     registry
         .register(Arc::new(FindKnowledgeGraphPathHandler))
+        .await;
+    registry
+        .register(Arc::new(GetKnowledgeGraphSnapshotHandler))
         .await;
     registry
         .register(Arc::new(LintBookKnowledgeBaseHandler))

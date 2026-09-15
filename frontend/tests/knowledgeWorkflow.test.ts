@@ -152,10 +152,11 @@ test('knowledge pages distinguish source synchronization from wiki compilation',
   assert.match(api, /compile_state: 'not_started' \| 'outdated' \| 'compiling' \| 'ready' \| 'failed'/)
 })
 
-test('wiki workspace supports reviewed edits, paged entities, and scoped graph navigation', async () => {
-  const [bases, workspace, reader, chat, tasks, api] = await Promise.all([
+test('wiki workspace supports reviewed structure changes, paging, and an on-demand graph canvas', async () => {
+  const [bases, workspace, graphCanvas, reader, chat, tasks, api] = await Promise.all([
     source('src/views/knowledge/KnowledgeBases.vue'),
     source('src/views/knowledge/WikiWorkspace.vue'),
+    source('src/components/knowledge/KnowledgeGraphCanvas.vue'),
     source('src/views/Reader.vue'),
     source('src/views/knowledge/KnowledgeChat.vue'),
     source('src/views/knowledge/KnowledgeTasks.vue'),
@@ -167,9 +168,16 @@ test('wiki workspace supports reviewed edits, paged entities, and scoped graph n
   assert.match(bases, /原书目录已失效/)
   assert.match(workspace, /继续加载/)
   assert.match(workspace, /proposeKnowledgeEntryEdit/)
+  assert.match(workspace, /proposeKnowledgeEntryMerge/)
+  assert.match(workspace, /proposeKnowledgeEntrySplit/)
+  assert.match(workspace, /调整知识实体/)
   assert.match(workspace, /查看变更前后/)
   assert.match(workspace, /关系洞察/)
   assert.match(workspace, /findKnowledgeGraphPath/)
+  assert.match(workspace, /getKnowledgeGraphSnapshot/)
+  assert.match(graphCanvas, /@wheel\.prevent="onWheel"/)
+  assert.match(graphCanvas, /@pointermove="movePan"/)
+  assert.match(graphCanvas, /@media \(max-width: 768px\) \{ \.graph-canvas-shell \{ display: none;/)
   assert.match(reader, /proposeReaderSelection/)
   assert.match(reader, /加入知识/)
   assert.match(reader, /fileKind === 'md'/)
@@ -177,6 +185,9 @@ test('wiki workspace supports reviewed edits, paged entities, and scoped graph n
   assert.match(tasks, /route\.query\.create === '1'/)
   assert.match(api, /source_available: boolean/)
   assert.match(api, /has_more: boolean/)
+  assert.match(api, /propose_knowledge_entry_merge/)
+  assert.match(api, /propose_knowledge_entry_split/)
+  assert.match(api, /get_knowledge_graph_snapshot/)
 })
 
 test('Book Wiki only exposes Markdown folders while Reader keeps PDF support', async () => {

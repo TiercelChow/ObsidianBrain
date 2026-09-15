@@ -5,7 +5,10 @@ use chrono::{Duration, Local};
 use serde_json::{json, Value};
 
 use crate::error::BrainError;
-use crate::infra::book_wiki_store::KnowledgeEntryEditProposal;
+use crate::infra::book_wiki_store::{
+    KnowledgeEntryEditProposal, KnowledgeEntryMergeProposal, KnowledgeEntryRevision,
+    KnowledgeEntrySplitPart, KnowledgeEntrySplitProposal,
+};
 use crate::infra::deepseek_harness::inspect_runtime_profiles;
 use crate::models::book_wiki::RuntimeProviderConfig;
 use crate::tools::traits::ToolHandler;
@@ -376,6 +379,10 @@ pub struct GetKnowledgeEntryHandler;
 
 pub struct ProposeKnowledgeEntryEditHandler;
 
+pub struct ProposeKnowledgeEntryMergeHandler;
+
+pub struct ProposeKnowledgeEntrySplitHandler;
+
 pub struct ProposeReaderSelectionHandler;
 
 #[async_trait]
@@ -478,6 +485,141 @@ impl ToolHandler for ProposeKnowledgeEntryEditHandler {
     }
 }
 
+#[async_trait]
+impl ToolHandler for ProposeKnowledgeEntryMergeHandler {
+    fn name(&self) -> &str {
+        "propose_knowledge_entry_merge"
+    }
+    fn description(&self) -> &str {
+        "把多个同书实体合并为高风险待审核变更，批准后归档来源并迁移关系"
+    }
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "target_entry_id": { "type": "string" },
+                "title": { "type": "string", "maxLength": 1000 },
+                "summary": { "type": "string", "maxLength": 1000 },
+                "content_md": { "type": "string", "maxLength": 30000 },
+                "aliases": { "type": "array", "maxItems": 30, "items": { "type": "string", "maxLength": 100 } },
+                "status": { "type": "string", "enum": ["draft", "verified"] },
+                "expected_revision": { "type": "integer", "minimum": 1 },
+                "sources": {
+                    "type": "array", "minItems": 1, "maxItems": 20,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "entry_id": { "type": "string" },
+                            "expected_revision": { "type": "integer", "minimum": 1 }
+                        },
+                        "required": ["entry_id", "expected_revision"],
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "required": ["target_entry_id", "title", "summary", "content_md", "aliases", "status", "expected_revision", "sources"],
+            "additionalProperties": false
+        })
+    }
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let aliases = string_array(&args, "aliases")?;
+        let sources = args
+            .get("sources")
+            .and_then(Value::as_array)
+            .ok_or_else(|| BrainError::KnowledgeValidation("sources 必须是数组".to_string()))?
+            .iter()
+            .map(|source| {
+                Ok(KnowledgeEntryRevision {
+                    entry_id: required_string(source, "entry_id")?.to_string(),
+                    expected_revision: required_i64(source, "expected_revision")?,
+                })
+            })
+            .collect::<Result<Vec<_>, BrainError>>()?;
+        let proposal = KnowledgeEntryMergeProposal {
+            title: required_string(&args, "title")?,
+            summary: required_string(&args, "summary")?,
+            content_md: required_string(&args, "content_md")?,
+            aliases: &aliases,
+            status: required_string(&args, "status")?,
+            expected_revision: required_i64(&args, "expected_revision")?,
+            sources: &sources,
+        };
+        serde_json::to_value(
+            ctx.book_wiki_service
+                .store()
+                .propose_entry_merge(required_string(&args, "target_entry_id")?, &proposal)?,
+        )
+        .map_err(|error| BrainError::Internal(format!("实体合并候选序列化失败: {error}")))
+    }
+}
+
+#[async_trait]
+impl ToolHandler for ProposeKnowledgeEntrySplitHandler {
+    fn name(&self) -> &str {
+        "propose_knowledge_entry_split"
+    }
+    fn description(&self) -> &str {
+        "把一个实体拆成多个继承原始引用的新实体，批准前不修改正式知识"
+    }
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "entry_id": { "type": "string" },
+                "expected_revision": { "type": "integer", "minimum": 1 },
+                "parts": {
+                    "type": "array", "minItems": 2, "maxItems": 12,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": { "type": "string", "maxLength": 1000 },
+                            "summary": { "type": "string", "maxLength": 1000 },
+                            "content_md": { "type": "string", "maxLength": 30000 },
+                            "aliases": { "type": "array", "maxItems": 30, "items": { "type": "string", "maxLength": 100 } }
+                        },
+                        "required": ["title", "summary", "content_md", "aliases"],
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "required": ["entry_id", "expected_revision", "parts"],
+            "additionalProperties": false
+        })
+    }
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let parts = args
+            .get("parts")
+            .and_then(Value::as_array)
+            .ok_or_else(|| BrainError::KnowledgeValidation("parts 必须是数组".to_string()))?
+            .iter()
+            .map(|part| {
+                Ok(KnowledgeEntrySplitPart {
+                    title: required_string(part, "title")?.to_string(),
+                    summary: required_string(part, "summary")?.to_string(),
+                    content_md: required_string(part, "content_md")?.to_string(),
+                    aliases: string_array(part, "aliases")?,
+                })
+            })
+            .collect::<Result<Vec<_>, BrainError>>()?;
+        let proposal = KnowledgeEntrySplitProposal {
+            expected_revision: required_i64(&args, "expected_revision")?,
+            parts: &parts,
+        };
+        serde_json::to_value(
+            ctx.book_wiki_service
+                .store()
+                .propose_entry_split(required_string(&args, "entry_id")?, &proposal)?,
+        )
+        .map_err(|error| BrainError::Internal(format!("实体拆分候选序列化失败: {error}")))
+    }
+}
+
 pub struct GetKnowledgeGraphOverviewHandler;
 
 #[async_trait]
@@ -512,6 +654,39 @@ impl ToolHandler for GetKnowledgeGraphOverviewHandler {
 }
 
 pub struct FindKnowledgeGraphPathHandler;
+
+pub struct GetKnowledgeGraphSnapshotHandler;
+
+#[async_trait]
+impl ToolHandler for GetKnowledgeGraphSnapshotHandler {
+    fn name(&self) -> &str {
+        "get_knowledge_graph_snapshot"
+    }
+    fn description(&self) -> &str {
+        "按连接度读取桌面知识图谱画布所需的有限节点和关系快照"
+    }
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": { "type": "string" },
+                "limit": { "type": "integer", "minimum": 10, "maximum": 300, "default": 120 }
+            },
+            "required": ["knowledge_base_id"],
+            "additionalProperties": false
+        })
+    }
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(ctx.book_wiki_service.store().get_graph_snapshot(
+            required_string(&args, "knowledge_base_id")?,
+            args.get("limit").and_then(Value::as_u64).unwrap_or(120) as usize,
+        )?)
+        .map_err(|error| BrainError::Internal(format!("关系图谱快照序列化失败: {error}")))
+    }
+}
 
 #[async_trait]
 impl ToolHandler for FindKnowledgeGraphPathHandler {
@@ -1371,6 +1546,27 @@ fn required_string<'a>(args: &'a Value, key: &str) -> Result<&'a str, BrainError
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| BrainError::KnowledgeValidation(format!("缺少必需参数 {key}")))
+}
+
+fn required_i64(args: &Value, key: &str) -> Result<i64, BrainError> {
+    args.get(key)
+        .and_then(Value::as_i64)
+        .filter(|value| *value > 0)
+        .ok_or_else(|| BrainError::KnowledgeValidation(format!("{key} 必须是正整数")))
+}
+
+fn string_array(args: &Value, key: &str) -> Result<Vec<String>, BrainError> {
+    args.get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(|| BrainError::KnowledgeValidation(format!("{key} 必须是字符串数组")))?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| BrainError::KnowledgeValidation(format!("{key} 必须是字符串数组")))
+        })
+        .collect()
 }
 
 fn empty_schema() -> Value {

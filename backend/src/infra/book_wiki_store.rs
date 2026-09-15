@@ -13,9 +13,10 @@ use crate::models::book_wiki::{
     KnowledgeBaseSummary, KnowledgeBridgeEntry, KnowledgeChange, KnowledgeChangeSet,
     KnowledgeCitation, KnowledgeClaimSummary, KnowledgeConversationDetail,
     KnowledgeConversationSummary, KnowledgeEntryDetail, KnowledgeEntryPage, KnowledgeEntrySummary,
-    KnowledgeEntryVersionSummary, KnowledgeGraphOverview, KnowledgeGraphPath, KnowledgeHealthIssue,
-    KnowledgeHealthReport, KnowledgeMessage, KnowledgeRelationSummary, KnowledgeTask, ReaderBook,
-    RuntimeProfile, RuntimeProviderConfig, SourceDocumentSummary, SourceSpanSnapshot, WikiSkill,
+    KnowledgeEntryVersionSummary, KnowledgeGraphOverview, KnowledgeGraphPath,
+    KnowledgeGraphRelation, KnowledgeGraphSnapshot, KnowledgeHealthIssue, KnowledgeHealthReport,
+    KnowledgeMessage, KnowledgeRelationSummary, KnowledgeTask, ReaderBook, RuntimeProfile,
+    RuntimeProviderConfig, SourceDocumentSummary, SourceSpanSnapshot, WikiSkill,
 };
 
 const LEGACY_BOOKS_KEY: &str = "reader_books";
@@ -34,6 +35,33 @@ pub struct KnowledgeEntryEditProposal<'a> {
     pub aliases: &'a [String],
     pub status: &'a str,
     pub expected_revision: i64,
+}
+
+pub struct KnowledgeEntryRevision {
+    pub entry_id: String,
+    pub expected_revision: i64,
+}
+
+pub struct KnowledgeEntryMergeProposal<'a> {
+    pub title: &'a str,
+    pub summary: &'a str,
+    pub content_md: &'a str,
+    pub aliases: &'a [String],
+    pub status: &'a str,
+    pub expected_revision: i64,
+    pub sources: &'a [KnowledgeEntryRevision],
+}
+
+pub struct KnowledgeEntrySplitPart {
+    pub title: String,
+    pub summary: String,
+    pub content_md: String,
+    pub aliases: Vec<String>,
+}
+
+pub struct KnowledgeEntrySplitProposal<'a> {
+    pub expected_revision: i64,
+    pub parts: &'a [KnowledgeEntrySplitPart],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1714,7 +1742,12 @@ impl BookWikiStore {
         let limit = limit.clamp(1, 100) as i64;
         self.db.with_connection(|conn| {
             let relation_count = conn.query_row(
-                "SELECT COUNT(*) FROM knowledge_relations WHERE knowledge_base_id = ?1",
+                "SELECT COUNT(*) FROM knowledge_relations kr
+                 JOIN knowledge_entries source ON source.id = kr.from_entry_id
+                 JOIN knowledge_entries target ON target.id = kr.to_entry_id
+                 WHERE kr.knowledge_base_id = ?1
+                   AND source.status NOT IN ('archived', 'stale')
+                   AND target.status NOT IN ('archived', 'stale')",
                 params![base_id],
                 |row| row.get::<_, i64>(0),
             )?;
@@ -1730,8 +1763,12 @@ impl BookWikiStore {
                    AND ke.status NOT IN ('archived', 'stale')
                    AND NOT EXISTS (
                        SELECT 1 FROM knowledge_relations kr
+                       JOIN knowledge_entries source ON source.id = kr.from_entry_id
+                       JOIN knowledge_entries target ON target.id = kr.to_entry_id
                        WHERE kr.knowledge_base_id = ?1
                          AND (kr.from_entry_id = ke.id OR kr.to_entry_id = ke.id)
+                         AND source.status NOT IN ('archived', 'stale')
+                         AND target.status NOT IN ('archived', 'stale')
                    )
                  ORDER BY ke.updated_at DESC, ke.title COLLATE NOCASE LIMIT ?2"
             );
@@ -1743,8 +1780,12 @@ impl BookWikiStore {
             let bridge_sql = format!(
                 "SELECT {entry_columns},
                         (SELECT COUNT(*) FROM knowledge_relations kr
+                         JOIN knowledge_entries source ON source.id = kr.from_entry_id
+                         JOIN knowledge_entries target ON target.id = kr.to_entry_id
                          WHERE kr.knowledge_base_id = ?1
-                           AND (kr.from_entry_id = ke.id OR kr.to_entry_id = ke.id)) AS degree
+                           AND (kr.from_entry_id = ke.id OR kr.to_entry_id = ke.id)
+                           AND source.status NOT IN ('archived', 'stale')
+                           AND target.status NOT IN ('archived', 'stale')) AS degree
                  FROM knowledge_entries ke
                  LEFT JOIN source_documents sd ON sd.id = ke.origin_document_id
                  WHERE ke.knowledge_base_id = ?1
@@ -1770,6 +1811,102 @@ impl BookWikiStore {
         })
     }
 
+    pub fn get_graph_snapshot(
+        &self,
+        base_id: &str,
+        limit: usize,
+    ) -> Result<KnowledgeGraphSnapshot, BrainError> {
+        self.get_base(base_id)?;
+        let limit = limit.clamp(10, 300) as i64;
+        self.db.with_connection(|conn| {
+            let total_entries = conn.query_row(
+                "SELECT COUNT(*) FROM knowledge_entries
+                 WHERE knowledge_base_id = ?1 AND entry_type != 'source_section'
+                   AND status NOT IN ('archived', 'stale')",
+                params![base_id],
+                |row| row.get::<_, i64>(0),
+            )?;
+            let mut stmt = conn.prepare(
+                "SELECT ke.id, ke.knowledge_base_id, ke.entry_type, ke.slug, ke.title,
+                        ke.summary, ke.status, ke.confidence, sd.relative_path, ke.updated_at,
+                        COUNT(kr.id) AS degree
+                 FROM knowledge_entries ke
+                 LEFT JOIN source_documents sd ON sd.id = ke.origin_document_id
+                 LEFT JOIN knowledge_relations kr
+                   ON kr.knowledge_base_id = ke.knowledge_base_id
+                  AND (kr.from_entry_id = ke.id OR kr.to_entry_id = ke.id)
+                  AND EXISTS (
+                      SELECT 1 FROM knowledge_entries source
+                      WHERE source.id = kr.from_entry_id
+                        AND source.status NOT IN ('archived', 'stale')
+                  )
+                  AND EXISTS (
+                      SELECT 1 FROM knowledge_entries target
+                      WHERE target.id = kr.to_entry_id
+                        AND target.status NOT IN ('archived', 'stale')
+                  )
+                 WHERE ke.knowledge_base_id = ?1 AND ke.entry_type != 'source_section'
+                   AND ke.status NOT IN ('archived', 'stale')
+                 GROUP BY ke.id
+                 ORDER BY degree DESC, ke.updated_at DESC, ke.title COLLATE NOCASE
+                 LIMIT ?2",
+            )?;
+            let entries = stmt
+                .query_map(params![base_id, limit], map_entry_summary)?
+                .collect::<Result<Vec<_>, _>>()?;
+            if entries.is_empty() {
+                return Ok(KnowledgeGraphSnapshot {
+                    entries,
+                    relations: Vec::new(),
+                    total_entries,
+                    truncated: false,
+                });
+            }
+            let entry_ids = entries
+                .iter()
+                .map(|entry| entry.id.clone())
+                .collect::<Vec<_>>();
+            let placeholders = std::iter::repeat_n("?", entry_ids.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "SELECT kr.id, kr.from_entry_id, kr.to_entry_id, kr.relation_type,
+                        kr.strength, COALESCE(kr.evidence, '')
+                 FROM knowledge_relations kr
+                 JOIN knowledge_entries source ON source.id = kr.from_entry_id
+                 JOIN knowledge_entries target ON target.id = kr.to_entry_id
+                 WHERE kr.knowledge_base_id = ?
+                   AND source.status NOT IN ('archived', 'stale')
+                   AND target.status NOT IN ('archived', 'stale')
+                   AND kr.from_entry_id IN ({placeholders})
+                   AND kr.to_entry_id IN ({placeholders})
+                 ORDER BY kr.relation_type, kr.id"
+            );
+            let parameters = std::iter::once(base_id)
+                .chain(entry_ids.iter().map(String::as_str))
+                .chain(entry_ids.iter().map(String::as_str));
+            let mut relation_stmt = conn.prepare(&sql)?;
+            let relations = relation_stmt
+                .query_map(rusqlite::params_from_iter(parameters), |row| {
+                    Ok(KnowledgeGraphRelation {
+                        id: row.get(0)?,
+                        from_entry_id: row.get(1)?,
+                        to_entry_id: row.get(2)?,
+                        relation_type: row.get(3)?,
+                        strength: row.get(4)?,
+                        evidence: row.get(5)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(KnowledgeGraphSnapshot {
+                truncated: total_entries > entries.len() as i64,
+                entries,
+                relations,
+                total_entries,
+            })
+        })
+    }
+
     pub fn find_graph_path(
         &self,
         base_id: &str,
@@ -1788,8 +1925,12 @@ impl BookWikiStore {
                 });
             }
             let mut stmt = conn.prepare(
-                "SELECT from_entry_id, to_entry_id FROM knowledge_relations
-                 WHERE knowledge_base_id = ?1",
+                "SELECT kr.from_entry_id, kr.to_entry_id FROM knowledge_relations kr
+                 JOIN knowledge_entries source ON source.id = kr.from_entry_id
+                 JOIN knowledge_entries target ON target.id = kr.to_entry_id
+                 WHERE kr.knowledge_base_id = ?1
+                   AND source.status NOT IN ('archived', 'stale')
+                   AND target.status NOT IN ('archived', 'stale')",
             )?;
             let edges = stmt
                 .query_map(params![base_id], |row| {
@@ -1879,28 +2020,11 @@ impl BookWikiStore {
         })
     }
 
-    pub fn propose_entry_edit(
+    fn entry_candidate_snapshot(
         &self,
-        entry_id: &str,
-        proposal: &KnowledgeEntryEditProposal<'_>,
-    ) -> Result<KnowledgeChangeSet, BrainError> {
-        let detail = self.get_entry(entry_id)?;
-        if detail.entry.entry_type == "source_section" {
-            return Err(BrainError::KnowledgeValidation(
-                "来源章节来自原始 Markdown，不能在 Wiki 中直接编辑".to_string(),
-            ));
-        }
-        let base = self.get_base(&detail.entry.knowledge_base_id)?;
-        if base.lifecycle != "active" {
-            return Err(BrainError::KnowledgeValidation(
-                "知识库已暂停或归档，只能浏览，不能提交实体变更".to_string(),
-            ));
-        }
-        if detail.revision != proposal.expected_revision {
-            return Err(BrainError::KnowledgeValidation(
-                "知识实体已变化，请刷新后重试".to_string(),
-            ));
-        }
+        detail: &KnowledgeEntryDetail,
+    ) -> Result<serde_json::Value, BrainError> {
+        let entry_id = &detail.entry.id;
         let (citations, claims, relations) = self.db.with_connection(|conn| {
             let mut citation_stmt = conn.prepare(
                 "SELECT source_span_id FROM knowledge_citations
@@ -1942,20 +2066,52 @@ impl BookWikiStore {
                 .collect::<Result<Vec<_>, _>>()?;
             Ok((citations, claims, relations))
         })?;
-        let candidate = serde_json::json!({
-            "entry_type": detail.entry.entry_type.clone(),
-            "slug": detail.entry.slug.clone(),
-            "title": proposal.title.trim(),
-            "summary": proposal.summary.trim(),
-            "content_md": proposal.content_md.trim(),
-            "aliases": proposal.aliases,
-            "status": proposal.status,
-            "edit_policy": "human_protected",
+        Ok(serde_json::json!({
+            "entry_type": detail.entry.entry_type,
+            "slug": detail.entry.slug,
+            "title": detail.entry.title,
+            "summary": detail.entry.summary,
+            "content_md": detail.content_md,
+            "aliases": detail.aliases,
+            "status": detail.entry.status,
+            "edit_policy": detail.edit_policy,
             "confidence": detail.entry.confidence,
             "citations": citations,
             "claims": claims,
             "relations": relations,
-        });
+        }))
+    }
+
+    pub fn propose_entry_edit(
+        &self,
+        entry_id: &str,
+        proposal: &KnowledgeEntryEditProposal<'_>,
+    ) -> Result<KnowledgeChangeSet, BrainError> {
+        let detail = self.get_entry(entry_id)?;
+        if detail.entry.entry_type == "source_section" {
+            return Err(BrainError::KnowledgeValidation(
+                "来源章节来自原始 Markdown，不能在 Wiki 中直接编辑".to_string(),
+            ));
+        }
+        let base = self.get_base(&detail.entry.knowledge_base_id)?;
+        if base.lifecycle != "active" {
+            return Err(BrainError::KnowledgeValidation(
+                "知识库已暂停或归档，只能浏览，不能提交实体变更".to_string(),
+            ));
+        }
+        if detail.revision != proposal.expected_revision {
+            return Err(BrainError::KnowledgeValidation(
+                "知识实体已变化，请刷新后重试".to_string(),
+            ));
+        }
+        let mut candidate = self.entry_candidate_snapshot(&detail)?;
+        candidate["title"] = serde_json::Value::String(proposal.title.trim().to_string());
+        candidate["summary"] = serde_json::Value::String(proposal.summary.trim().to_string());
+        candidate["content_md"] = serde_json::Value::String(proposal.content_md.trim().to_string());
+        candidate["aliases"] = serde_json::to_value(proposal.aliases)
+            .map_err(|error| BrainError::Internal(format!("实体别名序列化失败: {error}")))?;
+        candidate["status"] = serde_json::Value::String(proposal.status.to_string());
+        candidate["edit_policy"] = serde_json::Value::String("human_protected".to_string());
         let input = serde_json::json!({
             "entry_id": entry_id,
             "expected_revision": proposal.expected_revision,
@@ -1988,6 +2144,298 @@ impl BookWikiStore {
                 Err(error)
             }
         }
+    }
+
+    pub fn propose_entry_merge(
+        &self,
+        target_entry_id: &str,
+        proposal: &KnowledgeEntryMergeProposal<'_>,
+    ) -> Result<KnowledgeChangeSet, BrainError> {
+        let target = self.get_entry(target_entry_id)?;
+        self.get_active_base(&target.entry.knowledge_base_id)?;
+        if target.entry.entry_type == "source_section"
+            || matches!(target.entry.status.as_str(), "archived" | "stale")
+        {
+            return Err(BrainError::KnowledgeValidation(
+                "来源章节或已归档实体不能作为合并目标".to_string(),
+            ));
+        }
+        if target.revision != proposal.expected_revision {
+            return Err(BrainError::KnowledgeValidation(
+                "合并目标已变化，请刷新后重试".to_string(),
+            ));
+        }
+        if !matches!(proposal.status, "draft" | "verified") {
+            return Err(BrainError::KnowledgeValidation(
+                "合并后的实体状态只能是 draft 或 verified".to_string(),
+            ));
+        }
+        if proposal.sources.is_empty() || proposal.sources.len() > 20 {
+            return Err(BrainError::KnowledgeValidation(
+                "一次合并需要选择 1 至 20 个来源实体".to_string(),
+            ));
+        }
+        let mut seen_ids = HashSet::from([target_entry_id.to_string()]);
+        let mut source_details = Vec::with_capacity(proposal.sources.len());
+        for source in proposal.sources {
+            if !seen_ids.insert(source.entry_id.clone()) {
+                return Err(BrainError::KnowledgeValidation(
+                    "合并来源不能重复或包含目标实体".to_string(),
+                ));
+            }
+            let detail = self.get_entry(&source.entry_id)?;
+            if detail.entry.knowledge_base_id != target.entry.knowledge_base_id {
+                return Err(BrainError::KnowledgeValidation(
+                    "只能合并同一本书中的实体".to_string(),
+                ));
+            }
+            if detail.entry.entry_type == "source_section"
+                || matches!(detail.entry.status.as_str(), "archived" | "stale")
+            {
+                return Err(BrainError::KnowledgeValidation(
+                    "来源章节或已归档实体不能参与合并".to_string(),
+                ));
+            }
+            if detail.revision != source.expected_revision {
+                return Err(BrainError::KnowledgeValidation(format!(
+                    "合并来源“{}”已变化，请刷新后重试",
+                    detail.entry.title
+                )));
+            }
+            source_details.push(detail);
+        }
+
+        let mut candidates = Vec::with_capacity(source_details.len() + 1);
+        let mut target_candidate = self.entry_candidate_snapshot(&target)?;
+        let mut citations = json_string_list(&target_candidate, "citations")?;
+        let mut citation_set = citations.iter().cloned().collect::<HashSet<_>>();
+        let mut claims = target_candidate["claims"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let mut claim_set = claims
+            .iter()
+            .filter_map(|claim| claim.get("claim_text").and_then(serde_json::Value::as_str))
+            .map(str::to_string)
+            .collect::<HashSet<_>>();
+        let mut relations = target_candidate["relations"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let mut relation_set = relations
+            .iter()
+            .map(|relation| {
+                format!(
+                    "{}:{}",
+                    relation
+                        .get("to_slug")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default(),
+                    relation
+                        .get("relation_type")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                )
+            })
+            .collect::<HashSet<_>>();
+        let merged_slugs = source_details
+            .iter()
+            .map(|detail| detail.entry.slug.clone())
+            .chain(std::iter::once(target.entry.slug.clone()))
+            .collect::<HashSet<_>>();
+        let mut aliases = proposal.aliases.to_vec();
+        for detail in &source_details {
+            let source_candidate = self.entry_candidate_snapshot(detail)?;
+            for citation in json_string_list(&source_candidate, "citations")? {
+                if citation_set.insert(citation.clone()) {
+                    citations.push(citation);
+                }
+            }
+            for claim in source_candidate["claims"].as_array().into_iter().flatten() {
+                let key = claim
+                    .get("claim_text")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                if claim_set.insert(key.to_string()) {
+                    claims.push(claim.clone());
+                }
+            }
+            for relation in source_candidate["relations"]
+                .as_array()
+                .into_iter()
+                .flatten()
+            {
+                let to_slug = relation
+                    .get("to_slug")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                let relation_type = relation
+                    .get("relation_type")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                let key = format!("{to_slug}:{relation_type}");
+                if !merged_slugs.contains(to_slug) && relation_set.insert(key) {
+                    relations.push(relation.clone());
+                }
+            }
+            aliases.push(detail.entry.title.clone());
+            aliases.extend(detail.aliases.clone());
+        }
+        aliases.retain(|alias| !alias.trim().is_empty());
+        aliases.sort();
+        aliases.dedup();
+        aliases.truncate(30);
+        relations.retain(|relation| {
+            relation
+                .get("to_slug")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|slug| !merged_slugs.contains(slug))
+        });
+        target_candidate["title"] = serde_json::Value::String(proposal.title.trim().to_string());
+        target_candidate["summary"] =
+            serde_json::Value::String(proposal.summary.trim().to_string());
+        target_candidate["content_md"] =
+            serde_json::Value::String(proposal.content_md.trim().to_string());
+        target_candidate["aliases"] = serde_json::to_value(aliases)
+            .map_err(|error| BrainError::Internal(format!("合并别名序列化失败: {error}")))?;
+        target_candidate["status"] = serde_json::Value::String(proposal.status.to_string());
+        target_candidate["edit_policy"] = serde_json::Value::String("human_protected".to_string());
+        target_candidate["citations"] = serde_json::to_value(citations)
+            .map_err(|error| BrainError::Internal(format!("合并引用序列化失败: {error}")))?;
+        target_candidate["claims"] = serde_json::Value::Array(claims);
+        target_candidate["relations"] = serde_json::Value::Array(relations);
+        target_candidate["_operation"] = serde_json::Value::String("merge".to_string());
+        target_candidate["merge_source_ids"] = serde_json::to_value(
+            source_details
+                .iter()
+                .map(|detail| detail.entry.id.clone())
+                .collect::<Vec<_>>(),
+        )
+        .map_err(|error| BrainError::Internal(format!("合并来源序列化失败: {error}")))?;
+        candidates.push(target_candidate);
+
+        for detail in &source_details {
+            let mut candidate = self.entry_candidate_snapshot(detail)?;
+            candidate["status"] = serde_json::Value::String("archived".to_string());
+            candidate["edit_policy"] = serde_json::Value::String("human_protected".to_string());
+            candidate["relations"] = serde_json::json!([]);
+            candidate["_operation"] = serde_json::Value::String("merge".to_string());
+            candidate["merge_target_id"] = serde_json::Value::String(target_entry_id.to_string());
+            candidates.push(candidate);
+        }
+        let revision_key = proposal
+            .sources
+            .iter()
+            .map(|source| format!("{}:{}", source.entry_id, source.expected_revision))
+            .collect::<Vec<_>>()
+            .join(",");
+        let input = serde_json::json!({
+            "target_entry_id": target_entry_id,
+            "source_entry_ids": proposal.sources.iter().map(|source| &source.entry_id).collect::<Vec<_>>(),
+            "source": "wiki_workspace",
+        });
+        let run = self.start_agent_run(
+            &target.entry.knowledge_base_id,
+            "user",
+            "knowledge_manual_merge",
+            &input,
+        )?;
+        let result = self.create_semantic_change_set(
+            &target.entry.knowledge_base_id,
+            &run.id,
+            &format!("合并实体：{}", target.entry.title),
+            "合并会更新目标、归档来源并迁移关系，批准前不会修改正式知识",
+            &format!(
+                "manual-merge:{target_entry_id}:{}:{revision_key}",
+                proposal.expected_revision
+            ),
+            &candidates,
+        );
+        complete_manual_change_run(self, &run.id, result)
+    }
+
+    pub fn propose_entry_split(
+        &self,
+        entry_id: &str,
+        proposal: &KnowledgeEntrySplitProposal<'_>,
+    ) -> Result<KnowledgeChangeSet, BrainError> {
+        let original = self.get_entry(entry_id)?;
+        self.get_active_base(&original.entry.knowledge_base_id)?;
+        if original.entry.entry_type == "source_section"
+            || matches!(original.entry.status.as_str(), "archived" | "stale")
+        {
+            return Err(BrainError::KnowledgeValidation(
+                "来源章节或已归档实体不能拆分".to_string(),
+            ));
+        }
+        if original.revision != proposal.expected_revision {
+            return Err(BrainError::KnowledgeValidation(
+                "待拆分实体已变化，请刷新后重试".to_string(),
+            ));
+        }
+        if !(2..=12).contains(&proposal.parts.len()) {
+            return Err(BrainError::KnowledgeValidation(
+                "一次拆分需要提供 2 至 12 个新实体".to_string(),
+            ));
+        }
+        let source_candidate = self.entry_candidate_snapshot(&original)?;
+        let citations = json_string_list(&source_candidate, "citations")?;
+        let mut candidates = Vec::with_capacity(proposal.parts.len() + 1);
+        let mut archived = source_candidate;
+        archived["status"] = serde_json::Value::String("archived".to_string());
+        archived["edit_policy"] = serde_json::Value::String("human_protected".to_string());
+        archived["_operation"] = serde_json::Value::String("split".to_string());
+        candidates.push(archived);
+        let mut identity_set = HashSet::new();
+        for (index, part) in proposal.parts.iter().enumerate() {
+            let identity = format!(
+                "{}:{}:{}",
+                part.title.trim(),
+                part.summary.trim(),
+                part.content_md.trim()
+            );
+            if !identity_set.insert(identity.clone()) {
+                return Err(BrainError::KnowledgeValidation(
+                    "拆分后的实体内容不能完全重复".to_string(),
+                ));
+            }
+            candidates.push(serde_json::json!({
+                "entry_type": original.entry.entry_type,
+                "slug": format!("{}-{}", original.entry.slug, stable_id("part", &format!("{entry_id}:{index}:{identity}"))),
+                "title": part.title.trim(),
+                "summary": part.summary.trim(),
+                "content_md": part.content_md.trim(),
+                "aliases": part.aliases,
+                "status": "draft",
+                "edit_policy": "human_protected",
+                "confidence": original.entry.confidence,
+                "citations": citations,
+                "claims": [],
+                "relations": [],
+                "_operation": "split",
+                "split_from_entry_id": entry_id,
+            }));
+        }
+        let input = serde_json::json!({
+            "entry_id": entry_id,
+            "part_count": proposal.parts.len(),
+            "source": "wiki_workspace",
+        });
+        let run = self.start_agent_run(
+            &original.entry.knowledge_base_id,
+            "user",
+            "knowledge_manual_split",
+            &input,
+        )?;
+        let result = self.create_semantic_change_set(
+            &original.entry.knowledge_base_id,
+            &run.id,
+            &format!("拆分实体：{}", original.entry.title),
+            "拆分会归档原实体并建立带原始引用的新实体，批准前不会修改正式知识",
+            &format!("manual-split:{entry_id}:{}", proposal.expected_revision),
+            &candidates,
+        );
+        complete_manual_change_run(self, &run.id, result)
     }
 
     pub fn propose_reader_selection(
@@ -2161,6 +2609,16 @@ impl BookWikiStore {
             for (ordinal, candidate) in candidates.iter().enumerate() {
                 let slug = required_json_string(candidate, "slug")?;
                 let entry_type = required_json_string(candidate, "entry_type")?;
+                let requested_operation = candidate
+                    .get("_operation")
+                    .and_then(serde_json::Value::as_str);
+                if requested_operation.is_some_and(|operation| {
+                    !matches!(operation, "merge" | "split" | "archive" | "restore")
+                }) {
+                    return Err(BrainError::KnowledgeValidation(
+                        "知识候选包含未知的结构化操作".to_string(),
+                    ));
+                }
                 if candidate
                     .get("edit_policy")
                     .and_then(serde_json::Value::as_str)
@@ -2189,7 +2647,7 @@ impl BookWikiStore {
                         },
                     )
                     .optional()?;
-                let (operation, expected_revision, before) = match existing {
+                let (default_operation, expected_revision, before) = match existing {
                     Some((
                         revision,
                         title,
@@ -2223,6 +2681,10 @@ impl BookWikiStore {
                     None => ("create", None, None),
                 };
                 let mut after = candidate.clone();
+                if let Some(object) = after.as_object_mut() {
+                    object.remove("_operation");
+                }
+                let operation = requested_operation.unwrap_or(default_operation);
                 after["id"] = serde_json::Value::String(object_id.clone());
                 conn.execute(
                     "INSERT INTO knowledge_changes
@@ -2457,6 +2919,7 @@ impl BookWikiStore {
             for change in &change_set.changes {
                 apply_entry_relations(conn, &change_set.knowledge_base_id, change, &now)?;
             }
+            apply_merge_redirects(conn, &change_set, &now)?;
             conn.execute(
                 "UPDATE knowledge_change_sets
                  SET status = 'applied', resolved_at = ?2, resolved_by = 'user'
@@ -4864,9 +5327,9 @@ fn validate_change_revision(
             |row| row.get::<_, i64>(0),
         )
         .optional()?;
-    match (change.operation.as_str(), change.expected_revision, current) {
-        ("create", None, None) => Ok(()),
-        ("update", Some(expected), Some(current)) if expected == current => Ok(()),
+    match (change.expected_revision, current) {
+        (None, None) => Ok(()),
+        (Some(expected), Some(current)) if expected == current => Ok(()),
         _ => Err(BrainError::KnowledgeValidation(format!(
             "知识条目 {} 已变化，变更集需要重新生成",
             change.object_id
@@ -4901,7 +5364,7 @@ fn apply_entry_change(
         .and_then(serde_json::Value::as_str)
         .unwrap_or("agent_managed");
 
-    if change.operation == "create" {
+    if change.expected_revision.is_none() {
         conn.execute(
             "INSERT INTO knowledge_entries
              (id, knowledge_base_id, entry_type, slug, title, summary, content_md, status,
@@ -5061,7 +5524,7 @@ fn apply_entry_change(
         "INSERT OR REPLACE INTO knowledge_entry_versions
          (id, entry_id, revision, title, summary, content_md, aliases_json, status,
           confidence, changed_by_run_id, change_set_id, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'draft', ?8, ?9, ?10, ?11)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             stable_id(
                 "entry-version",
@@ -5073,6 +5536,7 @@ fn apply_entry_change(
             summary,
             content_md,
             aliases,
+            status,
             confidence,
             change_set.agent_run_id,
             change_set.id,
@@ -5092,6 +5556,14 @@ fn apply_entry_relations(
         "DELETE FROM knowledge_relations WHERE from_entry_id = ?1",
         params![change.object_id],
     )?;
+    if change
+        .after
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        == Some("archived")
+    {
+        return Ok(());
+    }
     let Some(relations) = change
         .after
         .get("relations")
@@ -5144,6 +5616,97 @@ fn apply_entry_relations(
         )?;
     }
     Ok(())
+}
+
+fn apply_merge_redirects(
+    conn: &rusqlite::Connection,
+    change_set: &KnowledgeChangeSet,
+    now: &str,
+) -> Result<(), BrainError> {
+    for change in &change_set.changes {
+        let Some(source_ids) = change
+            .after
+            .get("merge_source_ids")
+            .and_then(serde_json::Value::as_array)
+        else {
+            continue;
+        };
+        let source_ids = source_ids
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect::<HashSet<_>>();
+        for source_id in &source_ids {
+            let mut stmt = conn.prepare(
+                "SELECT from_entry_id, relation_type, strength, COALESCE(evidence, '')
+                 FROM knowledge_relations
+                 WHERE knowledge_base_id = ?1 AND to_entry_id = ?2",
+            )?;
+            let incoming = stmt
+                .query_map(params![change_set.knowledge_base_id, source_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<f64>>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            for (from_entry_id, relation_type, strength, evidence) in incoming {
+                if from_entry_id == change.object_id || source_ids.contains(from_entry_id.as_str())
+                {
+                    continue;
+                }
+                conn.execute(
+                    "INSERT OR IGNORE INTO knowledge_relations
+                     (id, knowledge_base_id, from_entry_id, to_entry_id, relation_type,
+                      strength, evidence, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+                    params![
+                        stable_id(
+                            "relation",
+                            &format!("{from_entry_id}:{}:{relation_type}", change.object_id),
+                        ),
+                        change_set.knowledge_base_id,
+                        from_entry_id,
+                        change.object_id,
+                        relation_type,
+                        strength,
+                        evidence,
+                        now,
+                    ],
+                )?;
+            }
+        }
+        for source_id in source_ids {
+            conn.execute(
+                "DELETE FROM knowledge_relations
+                 WHERE knowledge_base_id = ?1
+                   AND (from_entry_id = ?2 OR to_entry_id = ?2)",
+                params![change_set.knowledge_base_id, source_id],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn complete_manual_change_run(
+    store: &BookWikiStore,
+    run_id: &str,
+    result: Result<KnowledgeChangeSet, BrainError>,
+) -> Result<KnowledgeChangeSet, BrainError> {
+    match result {
+        Ok(change_set) => {
+            store.complete_agent_run(
+                run_id,
+                &serde_json::json!({ "change_set_id": change_set.id }),
+            )?;
+            Ok(change_set)
+        }
+        Err(error) => {
+            let _ = store.fail_agent_run(run_id, &error.to_string());
+            Err(error)
+        }
+    }
 }
 
 fn refresh_review_state(
@@ -6767,6 +7330,191 @@ mod tests {
     }
 
     #[test]
+    fn test_manual_merge_archives_sources_and_redirects_relations_atomically() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-merge", "/tmp/book-merge")])
+            .unwrap();
+        let base = store.initialize_base("book-merge").unwrap();
+        store
+            .sync_markdown_sources(
+                &base.id,
+                &[sample_source("merge", "source-entry-merge", "span-merge")],
+            )
+            .unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_ingest",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        let candidate = |slug: &str, title: &str, relations: serde_json::Value| {
+            serde_json::json!({
+                "entry_type": "concept", "slug": slug, "title": title,
+                "summary": format!("{title}摘要"), "content_md": format!("{title}正文"),
+                "aliases": [], "confidence": 0.8, "citations": ["span-merge"],
+                "claims": [], "relations": relations,
+            })
+        };
+        let initial = store
+            .create_semantic_change_set(
+                &base.id,
+                &run.id,
+                "合并准备",
+                "测试",
+                "test-merge-initial",
+                &[
+                    candidate("alpha", "甲", serde_json::json!([])),
+                    candidate(
+                        "beta",
+                        "乙",
+                        serde_json::json!([{
+                            "to_slug": "gamma", "relation_type": "explains",
+                            "strength": 0.8, "evidence": "乙解释丙"
+                        }]),
+                    ),
+                    candidate(
+                        "gamma",
+                        "丙",
+                        serde_json::json!([{
+                            "to_slug": "beta", "relation_type": "supports",
+                            "strength": 0.7, "evidence": "丙支持乙"
+                        }]),
+                    ),
+                ],
+            )
+            .unwrap();
+        store.resolve_change_set(&initial.id, true, "").unwrap();
+        let alpha_id = stable_id("entry", &format!("{}:concept:alpha", base.id));
+        let beta_id = stable_id("entry", &format!("{}:concept:beta", base.id));
+        let gamma_id = stable_id("entry", &format!("{}:concept:gamma", base.id));
+        let alpha = store.get_entry(&alpha_id).unwrap();
+        let beta = store.get_entry(&beta_id).unwrap();
+
+        let merge = store
+            .propose_entry_merge(
+                &alpha_id,
+                &KnowledgeEntryMergeProposal {
+                    title: "甲乙合并",
+                    summary: "合并摘要",
+                    content_md: "甲与乙的完整内容",
+                    aliases: &["甲".to_string(), "乙".to_string()],
+                    status: "verified",
+                    expected_revision: alpha.revision,
+                    sources: &[KnowledgeEntryRevision {
+                        entry_id: beta_id.clone(),
+                        expected_revision: beta.revision,
+                    }],
+                },
+            )
+            .unwrap();
+        assert!(merge
+            .changes
+            .iter()
+            .all(|change| change.operation == "merge"));
+        assert_eq!(store.get_entry(&beta_id).unwrap().entry.status, "draft");
+
+        store
+            .resolve_change_set(&merge.id, true, "确认合并")
+            .unwrap();
+        let merged = store.get_entry(&alpha_id).unwrap();
+        assert_eq!(merged.entry.title, "甲乙合并");
+        assert_eq!(merged.entry.status, "verified");
+        assert_eq!(store.get_entry(&beta_id).unwrap().entry.status, "archived");
+        let path = store
+            .find_graph_path(&base.id, &gamma_id, &alpha_id, 3)
+            .unwrap();
+        assert_eq!(path.entries.len(), 2);
+        assert!(store
+            .list_entries(&base.id, Some("乙正文"), None, 20)
+            .unwrap()
+            .iter()
+            .all(|entry| entry.id != beta_id));
+    }
+
+    #[test]
+    fn test_manual_split_archives_original_and_creates_cited_parts_after_review() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-split", "/tmp/book-split")])
+            .unwrap();
+        let base = store.initialize_base("book-split").unwrap();
+        store
+            .sync_markdown_sources(
+                &base.id,
+                &[sample_source("split", "source-entry-split", "span-split")],
+            )
+            .unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_ingest",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        let initial = store
+            .create_semantic_change_set(
+                &base.id,
+                &run.id,
+                "拆分准备",
+                "测试",
+                "test-split-initial",
+                &[semantic_candidate("span-split", "复合主题")],
+            )
+            .unwrap();
+        store.resolve_change_set(&initial.id, true, "").unwrap();
+        let original_id = stable_id("entry", &format!("{}:concept:semantic-concept", base.id));
+        let original = store.get_entry(&original_id).unwrap();
+
+        let split = store
+            .propose_entry_split(
+                &original_id,
+                &KnowledgeEntrySplitProposal {
+                    expected_revision: original.revision,
+                    parts: &[
+                        KnowledgeEntrySplitPart {
+                            title: "主题甲".to_string(),
+                            summary: "甲摘要".to_string(),
+                            content_md: "甲正文".to_string(),
+                            aliases: Vec::new(),
+                        },
+                        KnowledgeEntrySplitPart {
+                            title: "主题乙".to_string(),
+                            summary: "乙摘要".to_string(),
+                            content_md: "乙正文".to_string(),
+                            aliases: vec!["乙别名".to_string()],
+                        },
+                    ],
+                },
+            )
+            .unwrap();
+        assert_eq!(split.changes.len(), 3);
+        assert!(split
+            .changes
+            .iter()
+            .all(|change| change.operation == "split"));
+        assert_eq!(store.get_entry(&original_id).unwrap().entry.status, "draft");
+
+        store
+            .resolve_change_set(&split.id, true, "确认拆分")
+            .unwrap();
+        assert_eq!(
+            store.get_entry(&original_id).unwrap().entry.status,
+            "archived"
+        );
+        let parts = store
+            .list_entries(&base.id, Some("主题"), Some("concept"), 20)
+            .unwrap();
+        assert_eq!(parts.len(), 2);
+        for part in parts {
+            assert_eq!(store.get_entry(&part.id).unwrap().citations.len(), 1);
+        }
+    }
+
+    #[test]
     fn test_reader_selection_creates_cited_review_candidate() {
         let (store, dir) = test_store();
         let book_path = dir.path().join("selection-book");
@@ -6869,6 +7617,12 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["甲", "乙"]
         );
+        let snapshot = store.get_graph_snapshot(&base.id, 120).unwrap();
+        assert_eq!(snapshot.entries.len(), 3);
+        assert_eq!(snapshot.relations.len(), 1);
+        assert_eq!(snapshot.relations[0].from_entry_id, alpha);
+        assert_eq!(snapshot.relations[0].to_entry_id, beta);
+        assert!(!snapshot.truncated);
     }
 
     #[test]
