@@ -213,12 +213,15 @@ pub struct StorageConfig {
     pub db_path: PathBuf,
     #[serde(default = "default_index_path")]
     pub index_path: PathBuf,
+    #[serde(default = "default_backup_retention")]
+    pub backup_retention: usize,
 }
 impl Default for StorageConfig {
     fn default() -> Self {
         Self {
             db_path: default_db_path(),
             index_path: default_index_path(),
+            backup_retention: default_backup_retention(),
         }
     }
 }
@@ -326,6 +329,9 @@ fn default_db_path() -> PathBuf {
 }
 fn default_index_path() -> PathBuf {
     crate::paths::index_path()
+}
+fn default_backup_retention() -> usize {
+    7
 }
 fn default_log_level() -> String {
     "info".to_string()

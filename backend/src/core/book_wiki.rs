@@ -383,6 +383,16 @@ impl BookWikiService {
                         }
                     }
                     Ok(None) => {
+                        match self.store.recover_expired_task_leases() {
+                            Ok(recovered) if recovered > 0 => {
+                                tracing::warn!(recovered, "已重新排队租约过期的知识研究任务");
+                                continue;
+                            }
+                            Ok(_) => {}
+                            Err(error) => {
+                                tracing::error!(error = %error, "恢复过期知识任务租约失败");
+                            }
+                        }
                         let _ = tokio::time::timeout(
                             Duration::from_secs(2),
                             self.task_notify.notified(),
@@ -404,7 +414,30 @@ impl BookWikiService {
         task: KnowledgeTask,
     ) -> Result<KnowledgeTaskExecution, BrainError> {
         let task_id = task.id.clone();
+        let (heartbeat_stop, mut heartbeat_stop_receiver) = tokio::sync::watch::channel(false);
+        let heartbeat_store = self.store.clone();
+        let heartbeat_task_id = task_id.clone();
+        let heartbeat = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(15));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        match heartbeat_store.renew_task_lease(&heartbeat_task_id) {
+                            Ok(true) => {}
+                            Ok(false) => break,
+                            Err(error) => tracing::warn!(task_id = %heartbeat_task_id, error = %error, "知识任务租约续期失败"),
+                        }
+                    }
+                    changed = heartbeat_stop_receiver.changed() => {
+                        if changed.is_err() || *heartbeat_stop_receiver.borrow() { break; }
+                    }
+                }
+            }
+        });
         let result = self.execute_task_inner(&task).await;
+        let _ = heartbeat_stop.send(true);
+        let _ = heartbeat.await;
         match result {
             Ok((run_id, answer, evidence)) => {
                 if self.store.get_task(&task_id)?.cancel_requested {
@@ -450,7 +483,7 @@ impl BookWikiService {
                 }
                 if let Err(store_error) = self
                     .store
-                    .fail_task_execution(&task_id, &format!("执行失败：{error}"))
+                    .retry_or_fail_task_execution(&task_id, &format!("执行失败：{error}"))
                 {
                     tracing::error!(
                         task_id = %task_id,

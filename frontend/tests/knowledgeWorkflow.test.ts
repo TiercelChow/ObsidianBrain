@@ -110,6 +110,24 @@ test('wiki settings manage versioned skills per book and keep execution instruct
   assert.match(api, /knowledge\/skills\/import/)
 })
 
+test('wiki settings expose consistent database snapshots and guarded restore flows', async () => {
+  const [settings, api] = await Promise.all([
+    source('src/views/knowledge/WikiSettings.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+
+  assert.match(settings, /SQLite Online Backup/)
+  assert.match(settings, /listKnowledgeBackups/)
+  assert.match(settings, /createKnowledgeBackup/)
+  assert.match(settings, /knowledgeBackupDownloadUrl/)
+  assert.match(settings, /uploadAndRestoreKnowledgeBackup/)
+  assert.match(settings, /restoreConfirmation !== 'RESTORE'/)
+  assert.match(api, /list_knowledge_backups/)
+  assert.match(api, /create_knowledge_backup/)
+  assert.match(api, /restore_knowledge_backup/)
+  assert.match(api, /knowledge\/backups\/restore\/upload/)
+})
+
 test('knowledge tasks expose durable execution controls and real presentation artifacts', async () => {
   const [view, api] = await Promise.all([
     source('src/views/knowledge/KnowledgeTasks.vue'),

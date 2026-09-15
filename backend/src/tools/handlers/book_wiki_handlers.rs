@@ -1107,6 +1107,122 @@ impl ToolHandler for ExecuteKnowledgeTaskHandler {
 
 pub struct GetBookWikiSettingsHandler;
 
+pub struct ListKnowledgeBackupsHandler;
+
+#[async_trait]
+impl ToolHandler for ListKnowledgeBackupsHandler {
+    fn name(&self) -> &str {
+        "list_knowledge_backups"
+    }
+
+    fn description(&self) -> &str {
+        "列出 SQLite Online Backup 创建的一致性数据库快照"
+    }
+
+    fn input_schema(&self) -> Value {
+        empty_schema()
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, _args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        Ok(json!({
+            "backups": ctx.db.list_managed_backups()?,
+            "retention": ctx.db.backup_retention()
+        }))
+    }
+}
+
+pub struct CreateKnowledgeBackupHandler;
+
+#[async_trait]
+impl ToolHandler for CreateKnowledgeBackupHandler {
+    fn name(&self) -> &str {
+        "create_knowledge_backup"
+    }
+
+    fn description(&self) -> &str {
+        "立即创建包含当前 WAL 写入的一致性数据库快照"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "reason": { "type": "string", "maxLength": 80, "default": "manual" }
+            },
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let db = ctx.db.clone();
+        let reason = args
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or("manual")
+            .to_string();
+        let backup = tokio::task::spawn_blocking(move || {
+            db.create_managed_backup(&reason, db.backup_retention())
+        })
+        .await
+        .map_err(|error| BrainError::Internal(format!("备份任务失败: {error}")))??;
+        serde_json::to_value(backup)
+            .map_err(|error| BrainError::Internal(format!("备份结果序列化失败: {error}")))
+    }
+}
+
+pub struct RestoreKnowledgeBackupHandler;
+
+#[async_trait]
+impl ToolHandler for RestoreKnowledgeBackupHandler {
+    fn name(&self) -> &str {
+        "restore_knowledge_backup"
+    }
+
+    fn description(&self) -> &str {
+        "从应用管理的快照安全恢复数据库，并重建派生全文索引"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "filename": { "type": "string", "minLength": 1, "maxLength": 180 },
+                "confirmation": { "type": "string", "const": "RESTORE" }
+            },
+            "required": ["filename", "confirmation"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let filename = required_string(&args, "filename")?;
+        let confirmation = required_string(&args, "confirmation")?.to_string();
+        let path = ctx.db.managed_backup_path(filename)?;
+        let db = ctx.db.clone();
+        let report = tokio::task::spawn_blocking(move || {
+            db.restore_database_file(&path, &confirmation, db.backup_retention())
+        })
+        .await
+        .map_err(|error| BrainError::Internal(format!("恢复任务失败: {error}")))??;
+        ctx.book_wiki_service
+            .store()
+            .rebuild_knowledge_search_indexes()?;
+        Ok(json!({ "validation": report }))
+    }
+}
+
 pub struct ListWikiSkillsHandler;
 
 #[async_trait]

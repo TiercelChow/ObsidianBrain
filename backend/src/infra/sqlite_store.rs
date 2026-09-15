@@ -1,8 +1,11 @@
 // DB functions naturally take many parameters and return complex rusqlite types.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-use rusqlite::{params, Connection};
-use std::path::Path;
+use chrono::{DateTime, Utc};
+use rusqlite::{params, Connection, DatabaseName, OpenFlags};
+use serde::Serialize;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::error::BrainError;
@@ -10,6 +13,32 @@ use crate::error::BrainError;
 /// SQLite metadata store with WAL mode and versioned migrations.
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
+    db_path: PathBuf,
+    backup_retention: usize,
+}
+
+const DEFAULT_BACKUP_RETENTION: usize = 7;
+const MANAGED_BACKUP_PREFIX: &str = "brain-";
+const MANAGED_BACKUP_EXTENSION: &str = "sqlite3";
+
+/// A consistent SQLite snapshot managed alongside the live database.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct DatabaseBackupSummary {
+    pub filename: String,
+    pub reason: String,
+    pub created_at: String,
+    pub size_bytes: u64,
+    #[serde(skip)]
+    pub path: PathBuf,
+}
+
+/// Results from opening and checking a database before or after restoration.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct DatabaseValidationReport {
+    pub integrity_ok: bool,
+    pub integrity_message: String,
+    pub foreign_key_violations: u64,
+    pub migration_version: u32,
 }
 
 #[allow(dead_code)] // Internal helper for migrations
@@ -120,11 +149,23 @@ const MIGRATIONS: &[Migration] = &[
         description: "short-lived scoped capabilities for agent knowledge tools",
         sql: include_str!("../../migrations/020_agent_run_capabilities.sql"),
     },
+    Migration {
+        version: 21,
+        description: "leased knowledge task queue with retry backoff",
+        sql: include_str!("../../migrations/021_knowledge_task_leases.sql"),
+    },
 ];
 
 impl SqliteStore {
     /// Open (or create) the database at `db_path`, enable WAL, run pending migrations.
     pub fn new(db_path: &Path) -> Result<Self, BrainError> {
+        Self::new_with_backup_retention(db_path, DEFAULT_BACKUP_RETENTION)
+    }
+
+    pub fn new_with_backup_retention(
+        db_path: &Path,
+        backup_retention: usize,
+    ) -> Result<Self, BrainError> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -143,30 +184,32 @@ impl SqliteStore {
 
         let store = SqliteStore {
             conn: Arc::new(Mutex::new(conn)),
+            db_path: db_path.to_path_buf(),
+            backup_retention: backup_retention.max(1),
         };
         store.run_migrations()?;
         Ok(store)
     }
 
     fn run_migrations(&self) -> Result<(), BrainError> {
-        let conn = self.conn.lock().unwrap();
+        let current_version: u32 = {
+            let conn = self.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS _migrations (
+                    version INTEGER PRIMARY KEY,
+                    description TEXT NOT NULL,
+                    applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );",
+            )
+            .map_err(|e| BrainError::Internal(format!("迁移表创建失败: {e}")))?;
 
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS _migrations (
-                version INTEGER PRIMARY KEY,
-                description TEXT NOT NULL,
-                applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            );",
-        )
-        .map_err(|e| BrainError::Internal(format!("迁移表创建失败: {e}")))?;
-
-        let current_version: u32 = conn
-            .query_row(
+            conn.query_row(
                 "SELECT COALESCE(MAX(version), 0) FROM _migrations",
                 [],
                 |row| row.get(0),
             )
-            .unwrap_or(0);
+            .unwrap_or(0)
+        };
 
         let pending: Vec<&Migration> = MIGRATIONS
             .iter()
@@ -176,6 +219,13 @@ impl SqliteStore {
         if pending.is_empty() {
             return Ok(());
         }
+
+        // Existing user data gets a consistent snapshot before schema changes.
+        if current_version > 0 {
+            self.create_managed_backup("pre-migration", self.backup_retention)?;
+        }
+
+        let conn = self.conn.lock().unwrap();
 
         // Wrap all pending migrations in a single transaction
         conn.execute_batch("BEGIN IMMEDIATE;")
@@ -205,6 +255,295 @@ impl SqliteStore {
         conn.execute_batch("COMMIT;")
             .map_err(|e| BrainError::Internal(format!("迁移事务提交失败: {e}")))?;
 
+        Ok(())
+    }
+
+    fn backups_dir(&self) -> PathBuf {
+        self.db_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("backups")
+    }
+
+    pub fn backup_retention(&self) -> usize {
+        self.backup_retention
+    }
+
+    pub fn database_path(&self) -> &Path {
+        &self.db_path
+    }
+
+    fn sanitize_backup_reason(reason: &str) -> String {
+        let sanitized = reason
+            .trim()
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect::<String>()
+            .trim_matches('-')
+            .to_string();
+        if sanitized.is_empty() {
+            "manual".to_string()
+        } else {
+            sanitized
+        }
+    }
+
+    fn backup_reason_from_filename(filename: &str) -> Option<String> {
+        let stem = filename.strip_suffix(".sqlite3")?;
+        let mut parts = stem.splitn(4, '-');
+        if parts.next()? != "brain" {
+            return None;
+        }
+        parts.next()?.parse::<i64>().ok()?;
+        let nonce = parts.next()?;
+        if nonce.len() != 32 || !nonce.chars().all(|character| character.is_ascii_hexdigit()) {
+            return None;
+        }
+        let reason = parts.next()?.trim();
+        (!reason.is_empty()).then(|| reason.to_string())
+    }
+
+    fn summary_for_backup(path: PathBuf) -> Result<DatabaseBackupSummary, BrainError> {
+        let filename = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| BrainError::Internal("备份文件名无效".to_string()))?
+            .to_string();
+        let reason = Self::backup_reason_from_filename(&filename)
+            .ok_or_else(|| BrainError::Internal("备份文件不属于当前应用".to_string()))?;
+        let metadata = fs::metadata(&path)?;
+        let created_at = metadata
+            .modified()
+            .ok()
+            .map(DateTime::<Utc>::from)
+            .unwrap_or_else(Utc::now)
+            .to_rfc3339();
+        Ok(DatabaseBackupSummary {
+            filename,
+            reason,
+            created_at,
+            size_bytes: metadata.len(),
+            path,
+        })
+    }
+
+    /// Create a transactionally consistent snapshot using SQLite's Online Backup API.
+    pub fn create_managed_backup(
+        &self,
+        reason: &str,
+        retention: usize,
+    ) -> Result<DatabaseBackupSummary, BrainError> {
+        let backup_dir = self.backups_dir();
+        fs::create_dir_all(&backup_dir)?;
+        let filename = format!(
+            "{MANAGED_BACKUP_PREFIX}{}-{}-{}.{}",
+            Utc::now().timestamp_millis(),
+            uuid::Uuid::new_v4().simple(),
+            Self::sanitize_backup_reason(reason),
+            MANAGED_BACKUP_EXTENSION
+        );
+        let path = backup_dir.join(&filename);
+
+        {
+            let conn = self.conn.lock().unwrap();
+            conn.backup(DatabaseName::Main, &path, None)
+                .map_err(|error| BrainError::Internal(format!("SQLite 在线备份失败: {error}")))?;
+        }
+
+        let report = Self::validate_database_file(&path)?;
+        if !report.integrity_ok || report.foreign_key_violations > 0 {
+            let _ = fs::remove_file(&path);
+            return Err(BrainError::Internal(format!(
+                "备份校验失败: {}, 外键异常 {} 条",
+                report.integrity_message, report.foreign_key_violations
+            )));
+        }
+
+        let summary = Self::summary_for_backup(path)?;
+        self.prune_managed_backups(retention.max(1), Some(&summary.filename))?;
+        Ok(summary)
+    }
+
+    /// List only snapshots created by this application, newest first.
+    pub fn list_managed_backups(&self) -> Result<Vec<DatabaseBackupSummary>, BrainError> {
+        let backup_dir = self.backups_dir();
+        if !backup_dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut backups = fs::read_dir(backup_dir)?
+            .filter_map(Result::ok)
+            .filter_map(|entry| Self::summary_for_backup(entry.path()).ok())
+            .collect::<Vec<_>>();
+        backups.sort_by(|left, right| right.filename.cmp(&left.filename));
+        Ok(backups)
+    }
+
+    /// Resolve a public backup identifier without accepting arbitrary paths.
+    pub fn managed_backup_path(&self, filename: &str) -> Result<PathBuf, BrainError> {
+        if Self::backup_reason_from_filename(filename).is_none()
+            || Path::new(filename).components().count() != 1
+        {
+            return Err(BrainError::KnowledgeValidation(
+                "备份文件标识无效".to_string(),
+            ));
+        }
+        let path = self.backups_dir().join(filename);
+        if !path.is_file() {
+            return Err(BrainError::KnowledgeNotFound(filename.to_string()));
+        }
+        Ok(path)
+    }
+
+    fn prune_managed_backups(
+        &self,
+        retention: usize,
+        preserve: Option<&str>,
+    ) -> Result<(), BrainError> {
+        let backups = self.list_managed_backups()?;
+        let keep = retention.max(1);
+        for backup in backups.iter().skip(keep) {
+            if preserve == Some(backup.filename.as_str()) {
+                continue;
+            }
+            fs::remove_file(&backup.path)?;
+        }
+        Ok(())
+    }
+
+    /// Open a database read-only and check integrity, foreign keys and schema level.
+    pub fn validate_database_file(path: &Path) -> Result<DatabaseValidationReport, BrainError> {
+        // FTS5's integrity hook may need a transient write lock even though the
+        // check itself does not change user data, so validate a private upload
+        // or managed snapshot with read/write access.
+        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .map_err(|error| BrainError::Internal(format!("备份数据库无法打开: {error}")))?;
+        let integrity_message: String = conn
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .map_err(|error| BrainError::Internal(format!("数据库完整性检查失败: {error}")))?;
+        let foreign_key_violations: u64 = conn
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .map_err(|error| BrainError::Internal(format!("数据库外键检查失败: {error}")))?;
+        let migration_version: u32 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM _migrations",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| BrainError::Internal(format!("数据库迁移版本读取失败: {error}")))?;
+
+        Ok(DatabaseValidationReport {
+            integrity_ok: integrity_message.eq_ignore_ascii_case("ok"),
+            integrity_message,
+            foreign_key_violations,
+            migration_version,
+        })
+    }
+
+    /// Replace the live database with a checked snapshot after explicit confirmation.
+    pub fn restore_database_file(
+        &self,
+        source_path: &Path,
+        confirmation: &str,
+        retention: usize,
+    ) -> Result<DatabaseValidationReport, BrainError> {
+        if confirmation != "RESTORE" {
+            return Err(BrainError::KnowledgeValidation(
+                "恢复数据库前请输入 RESTORE 确认".to_string(),
+            ));
+        }
+        let source_report = Self::validate_database_file(source_path)?;
+        let latest_version = MIGRATIONS
+            .last()
+            .map(|migration| migration.version)
+            .unwrap_or(0);
+        if !source_report.integrity_ok || source_report.foreign_key_violations > 0 {
+            return Err(BrainError::KnowledgeValidation(format!(
+                "恢复文件校验失败: {}, 外键异常 {} 条",
+                source_report.integrity_message, source_report.foreign_key_violations
+            )));
+        }
+        if source_report.migration_version > latest_version {
+            return Err(BrainError::KnowledgeValidation(format!(
+                "恢复文件版本 v{} 高于当前应用支持的 v{}",
+                source_report.migration_version, latest_version
+            )));
+        }
+
+        let active_work: u64 = {
+            let conn = self.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM agent_runs WHERE status IN ('queued', 'running')) +
+                    (SELECT COUNT(*) FROM knowledge_tasks WHERE status IN ('queued', 'running'))",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| BrainError::Internal(format!("运行任务检查失败: {error}")))?
+        };
+        if active_work > 0 {
+            return Err(BrainError::KnowledgeValidation(format!(
+                "仍有 {active_work} 项知识任务或 Agent 运行中，请结束后再恢复"
+            )));
+        }
+
+        // Do not let retention pruning remove a selected managed snapshot before
+        // the restore has consumed it. Normal retention is applied afterwards.
+        let temporary_retention = self
+            .list_managed_backups()?
+            .len()
+            .saturating_add(1)
+            .max(retention.max(1));
+        let safety_backup = self.create_managed_backup("pre-restore", temporary_retention)?;
+        let restoration = (|| {
+            self.replace_database_from_path(source_path)?;
+            self.run_migrations()?;
+            let report = Self::validate_database_file(&self.db_path)?;
+            if !report.integrity_ok || report.foreign_key_violations > 0 {
+                return Err(BrainError::Internal(format!(
+                    "数据库恢复后校验失败: {}, 外键异常 {} 条",
+                    report.integrity_message, report.foreign_key_violations
+                )));
+            }
+            Ok(report)
+        })();
+        let report = match restoration {
+            Ok(report) => report,
+            Err(error) => {
+                let rollback = self
+                    .replace_database_from_path(&safety_backup.path)
+                    .and_then(|_| self.run_migrations());
+                return match rollback {
+                    Ok(()) => Err(BrainError::Internal(format!(
+                        "数据库恢复失败，已回滚到操作前快照: {error}"
+                    ))),
+                    Err(rollback_error) => Err(BrainError::Internal(format!(
+                        "数据库恢复失败且自动回滚未完成: {error}; 回滚错误: {rollback_error}"
+                    ))),
+                };
+            }
+        };
+        self.prune_managed_backups(retention.max(1), None)?;
+        Ok(report)
+    }
+
+    fn replace_database_from_path(&self, source_path: &Path) -> Result<(), BrainError> {
+        let mut conn = self.conn.lock().unwrap();
+        conn.restore(
+            DatabaseName::Main,
+            source_path,
+            None::<fn(rusqlite::backup::Progress)>,
+        )
+        .map_err(|error| BrainError::Internal(format!("SQLite 恢复失败: {error}")))?;
+        conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")
+            .map_err(|error| BrainError::Internal(format!("恢复后数据库初始化失败: {error}")))?;
         Ok(())
     }
 
@@ -1070,5 +1409,146 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].0, "r1");
         assert_eq!(items[0].3, "hackernews");
+    }
+
+    #[test]
+    fn test_online_backup_is_valid_and_preserves_wal_state() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("backup-source.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+        store.set_state("backup-marker", "snapshot-value").unwrap();
+
+        let backup = store.create_managed_backup("manual", 7).unwrap();
+        let backups = store.list_managed_backups().unwrap();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(backups[0], backup);
+        assert!(backup.size_bytes > 0);
+        assert_eq!(backup.reason, "manual");
+        let report = SqliteStore::validate_database_file(&backup.path).unwrap();
+        assert!(report.integrity_ok);
+        assert_eq!(report.foreign_key_violations, 0);
+        assert_eq!(report.migration_version, MIGRATIONS.last().unwrap().version);
+
+        let snapshot = SqliteStore::new(&backup.path).unwrap();
+        assert_eq!(
+            snapshot.get_state("backup-marker").unwrap().as_deref(),
+            Some("snapshot-value")
+        );
+    }
+
+    #[test]
+    fn test_restore_replaces_live_database_and_keeps_safety_backup() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("restore-source.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+        store.set_state("restore-marker", "before").unwrap();
+        let desired = store.create_managed_backup("manual", 7).unwrap();
+        store.set_state("restore-marker", "after").unwrap();
+
+        let result = store
+            .restore_database_file(&desired.path, "RESTORE", 7)
+            .unwrap();
+
+        assert_eq!(
+            store.get_state("restore-marker").unwrap().as_deref(),
+            Some("before")
+        );
+        assert!(result.integrity_ok);
+        assert!(store
+            .list_managed_backups()
+            .unwrap()
+            .iter()
+            .any(|backup| backup.reason == "pre-restore"));
+    }
+
+    #[test]
+    fn test_backup_retention_prunes_only_old_managed_snapshots() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("retention-source.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+
+        for index in 0..4 {
+            store
+                .set_state("retention-marker", &index.to_string())
+                .unwrap();
+            store
+                .create_managed_backup(&format!("manual-{index}"), 2)
+                .unwrap();
+        }
+
+        let backups = store.list_managed_backups().unwrap();
+        assert_eq!(backups.len(), 2);
+        assert!(backups.iter().all(|backup| backup.path.exists()));
+    }
+
+    #[test]
+    fn test_restore_rejects_while_agent_work_is_active() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("active-run.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+        let desired = store.create_managed_backup("manual", 7).unwrap();
+        store
+            .with_connection(|conn| {
+                conn.execute(
+                    "INSERT INTO agent_runs
+                        (id, runtime, task_type, status, input_json, created_at)
+                     VALUES ('active-run', 'deepseek_harness', 'knowledge_qa', 'running', '{}',
+                             CURRENT_TIMESTAMP)",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        let error = store
+            .restore_database_file(&desired.path, "RESTORE", 7)
+            .unwrap_err();
+        assert!(error.to_string().contains("运行中"));
+    }
+
+    #[test]
+    fn test_managed_backup_path_rejects_traversal_and_unknown_files() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("secure-path.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+        let backup = store.create_managed_backup("manual", 7).unwrap();
+
+        assert_eq!(
+            store.managed_backup_path(&backup.filename).unwrap(),
+            backup.path
+        );
+        assert!(store.managed_backup_path("../secure-path.db").is_err());
+        assert!(store.managed_backup_path("unknown.sqlite3").is_err());
+    }
+
+    #[test]
+    fn test_restore_rolls_back_when_post_restore_migration_fails() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("rollback-live.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+        store.set_state("rollback-marker", "preserved").unwrap();
+        let incompatible_path = dir.path().join("incomplete.db");
+        let incompatible = Connection::open(&incompatible_path).unwrap();
+        incompatible
+            .execute_batch(
+                "CREATE TABLE _migrations (
+                    version INTEGER PRIMARY KEY,
+                    description TEXT NOT NULL,
+                    applied_at TEXT
+                 );
+                 INSERT INTO _migrations (version, description) VALUES (20, 'incomplete');",
+            )
+            .unwrap();
+        drop(incompatible);
+
+        let error = store
+            .restore_database_file(&incompatible_path, "RESTORE", 7)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("已回滚"));
+        assert_eq!(
+            store.get_state("rollback-marker").unwrap().as_deref(),
+            Some("preserved")
+        );
     }
 }

@@ -10,3 +10,7 @@
 host = "0.0.0.0"
 # 监听端口
 port = 9876
+
+[storage]
+# 自动备份与手动备份最多保留的快照数量
+backup_retention = 7

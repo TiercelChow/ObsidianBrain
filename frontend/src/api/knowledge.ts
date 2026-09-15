@@ -285,6 +285,20 @@ export interface AgentUsageStats {
   by_caller: AgentUsageCaller[]
 }
 
+export interface DatabaseBackup {
+  filename: string
+  reason: string
+  created_at: string
+  size_bytes: number
+}
+
+export interface DatabaseValidationReport {
+  integrity_ok: boolean
+  integrity_message: string
+  foreign_key_violations: number
+  migration_version: number
+}
+
 export interface WikiSkill {
   id: string
   slug: string
@@ -729,6 +743,45 @@ export function getAgentUsageStats(options: {
     end_date: options.endDate,
     ...(options.caller ? { caller: options.caller } : {}),
   }) as unknown as Promise<ToolEnvelope<AgentUsageStats>>
+}
+
+export function listKnowledgeBackups() {
+  return callTool('list_knowledge_backups') as unknown as Promise<
+    ToolEnvelope<{ backups: DatabaseBackup[]; retention: number }>
+  >
+}
+
+export function createKnowledgeBackup(reason = 'manual') {
+  return callTool('create_knowledge_backup', { reason }) as unknown as Promise<
+    ToolEnvelope<DatabaseBackup>
+  >
+}
+
+export function restoreKnowledgeBackup(filename: string, confirmation: string) {
+  return callTool('restore_knowledge_backup', { filename, confirmation }, {
+    timeout: 10 * 60_000,
+  }) as unknown as Promise<ToolEnvelope<{ validation: DatabaseValidationReport }>>
+}
+
+export function knowledgeBackupDownloadUrl(filename: string) {
+  return `/v1/knowledge/backups/${encodeURIComponent(filename)}`
+}
+
+export function bookWikiExportDownloadUrl(
+  knowledgeBaseId: string,
+  format: 'json' | 'markdown',
+) {
+  return `/v1/knowledge/bases/${encodeURIComponent(knowledgeBaseId)}/export/${format}`
+}
+
+export function uploadAndRestoreKnowledgeBackup(file: File, confirmation: string) {
+  const form = new FormData()
+  form.append('backup', file)
+  form.append('confirmation', confirmation)
+  return api.post('/knowledge/backups/restore/upload', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 10 * 60_000,
+  }) as unknown as Promise<{ validation: DatabaseValidationReport }>
 }
 
 export function listWikiSkills(knowledgeBaseId?: string) {

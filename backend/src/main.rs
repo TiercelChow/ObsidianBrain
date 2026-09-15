@@ -231,7 +231,10 @@ async fn run_server_async(
         timeline: "pending".to_string(),
         code_repo: "pending".to_string(),
     };
-    let db = match SqliteStore::new(&config.storage.db_path) {
+    let db = match SqliteStore::new_with_backup_retention(
+        &config.storage.db_path,
+        config.storage.backup_retention,
+    ) {
         Ok(store) => {
             components.sqlite = "ok".to_string();
             tracing::info!("SQLite 初始化成功: {:?}", config.storage.db_path);

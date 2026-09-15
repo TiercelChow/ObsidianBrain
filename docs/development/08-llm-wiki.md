@@ -1,8 +1,8 @@
 # 阅境轩·书籍知识库（Book Wiki）— 开发设计文档 v3
 
 > **文档编号**: DEV-08
-> **版本**: v3.7
-> **状态**: 增量语义 Wiki、受控 Harness 工具链、完整知识工作台与 PPTX 纵切已落地
+> **版本**: v3.8
+> **状态**: 增量语义 Wiki、可靠任务队列、备份恢复与可移植导出已落地
 > **最后更新**: 2026-09-15
 > **对应需求**: [REQ-08](../requirement/08-llm-wiki.md)
 > **关联需求**: [REQ-10 阅境轩书架](../requirement/10-reader-bookshelf.md)
@@ -30,6 +30,14 @@
 工作台读写边界已在 Store 而非仅在页面实现：`active` 才能创建任务、启动 Run、生成或处理变更集，暂停/归档保留只读查询；同步和编译还会实时检查书架路径。实体浏览返回 `offset/limit/total/has_more`，关系查询严格限定单一知识库并用有界 BFS 查找最多八层路径。人工编辑和阅境轩摘录都创建审计 Run 与 `human_protected` 高风险变更集，批准前不触碰正式实体；阅境轩摘录必须重新定位到当前 source span，无法定位时拒绝伪造引用。
 
 结构化编辑复用同一变更集应用器。合并候选包含目标和来源实体的期望 revision，事务内先保存版本、合并引用/论断/出向关系，再归档来源并把未参与合并实体的入向关系重定向到目标；任何 revision 冲突都会使整组变更失败。拆分候选在同一事务中归档原实体并创建两个至十二个继承原始引用的新实体，避免把未经核验的旧论断和关系自动复制到每个部分。桌面关系画布只查询连接度最高的有限节点和这些节点之间的边，关闭弹窗后卸载快照；手机端不请求画布快照，只使用洞察与有界路径接口。
+
+`SqliteStore` 通过 rusqlite Online Backup API 生成一致快照，不直接复制主文件和 WAL。受管备份名称经过严格解析，下载接口不能解析任意路径；恢复要求精确输入 `RESTORE`，先验证 `integrity_check`、外键和迁移版本，并在替换前生成 `pre-restore` 安全快照。恢复完成后再次执行迁移、完整性检查并清除 FTS 内容版本标记，随后由核心表重建两个全文索引；若恢复后迁移或校验失败，会自动换回操作前快照。迁移、知识库删除和超过五十项的大变更集应用前也会自动快照，默认保留七份，可通过 `storage.backup_retention` 调整。
+
+`book_wiki_export` 在数据库锁定的一致读取窗口内直接把各表逐行写入压缩包。JSON 导出使用 JSONL 避免把来源片段全集装入内存；Markdown 导出生成入口、实体页、来源清单、问答与研究任务报告。导出文件只进入数据库相邻的受管 `exports` 目录，不位于任何 Reader 原书目录，因此不会被同步器反向摄入。
+
+迁移 021 为研究任务增加 `attempt_count/max_attempts/next_attempt_at/lease_expires_at/last_heartbeat_at`。领取任务时原子建立 45 秒租约，执行期每 15 秒续期；租约过期会重新排队，失败按 5 秒起始的指数退避重试，耗尽三次才进入 failed。部分唯一索引限制每个知识库最多一个 running 任务。DeepSeek Harness 仍采用每次 Run 独立 ACP 子进程，会话结束、取消或超时后连接和子进程立即释放，不维持空闲常驻池。
+
+实体分页已经下推为 SQLite `LIMIT/OFFSET`，查询总数单独聚合；FTS 查询不再为了补足 limit 再执行正文 `LIKE` 全表扫描。发布前显式规模测试构造十万来源片段，验证目标召回和 `VIRTUAL TABLE INDEX` 查询计划；默认测试保留该用例但标为显式规模回归，避免每次开发循环重复生成大库。
 
 本地开发仍使用固定命令 `npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp`。Runtime Profile 可将 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 兼容供应商注入 Harness；真实密钥只从用户指定的环境变量读取。Book Wiki 只处理 Markdown 文件夹并固定使用 DeepSeek Harness。ACP 的 `UsageUpdate` 只作为真实上下文占用展示；供应商未上报输入/输出明细时，计费统计继续标为 `estimated`。剩余 P2 是显式授权的外部研究和脚本型 Skill 沙箱。
 
@@ -818,14 +826,20 @@ Wiki 工作台三栏可伸缩；列表压缩为窄轨时保留搜索、类型和
 - 使用 SQLite Online Backup API 生成一致快照。
 - 数据库迁移、知识库重建和大批量应用前自动备份。
 - 默认保留最近 7 份，可配置。
+- 快照目录始终以实际数据库路径为基准，避免自定义数据库与默认数据目录错位。
+- 只清理符合受管命名规则的快照，不触碰同目录其他文件。
 
 ### 16.2 恢复
 
 恢复前执行 `PRAGMA integrity_check`，恢复后校验迁移版本、外键和 FTS；FTS 可从核心表重建，但实体、引用、配置和版本不可丢失。
 
+恢复入口分为受管快照和最大 2 GB 的流式上传文件。两者都拒绝在 `agent_runs` 或 `knowledge_tasks` 处于 queued/running 时执行；上传写入临时目录，接口不接受服务端任意路径。
+
 ### 16.3 导出
 
 导出器从数据库生成标准 Markdown Wiki 或 JSON Bundle。导出目录不能被 Agent 自动反向摄入，以免形成循环。
+
+JSON Bundle 以 `manifest.json` 加多个 JSONL 数据集组成，覆盖来源、片段、实体、论断、关系、引用、对话和研究任务；Markdown Wiki 以 `README.md`、实体目录、逐实体页面、来源清单和报告目录组成。
 
 ---
 

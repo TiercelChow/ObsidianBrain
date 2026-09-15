@@ -9,7 +9,11 @@ use tower_http::trace::TraceLayer;
 use crate::api::handlers::agent_mcp::agent_mcp;
 use crate::api::handlers::health::health_check;
 use crate::api::handlers::knowledge_artifact::download_knowledge_artifact;
+use crate::api::handlers::knowledge_backup::{
+    download_knowledge_backup, upload_and_restore_knowledge_backup,
+};
 use crate::api::handlers::knowledge_chat::stream_knowledge_chat;
+use crate::api::handlers::knowledge_export::download_book_wiki_export;
 use crate::api::handlers::knowledge_skill::upload_wiki_skill_archive;
 use crate::api::handlers::reader_file::serve_reader_file;
 use crate::api::handlers::tool_handler::{call_tool, list_tools};
@@ -40,6 +44,19 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
         .route(
             "/knowledge/artifacts/:artifact_id",
             get(download_knowledge_artifact),
+        )
+        .route(
+            "/knowledge/backups/:filename",
+            get(download_knowledge_backup),
+        )
+        .route(
+            "/knowledge/backups/restore/upload",
+            post(upload_and_restore_knowledge_backup)
+                .layer(DefaultBodyLimit::max(2 * 1024 * 1024 * 1024)),
+        )
+        .route(
+            "/knowledge/bases/:base_id/export/:format",
+            get(download_book_wiki_export),
         )
         .route("/knowledge/skills/import", post(upload_wiki_skill_archive))
         .with_state(ctx);

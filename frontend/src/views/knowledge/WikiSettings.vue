@@ -4,6 +4,7 @@
       <aside class="settings-nav knowledge-surface">
         <button :class="{ active: section === 'runtime' }" @click="section = 'runtime'"><el-icon><Cpu /></el-icon><span><strong>Agent Runtime</strong><small>执行器与模型</small></span></button>
         <button :class="{ active: section === 'usage' }" @click="section = 'usage'"><el-icon><DataAnalysis /></el-icon><span><strong>Token 用量</strong><small>调用趋势与来源</small></span></button>
+        <button :class="{ active: section === 'protection' }" @click="section = 'protection'"><el-icon><Lock /></el-icon><span><strong>数据保护</strong><small>备份、下载与恢复</small></span></button>
         <button :class="{ active: section === 'documents' }" @click="section = 'documents'"><el-icon><Document /></el-icon><span><strong>配置文档</strong><small>数据库中的 Markdown</small></span></button>
         <button :class="{ active: section === 'skills' }" @click="section = 'skills'"><el-icon><MagicStick /></el-icon><span><strong>Skills</strong><small>版本化能力</small></span></button>
       </aside>
@@ -89,6 +90,45 @@
           </div>
         </template>
 
+        <template v-else-if="section === 'protection'">
+          <header class="settings-section-head split protection-head">
+            <div><span>本地数据安全</span><h2>数据保护</h2><p>快照使用 SQLite Online Backup，能够一致地包含 WAL 中尚未合并的写入。</p></div>
+            <div class="protection-actions">
+              <input ref="backupUploadInput" class="visually-hidden" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3" @change="selectRestoreUpload" />
+              <el-button @click="backupUploadInput?.click()"><el-icon><UploadFilled /></el-icon>上传恢复</el-button>
+              <el-button type="primary" :loading="creatingBackup" @click="createBackup"><el-icon><Plus /></el-icon>立即备份</el-button>
+            </div>
+          </header>
+          <div class="protection-note">
+            <el-icon><InfoFilled /></el-icon>
+            <span><strong>自动保留最近 {{ backupRetention }} 份快照。</strong>数据库迁移和恢复前也会自动创建安全备份；有运行中的问答或研究任务时，系统会拒绝恢复。</span>
+          </div>
+          <section class="wiki-export-card">
+            <div><span>单书可迁移导出</span><h3>导出可检查的知识资产</h3><p>JSON 包适合程序迁移与审计；Markdown Wiki 可直接解压浏览，包含实体、来源引用、问答与研究任务。</p></div>
+            <div class="wiki-export-actions">
+              <el-select v-model="activeBaseId" class="knowledge-select is-compact is-responsive" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" /></el-select>
+              <a v-if="activeBaseId" :href="bookWikiExportDownloadUrl(activeBaseId, 'json')" download><el-button><el-icon><Download /></el-icon>结构化 JSON</el-button></a>
+              <a v-if="activeBaseId" :href="bookWikiExportDownloadUrl(activeBaseId, 'markdown')" download><el-button><el-icon><Download /></el-icon>Markdown Wiki</el-button></a>
+            </div>
+          </section>
+          <div v-if="backupLoading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
+          <div v-else-if="!backups.length" class="knowledge-empty"><strong>还没有数据库快照</strong><span>创建第一份一致性备份，之后可随时下载到其他位置保存。</span></div>
+          <div v-else class="backup-list">
+            <article v-for="backup in backups" :key="backup.filename" class="backup-card">
+              <div class="backup-symbol"><el-icon><Lock /></el-icon></div>
+              <div class="backup-copy">
+                <h3>{{ backupReasonLabel(backup.reason) }}</h3>
+                <p>{{ formatBackupDate(backup.created_at) }} · {{ formatBytes(backup.size_bytes) }}</p>
+                <code>{{ backup.filename }}</code>
+              </div>
+              <div class="backup-card-actions">
+                <a :href="knowledgeBackupDownloadUrl(backup.filename)" download><el-button text><el-icon><Download /></el-icon>下载</el-button></a>
+                <el-button text type="danger" @click="openManagedRestore(backup)">恢复</el-button>
+              </div>
+            </article>
+          </div>
+        </template>
+
         <template v-else-if="section === 'documents'">
           <header class="settings-section-head split"><div><span>提示词与规则</span><h2>配置文档</h2><p>内容保存在 SQLite，需要运行时才会物化为临时文件。</p></div><el-select v-model="activeBaseId" class="knowledge-select is-compact is-responsive" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库" @change="loadSettings"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" /></el-select></header>
           <div v-if="!activeBaseId" class="knowledge-empty"><strong>选择一本书</strong><span>查看并调整它的知识建模、问答与任务规则。</span></div>
@@ -147,27 +187,46 @@
         <div class="knowledge-modal-actions"><el-button @click="skillEditorVisible = false">取消</el-button><el-button type="primary" :loading="savingSkill" :disabled="!skillDraft.name.trim() || !skillDraft.slug.trim() || !skillDraft.instructions.trim()" @click="saveSkill">保存版本</el-button></div>
       </div>
     </MotionModal>
+
+    <MotionModal v-model="restoreVisible" aria-label="恢复知识数据库">
+      <div class="knowledge-modal-card restore-modal-card">
+        <div class="knowledge-modal-head"><h3>恢复知识数据库</h3><p>这会用所选快照替换当前数据库。执行前系统会再创建一份安全备份。</p></div>
+        <div class="knowledge-modal-body restore-form">
+          <div class="restore-target"><span>{{ restoreFile ? '上传文件' : '应用快照' }}</span><strong>{{ restoreFile?.name || restoreTarget?.filename }}</strong><small v-if="restoreFile">{{ formatBytes(restoreFile.size) }}</small><small v-else-if="restoreTarget">{{ formatBackupDate(restoreTarget.created_at) }} · {{ formatBytes(restoreTarget.size_bytes) }}</small></div>
+          <div class="restore-warning"><el-icon><InfoFilled /></el-icon><span>恢复期间请勿关闭应用。运行中的知识任务会阻止本次操作，恢复完成后页面将自动刷新。</span></div>
+          <label><span>输入 RESTORE 确认</span><el-input v-model="restoreConfirmation" autocomplete="off" placeholder="RESTORE" /></label>
+        </div>
+        <div class="knowledge-modal-actions"><el-button :disabled="restoring" @click="restoreVisible = false">取消</el-button><el-button type="danger" :loading="restoring" :disabled="restoreConfirmation !== 'RESTORE'" @click="performRestore">确认恢复</el-button></div>
+      </div>
+    </MotionModal>
   </KnowledgePageShell>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Cpu, DataAnalysis, Document, InfoFilled, Loading, MagicStick, Plus, UploadFilled } from '@element-plus/icons-vue'
+import { Cpu, DataAnalysis, Document, Download, InfoFilled, Loading, Lock, MagicStick, Plus, UploadFilled } from '@element-plus/icons-vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import {
   getBookWikiSettings,
   getAgentUsageStats,
+  bookWikiExportDownloadUrl,
+  createKnowledgeBackup,
   importWikiSkillArchive,
+  knowledgeBackupDownloadUrl,
   listBookKnowledgeBases,
+  listKnowledgeBackups,
   listWikiSkills,
+  restoreKnowledgeBackup,
   saveAgentRuntimeProfile,
   saveBookWikiConfigDocument,
   saveCustomWikiSkill,
   setWikiSkillBinding,
+  uploadAndRestoreKnowledgeBackup,
   verifyAgentRuntime,
   type ConfigDocument,
+  type DatabaseBackup,
   type AgentUsageStats,
   type KnowledgeBaseSummary,
   type RuntimeHealth,
@@ -175,7 +234,7 @@ import {
   type WikiSkill,
 } from '@/api/knowledge'
 
-const section = ref<'runtime' | 'usage' | 'documents' | 'skills'>('runtime')
+const section = ref<'runtime' | 'usage' | 'protection' | 'documents' | 'skills'>('runtime')
 const bases = ref<KnowledgeBaseSummary[]>([])
 const activeBaseId = ref('')
 const documents = ref<ConfigDocument[]>([])
@@ -190,6 +249,16 @@ const usageLoading = ref(false)
 const usageCaller = ref<'' | 'knowledge_qa' | 'knowledge_task'>('')
 const usageDateRange = ref<[string, string]>(defaultUsageRange())
 const usageStats = ref<AgentUsageStats | null>(null)
+const backups = ref<DatabaseBackup[]>([])
+const backupRetention = ref(7)
+const backupLoading = ref(false)
+const creatingBackup = ref(false)
+const backupUploadInput = ref<HTMLInputElement | null>(null)
+const restoreVisible = ref(false)
+const restoreTarget = ref<DatabaseBackup | null>(null)
+const restoreFile = ref<File | null>(null)
+const restoreConfirmation = ref('')
+const restoring = ref(false)
 const skills = ref<WikiSkill[]>([])
 const skillsLoading = ref(false)
 const savingSkillId = ref('')
@@ -231,6 +300,91 @@ function formatDateValue(value: Date) {
 
 function formatTokenCount(value: number) {
   return new Intl.NumberFormat('zh-CN', { notation: value >= 10_000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value)
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`
+  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`
+  return `${(value / 1024 ** 3).toFixed(2)} GB`
+}
+
+function formatBackupDate(value: string) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  }).format(new Date(value))
+}
+
+function backupReasonLabel(reason: string) {
+  if (reason === 'manual') return '手动备份'
+  if (reason === 'pre-migration') return '迁移前自动备份'
+  if (reason === 'pre-restore') return '恢复前安全备份'
+  return reason
+}
+
+async function loadBackups() {
+  backupLoading.value = true
+  try {
+    const response = await listKnowledgeBackups()
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '备份列表加载失败')
+    backups.value = response.result.backups
+    backupRetention.value = response.result.retention
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    backupLoading.value = false
+  }
+}
+
+async function createBackup() {
+  creatingBackup.value = true
+  try {
+    const response = await createKnowledgeBackup()
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '数据库备份失败')
+    ElMessage.success('一致性数据库快照已创建')
+    await loadBackups()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    creatingBackup.value = false
+  }
+}
+
+function openManagedRestore(backup: DatabaseBackup) {
+  restoreTarget.value = backup
+  restoreFile.value = null
+  restoreConfirmation.value = ''
+  restoreVisible.value = true
+}
+
+function selectRestoreUpload(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  restoreTarget.value = null
+  restoreFile.value = file
+  restoreConfirmation.value = ''
+  restoreVisible.value = true
+}
+
+async function performRestore() {
+  if (restoreConfirmation.value !== 'RESTORE' || (!restoreTarget.value && !restoreFile.value)) return
+  restoring.value = true
+  try {
+    if (restoreFile.value) {
+      await uploadAndRestoreKnowledgeBackup(restoreFile.value, restoreConfirmation.value)
+    } else if (restoreTarget.value) {
+      const response = await restoreKnowledgeBackup(restoreTarget.value.filename, restoreConfirmation.value)
+      if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '数据库恢复失败')
+    }
+    ElMessage.success('数据库已恢复并通过完整性检查')
+    window.setTimeout(() => window.location.reload(), 500)
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    restoring.value = false
+  }
 }
 
 function callerLabel(caller: string) {
@@ -448,6 +602,7 @@ async function saveDocument() {
 
 watch(section, value => {
   if (value === 'usage' && !usageStats.value) void loadUsage()
+  if (value === 'protection' && !backups.value.length) void loadBackups()
   if (value === 'skills' && !skills.value.length) void loadSkills()
 })
 onMounted(initialize)
@@ -524,6 +679,37 @@ onMounted(initialize)
 .usage-callers article > i { height: 7px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
 .usage-callers article > i b { height: 100%; display: block; border-radius: inherit; background: var(--accent); transition: width var(--motion-slow) var(--ease-emphasized); }
 @keyframes usage-rise { from { transform: scaleY(.08); opacity: .35; } }
+.protection-head { align-items: flex-start !important; }
+.protection-actions { display: flex; gap: 8px; }
+.protection-note { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 14px; padding: 12px 14px; border: 1px solid var(--accent-border); border-radius: 14px; background: var(--accent-light); color: var(--text-muted); font-size: 11px; line-height: 1.6; }
+.protection-note .el-icon { flex: none; margin-top: 2px; color: var(--accent); font-size: 16px; }
+.protection-note strong { display: block; color: var(--text-primary); }
+.wiki-export-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 14px; padding: 16px; border: 1px solid var(--border-faint); border-radius: 16px; background: var(--bg-glass-subtle); box-shadow: var(--inset-highlight); }
+.wiki-export-card > div:first-child { min-width: 0; flex: 1; display: grid; gap: 3px; }
+.wiki-export-card span { color: var(--accent); font-size: 9px; font-weight: 720; letter-spacing: .06em; }
+.wiki-export-card h3 { margin: 0; color: var(--text-primary); font-size: 14px; }
+.wiki-export-card p { max-width: 590px; color: var(--text-muted); font-size: 10px; line-height: 1.55; }
+.wiki-export-actions { width: min(100%, 460px); display: grid; grid-template-columns: minmax(150px, 1fr) auto auto; gap: 7px; }
+.wiki-export-actions a { text-decoration: none; }
+.backup-list { display: grid; gap: 9px; }
+.backup-card { min-width: 0; display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--border-faint); border-radius: 16px; background: var(--bg-glass-subtle); box-shadow: var(--inset-highlight); transition: var(--transition-interactive); }
+.backup-card:hover { border-color: var(--accent-border); transform: translateY(-1px); }
+.backup-symbol { width: 42px; height: 42px; flex: none; display: grid; place-items: center; border-radius: 13px; background: var(--accent-light); color: var(--accent); font-size: 18px; }
+.backup-copy { min-width: 0; flex: 1; display: grid; gap: 2px; }
+.backup-copy h3 { margin: 0; color: var(--text-primary); font-size: 13px; }
+.backup-copy p { color: var(--text-muted); font-size: 10px; }
+.backup-copy code { overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.backup-card-actions { display: flex; align-items: center; gap: 2px; }
+.backup-card-actions a { text-decoration: none; }
+.restore-modal-card { width: min(520px, calc(100vw - 28px)); }
+.restore-form { display: grid; gap: 13px; }
+.restore-target { display: grid; gap: 3px; padding: 13px; border: 1px solid var(--border-faint); border-radius: 13px; background: var(--bg-glass-subtle); }
+.restore-target span, .restore-form label > span { color: var(--text-faint); font-size: 9px; }
+.restore-target strong { overflow: hidden; color: var(--text-primary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.restore-target small { color: var(--text-muted); font-size: 10px; }
+.restore-warning { display: flex; gap: 9px; padding: 11px 12px; border: 1px solid color-mix(in srgb, #ff453a 24%, var(--border-faint)); border-radius: 12px; background: color-mix(in srgb, #ff453a 6%, transparent); color: var(--text-muted); font-size: 10px; line-height: 1.55; }
+.restore-warning .el-icon { flex: none; margin-top: 2px; color: #ff453a; }
+.restore-form label { display: grid; gap: 6px; }
 .document-editor { display: grid; gap: 12px; }
 .document-tabs { display: flex; gap: 6px; overflow-x: auto; }
 .document-tabs button { min-height: 38px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--border-faint); border-radius: 11px; background: transparent; color: var(--text-muted); font: inherit; font-size: 11px; white-space: nowrap; cursor: pointer; }
@@ -567,6 +753,15 @@ onMounted(initialize)
   .usage-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .usage-bars { height: 190px; }
   .usage-chart-card, .usage-callers { padding: 13px; }
+  .protection-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
+  .wiki-export-card { align-items: stretch; flex-direction: column; }
+  .wiki-export-actions { width: 100%; grid-template-columns: 1fr 1fr; }
+  .wiki-export-actions .knowledge-select { grid-column: 1 / -1; }
+  .wiki-export-actions a .el-button { width: 100%; }
+  .backup-card { align-items: flex-start; flex-wrap: wrap; }
+  .backup-copy { width: calc(100% - 58px); flex: auto; }
+  .backup-card-actions { width: 100%; justify-content: flex-end; border-top: 1px solid var(--border-faint); padding-top: 7px; }
+  .backup-card:hover { transform: none; }
   .skills-actions { width: 100%; }
   .skills-actions .knowledge-select { min-width: 0; flex: 1; }
   .skills-actions .el-button { flex: none; }

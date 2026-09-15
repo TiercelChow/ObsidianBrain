@@ -211,6 +211,18 @@ impl BookWikiStore {
         })
     }
 
+    /// Force derived search indexes to be rebuilt after a database restore.
+    pub fn rebuild_knowledge_search_indexes(&self) -> Result<(), BrainError> {
+        self.db.with_connection(|conn| {
+            conn.execute(
+                "DELETE FROM app_state WHERE key = ?1",
+                params![KNOWLEDGE_FTS_CONTENT_VERSION_KEY],
+            )?;
+            Ok(())
+        })?;
+        self.ensure_knowledge_fts_current()
+    }
+
     pub fn ensure_reader_books_migrated(&self) -> Result<(), BrainError> {
         if self.db.get_state(BOOKS_MIGRATED_KEY)?.is_some() {
             return Ok(());
@@ -578,6 +590,8 @@ impl BookWikiStore {
                 "知识库仍有排队或运行中的任务，不能删除".to_string(),
             ));
         }
+        self.db
+            .create_managed_backup("before-knowledge-base-delete", self.db.backup_retention())?;
         self.db.transaction(|conn| {
             conn.execute(
                 "DELETE FROM knowledge_entries_fts WHERE knowledge_base_id = ?1",
@@ -1076,7 +1090,11 @@ impl BookWikiStore {
         self.ensure_knowledge_fts_current()?;
         let limit = limit.clamp(1, 200) as i64;
         let fts_query = knowledge_fts_query(Some(query));
-        let patterns = knowledge_query_patterns(Some(query));
+        let patterns = if fts_query.is_none() {
+            knowledge_query_patterns(Some(query))
+        } else {
+            Vec::new()
+        };
         self.db.with_connection(|conn| {
             let mut spans = Vec::new();
             let mut seen = HashSet::new();
@@ -1295,8 +1313,12 @@ impl BookWikiStore {
     ) -> Result<Vec<KnowledgeEntrySummary>, BrainError> {
         self.ensure_knowledge_fts_current()?;
         let limit = limit.clamp(1, 10_000) as i64;
-        let patterns = knowledge_query_patterns(query);
         let fts_query = knowledge_fts_query(query);
+        let patterns = if fts_query.is_none() {
+            knowledge_query_patterns(query)
+        } else {
+            Vec::new()
+        };
         let entry_type = entry_type.filter(|value| !value.trim().is_empty());
         self.db.with_connection(|conn| {
             let mut entries = Vec::new();
@@ -1398,59 +1420,83 @@ impl BookWikiStore {
         limit: usize,
     ) -> Result<KnowledgeEntryPage, BrainError> {
         self.get_base(base_id)?;
-        let limit = limit.clamp(1, 100);
-        let offset = offset.min(100_000);
-        let has_query = query.is_some_and(|value| !value.trim().is_empty());
-        let requested = if has_query {
-            10_000
-        } else {
-            offset.saturating_add(limit).saturating_add(1)
-        };
-        let mut matches = self.list_entries(base_id, query, entry_type, requested)?;
-        let total = if has_query {
-            matches.len() as i64
-        } else {
-            self.count_entries(base_id, None, entry_type)?
-        };
-        let entries = if offset >= matches.len() {
-            Vec::new()
-        } else {
-            matches
-                .drain(offset..matches.len().min(offset + limit))
-                .collect()
-        };
-        let has_more = (offset + entries.len()) < total as usize;
-        Ok(KnowledgeEntryPage {
-            entries,
-            offset: offset as i64,
-            limit: limit as i64,
-            total,
-            has_more,
-        })
-    }
-
-    fn count_entries(
-        &self,
-        base_id: &str,
-        query: Option<&str>,
-        entry_type: Option<&str>,
-    ) -> Result<i64, BrainError> {
+        self.ensure_knowledge_fts_current()?;
+        let limit = limit.clamp(1, 100) as i64;
+        let offset = offset.min(100_000) as i64;
         let entry_type = entry_type.filter(|value| !value.trim().is_empty());
-        let pattern = knowledge_query_patterns(query)
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| "%".to_string());
+        let fts_query = knowledge_fts_query(query);
         self.db.with_connection(|conn| {
-            conn.query_row(
-                "SELECT COUNT(*) FROM knowledge_entries ke
-                 WHERE ke.knowledge_base_id = ?1
-                   AND ke.status NOT IN ('archived', 'stale')
-                   AND (?2 IS NULL OR ke.entry_type = ?2)
-                   AND (ke.title LIKE ?3 OR ke.summary LIKE ?3 OR ke.content_md LIKE ?3)",
-                params![base_id, entry_type, pattern],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(Into::into)
+            let (entries, total) = if let Some(fts_query) = fts_query {
+                let total = conn.query_row(
+                    "SELECT COUNT(*)
+                     FROM knowledge_entries_fts
+                     JOIN knowledge_entries ke ON ke.id = knowledge_entries_fts.entry_id
+                     WHERE knowledge_entries_fts MATCH ?3
+                       AND knowledge_entries_fts.knowledge_base_id = ?1
+                       AND ke.knowledge_base_id = ?1
+                       AND ke.status NOT IN ('archived', 'stale')
+                       AND (?2 IS NULL OR ke.entry_type = ?2)",
+                    params![base_id, entry_type, fts_query],
+                    |row| row.get::<_, i64>(0),
+                )?;
+                let mut statement = conn.prepare(
+                    "SELECT ke.id, ke.knowledge_base_id, ke.entry_type, ke.slug, ke.title,
+                            ke.summary, ke.status, ke.confidence, sd.relative_path, ke.updated_at
+                     FROM knowledge_entries_fts
+                     JOIN knowledge_entries ke ON ke.id = knowledge_entries_fts.entry_id
+                     LEFT JOIN source_documents sd ON sd.id = ke.origin_document_id
+                     WHERE knowledge_entries_fts MATCH ?3
+                       AND knowledge_entries_fts.knowledge_base_id = ?1
+                       AND ke.knowledge_base_id = ?1
+                       AND ke.status NOT IN ('archived', 'stale')
+                       AND (?2 IS NULL OR ke.entry_type = ?2)
+                     ORDER BY CASE WHEN ke.entry_type = 'source_section' THEN 1 ELSE 0 END,
+                              bm25(knowledge_entries_fts, 0.0, 0.0, 12.0, 8.0, 4.0, 1.0,
+                                   1.0, 2.0),
+                              sd.ordinal, ke.title COLLATE NOCASE
+                     LIMIT ?4 OFFSET ?5",
+                )?;
+                let rows = statement.query_map(
+                    params![base_id, entry_type, fts_query, limit, offset],
+                    map_entry_summary,
+                )?;
+                (rows.collect::<Result<Vec<_>, _>>()?, total)
+            } else if query.is_some_and(|value| !value.trim().is_empty()) {
+                (Vec::new(), 0)
+            } else {
+                let total = conn.query_row(
+                    "SELECT COUNT(*) FROM knowledge_entries ke
+                     WHERE ke.knowledge_base_id = ?1
+                       AND ke.status NOT IN ('archived', 'stale')
+                       AND (?2 IS NULL OR ke.entry_type = ?2)",
+                    params![base_id, entry_type],
+                    |row| row.get::<_, i64>(0),
+                )?;
+                let mut statement = conn.prepare(
+                    "SELECT ke.id, ke.knowledge_base_id, ke.entry_type, ke.slug, ke.title,
+                            ke.summary, ke.status, ke.confidence, sd.relative_path, ke.updated_at
+                     FROM knowledge_entries ke
+                     LEFT JOIN source_documents sd ON sd.id = ke.origin_document_id
+                     WHERE ke.knowledge_base_id = ?1
+                       AND ke.status NOT IN ('archived', 'stale')
+                       AND (?2 IS NULL OR ke.entry_type = ?2)
+                     ORDER BY CASE WHEN ke.entry_type = 'source_section' THEN 1 ELSE 0 END,
+                              sd.ordinal, ke.title COLLATE NOCASE
+                     LIMIT ?3 OFFSET ?4",
+                )?;
+                let rows = statement.query_map(
+                    params![base_id, entry_type, limit, offset],
+                    map_entry_summary,
+                )?;
+                (rows.collect::<Result<Vec<_>, _>>()?, total)
+            };
+            Ok(KnowledgeEntryPage {
+                has_more: offset + (entries.len() as i64) < total,
+                entries,
+                offset,
+                limit,
+                total,
+            })
         })
     }
 
@@ -2908,6 +2954,10 @@ impl BookWikiStore {
         for change in &change_set.changes {
             validate_semantic_candidate(&change.after, &current_span_ids)?;
         }
+        if change_set.changes.len() >= 50 {
+            self.db
+                .create_managed_backup("before-large-change-set", self.db.backup_retention())?;
+        }
         let now = Utc::now().to_rfc3339();
         self.db.transaction(|conn| {
             for change in &change_set.changes {
@@ -3314,16 +3364,25 @@ impl BookWikiStore {
     pub fn start_task_execution(&self, task_id: &str) -> Result<KnowledgeTask, BrainError> {
         let current = self.get_task(task_id)?;
         self.get_active_base(&current.knowledge_base_id)?;
-        let now = Utc::now().to_rfc3339();
+        let now = Utc::now();
+        let now_text = now.to_rfc3339();
+        let lease_expires_at = (now + chrono::Duration::seconds(45)).to_rfc3339();
         let updated = self.db.with_connection(|conn| {
             Ok(conn.execute(
                 "UPDATE knowledge_tasks
                  SET status = 'running', result_summary = '', cancel_requested = 0,
+                     attempt_count = attempt_count + 1, lease_expires_at = ?3,
+                     last_heartbeat_at = ?2, next_attempt_at = NULL,
                      artifact_state = CASE
                          WHEN deliverable_type = 'presentation' THEN 'pending'
                          ELSE artifact_state END,
                      updated_at = ?2
                  WHERE id = ?1
+                   AND NOT EXISTS (
+                       SELECT 1 FROM knowledge_tasks running
+                       WHERE running.knowledge_base_id = knowledge_tasks.knowledge_base_id
+                         AND running.status = 'running' AND running.id <> ?1
+                   )
                    AND (
                        status IN ('draft', 'failed', 'completed', 'cancelled')
                        OR (
@@ -3331,7 +3390,7 @@ impl BookWikiStore {
                            AND julianday(updated_at) < julianday(?2, '-10 minutes')
                        )
                    )",
-                params![task_id, now],
+                params![task_id, now_text, lease_expires_at],
             )?)
         })?;
         if updated == 0 {
@@ -3351,6 +3410,8 @@ impl BookWikiStore {
             Ok(conn.execute(
                 "UPDATE knowledge_tasks
                  SET status = 'queued', result_summary = '', cancel_requested = 0,
+                     attempt_count = 0, next_attempt_at = ?2,
+                     lease_expires_at = NULL, last_heartbeat_at = NULL,
                      artifact_state = CASE
                          WHEN deliverable_type = 'presentation' THEN 'pending'
                          ELSE artifact_state END,
@@ -3376,7 +3437,8 @@ impl BookWikiStore {
                  SET status = CASE WHEN cancel_requested = 1 THEN 'cancelled' ELSE 'queued' END,
                      result_summary = CASE WHEN cancel_requested = 1
                          THEN '任务在服务停止前收到取消请求' ELSE result_summary END,
-                     updated_at = ?1
+                     next_attempt_at = CASE WHEN cancel_requested = 1 THEN NULL ELSE ?1 END,
+                     lease_expires_at = NULL, last_heartbeat_at = NULL, updated_at = ?1
                  WHERE status = 'running'",
                 params![now],
             )?;
@@ -3404,6 +3466,12 @@ impl BookWikiStore {
                     "SELECT kt.id FROM knowledge_tasks kt
                      JOIN knowledge_bases kb ON kb.id = kt.knowledge_base_id
                      WHERE kt.status = 'queued' AND kb.lifecycle = 'active'
+                       AND (kt.next_attempt_at IS NULL OR julianday(kt.next_attempt_at) <= julianday('now'))
+                       AND NOT EXISTS (
+                           SELECT 1 FROM knowledge_tasks running
+                           WHERE running.knowledge_base_id = kt.knowledge_base_id
+                             AND running.status = 'running'
+                       )
                      ORDER BY kt.updated_at, kt.created_at LIMIT 1",
                     [],
                     |row| row.get::<_, String>(0),
@@ -3412,15 +3480,96 @@ impl BookWikiStore {
             let Some(task_id) = task_id else {
                 return Ok(None);
             };
-            let now = Utc::now().to_rfc3339();
+            let now = Utc::now();
+            let now_text = now.to_rfc3339();
+            let lease_expires_at = (now + chrono::Duration::seconds(45)).to_rfc3339();
             let updated = conn.execute(
-                "UPDATE knowledge_tasks SET status = 'running', updated_at = ?2
+                "UPDATE knowledge_tasks
+                 SET status = 'running', attempt_count = attempt_count + 1,
+                     lease_expires_at = ?3, last_heartbeat_at = ?2, updated_at = ?2
                  WHERE id = ?1 AND status = 'queued'",
-                params![task_id, now],
+                params![task_id, now_text, lease_expires_at],
             )?;
             Ok((updated == 1).then_some(task_id))
         })?;
         task_id.map(|task_id| self.get_task(&task_id)).transpose()
+    }
+
+    pub fn renew_task_lease(&self, task_id: &str) -> Result<bool, BrainError> {
+        let now = Utc::now();
+        let updated = self.db.with_connection(|conn| {
+            Ok(conn.execute(
+                "UPDATE knowledge_tasks
+                 SET lease_expires_at = ?2, last_heartbeat_at = ?3, updated_at = ?3
+                 WHERE id = ?1 AND status = 'running'",
+                params![
+                    task_id,
+                    (now + chrono::Duration::seconds(45)).to_rfc3339(),
+                    now.to_rfc3339()
+                ],
+            )?)
+        })?;
+        Ok(updated == 1)
+    }
+
+    pub fn recover_expired_task_leases(&self) -> Result<usize, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        self.db.with_connection(|conn| {
+            Ok(conn.execute(
+                "UPDATE knowledge_tasks
+                 SET status = CASE WHEN cancel_requested = 1 THEN 'cancelled' ELSE 'queued' END,
+                     result_summary = CASE WHEN cancel_requested = 1
+                         THEN '任务在租约过期前收到取消请求'
+                         ELSE '上一次执行租约已过期，任务已重新排队' END,
+                     next_attempt_at = CASE WHEN cancel_requested = 1 THEN NULL ELSE ?1 END,
+                     lease_expires_at = NULL, last_heartbeat_at = NULL, updated_at = ?1
+                 WHERE status = 'running'
+                   AND lease_expires_at IS NOT NULL
+                   AND julianday(lease_expires_at) <= julianday(?1)",
+                params![now],
+            )?)
+        })
+    }
+
+    pub fn retry_or_fail_task_execution(
+        &self,
+        task_id: &str,
+        error: &str,
+    ) -> Result<KnowledgeTask, BrainError> {
+        let now = Utc::now();
+        let state = self.db.with_connection(|conn| {
+            conn.query_row(
+                "SELECT attempt_count, max_attempts FROM knowledge_tasks
+                 WHERE id = ?1 AND status = 'running'",
+                params![task_id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()
+            .map_err(Into::into)
+        })?;
+        let Some((attempt_count, max_attempts)) = state else {
+            return Err(BrainError::KnowledgeValidation(
+                "任务不存在或已经结束".to_string(),
+            ));
+        };
+        if attempt_count < max_attempts {
+            let delay_seconds = 5_i64.saturating_mul(2_i64.pow((attempt_count - 1).max(0) as u32));
+            let next_attempt_at =
+                (now + chrono::Duration::seconds(delay_seconds.min(300))).to_rfc3339();
+            self.db.with_connection(|conn| {
+                conn.execute(
+                    "UPDATE knowledge_tasks
+                     SET status = 'queued', result_summary = ?2, next_attempt_at = ?3,
+                         lease_expires_at = NULL, last_heartbeat_at = NULL, updated_at = ?4
+                     WHERE id = ?1 AND status = 'running'",
+                    params![task_id, error.trim(), next_attempt_at, now.to_rfc3339()],
+                )?;
+                Ok(())
+            })?;
+        } else {
+            self.fail_task_execution(task_id, error)?;
+        }
+        self.get_task(task_id)
     }
 
     pub fn complete_task_execution(
@@ -3433,6 +3582,7 @@ impl BookWikiStore {
             Ok(conn.execute(
                 "UPDATE knowledge_tasks
                  SET status = 'completed', result_summary = ?2, updated_at = ?3
+                     , lease_expires_at = NULL, last_heartbeat_at = NULL, next_attempt_at = NULL
                  WHERE id = ?1 AND status = 'running'",
                 params![task_id, result_summary.trim(), now],
             )?)
@@ -3455,6 +3605,7 @@ impl BookWikiStore {
             Ok(conn.execute(
                 "UPDATE knowledge_tasks
                  SET status = 'failed', result_summary = ?2, updated_at = ?3
+                     , lease_expires_at = NULL, last_heartbeat_at = NULL, next_attempt_at = NULL
                  WHERE id = ?1 AND status = 'running'",
                 params![task_id, error.trim(), now],
             )?)
@@ -3495,7 +3646,8 @@ impl BookWikiStore {
                  SET status = 'cancelled', artifact_state = CASE
                          WHEN deliverable_type = 'presentation' THEN 'failed'
                          ELSE artifact_state END,
-                     updated_at = ?2
+                     lease_expires_at = NULL, last_heartbeat_at = NULL,
+                     next_attempt_at = NULL, updated_at = ?2
                  WHERE id = ?1 AND status = 'running'",
                 params![task_id, now],
             )?;
@@ -7651,5 +7803,214 @@ mod tests {
             store.start_task_execution(&task.id).unwrap().status,
             "running"
         );
+    }
+
+    #[test]
+    fn test_task_leases_serialize_execution_per_knowledge_base() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-lease", "/tmp/book-lease")])
+            .unwrap();
+        let base = store.initialize_base("book-lease").unwrap();
+        let first = store
+            .create_task(&base.id, "任务一", "", "research")
+            .unwrap();
+        let second = store
+            .create_task(&base.id, "任务二", "", "research")
+            .unwrap();
+        store.queue_task_execution(&first.id).unwrap();
+        store.queue_task_execution(&second.id).unwrap();
+
+        let claimed = store.claim_next_queued_task().unwrap().unwrap();
+        assert_eq!(claimed.id, first.id);
+        assert!(store.claim_next_queued_task().unwrap().is_none());
+        assert!(store.renew_task_lease(&first.id).unwrap());
+        store.complete_task_execution(&first.id, "完成").unwrap();
+        assert_eq!(
+            store.claim_next_queued_task().unwrap().unwrap().id,
+            second.id
+        );
+    }
+
+    #[test]
+    fn test_failed_task_retries_with_backoff_then_exhausts_attempts() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-backoff", "/tmp/book-backoff")])
+            .unwrap();
+        let base = store.initialize_base("book-backoff").unwrap();
+        let task = store
+            .create_task(&base.id, "重试任务", "", "research")
+            .unwrap();
+        store.queue_task_execution(&task.id).unwrap();
+        store.claim_next_queued_task().unwrap().unwrap();
+
+        let retry = store
+            .retry_or_fail_task_execution(&task.id, "临时错误")
+            .unwrap();
+        assert_eq!(retry.status, "queued");
+        assert!(store.claim_next_queued_task().unwrap().is_none());
+
+        store
+            .db
+            .with_connection(|conn| {
+                conn.execute(
+                    "UPDATE knowledge_tasks SET next_attempt_at = '2020-01-01T00:00:00Z',
+                         attempt_count = max_attempts - 1 WHERE id = ?1",
+                    params![task.id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        store.claim_next_queued_task().unwrap().unwrap();
+        assert_eq!(
+            store
+                .retry_or_fail_task_execution(&task.id, "最终错误")
+                .unwrap()
+                .status,
+            "failed"
+        );
+    }
+
+    #[test]
+    fn test_expired_task_lease_is_requeued() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-expired", "/tmp/book-expired")])
+            .unwrap();
+        let base = store.initialize_base("book-expired").unwrap();
+        let task = store
+            .create_task(&base.id, "过期任务", "", "research")
+            .unwrap();
+        store.start_task_execution(&task.id).unwrap();
+        store
+            .db
+            .with_connection(|conn| {
+                conn.execute(
+                    "UPDATE knowledge_tasks SET lease_expires_at = '2020-01-01T00:00:00Z'
+                     WHERE id = ?1",
+                    params![task.id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(store.recover_expired_task_leases().unwrap(), 1);
+        assert_eq!(store.get_task(&task.id).unwrap().status, "queued");
+    }
+
+    #[test]
+    fn test_entry_page_uses_database_pagination_beyond_first_two_hundred_rows() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-page", "/tmp/book-page")])
+            .unwrap();
+        let base = store.initialize_base("book-page").unwrap();
+        store
+            .db
+            .transaction(|conn| {
+                for index in 0..250 {
+                    conn.execute(
+                        "INSERT INTO knowledge_entries
+                            (id, knowledge_base_id, entry_type, slug, title, summary, content_md,
+                             status, created_at, updated_at)
+                         VALUES (?1, ?2, 'concept', ?3, ?4, '', '', 'verified',
+                                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                        params![
+                            format!("page-entry-{index:03}"),
+                            base.id,
+                            format!("page-entry-{index:03}"),
+                            format!("分页实体 {index:03}")
+                        ],
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+        let page = store
+            .list_entries_page(&base.id, None, Some("concept"), 200, 25)
+            .unwrap();
+        assert_eq!(page.entries.len(), 25);
+        assert_eq!(page.offset, 200);
+        assert_eq!(page.total, 250);
+        assert!(page.has_more);
+    }
+
+    #[test]
+    #[ignore = "100k-fragment scale regression; run explicitly before release"]
+    fn test_100k_fragment_fts_query_uses_virtual_index_without_full_scan() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-scale", "/tmp/book-scale")])
+            .unwrap();
+        let base = store.initialize_base("book-scale").unwrap();
+        store
+            .db
+            .transaction(|conn| {
+                conn.execute(
+                    "INSERT INTO source_documents
+                        (id, knowledge_base_id, source_type, original_path, relative_path, title,
+                         mime_type, current_version_id, created_at, updated_at)
+                     VALUES ('scale-source', ?1, 'markdown', '/tmp/book-scale/all.md', 'all.md',
+                             '规模测试', 'text/markdown', 'scale-version', CURRENT_TIMESTAMP,
+                             CURRENT_TIMESTAMP)",
+                    params![base.id],
+                )?;
+                conn.execute(
+                    "INSERT INTO source_versions
+                        (id, source_document_id, content_hash, size_bytes, extraction_version,
+                         extraction_status, created_at)
+                     VALUES ('scale-version', 'scale-source', 'scale-hash', 1, 'markdown-v1',
+                             'ready', CURRENT_TIMESTAMP)",
+                    [],
+                )?;
+                let mut span_statement = conn.prepare(
+                    "INSERT INTO source_spans
+                        (id, knowledge_base_id, source_version_id, ordinal, heading, content,
+                         content_hash, token_estimate)
+                     VALUES (?1, ?2, 'scale-version', ?3, ?4, ?5, ?6, 3)",
+                )?;
+                let mut fts_statement = conn.prepare(
+                    "INSERT INTO source_spans_fts
+                        (span_id, knowledge_base_id, source_title, heading, content, cjk_terms)
+                     VALUES (?1, ?2, '规模测试', ?3, ?4, ?5)",
+                )?;
+                for index in 0..100_000 {
+                    let id = format!("scale-span-{index}");
+                    let is_target = index == 99_999;
+                    let heading = if is_target { "Scalability needle" } else { "Fragment" };
+                    let content = if is_target { "unique scalability needle" } else { "ordinary fragment" };
+                    span_statement.execute(params![id, base.id, index, heading, content, id])?;
+                    fts_statement.execute(params![id, base.id, heading, content, if is_target { "scalability needle" } else { "fragment" }])?;
+                }
+                conn.execute(
+                    "INSERT INTO app_state (key, value, updated_at) VALUES (?1, '1', CURRENT_TIMESTAMP)
+                     ON CONFLICT(key) DO UPDATE SET value = '1'",
+                    params![KNOWLEDGE_FTS_CONTENT_VERSION_KEY],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        let matches = store
+            .search_source_spans(&base.id, "scalability needle", 5)
+            .unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].id, "scale-span-99999");
+        let plan = store
+            .db
+            .with_connection(|conn| {
+                let mut statement = conn.prepare(
+                    "EXPLAIN QUERY PLAN SELECT span_id FROM source_spans_fts
+                 WHERE source_spans_fts MATCH 'scalability' AND knowledge_base_id = ?1 LIMIT 5",
+                )?;
+                let rows = statement.query_map(params![base.id], |row| row.get::<_, String>(3))?;
+                rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+            })
+            .unwrap();
+        assert!(plan
+            .iter()
+            .any(|detail| detail.contains("VIRTUAL TABLE INDEX")));
     }
 }

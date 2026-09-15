@@ -183,6 +183,15 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     registry
         .register(Arc::new(GetBookWikiSettingsHandler))
         .await;
+    registry
+        .register(Arc::new(ListKnowledgeBackupsHandler))
+        .await;
+    registry
+        .register(Arc::new(CreateKnowledgeBackupHandler))
+        .await;
+    registry
+        .register(Arc::new(RestoreKnowledgeBackupHandler))
+        .await;
     registry.register(Arc::new(ListWikiSkillsHandler)).await;
     registry
         .register(Arc::new(SaveCustomWikiSkillHandler))
