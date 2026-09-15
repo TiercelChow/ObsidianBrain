@@ -6,7 +6,10 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::{json, Value};
 
-use crate::core::agent_tool_gateway::{agent_knowledge_tool_schemas, call_agent_knowledge_tool};
+use crate::core::agent_tool_gateway::{
+    agent_knowledge_tool_schemas, call_agent_knowledge_tool, AGENT_EXTERNAL_RESEARCH_TOOL,
+};
+use crate::core::external_research::fetch_external_source;
 use crate::error::BrainError;
 use crate::AppContext;
 
@@ -47,7 +50,7 @@ pub async fn agent_mcp(
                 .collect::<Vec<_>>();
             Ok(json!({ "tools": tools }))
         }
-        "tools/call" => call_tool(&ctx, token, request.get("params")),
+        "tools/call" => call_tool(&ctx, token, request.get("params")).await,
         _ => Err((-32601, format!("未知的 MCP 方法: {method}"))),
     };
     let payload = match result {
@@ -61,7 +64,7 @@ pub async fn agent_mcp(
     Ok(Json(payload).into_response())
 }
 
-fn call_tool(
+async fn call_tool(
     ctx: &Arc<AppContext>,
     token: &str,
     params: Option<&Value>,
@@ -81,7 +84,21 @@ fn call_tool(
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    match call_agent_knowledge_tool(ctx.book_wiki_service.store(), token, name, arguments) {
+    let result = if name == AGENT_EXTERNAL_RESEARCH_TOOL {
+        match ctx
+            .book_wiki_service
+            .store()
+            .validate_agent_run_capability(token, name)
+        {
+            Ok(grant) => {
+                fetch_external_source(ctx.book_wiki_service.store(), &grant, arguments).await
+            }
+            Err(error) => Err(error),
+        }
+    } else {
+        call_agent_knowledge_tool(ctx.book_wiki_service.store(), token, name, arguments)
+    };
+    match result {
         Ok(value) => {
             let text = serde_json::to_string(&value)
                 .map_err(|error| (-32603, format!("工具结果序列化失败: {error}")))?;
@@ -168,6 +185,32 @@ mod tests {
         let payload: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload["result"]["tools"].as_array().unwrap().len(), 1);
         assert_eq!(payload["result"]["tools"][0]["name"], "book_get_context");
+
+        let unauthorized_external = Request::post("/v1/knowledge/agent-mcp")
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {}", capability.token))
+            .body(Body::from(
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "book_fetch_external",
+                        "arguments": { "url": "https://example.com/" }
+                    }
+                })
+                .to_string(),
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(unauthorized_external).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["result"]["isError"], true);
+        assert!(payload["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("工具权限"));
 
         ctx.book_wiki_service
             .store()

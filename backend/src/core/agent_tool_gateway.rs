@@ -19,6 +19,8 @@ pub const AGENT_KNOWLEDGE_TOOLS: &[&str] = &[
     "knowledge_get_review_result",
 ];
 
+pub const AGENT_EXTERNAL_RESEARCH_TOOL: &str = "book_fetch_external";
+
 pub fn agent_knowledge_tool_schemas() -> Vec<Value> {
     vec![
         tool_schema(
@@ -152,6 +154,16 @@ pub fn agent_knowledge_tool_schemas() -> Vec<Value> {
                 &["change_set_id"],
             ),
         ),
+        tool_schema(
+            AGENT_EXTERNAL_RESEARCH_TOOL,
+            "读取用户为当前研究任务明确授权的 HTTPS 域名中的一份文本资料；只读、限流且不跟随重定向",
+            object_schema(
+                json!({
+                    "url": { "type": "string", "format": "uri", "minLength": 1, "maxLength": 2048 }
+                }),
+                &["url"],
+            ),
+        ),
     ]
 }
 
@@ -161,6 +173,11 @@ pub fn call_agent_knowledge_tool(
     tool: &str,
     arguments: Value,
 ) -> Result<Value, BrainError> {
+    if tool == AGENT_EXTERNAL_RESEARCH_TOOL {
+        return Err(BrainError::KnowledgeValidation(
+            "外部研究工具必须通过异步 MCP 网关调用".to_string(),
+        ));
+    }
     if !AGENT_KNOWLEDGE_TOOLS.contains(&tool) {
         return Err(BrainError::KnowledgeValidation(format!(
             "未知的 Agent 知识工具: {tool}"

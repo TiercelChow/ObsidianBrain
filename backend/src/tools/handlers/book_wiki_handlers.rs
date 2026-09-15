@@ -988,6 +988,22 @@ impl ToolHandler for CreateKnowledgeTaskHandler {
                     "type": "string",
                     "enum": ["report", "presentation"],
                     "default": "report"
+                },
+                "external_research_enabled": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "external_domains": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": { "type": "string", "minLength": 3, "maxLength": 253 },
+                    "default": []
+                },
+                "external_request_limit": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 50,
+                    "default": 0
                 }
             },
             "required": ["knowledge_base_id", "title"],
@@ -1000,7 +1016,15 @@ impl ToolHandler for CreateKnowledgeTaskHandler {
     }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
-        let task = ctx.book_wiki_service.store().create_task_with_deliverable(
+        let external_research_enabled = args
+            .get("external_research_enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let external_domains = match args.get("external_domains") {
+            Some(_) => string_array(&args, "external_domains")?,
+            None => Vec::new(),
+        };
+        let task = ctx.book_wiki_service.store().create_task_with_options(
             required_string(&args, "knowledge_base_id")?,
             required_string(&args, "title")?,
             args.get("description")
@@ -1012,6 +1036,11 @@ impl ToolHandler for CreateKnowledgeTaskHandler {
             args.get("deliverable_type")
                 .and_then(Value::as_str)
                 .unwrap_or("report"),
+            external_research_enabled,
+            &external_domains,
+            args.get("external_request_limit")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
         )?;
         serde_json::to_value(task)
             .map_err(|error| BrainError::Internal(format!("结果序列化失败: {error}")))

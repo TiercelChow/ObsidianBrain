@@ -29,9 +29,11 @@
 - Wiki 工作台支持检索主题与来源章节，并查看实体正文、论断、关系、引用、别名和版本历史；知识体检可发现缺失引用与重复主题
 - 书籍问答优先召回语义 Wiki、再以章节证据兜底，通过 DeepSeek Harness ACP 生成带 `[S#]` 引用的 Markdown 回答；会话可恢复、来源原位预览、有价值的回答可保存为待审核知识候选
 - 研究任务通过持久化后台队列执行，支持离开页面后继续、取消、失败重试、报告恢复，并可选择生成真实可编辑的 `.pptx` 文件
+- 专题研究可逐任务显式授权外部 HTTPS 文本：必须指定域名与次数，默认无网络权限，访问记录可审计
 - Wiki 配置集中管理 Runtime Profile、Token 用量、每本书的 Purpose / Schema 配置文档，以及版本化的内置/自定义/ZIP 导入 Skill
+- 数据保护支持 SQLite 一致快照、校验后恢复，以及单书 JSONL/Markdown Wiki 导出；内置 Skill 已覆盖跨章综合和 Markdown 汇编
 
-> 当前边界：Markdown 的“来源 → 语义 Wiki → 审核 → 问答/研究 → PPTX/知识回写”闭环已经可用。PPTX 完成 OOXML 结构校验后即可下载，不提供应用内预览。当前 ACP 适配器返回完整文本，页面的逐字显示不是后端真实流式输出。
+> 当前边界：Markdown 的“来源 → 语义 Wiki → 审核 → 问答/研究 → PPTX/知识回写”闭环已经可用。问答通过 ACP 原生文本增量流式显示；PPTX 完成 OOXML 结构校验后即可下载，不提供应用内预览。脚本型 Skill 在独立沙箱、审批和资源配额完成前不可执行。
 
 ### 任务中枢
 - 短期待办记录标题、描述、日期和重要程度
@@ -208,11 +210,17 @@ npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp
 
 6. 对 Markdown 知识库，可在“书籍知识库”点击“智能编译”。系统会分批读取全部当前来源并生成跨章节候选；进入 Wiki 工作台检查差异，点击“批准并应用”后才会写入正式主题、论断、关系、引用和版本。
 
-7. 在“Wiki 配置 → Skills”为当前书启用问答/研究 Skill，也可以导入根目录含 `SKILL.md` 的 ZIP。为保证安全，当前只接受 UTF-8 指令与参考文本，不执行包内脚本，不授予 Shell、文件系统或网络权限。
+7. 在“Wiki 配置 → Skills”为当前书启用问答/研究 Skill，也可以导入根目录含 `SKILL.md` 的 ZIP。为保证安全，当前只接受 UTF-8 指令与参考文本，不执行包内脚本；Skill 本身不能授予 Shell、文件系统或网络权限。
 
 8. 在“研究任务”把交付物设为“PPTX 演示文稿”并运行。任务进入本地持久化队列；刷新或离开页面不会丢失状态。完成后可查看 Markdown 报告、下载 PPTX，并单独审核研究结论是否写回 Wiki。
 
+9. 只有确需补充书外资料时，才在创建“专题研究”任务时开启“授权外部资料研究”，填写允许域名和最多读取次数。后端只允许 HTTPS 文本，不跟随重定向，并拒绝本机、内网、IP 直连和超额请求；不开启时 Harness 不会看到外部读取工具。
+
+10. 在“Wiki 配置 → 数据保护”创建或下载 SQLite 一致快照；恢复前需输入 `RESTORE`。单本书还可导出为流式 JSONL 结构包或可浏览 Markdown Wiki。
+
 Harness 只接收后端召回的当前书籍证据。默认安全 Patch 会关闭文件系统、Shell、Web 和子 Agent 等能力；正式知识实体仍由 Rust 服务与 SQLite 管理。
+
+> 旧版说明：原“知识库 / Wiki 看板 / Wiki 工作台 / 知识探索 / 外部摄入”实现已经退役，旧地址暂时跳转到新的 Book Wiki 页面。Vault 中既有的 `Wiki/*.md` 不会被删除，也不会自动导入或与 SQLite 双写。
 
 ## 配置
 
@@ -328,6 +336,9 @@ ObsidianBrain/
 ```
 ~/.obsidian-brain/
 ├── brain.db              # SQLite（书架、Book Wiki 实体/引用/任务、个人任务、配置）
+├── backups/              # 受管 SQLite 一致快照
+├── exports/              # 单书 JSONL / Markdown Wiki 导出
+├── artifacts/            # PPTX 等研究成果
 ├── thumbnails/           # 图片缩略图
 ├── tantivy_index/        # 全文索引
 ├── obsidian-brain.pid    # PID 文件

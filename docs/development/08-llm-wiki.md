@@ -1,8 +1,8 @@
 # 阅境轩·书籍知识库（Book Wiki）— 开发设计文档 v3
 
 > **文档编号**: DEV-08
-> **版本**: v3.8
-> **状态**: 增量语义 Wiki、可靠任务队列、备份恢复与可移植导出已落地
+> **版本**: v3.9
+> **状态**: Book Wiki v3 核心闭环、授权外部研究与旧模块退役已落地
 > **最后更新**: 2026-09-15
 > **对应需求**: [REQ-08](../requirement/08-llm-wiki.md)
 > **关联需求**: [REQ-10 阅境轩书架](../requirement/10-reader-bookshelf.md)
@@ -39,7 +39,11 @@
 
 实体分页已经下推为 SQLite `LIMIT/OFFSET`，查询总数单独聚合；FTS 查询不再为了补足 limit 再执行正文 `LIKE` 全表扫描。发布前显式规模测试构造十万来源片段，验证目标召回和 `VIRTUAL TABLE INDEX` 查询计划；默认测试保留该用例但标为显式规模回归，避免每次开发循环重复生成大库。
 
-本地开发仍使用固定命令 `npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp`。Runtime Profile 可将 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 兼容供应商注入 Harness；真实密钥只从用户指定的环境变量读取。Book Wiki 只处理 Markdown 文件夹并固定使用 DeepSeek Harness。ACP 的 `UsageUpdate` 只作为真实上下文占用展示；供应商未上报输入/输出明细时，计费统计继续标为 `estimated`。剩余 P2 是显式授权的外部研究和脚本型 Skill 沙箱。
+迁移 022 为研究任务增加显式外部研究开关、域名白名单、请求额度与已用次数。只有带开关的 `knowledge_task_research` Run 才会获得 `book_fetch_external`；MCP 网关先验证 Run Capability，再原子消费额度，最后解析 DNS 并拒绝非公网地址。读取器固定 HTTPS/443、关闭重定向、只接受文本 MIME、限制 15 秒与 512 KiB，并把访问摘要写入 Run 事件。`book-synthesis` 和 `markdown-collection` 同批进入内置 Skill Registry；它们仍只能改变分析/输出格式，不能扩大工具权限。脚本型 Skill 继续保持不可执行，直到有独立沙箱、审批和资源配额。
+
+原 `Memory`、`WikiDashboard`、`WikiWorkbench`、`Explore`、`Ingest` 页面及 Wiki/Explore/Knowledge Insights handlers、旧 Markdown Wiki Engine 已移除。Vue Router 仍保留一个发布周期的静态跳转；旧 `Wiki/*.md` 不删除、不自动导入，新系统也不再读取。由此避免 SQLite Book Wiki 与 Obsidian Markdown Wiki 双写。
+
+本地开发仍使用固定命令 `npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp`。Runtime Profile 可将 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 兼容供应商注入 Harness；真实密钥只从用户指定的环境变量读取。Book Wiki 只处理 Markdown 文件夹并固定使用 DeepSeek Harness。ACP 的 `UsageUpdate` 只作为真实上下文占用展示；供应商未上报输入/输出明细时，计费统计继续标为 `estimated`。
 
 ---
 
@@ -585,7 +589,7 @@ Sidecar 插件通过 `127.0.0.1` 调用后端专用端点，使用 Run Capabilit
 
 ## 9. Agent 工具契约
 
-以下是后续向 Harness 开放的受控工具契约；当前安全 Profile 保持全部 Harness 工具关闭，由 Rust 服务在运行前完成等价的单书只读检索，并只接受结构化候选进入审核流程：
+Harness 只能看到当前 Run Capability 中列出的受控工具；Rust 服务继续拥有知识库边界、参数校验、额度和审核：
 
 | 工具 | 权限 | 说明 |
 |---|---|---|
@@ -600,6 +604,7 @@ Sidecar 插件通过 `127.0.0.1` 调用后端专用端点，使用 Run Capabilit
 | `knowledge_create_task` | propose | 提交研究任务候选 |
 | `knowledge_report_progress` | event | 更新阶段、百分比和说明 |
 | `knowledge_get_review_result` | read | 审核后继续运行时读取结果 |
+| `book_fetch_external` | conditional read | 仅显式授权的专题研究可见；读取允许域名的 HTTPS 文本并消耗任务额度 |
 
 所有 JSON Schema 均设置 `additionalProperties: false`，Rust 输入类型使用 `deny_unknown_fields`，避免额外字段造成工具参数漂移。
 
@@ -695,7 +700,7 @@ Agent 回答只能引用工具返回的 entry/span ID。后端在保存前验证
 
 ### 12.2 Worker
 
-当前 v1 Worker 为单进程、全局并发 1 的 SQLite 队列，按更新时间和创建时间领取；启动时恢复中断状态。运行中取消会通过 watch 通道立即发送 ACP `session/cancel`，ActiveSession 退出后 Harness 子进程组随连接回收。租约、多进程竞争和自动退避仍是后续增强项。
+当前 Worker 为单进程、全局并发 1 的 SQLite 队列，按下一次尝试时间、更新时间和创建时间领取。运行中取消会通过 watch 通道立即发送 ACP `session/cancel`，ActiveSession 退出后 Harness 子进程组随连接回收。任务使用 45 秒租约、15 秒心跳、过期重领和最多三次指数退避；数据库部分唯一索引保证每个知识库最多一个 running 任务。
 
 - 数据库队列按优先级和创建时间领取任务。
 - 使用租约字段避免重复领取。
@@ -713,7 +718,7 @@ Agent 回答只能引用工具返回的 entry/span ID。后端在保存前验证
 
 当前页面继续复用已有 Tool API Envelope；Skill ZIP 上传和成果下载使用资源型 HTTP 端点。下面列出的是逐步迁移后的目标资源 API，不代表每条路由已经存在。
 
-当前新增 Tool 包括 `compile_book_knowledge_base`、`list_knowledge_change_sets`、`resolve_knowledge_change_set`、`lint_book_knowledge_base`、`save_knowledge_answer`、`cancel_knowledge_task`、`list_wiki_skills`、`save_custom_wiki_skill`、`set_wiki_skill_binding` 和 `get_agent_run_events`；研究任务的 execute Tool 只负责入队。资源端点为 `POST /v1/knowledge/skills/import` 与 `GET /v1/knowledge/artifacts/:artifact_id`。
+当前新增 Tool 包括 `compile_book_knowledge_base`、`list_knowledge_change_sets`、`resolve_knowledge_change_set`、`lint_book_knowledge_base`、`save_knowledge_answer`、`cancel_knowledge_task`、`list_wiki_skills`、`save_custom_wiki_skill`、`set_wiki_skill_binding` 和 `get_agent_run_events`；研究任务的 execute Tool 只负责入队。资源端点覆盖 Skill ZIP 上传、成果下载、数据库快照下载/上传恢复与单书 JSON/Markdown 导出；`book_fetch_external` 仅存在于带能力令牌的本机 Agent MCP 端点，不进入普通页面 Tool API。
 
 ### 13.1 前端 API
 
@@ -854,6 +859,8 @@ JSON Bundle 以 `manifest.json` 加多个 JSONL 数据集组成，覆盖来源�
 - Harness stdout 保留协议，诊断只写 stderr 并脱敏。
 - Harness 与 Skill 版本固定并校验哈希。
 - 导入 Skill 不自动执行其中脚本。
+- 普通 Run 的工具列表不含外部读取；只有任务输入持久化了显式授权后才加入 Capability。
+- 外部读取使用精确域名/子域边界、原子额度、DNS 公网检查、禁重定向和响应大小/MIME/超时限制。
 
 ---
 
@@ -868,11 +875,11 @@ JSON Bundle 以 `manifest.json` 加多个 JSONL 数据集组成，覆盖来源�
 5. 接入 DeepSeek Harness。
 6. 完成问答、任务和配置。
 7. 切换导航和 Reader 联动。
-8. 删除旧页面、工具和 Wiki Engine。
+8. 删除旧页面、工具和 Wiki Engine；保留一版静态路由跳转和旧数据说明。
 
 ### 18.2 旧数据
 
-旧 `Wiki/*.md` 不作为正式迁移依赖。若需要保留，提供一次性“旧 Wiki 导入”命令，将页面作为 `legacy_import` 来源进入新的审核流程。
+旧 `Wiki/*.md` 不作为正式迁移依赖，不删除、不自动导入且新系统不再读取。若以后需要保留其内容，应另行提供一次性“旧 Wiki 导入”命令，将页面作为 `legacy_import` 来源进入新的审核流程。
 
 ### 18.3 可回滚性
 
@@ -975,7 +982,8 @@ JSON Bundle 以 `manifest.json` 加多个 JSONL 数据集组成，覆盖来源�
 | Agent 输出不稳定 | 严格 Schema、受控工具、两阶段处理、变更集和事务校验 |
 | 不同书籍数据串联 | 能力令牌、每表 knowledge_base_id、复合唯一约束和跨库测试 |
 | 长任务占用资源 | 队列、同书写任务互斥、并发上限、取消、超时和进程组回收 |
-| Skill 携带危险指令或脚本 | 数据库版本、权限声明、导入校验、默认不执行脚本、运行目录隔离 |
+| Skill 携带危险指令或脚本 | 数据库版本、权限声明、导入校验、默认不执行脚本；脚本型 Skill 在独立沙箱前不可用 |
+| 外部研究被滥用为 SSRF 或无限爬取 | 默认无工具、逐任务显式授权、域名和公网 DNS 校验、禁重定向、原子额度、文本/大小/超时限制 |
 | 外部 GPL 项目许可证影响 | 借鉴方法与交互，独立实现；不直接复制代码，除非项目明确接受 GPLv3 |
 
 ---

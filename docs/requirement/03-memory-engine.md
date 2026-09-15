@@ -1,6 +1,6 @@
 # 知识库 (Knowledge Base) — 需求设计文档
 
-> **模块编号**: 03 | **版本**: v2.0 | **状态**: 设计中 | **关联**: [顶层设计文档](../top_design.md §5.1)
+> **模块编号**: 03 | **版本**: v2.1 | **状态**: 已退役（历史设计） | **关联**: [Book Wiki 需求](08-llm-wiki.md)
 
 ---
 
@@ -96,46 +96,9 @@
 - 每个领域显示：文件夹名 + 笔记数 + 占比
 - 按笔记数降序
 
-### 2.6 获取知识库洞察 API
+### 2.6 历史 API 处置
 
-**工具名称**：`get_knowledge_insights`
-
-**参数**：
-```json
-{}
-```
-
-**返回**：
-```json
-{
-  "islands": {
-    "count": 12,
-    "notes": [
-      { "path": "notes/orphan-note.md", "modified": "2025-03-15", "days_ago": 462 }
-    ]
-  },
-  "hubs": {
-    "notes": [
-      { "path": "notes/core-concept.md", "refs": 8, "referenced_by": ["a.md", "b.md"] }
-    ]
-  },
-  "dormant": {
-    "notes": [
-      { "path": "old/ancient-note.md", "modified": "2024-01-10", "days_ago": 526 }
-    ]
-  },
-  "fresh": {
-    "notes": [
-      { "path": "notes/new-idea.md", "created": "2026-06-17" }
-    ]
-  },
-  "domains": {
-    "folders": [
-      { "folder": "notes", "count": 45, "percentage": 38.5 }
-    ]
-  }
-}
-```
+原 `get_knowledge_insights` 工具与对应页面已在 Book Wiki v3 切换完成后删除。本文前述洞察模型仅作为历史产品背景保留，不再代表当前可调用 API。新的书籍知识库使用实体、论断、关系、引用和确定性知识体检，详见 [REQ-08](08-llm-wiki.md)。
 
 ---
 
@@ -155,6 +118,7 @@
 |---|---|---|
 | v1.0 | 2026-05-29 | 初始版本：记忆引擎（搜索 + CRUD） |
 | v2.0 | 2026-06-19 | 重新设计为知识库洞察面板（孤岛/枢纽/尘封/新生/领域） |
+| v2.1 | 2026-09-15 | 标记旧洞察模块退役；入口和工具由数据库原生 Book Wiki v3 替代 |
 
 ### 1.3 与其他模块的关系
 

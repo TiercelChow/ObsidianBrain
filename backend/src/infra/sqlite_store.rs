@@ -154,6 +154,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "leased knowledge task queue with retry backoff",
         sql: include_str!("../../migrations/021_knowledge_task_leases.sql"),
     },
+    Migration {
+        version: 22,
+        description: "per-task external research grants and safe built-in skills",
+        sql: include_str!("../../migrations/022_external_research_and_safe_skills.sql"),
+    },
 ];
 
 impl SqliteStore {
@@ -1193,7 +1198,7 @@ mod tests {
     }
 
     #[test]
-    fn test_migrations_017_and_018_seed_versioned_instruction_skills() {
+    fn test_migrations_seed_versioned_safe_instruction_and_artifact_skills() {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("skills.db");
         let store = SqliteStore::new(&db_path).unwrap();
@@ -1208,7 +1213,7 @@ mod tests {
                     [],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )?;
-                assert_eq!(counts, (5, 5, 5));
+                assert_eq!(counts, (7, 7, 7));
                 let current: String = conn.query_row(
                     "SELECT current_version_id FROM skills WHERE id = 'skill-book-query'",
                     [],
@@ -1221,6 +1226,12 @@ mod tests {
                     |row| row.get(0),
                 )?;
                 assert_eq!(presentation, "skill-version-book-presentation-v1");
+                let synthesis: String = conn.query_row(
+                    "SELECT current_version_id FROM skills WHERE id = 'skill-book-synthesis'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(synthesis, "skill-version-book-synthesis-v1");
                 Ok(())
             })
             .unwrap();

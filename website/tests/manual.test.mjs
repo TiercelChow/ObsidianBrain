@@ -34,6 +34,7 @@ test('manual records the current storage and interaction boundaries', async () =
   assert.match(html, /task_documents/)
   assert.match(html, /不会写入 Obsidian 的 <code>Tasks\/<\/code> 文件夹/)
   assert.match(html, /任务数据不能从 Vault 重建/)
+  assert.match(html, /SQLite 一致快照/)
 })
 
 test('manual covers native macOS architectures and Windows x86_64 installation', async () => {

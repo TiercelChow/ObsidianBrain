@@ -67,10 +67,6 @@ export function getMemoryStats() {
   return callTool('get_memory_stats')
 }
 
-export function getKnowledgeInsights(force = false) {
-  return callTool('get_knowledge_insights', { force })
-}
-
 // ── System Config ──
 export function getConfig() {
   return callTool('get_config')

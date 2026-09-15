@@ -245,8 +245,8 @@
           <article class="feature-card wiki-card" data-reveal><div class="feature-icon"><svg><use href="#icon-wiki" /></svg></div><span class="feature-state">理解</span><h3>书籍知识库</h3><p>Markdown 先形成不可变来源证据，再由模型跨章节归并概念、别名、论断与关系。候选经服务端校验和人工审核后才进入正式 Wiki。</p><ul><li>书籍知识库只处理 Markdown 文件夹</li><li>主题知识与章节证据双层检索</li><li>原子审核、引用和版本历史</li></ul></article>
           <article class="feature-card compact" data-reveal><div class="feature-icon"><svg><use href="#icon-search" /></svg></div><div><span class="feature-state">浏览</span><h3>Wiki 工作台</h3><p>查看实体正文、论断、关系、引用和历史版本；知识体检帮助发现无来源结论与重复主题。</p></div></article>
           <article class="feature-card compact" data-reveal><div class="feature-icon"><svg><use href="#icon-spark" /></svg></div><div><span class="feature-state">追问</span><h3>书籍问答</h3><p>优先检索语义 Wiki、再以章节兜底；带引用回答支持历史恢复、来源弹窗预览，也可保存为待审核知识。</p></div></article>
-          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg><use href="#icon-task" /></svg></div><div><span class="feature-state">研究</span><h3>研究任务</h3><p>任务进入本地持久化队列，支持离开页面后继续、取消和重试；PPTX 生成并校验后可直接下载。</p></div></article>
-          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg><use href="#icon-code" /></svg></div><div><span class="feature-state">配置</span><h3>Wiki 配置</h3><p>管理模型、Token 用量、单书规则和版本化 Skill；可导入安全的指令型 ZIP，模型密钥不写入数据库。</p></div></article>
+          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg><use href="#icon-task" /></svg></div><div><span class="feature-state">研究</span><h3>研究任务</h3><p>任务进入本地持久化队列，支持离开页面后继续、取消和重试；可按任务授权域名与次数补充外部 HTTPS 资料，PPTX 校验后直接下载。</p></div></article>
+          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg><use href="#icon-code" /></svg></div><div><span class="feature-state">配置</span><h3>Wiki 配置</h3><p>管理模型、Token 用量、单书规则和版本化 Skill；提供 SQLite 一致快照、恢复及单书 JSONL/Markdown 导出。</p></div></article>
         </div>
       </section>
 
@@ -306,7 +306,7 @@
         <div class="privacy-grid" data-reveal-group>
           <article data-reveal><svg><use href="#icon-shield" /></svg><div><h3>数据归你所有</h3><p>原始资料保持原样；结构化知识、任务和运行审计集中保存在本机数据库中。</p></div></article>
           <article data-reveal><svg><use href="#icon-terminal" /></svg><div><h3>本地服务边界清晰</h3><p>可绑定 `127.0.0.1` 仅供本机使用，也可以主动开启局域网访问。</p></div></article>
-          <article data-reveal><svg><use href="#icon-spark" /></svg><div><h3>Agent 权限受限</h3><p>书籍问答只把召回证据交给 DeepSeek Harness；安全 Patch 默认关闭文件、Shell、Web 与子 Agent 能力。</p></div></article>
+          <article data-reveal><svg><use href="#icon-spark" /></svg><div><h3>Agent 权限受限</h3><p>书籍问答只把召回证据交给 DeepSeek Harness；外部研究默认关闭，只有单次任务明确授权域名和额度后才开放只读 HTTPS 文本。</p></div></article>
         </div>
       </section>
 
@@ -318,6 +318,7 @@
             <details><summary>必须安装 Obsidian 才能使用吗？<svg><use href="#icon-chevron" /></svg></summary><p>阅境轩、书籍知识库和任务中枢可以直接使用本地文件与 SQLite；时光机及 Vault 集成功能建议配合 Obsidian Local REST API 使用。</p></details>
             <details><summary>任务数据保存在哪里？<svg><use href="#icon-chevron" /></svg></summary><p>当前任务中枢以本地 SQLite 为唯一权威存储；阅读书架、配置和部分运行状态也保存在本机数据目录。Markdown 笔记与附件仍在你的 Vault 中。</p></details>
             <details><summary>书籍知识库保存在哪里？<svg><use href="#icon-chevron" /></svg></summary><p>实体、来源片段、配置文档、研究报告、Skill 和 Agent 审计保存在 <code>~/.obsidian-brain/brain.db</code>；PPTX 等二进制成果保存在同一应用数据目录的受管附件区。Book Wiki 只读取 Markdown 文集且不会改写原文，阅境轩中的 PDF 阅读数据保持独立。</p></details>
+            <details><summary>研究任务会访问哪些网站？<svg><use href="#icon-chevron" /></svg></summary><p>默认一个也不会。只有你在创建专题研究时主动开启外部研究、填写允许域名和最多请求次数，Harness 才能读取这些域名的 HTTPS 文本；系统拒绝重定向、IP 直连、内网地址和超额访问，并记录每次读取。</p></details>
             <details><summary>如何进行局域网访问？<svg><use href="#icon-chevron" /></svg></summary><p>默认服务可绑定 `0.0.0.0:9876`，同一局域网设备访问 `http://你的IP:9876`。若只希望本机使用，可将 `server.host` 设置为 `127.0.0.1`。</p></details>
             <details><summary>支持哪些 LLM？<svg><use href="#icon-chevron" /></svg></summary><p>书籍问答和研究任务通过 DeepSeek Harness 的 ACP 适配器执行，但模型供应商不受 DeepSeek 限制；可配置 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 兼容接口，API Key 仅从环境变量读取。</p></details>
             <details><summary>正式运行还需要 Node.js 吗？<svg><use href="#icon-chevron" /></svg></summary><p>阅境轩、时光机和任务中枢不需要。若使用默认的 DeepSeek Harness 启动命令，则需要系统中存在 npm / npx；前端仍已通过 <code>rust-embed</code> 嵌入 Rust 二进制。</p></details>

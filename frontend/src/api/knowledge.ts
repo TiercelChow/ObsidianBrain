@@ -154,6 +154,10 @@ export interface KnowledgeTask {
   artifact_state: 'not_requested' | 'pending' | 'ready' | 'failed'
   knowledge_change_state: 'none' | 'proposed' | 'applied' | 'rejected'
   cancel_requested: boolean
+  external_research_enabled: boolean
+  external_domains: string[]
+  external_request_limit: number
+  external_requests_used: number
   created_at: string
   updated_at: string
 }
@@ -693,6 +697,9 @@ export function createKnowledgeTask(input: {
   description?: string
   taskType?: KnowledgeTask['task_type']
   deliverableType?: KnowledgeTask['deliverable_type']
+  externalResearchEnabled?: boolean
+  externalDomains?: string[]
+  externalRequestLimit?: number
 }) {
   return callTool('create_knowledge_task', {
     knowledge_base_id: input.knowledgeBaseId,
@@ -700,6 +707,9 @@ export function createKnowledgeTask(input: {
     description: input.description ?? '',
     task_type: input.taskType ?? 'research',
     deliverable_type: input.deliverableType ?? 'report',
+    external_research_enabled: input.externalResearchEnabled ?? false,
+    external_domains: input.externalDomains ?? [],
+    external_request_limit: input.externalRequestLimit ?? 0,
   }) as unknown as Promise<ToolEnvelope<KnowledgeTask>>
 }
 

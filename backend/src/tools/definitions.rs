@@ -482,21 +482,6 @@ pub fn get_memo_stats_schema() -> Value {
     })
 }
 
-/// Schema for `get_knowledge_insights` — get knowledge base insights.
-pub fn get_knowledge_insights_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "force": {
-                "type": "boolean",
-                "default": false,
-                "description": "强制重新统计（忽略缓存）"
-            }
-        },
-        "additionalProperties": false
-    })
-}
-
 // ── System Config Tools ──
 
 /// Schema for `get_config`.

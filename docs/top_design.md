@@ -1,6 +1,6 @@
 # ObsidianBrain — 顶层设计文档
 
-> **版本**: v1.2 | **最后更新**: 2026-09-12 | **状态**: 持续演进
+> **版本**: v1.3 | **最后更新**: 2026-09-15 | **状态**: 持续演进
 
 ---
 
@@ -177,10 +177,10 @@ Book Wiki 采用与普通 Obsidian 笔记不同的数据边界：
                   ↓
 SQLite：实体、论断、关系、引用、版本、问答、任务、审核
                   ↓
-DeepSeek Harness / Claude Code（可替换的 Agent 执行器）
+DeepSeek Harness（固定 Agent 执行器，可接入兼容模型供应商）
 ```
 
-Agent 通过受控工具读取来源和提交结构化变更集，不能直接执行 SQL 或改写原书。配置文档和 Skill 在数据库中版本化，运行时物化为临时 Markdown 文件。完整产品与开发边界见 [Book Wiki 需求设计](requirement/08-llm-wiki.md) 和 [开发设计](development/08-llm-wiki.md)。
+Agent 通过短时、单书、工具白名单能力令牌读取来源和提交结构化变更集，不能直接执行 SQL 或改写原书。专题研究只有在用户为该任务明确授权域名与次数后，才能读取受限 HTTPS 文本；外部资料不能绕过引用边界和人工审核。配置文档和 Skill 在数据库中版本化，运行时物化为临时 Markdown 文件。完整产品与开发边界见 [Book Wiki 需求设计](requirement/08-llm-wiki.md) 和 [开发设计](development/08-llm-wiki.md)。
 
 ---
 
@@ -1142,17 +1142,18 @@ enum BrainError {
 
 **设计文档**：[需求设计](requirement/09-task-management.md) · [开发设计](development/09-task-management.md)
 
-### Phase 6: 阅境轩 Book Wiki v3（MVP 1 已落地）
+### Phase 6: 阅境轩 Book Wiki v3（核心闭环已落地）
 
 - [x] 书架正规化、软删除与每书一库基础生命周期
 - [x] Markdown 来源版本、章节片段、实体和行号引用
-- [x] PDF 来源登记与待 Harness 提取状态
+- [x] Book Wiki 限定 Markdown 文件夹；PDF 保持为阅境轩独立阅读能力
 - [x] 数据库实体浏览、检索与 FTS5 数据底座
-- [ ] DeepSeek Harness Sidecar、专用 Profile、Skill 与受控工具
-- [x] 知识库、Wiki 工作台、证据问答、研究任务草稿和配置中心首版页面
-- [ ] 论断、关系、审核、变更集与 Agent 执行闭环
-- [ ] Claude Code Adapter、导出与恢复
-- [ ] 退役原知识库、Wiki 看板、Wiki 工作台、知识探索和外部摄入页面
+- [x] DeepSeek Harness ACP、专用 Profile、版本化 Skill 与受控 MCP 工具
+- [x] 知识库、Wiki 工作台、证据问答、可靠研究任务和配置中心
+- [x] 论断、关系、审核、变更集与 DeepSeek Harness Agent 执行闭环
+- [x] 逐任务、域名范围、只读限流的外部研究授权
+- [x] SQLite 在线备份/恢复、单书 JSON/Markdown 导出与 PPTX 下载
+- [x] 退役原知识库、Wiki 看板、Wiki 工作台、知识探索和外部摄入页面（旧路由保留一版跳转）
 
 **设计文档**：[需求设计](requirement/08-llm-wiki.md) · [开发设计](development/08-llm-wiki.md)
 

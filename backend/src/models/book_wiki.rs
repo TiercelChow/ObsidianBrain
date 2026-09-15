@@ -220,6 +220,10 @@ pub struct KnowledgeTask {
     pub artifact_state: String,
     pub knowledge_change_state: String,
     pub cancel_requested: bool,
+    pub external_research_enabled: bool,
+    pub external_domains: Vec<String>,
+    pub external_request_limit: i64,
+    pub external_requests_used: i64,
     pub created_at: String,
     pub updated_at: String,
 }

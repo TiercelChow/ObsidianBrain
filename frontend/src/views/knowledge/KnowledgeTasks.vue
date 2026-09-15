@@ -24,7 +24,7 @@
             <i></i><span>{{ taskActivity[task.id] }}</span>
           </div>
           <p v-if="task.result_summary" class="task-result-preview">{{ task.result_summary }}</p>
-          <footer><span>{{ typeLabel(task.task_type) }}</span><span>{{ task.deliverable_type === 'presentation' ? 'PPTX 演示文稿' : '研究报告' }}</span><span v-if="task.knowledge_change_state === 'proposed'">待知识审核</span><time>{{ formatDate(task.updated_at) }}</time></footer>
+          <footer><span>{{ typeLabel(task.task_type) }}</span><span>{{ task.deliverable_type === 'presentation' ? 'PPTX 演示文稿' : '研究报告' }}</span><span v-if="task.external_research_enabled">外部资料 {{ task.external_requests_used }}/{{ task.external_request_limit }}</span><span v-if="task.knowledge_change_state === 'proposed'">待知识审核</span><time>{{ formatDate(task.updated_at) }}</time></footer>
         </div>
         <button class="task-action" type="button" :class="{ 'is-cancel': task.status === 'running' || task.status === 'queued' }" :aria-label="taskActionLabel(task)" :disabled="(Boolean(executingTaskId) && executingTaskId !== task.id) || Boolean(loadingResultId)" @click="runOrOpen(task)">
           <el-icon :class="{ 'is-loading': task.status === 'running' || executingTaskId === task.id || loadingResultId === task.id }">
@@ -61,6 +61,22 @@
             <el-option label="研究报告" value="report" />
             <el-option label="PPTX 演示文稿" value="presentation" />
           </el-select>
+          <section class="external-grant" :class="{ 'is-enabled': draft.externalResearchEnabled }">
+            <div class="external-grant-head">
+              <div><strong>授权外部资料研究</strong><span>仅本次任务有效，默认关闭</span></div>
+              <el-switch v-model="draft.externalResearchEnabled" :disabled="draft.taskType !== 'research'" />
+            </div>
+            <template v-if="draft.externalResearchEnabled">
+              <el-input v-model="draft.externalDomains" type="textarea" :rows="2" placeholder="允许访问的域名，用逗号分隔，例如 docs.example.com, arxiv.org" />
+              <div class="external-limit-row">
+                <span>最多读取</span>
+                <el-input-number v-model="draft.externalRequestLimit" :min="1" :max="50" controls-position="right" />
+                <span>个网页</span>
+              </div>
+              <p>只允许 HTTPS 文本、不会跟随重定向，并拒绝本机和内网地址。外部内容只作为参考，不会自动写入正式知识。</p>
+            </template>
+            <p v-else-if="draft.taskType !== 'research'">知识刷新和事实审核保持纯书内证据模式，不开放外部网络。</p>
+          </section>
         </div>
         <div class="knowledge-modal-actions">
           <el-button @click="createVisible = false">取消</el-button>
@@ -101,7 +117,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { DataAnalysis, Download, Loading, Operation, Plus, Refresh, Select, VideoPlay, View } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -138,8 +154,12 @@ const activeTask = ref<KnowledgeTask | null>(null)
 const activeEvidence = ref<KnowledgeEntrySummary[]>([])
 const activeArtifacts = ref<KnowledgeArtifact[]>([])
 const taskActivity = ref<Record<string, string>>({})
-const draft = reactive({ knowledgeBaseId: '', title: '', description: '', taskType: 'research' as KnowledgeTask['task_type'], deliverableType: 'report' as KnowledgeTask['deliverable_type'] })
+const draft = reactive({ knowledgeBaseId: '', title: '', description: '', taskType: 'research' as KnowledgeTask['task_type'], deliverableType: 'report' as KnowledgeTask['deliverable_type'], externalResearchEnabled: false, externalDomains: '', externalRequestLimit: 6 })
 let viewActive = true
+
+watch(() => draft.taskType, taskType => {
+  if (taskType !== 'research') draft.externalResearchEnabled = false
+})
 
 async function loadData() {
   try {
@@ -180,13 +200,25 @@ function openCreate() {
   draft.description = ''
   draft.taskType = 'research'
   draft.deliverableType = 'report'
+  draft.externalResearchEnabled = false
+  draft.externalDomains = ''
+  draft.externalRequestLimit = 6
   createVisible.value = true
 }
 
 async function createTask() {
   creating.value = true
   try {
-    const response = await createKnowledgeTask(draft)
+    const externalDomains = draft.externalDomains
+      .split(/[，,\n]/)
+      .map(domain => domain.trim())
+      .filter(Boolean)
+    if (draft.externalResearchEnabled && externalDomains.length === 0) throw new Error('请填写至少一个允许访问的域名')
+    const response = await createKnowledgeTask({
+      ...draft,
+      externalDomains,
+      externalRequestLimit: draft.externalResearchEnabled ? draft.externalRequestLimit : 0,
+    })
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '创建失败')
     createVisible.value = false
     ElMessage.success('研究任务已创建')
@@ -340,6 +372,14 @@ onBeforeUnmount(() => { viewActive = false })
 .task-action.is-cancel { border-color: color-mix(in srgb, var(--danger, #ff3b30) 25%, transparent); background: color-mix(in srgb, var(--danger, #ff3b30) 9%, transparent); color: var(--danger, #d9342b); }
 .task-empty-symbol { width: 62px; height: 62px; display: grid; place-items: center; border-radius: 20px; background: var(--accent-light); color: var(--accent); font-size: 27px; }
 .mobile-create-task { display: none; }
+.external-grant { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border-faint); border-radius: 14px; background: color-mix(in srgb, var(--bg-glass) 72%, transparent); transition: border-color var(--motion-fast) var(--ease-emphasized), background var(--motion-fast) var(--ease-emphasized); }
+.external-grant.is-enabled { border-color: var(--accent-border); background: var(--accent-light); }
+.external-grant-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.external-grant-head > div { display: grid; gap: 2px; }
+.external-grant-head strong { color: var(--text-primary); font-size: 12px; }
+.external-grant-head span, .external-grant > p { color: var(--text-faint); font-size: 10px; line-height: 1.55; }
+.external-limit-row { display: flex; align-items: center; gap: 9px; color: var(--text-muted); font-size: 11px; }
+.external-limit-row :deep(.el-input-number) { width: 116px; }
 .task-result-modal { width: min(720px, calc(100vw - 28px)); }
 .task-result-modal .knowledge-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .task-result-heading > span { color: var(--accent); font-size: 10px; font-weight: 680; }

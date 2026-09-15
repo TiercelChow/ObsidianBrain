@@ -79,6 +79,15 @@ pub struct AgentCapabilityGrant {
     pub expires_at: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExternalResearchAuthorization {
+    pub run_id: String,
+    pub knowledge_base_id: String,
+    pub host: String,
+    pub request_number: i64,
+    pub request_limit: i64,
+}
+
 #[derive(Clone, Debug)]
 pub struct SourceSectionDraft {
     pub id: String,
@@ -3222,6 +3231,8 @@ impl BookWikiStore {
                 "SELECT kt.id, kt.knowledge_base_id, b.name, kt.title, kt.description,
                         kt.task_type, kt.status, kt.result_summary, kt.deliverable_type,
                         kt.artifact_state, kt.knowledge_change_state, kt.cancel_requested,
+                        kt.external_research_enabled, kt.external_domains_json,
+                        kt.external_request_limit, kt.external_requests_used,
                         kt.created_at, kt.updated_at
                  FROM knowledge_tasks kt
                  JOIN knowledge_bases kb ON kb.id = kt.knowledge_base_id
@@ -3229,24 +3240,7 @@ impl BookWikiStore {
                  WHERE (?1 IS NULL OR kt.knowledge_base_id = ?1)
                  ORDER BY kt.updated_at DESC",
             )?;
-            let rows = stmt.query_map(params![base_id], |row| {
-                Ok(KnowledgeTask {
-                    id: row.get(0)?,
-                    knowledge_base_id: row.get(1)?,
-                    book_name: row.get(2)?,
-                    title: row.get(3)?,
-                    description: row.get(4)?,
-                    task_type: row.get(5)?,
-                    status: row.get(6)?,
-                    result_summary: row.get(7)?,
-                    deliverable_type: row.get(8)?,
-                    artifact_state: row.get(9)?,
-                    knowledge_change_state: row.get(10)?,
-                    cancel_requested: row.get(11)?,
-                    created_at: row.get(12)?,
-                    updated_at: row.get(13)?,
-                })
-            })?;
+            let rows = stmt.query_map(params![base_id], map_knowledge_task)?;
             rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
         })
     }
@@ -3268,6 +3262,30 @@ impl BookWikiStore {
         description: &str,
         task_type: &str,
         deliverable_type: &str,
+    ) -> Result<KnowledgeTask, BrainError> {
+        self.create_task_with_options(
+            base_id,
+            title,
+            description,
+            task_type,
+            deliverable_type,
+            false,
+            &[],
+            0,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_task_with_options(
+        &self,
+        base_id: &str,
+        title: &str,
+        description: &str,
+        task_type: &str,
+        deliverable_type: &str,
+        external_research_enabled: bool,
+        external_domains: &[String],
+        external_request_limit: i64,
     ) -> Result<KnowledgeTask, BrainError> {
         let title = title.trim();
         let description = description.trim();
@@ -3296,6 +3314,31 @@ impl BookWikiStore {
                 "未知的研究任务交付物类型".to_string(),
             ));
         }
+        let external_domains = normalize_external_domains(external_domains)?;
+        if external_research_enabled && task_type != "research" {
+            return Err(BrainError::KnowledgeValidation(
+                "只有专题研究任务可以授权外部资料检索".to_string(),
+            ));
+        }
+        if external_research_enabled
+            && (external_domains.is_empty() || !(1..=50).contains(&external_request_limit))
+        {
+            return Err(BrainError::KnowledgeValidation(
+                "外部研究必须授权 1 至 20 个域名，并设置 1 至 50 次请求额度".to_string(),
+            ));
+        }
+        let external_request_limit = if external_research_enabled {
+            external_request_limit
+        } else {
+            0
+        };
+        let external_domains = if external_research_enabled {
+            external_domains
+        } else {
+            Vec::new()
+        };
+        let external_domains_json = serde_json::to_string(&external_domains)
+            .map_err(|error| BrainError::Internal(format!("外部研究域名序列化失败: {error}")))?;
         self.get_active_base(base_id)?;
         let id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
@@ -3303,10 +3346,12 @@ impl BookWikiStore {
             conn.execute(
                 "INSERT INTO knowledge_tasks
                  (id, knowledge_base_id, title, description, task_type, status,
-                  deliverable_type, artifact_state, created_at, updated_at)
+                  deliverable_type, artifact_state, external_research_enabled,
+                  external_domains_json, external_request_limit, external_requests_used,
+                  created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, 'draft', ?6,
                          CASE WHEN ?6 = 'presentation' THEN 'pending' ELSE 'not_requested' END,
-                         ?7, ?7)",
+                         ?7, ?8, ?9, 0, ?10, ?10)",
                 params![
                     id,
                     base_id,
@@ -3314,7 +3359,10 @@ impl BookWikiStore {
                     description,
                     task_type,
                     deliverable_type,
-                    now
+                    external_research_enabled,
+                    external_domains_json,
+                    external_request_limit,
+                    now,
                 ],
             )?;
             Ok(())
@@ -3331,30 +3379,15 @@ impl BookWikiStore {
                 "SELECT kt.id, kt.knowledge_base_id, b.name, kt.title, kt.description,
                         kt.task_type, kt.status, kt.result_summary, kt.deliverable_type,
                         kt.artifact_state, kt.knowledge_change_state, kt.cancel_requested,
+                        kt.external_research_enabled, kt.external_domains_json,
+                        kt.external_request_limit, kt.external_requests_used,
                         kt.created_at, kt.updated_at
                  FROM knowledge_tasks kt
                  JOIN knowledge_bases kb ON kb.id = kt.knowledge_base_id
                  JOIN reader_books b ON b.id = kb.book_id
                  WHERE kt.id = ?1",
                 params![task_id],
-                |row| {
-                    Ok(KnowledgeTask {
-                        id: row.get(0)?,
-                        knowledge_base_id: row.get(1)?,
-                        book_name: row.get(2)?,
-                        title: row.get(3)?,
-                        description: row.get(4)?,
-                        task_type: row.get(5)?,
-                        status: row.get(6)?,
-                        result_summary: row.get(7)?,
-                        deliverable_type: row.get(8)?,
-                        artifact_state: row.get(9)?,
-                        knowledge_change_state: row.get(10)?,
-                        cancel_requested: row.get(11)?,
-                        created_at: row.get(12)?,
-                        updated_at: row.get(13)?,
-                    })
-                },
+                map_knowledge_task,
             )
             .optional()?
             .ok_or_else(|| BrainError::KnowledgeNotFound(task_id.to_string()))
@@ -4526,6 +4559,107 @@ impl BookWikiStore {
         })
     }
 
+    pub fn authorize_external_research_request(
+        &self,
+        run_id: &str,
+        host: &str,
+    ) -> Result<ExternalResearchAuthorization, BrainError> {
+        let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+        if host.is_empty() {
+            return Err(BrainError::KnowledgeValidation(
+                "外部资料地址缺少域名".to_string(),
+            ));
+        }
+        self.db.transaction(|conn| {
+            let (base_id, input_json, run_status) = conn
+                .query_row(
+                    "SELECT knowledge_base_id, input_json, status FROM agent_runs WHERE id = ?1",
+                    params![run_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .optional()?
+                .ok_or_else(|| BrainError::KnowledgeNotFound(run_id.to_string()))?;
+            if run_status != "running" {
+                return Err(BrainError::KnowledgeValidation(
+                    "Agent 运行已经结束，外部研究授权已失效".to_string(),
+                ));
+            }
+            let input: serde_json::Value = serde_json::from_str(&input_json)
+                .map_err(|error| BrainError::Internal(format!("Agent 运行输入损坏: {error}")))?;
+            let task_id = input
+                .get("knowledge_task_id")
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| {
+                    BrainError::KnowledgeValidation(
+                        "只有用户创建的研究任务可以访问外部资料".to_string(),
+                    )
+                })?;
+            let (task_base_id, enabled, domains_json, request_limit, requests_used) = conn
+                .query_row(
+                    "SELECT knowledge_base_id, external_research_enabled,
+                            external_domains_json, external_request_limit, external_requests_used
+                     FROM knowledge_tasks WHERE id = ?1",
+                    params![task_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, bool>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, i64>(3)?,
+                            row.get::<_, i64>(4)?,
+                        ))
+                    },
+                )
+                .optional()?
+                .ok_or_else(|| BrainError::KnowledgeNotFound(task_id.to_string()))?;
+            if !enabled || task_base_id != base_id {
+                return Err(BrainError::KnowledgeValidation(
+                    "该研究任务未授权访问外部资料".to_string(),
+                ));
+            }
+            let domains = parse_string_list(&domains_json, "外部研究域名")?;
+            if !domains
+                .iter()
+                .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+            {
+                return Err(BrainError::KnowledgeValidation(format!(
+                    "域名 {host} 不在本任务的外部研究授权范围内"
+                )));
+            }
+            if requests_used >= request_limit {
+                return Err(BrainError::KnowledgeValidation(
+                    "该研究任务的外部请求额度已用完".to_string(),
+                ));
+            }
+            let updated = conn.execute(
+                "UPDATE knowledge_tasks
+                 SET external_requests_used = external_requests_used + 1, updated_at = ?2
+                 WHERE id = ?1 AND external_research_enabled = 1
+                   AND external_requests_used < external_request_limit",
+                params![task_id, Utc::now().to_rfc3339()],
+            )?;
+            if updated != 1 {
+                return Err(BrainError::KnowledgeValidation(
+                    "该研究任务的外部请求额度已用完".to_string(),
+                ));
+            }
+            Ok(ExternalResearchAuthorization {
+                run_id: run_id.to_string(),
+                knowledge_base_id: base_id,
+                host,
+                request_number: requests_used + 1,
+                request_limit,
+            })
+        })
+    }
+
     pub fn revoke_agent_run_capabilities(&self, run_id: &str) -> Result<(), BrainError> {
         let now = Utc::now().to_rfc3339();
         self.db.with_connection(|conn| {
@@ -5197,6 +5331,69 @@ fn map_artifact(row: &rusqlite::Row<'_>) -> rusqlite::Result<KnowledgeArtifact> 
     })
 }
 
+fn map_knowledge_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<KnowledgeTask> {
+    let raw_domains = row.get::<_, String>(13)?;
+    let external_domains = serde_json::from_str(&raw_domains).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(13, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    Ok(KnowledgeTask {
+        id: row.get(0)?,
+        knowledge_base_id: row.get(1)?,
+        book_name: row.get(2)?,
+        title: row.get(3)?,
+        description: row.get(4)?,
+        task_type: row.get(5)?,
+        status: row.get(6)?,
+        result_summary: row.get(7)?,
+        deliverable_type: row.get(8)?,
+        artifact_state: row.get(9)?,
+        knowledge_change_state: row.get(10)?,
+        cancel_requested: row.get(11)?,
+        external_research_enabled: row.get(12)?,
+        external_domains,
+        external_request_limit: row.get(14)?,
+        external_requests_used: row.get(15)?,
+        created_at: row.get(16)?,
+        updated_at: row.get(17)?,
+    })
+}
+
+fn normalize_external_domains(domains: &[String]) -> Result<Vec<String>, BrainError> {
+    if domains.len() > 20 {
+        return Err(BrainError::KnowledgeValidation(
+            "外部研究最多授权 20 个域名".to_string(),
+        ));
+    }
+    let mut normalized = domains
+        .iter()
+        .map(|domain| domain.trim().trim_end_matches('.').to_ascii_lowercase())
+        .filter(|domain| !domain.is_empty())
+        .collect::<Vec<_>>();
+    normalized.sort();
+    normalized.dedup();
+    let valid = normalized.iter().all(|domain| {
+        domain.len() <= 253
+            && domain.contains('.')
+            && !domain.starts_with('.')
+            && !domain.ends_with('.')
+            && domain.split('.').all(|label| {
+                !label.is_empty()
+                    && label.len() <= 63
+                    && !label.starts_with('-')
+                    && !label.ends_with('-')
+                    && label
+                        .chars()
+                        .all(|character| character.is_ascii_alphanumeric() || character == '-')
+            })
+    });
+    if !valid {
+        return Err(BrainError::KnowledgeValidation(
+            "外部研究域名格式无效；请只填写 example.com 这样的域名".to_string(),
+        ));
+    }
+    Ok(normalized)
+}
+
 fn default_book_config_documents() -> [(&'static str, &'static str); 3] {
     [
         (
@@ -5288,6 +5485,7 @@ fn validate_agent_event_type(value: &str) -> Result<(), BrainError> {
             | "run.usage"
             | "run.tool_started"
             | "run.tool_finished"
+            | "run.external_source_read"
             | "run.review_required"
             | "run.completed"
             | "run.failed"
@@ -7239,6 +7437,79 @@ mod tests {
         assert_eq!(completed.status, "completed");
         assert_eq!(completed.result_summary, "核心观点已经完成梳理。[S1]");
         assert_eq!(store.get_task(&task.id).unwrap(), completed);
+    }
+
+    #[test]
+    fn test_external_research_requires_task_grant_domain_scope_and_quota() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-external", "/tmp/book-external")])
+            .unwrap();
+        let base = store.initialize_base("book-external").unwrap();
+        let task = store
+            .create_task_with_options(
+                &base.id,
+                "核验外部资料",
+                "只访问授权官网",
+                "research",
+                "report",
+                true,
+                &["Docs.Example.com".to_string()],
+                1,
+            )
+            .unwrap();
+        assert!(task.external_research_enabled);
+        assert_eq!(task.external_domains, vec!["docs.example.com"]);
+        assert_eq!(task.external_request_limit, 1);
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_task_research",
+                &serde_json::json!({"knowledge_task_id": task.id}),
+            )
+            .unwrap();
+
+        let wrong_domain = store
+            .authorize_external_research_request(&run.id, "other.example.com")
+            .unwrap_err();
+        assert!(wrong_domain.to_string().contains("授权范围"));
+
+        let granted = store
+            .authorize_external_research_request(&run.id, "api.docs.example.com")
+            .unwrap();
+        assert_eq!(granted.request_number, 1);
+        assert_eq!(granted.request_limit, 1);
+
+        let exhausted = store
+            .authorize_external_research_request(&run.id, "docs.example.com")
+            .unwrap_err();
+        assert!(exhausted.to_string().contains("额度"));
+    }
+
+    #[test]
+    fn test_external_research_defaults_to_denied() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-no-external", "/tmp/book-no-external")])
+            .unwrap();
+        let base = store.initialize_base("book-no-external").unwrap();
+        let task = store
+            .create_task(&base.id, "仅书内研究", "", "research")
+            .unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_task_research",
+                &serde_json::json!({"knowledge_task_id": task.id}),
+            )
+            .unwrap();
+
+        let error = store
+            .authorize_external_research_request(&run.id, "example.com")
+            .unwrap_err();
+        assert!(error.to_string().contains("未授权"));
     }
 
     #[test]

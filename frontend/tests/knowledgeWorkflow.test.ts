@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const frontendRoot = new URL('../', import.meta.url)
@@ -150,6 +150,22 @@ test('knowledge tasks expose durable execution controls and real presentation ar
   assert.match(api, /knowledge\/artifacts/)
 })
 
+test('external research stays opt-in, domain scoped, and rate limited per task', async () => {
+  const [view, api] = await Promise.all([
+    source('src/views/knowledge/KnowledgeTasks.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+
+  assert.match(view, /授权外部资料研究/)
+  assert.match(view, /仅本次任务有效，默认关闭/)
+  assert.match(view, /draft\.externalResearchEnabled = false/)
+  assert.match(view, /externalRequestLimit/)
+  assert.match(view, /只允许 HTTPS 文本/)
+  assert.match(api, /external_research_enabled/)
+  assert.match(api, /external_domains/)
+  assert.match(api, /external_request_limit/)
+})
+
 test('knowledge pages distinguish source synchronization from wiki compilation', async () => {
   const [bases, workspace, api] = await Promise.all([
     source('src/views/knowledge/KnowledgeBases.vue'),
@@ -219,6 +235,22 @@ test('Book Wiki only exposes Markdown folders while Reader keeps PDF support', a
   assert.doesNotMatch(bases, /card\.book\.kind === 'pdf'/)
   assert.match(api, /runtime: 'deepseek_harness'/)
   assert.doesNotMatch(api, /runtime: 'deepseek_harness' \| 'claude_code'/)
+})
+
+test('legacy knowledge pages are retired behind one-release compatibility redirects', async () => {
+  const router = await source('src/router/index.ts')
+  for (const [legacyPath, destination] of [
+    ['/memory', '/knowledge'],
+    ['/wiki-dashboard', '/knowledge'],
+    ['/wiki', '/knowledge/wiki'],
+    ['/explore', '/knowledge/chat'],
+    ['/ingest', '/knowledge/tasks'],
+  ]) {
+    assert.match(router, new RegExp(`path: '${legacyPath}'.*redirect: '${destination}'`))
+  }
+  for (const file of ['Memory.vue', 'WikiDashboard.vue', 'WikiWorkbench.vue', 'Explore.vue', 'Ingest.vue']) {
+    await assert.rejects(access(new URL(`src/views/${file}`, frontendRoot)), { code: 'ENOENT' })
+  }
 })
 
 test('runtime settings keep save and paid connection verification as separate actions', async () => {

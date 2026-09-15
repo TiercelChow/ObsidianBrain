@@ -12,16 +12,13 @@
 pub mod book_wiki_handlers;
 pub mod code_repo_handlers;
 pub mod config_handlers;
-pub mod explore_handlers;
 pub mod inspiration_handlers;
-pub mod knowledge_handlers;
 pub mod memory_handlers;
 pub mod radar_handlers;
 pub mod reader_handlers;
 pub mod search_handlers;
 pub mod task_handlers;
 pub mod timeline_handlers;
-pub mod wiki_handlers;
 
 use std::sync::Arc;
 
@@ -30,16 +27,13 @@ use crate::tools::handlers::code_repo_handlers::*;
 use crate::tools::handlers::config_handlers::{
     GetConfigHandler, SaveConfigHandler, VerifyLlmHandler,
 };
-use crate::tools::handlers::explore_handlers::*;
 use crate::tools::handlers::inspiration_handlers::*;
-use crate::tools::handlers::knowledge_handlers::GetKnowledgeInsightsHandler;
 use crate::tools::handlers::memory_handlers::GetMemoryStatsHandler;
 use crate::tools::handlers::radar_handlers::*;
 use crate::tools::handlers::reader_handlers::*;
 use crate::tools::handlers::search_handlers::*;
 use crate::tools::handlers::task_handlers::*;
 use crate::tools::handlers::timeline_handlers::*;
-use crate::tools::handlers::wiki_handlers::*;
 use crate::tools::registry::ToolRegistry;
 use crate::AppContext;
 
@@ -56,9 +50,6 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
 
     // Memory module
     registry.register(Arc::new(GetMemoryStatsHandler)).await;
-    registry
-        .register(Arc::new(GetKnowledgeInsightsHandler))
-        .await;
 
     // Code Repo module
     registry.register(Arc::new(AddCodeRepoHandler)).await;
@@ -211,17 +202,6 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(SaveAgentRuntimeProfileHandler))
         .await;
     registry.register(Arc::new(VerifyAgentRuntimeHandler)).await;
-
-    // Wiki module
-    registry.register(Arc::new(IngestSourceHandler)).await;
-    registry.register(Arc::new(QueryWikiHandler)).await;
-    registry.register(Arc::new(LintWikiHandler)).await;
-    registry.register(Arc::new(GetWikiStatusHandler)).await;
-
-    // Knowledge exploration (Wiki-powered)
-    registry.register(Arc::new(DiscoverGapsHandler)).await;
-    registry.register(Arc::new(GenerateQuestionsHandler)).await;
-    registry.register(Arc::new(ConceptCollisionHandler)).await;
 
     // Reader (filesystem-scoped, powers the Markdown Reader UI)
     registry.register(Arc::new(ListLocalDirHandler)).await;
