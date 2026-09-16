@@ -39,6 +39,8 @@ test('product site describes the database-native Book Wiki workflow and current 
   assert.match(html, /PPTX[^。]*下载/)
   assert.doesNotMatch(html, /Claude Code/)
   assert.doesNotMatch(html, /观察领域分布、孤岛、枢纽、尘封和新生内容/)
+  assert.match(html, /href="\.\/manual\/#wiki"/)
+  assert.match(html, /7 个内置 Skill/)
 })
 
 test('site assets use repository-relative paths and never call the local API', async () => {

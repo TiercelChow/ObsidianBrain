@@ -8769,8 +8769,48 @@ mod tests {
     }
 
     #[test]
+    fn test_builtin_ingest_v3_is_reviewable_and_active() {
+        let (store, _dir) = test_store();
+        let detail = store
+            .get_wiki_skill_detail("skill-book-ingest", None)
+            .unwrap();
+        assert_eq!(detail.current_version_id, "skill-version-book-ingest-v3");
+        let published = detail
+            .versions
+            .iter()
+            .find(|version| version.revision == 3)
+            .unwrap();
+        assert_eq!(published.release_state, "published");
+        assert_eq!(
+            published.parent_version_id.as_deref(),
+            Some("skill-version-book-ingest-v2")
+        );
+        let skill_file = published
+            .files
+            .iter()
+            .find(|file| file.relative_path == "SKILL.md")
+            .unwrap();
+        assert_eq!(
+            skill_file.content_text,
+            include_str!("../../skills/book-ingest/SKILL.md")
+        );
+    }
+
+    #[test]
     fn test_builtin_skill_candidate_requires_evaluation_then_can_publish_and_rollback() {
         let (store, _dir) = test_store();
+        // Exercise the legacy v1 → v2 release gate independently of the v3 rollout.
+        store
+            .db
+            .with_connection(|conn| {
+                conn.execute(
+                    "UPDATE skills SET current_version_id = 'skill-version-book-ingest-v1'
+                     WHERE id = 'skill-book-ingest'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
         store
             .save_reader_books(&[sample_book(
                 "book-skill-benchmark",
@@ -8784,7 +8824,7 @@ mod tests {
         let candidate = detail
             .versions
             .iter()
-            .find(|version| version.release_state == "candidate")
+            .find(|version| version.revision == 2)
             .unwrap();
         assert_eq!(candidate.revision, 2);
         assert_eq!(candidate.origin.as_ref().unwrap().license_spdx, "MIT");
@@ -8962,7 +9002,13 @@ mod tests {
             .unwrap();
         assert_eq!(published.current_version_id, candidate.id);
         assert_eq!(published.skill.revision, 2);
-        assert!(published.versions[0].latest_evaluation.is_some());
+        assert!(published
+            .versions
+            .iter()
+            .find(|version| version.id == candidate.id)
+            .unwrap()
+            .latest_evaluation
+            .is_some());
 
         let rolled_back = store
             .rollback_wiki_skill_version("skill-book-ingest", "skill-version-book-ingest-v1")
@@ -8989,7 +9035,7 @@ mod tests {
             .unwrap()
             .versions
             .into_iter()
-            .find(|version| version.release_state == "candidate")
+            .find(|version| version.revision == 2)
             .unwrap();
         store
             .evaluate_wiki_skill_version("skill-book-ingest", &candidate.id, "semantic-ingest")

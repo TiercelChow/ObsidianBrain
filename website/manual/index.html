@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#f0f0f3" />
-    <meta name="description" content="ObsidianBrain 安装指南与使用手册：阅境轩、时光机和任务中枢的当前功能和操作说明。" />
+    <meta name="description" content="ObsidianBrain 安装指南与使用手册：阅境轩、时光机、任务中枢和书籍 Wiki 的当前功能、操作步骤与数据说明。" />
     <link rel="canonical" href="https://tiercelchow.github.io/ObsidianBrain/manual/" />
     <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
     <title>使用手册 · ObsidianBrain</title>
@@ -66,15 +66,16 @@
       <header class="docs-intro" id="top">
         <a class="docs-back" href="../">← 产品首页</a>
         <div class="docs-title-row"><div><span class="section-label">OBSIDIANBRAIN / HANDBOOK</span><h1>使用手册</h1></div><img src="../favicon.svg" width="72" height="72" alt="" /></div>
-        <p class="docs-lead">先完成安装，再围绕阅读、记录与执行，讲清三个核心模块的实际用法。</p>
-        <div class="version-notice"><span class="version-badge">当前版本</span><p><strong>已按现有实现核实</strong> · 功能部分只介绍阅境轩、时光机和任务中枢，另附 macOS 与 Windows 安装说明。</p></div>
+        <p class="docs-lead">先完成安装，再沿着阅读、记录、执行与书籍理解，走通四个核心模块。</p>
+        <div class="version-notice"><span class="version-badge">当前版本</span><p><strong>已按现有实现核实</strong> · 功能部分介绍阅境轩、时光机、任务中枢和书籍 Wiki，另附 macOS 与 Windows 安装说明。</p></div>
       </header>
       <details class="mobile-chapters">
         <summary>浏览章节 <span data-current-chapter>安装与启动</span><svg aria-hidden="true"><use href="#icon-chevron" /></svg></summary>
         <nav aria-label="手机章节目录"><a href="#install" data-chapter-link><span>00</span>安装与启动</a>
 <a href="#reader" data-chapter-link><span>01</span>阅境轩</a>
 <a href="#timeline" data-chapter-link><span>02</span>时光机</a>
-<a href="#tasks" data-chapter-link><span>03</span>任务中枢</a></nav>
+<a href="#tasks" data-chapter-link><span>03</span>任务中枢</a>
+<a href="#wiki" data-chapter-link><span>04</span>书籍 Wiki</a></nav>
       </details>
       <div class="docs-layout">
         <aside class="docs-sidebar">
@@ -82,7 +83,8 @@
           <nav aria-label="章节目录"><a href="#install" data-chapter-link><span>00</span>安装与启动</a>
 <a href="#reader" data-chapter-link><span>01</span>阅境轩</a>
 <a href="#timeline" data-chapter-link><span>02</span>时光机</a>
-<a href="#tasks" data-chapter-link><span>03</span>任务中枢</a></nav>
+<a href="#tasks" data-chapter-link><span>03</span>任务中枢</a>
+<a href="#wiki" data-chapter-link><span>04</span>书籍 Wiki</a></nav>
           <a class="docs-top-link" href="#top">返回顶部 ↑</a>
         </aside>
         <div class="manual-content">
@@ -91,7 +93,7 @@
         <section id="install" class="manual-section">
           <span class="chapter-kicker">00 / INSTALL</span>
           <h2>安装与启动</h2>
-          <p>当前仓库尚未在 GitHub Releases 提供预编译安装包，需要在目标电脑上从源码构建。前端会嵌入最终的单个可执行文件，构建完成后阅境轩、时光机和任务中枢不再需要 Node.js 或 Rust；若另外启用 DeepSeek Harness 书籍问答，则需保留可用的 npm / npx。</p>
+          <p>当前仓库尚未在 GitHub Releases 提供预编译安装包，需要在目标电脑上从源码构建。前端会嵌入最终的单个可执行文件，构建完成后基础功能不再需要 Node.js 或 Rust；若启用默认的 DeepSeek Harness 书籍智能功能，则需保留可用的 npm / npx。</p>
 
           <table class="info-table platform-table">
             <thead><tr><th>系统</th><th>处理器</th><th>当前方式</th><th>最终文件</th></tr></thead>
@@ -323,6 +325,89 @@ cargo build --release</code></pre>
             <span class="callout-icon">↻</span>
             <span>任务更新使用版本检查避免并发覆盖。如果页面提示版本冲突，请刷新任务详情后再提交修改。</span>
           </div>
+        </section>
+
+        <section id="wiki" class="manual-section">
+          <span class="chapter-kicker">04 / UNDERSTAND</span>
+          <h2>书籍 Wiki — 从来源到可审核的知识</h2>
+          <p>为阅境轩书架中的每个 Markdown 文件夹建立一个独立知识库。同步先建立章节来源索引；智能编译再尝试跨章节归并概念、论断与关系。原始 Markdown 文件保持只读，结构化实体、引用、版本、审核记录和运行状态保存在本机 SQLite。单个 PDF 目前不能建立 Wiki。</p>
+
+          <div class="flow-diagram" aria-label="书籍 Wiki 工作流程">
+            <div class="flow-step"><span class="flow-icon">01</span><strong class="flow-label">建立知识库</strong><small class="flow-desc">从阅境轩书架选择 Markdown 书籍</small></div>
+            <div class="flow-step"><span class="flow-icon">02</span><strong class="flow-label">同步来源</strong><small class="flow-desc">建立章节和可追溯的原文证据</small></div>
+            <div class="flow-step"><span class="flow-icon">03</span><strong class="flow-label">智能编译</strong><small class="flow-desc">生成待审核的主题知识候选</small></div>
+            <div class="flow-step"><span class="flow-icon">04</span><strong class="flow-label">审核应用</strong><small class="flow-desc">确认引用与变更后写入正式 Wiki</small></div>
+            <div class="flow-step"><span class="flow-icon">05</span><strong class="flow-label">问答研究</strong><small class="flow-desc">带引用回答、报告与 PPTX</small></div>
+          </div>
+
+          <h3>开始前：配置 Agent Runtime 与模型</h3>
+          <p>智能编译、知识问答和研究任务需要可用的 Agent Runtime。当前只支持通过 ACP 接入 DeepSeek Harness；这里的 “DeepSeek” 指运行时，不要求使用 DeepSeek 的模型 API。你可以配置兼容协议的其他模型供应商。</p>
+          <ol class="manual-steps">
+            <li><span>1</span><div><strong>准备运行环境</strong><p>确保运行服务的电脑有可执行的 <code>npx</code> 和 DeepSeek Harness。进入「知识 → 配置 → Agent Runtime」，填写 ACP 启动命令。使用默认命令时，首次启动可能需要下载依赖。</p></div></li>
+            <li><span>2</span><div><strong>填写模型信息</strong><p>若使用第三方供应商，打开对应开关，填写协议、API Base URL、模型 ID，以及保存 API Key 的<strong>环境变量名</strong>（例如 <code>CUSTOM_LLM_API_KEY</code>）。密钥值本身应配置在启动 ObsidianBrain 的进程环境中，不要填进 Skill 或书籍文档。</p></div></li>
+            <li><span>3</span><div><strong>保存并验证</strong><p>先保存配置，再点击「验证已保存配置」。验证会检查 Runtime 是否能实际启动并完成请求；界面显示连接成功后再开始智能编译。</p></div></li>
+          </ol>
+          <div class="callout subtle"><span class="callout-icon">ⓘ</span><span>如果系统提示「未找到可执行文件」，先检查服务进程能否找到 <code>npx</code> 或你填写的 ACP 程序；如果模型请求失败，检查 API Key 所在环境变量是否对<strong>后端进程</strong>可见，以及 Base URL、模型 ID、协议是否匹配供应商。更改环境变量后需要重新启动服务。</span></div>
+
+          <h3>从书架建立知识库</h3>
+          <ol class="manual-steps">
+            <li><span>1</span><div><strong>添加 Markdown 书籍</strong><p>先在「阅境轩 → 书架」添加一个 Markdown 文件夹。书籍知识库按书架中的每本文件夹书籍隔离；PDF 可以继续阅读，但暂不进入 Wiki 工作流。</p></div></li>
+            <li><span>2</span><div><strong>建立知识库</strong><p>进入「知识 → 书籍知识库」，找到对应书籍，点击「建立知识库」。这一步创建知识库及默认配置文档，<strong>不会自动完成来源同步</strong>。</p></div></li>
+            <li><span>3</span><div><strong>同步</strong><p>点击「同步」，读取文件夹中的 Markdown 内容，建立章节来源及检索索引。第一次同步后即能按章节证据查找内容；若以后修改原书，也在这里重新同步。</p></div></li>
+            <li><span>4</span><div><strong>智能编译</strong><p>来源同步完成后，点击「智能编译」。页面会显示运行阶段、来源与批次进度；离开页面不会取消后台任务，需要时可主动停止。编译生成主题知识候选，而不是立即改写正式 Wiki。</p></div></li>
+            <li><span>5</span><div><strong>审核并发布</strong><p>运行结束后点击「查看并审核」，逐项核对新增、更新或争议候选的正文、引用、影响范围和前后差异。确认无误再点「批准并应用」；不合适的候选可驳回并注明原因。</p></div></li>
+          </ol>
+          <div class="callout"><span class="callout-icon">↻</span><span><strong>什么时候再编译：</strong>书籍来源变更后先同步，再做增量编译；模型、配置或生效 Skill 的指纹变化，可能让系统重新分析更多甚至全部来源。同步后的章节证据仍可作为兜底，智能编译没有产生有效候选时也不会伪造待审核内容。</span></div>
+
+          <h3>在 Wiki 工作台查看与维护</h3>
+          <p>进入「知识 → Wiki 工作台」，选择一本书后按标题、摘要或正文搜索实体。打开实体可以查看 Markdown 正文、论断、关系、原文引用和版本历史；引用包含来源路径、行号与摘录。关系洞察帮助浏览知识之间的连接，「知识体检」用于检查缺少来源或重复主题，不调用模型，也不会自动修改数据。</p>
+          <ul class="manual-points">
+            <li><strong>审核队列：</strong>「审核」入口集中展示待决候选；批准时服务端再次校验来源和引用，再原子写入正式知识。</li>
+            <li><strong>人工调整：</strong>编辑、合并或拆分实体会形成高风险候选，需要回到审核队列确认，不能绕过审核直接覆盖正式版。</li>
+            <li><strong>同步来源：</strong>工作台也提供同步入口；来源变更后应重新同步并按需重新编译。</li>
+            <li><strong>暂停与归档：</strong>在「书籍知识库 → 管理」调整书籍状态。暂停或归档后知识库只读；删除生成知识会移除该书的 Wiki 产物，但不会删除书架条目或原书。</li>
+          </ul>
+
+          <h3>知识问答：带着来源追问</h3>
+          <p>进入「知识 → 知识问答」，选择一本书后输入问题。系统先检索该书的主题 Wiki，再用章节证据兜底；回答以流式 Markdown 显示，<code>[S1]</code> 等标记对应引用。点击标记或来源卡片会打开<strong>来源预览</strong>弹窗，不会直接跳走。对话历史会自动保存，可以切换旧会话或新建会话。</p>
+          <ul class="manual-points">
+            <li><strong>证据不足：</strong>先确认已同步、书籍选择正确，或换一个更贴近原文的关键词；不要把没有引用的回答当作已核实结论。</li>
+            <li><strong>保存回答：</strong>「保存到 Wiki」只创建待审核候选，不会立即把模型回答写入正式知识库。</li>
+            <li><strong>边界：</strong>一次问答限定在所选书籍；不同书籍的来源不会混入同一个回答。</li>
+          </ul>
+
+          <h3>研究任务：报告和可下载 PPTX</h3>
+          <p>进入「知识 → 研究任务」新建任务，选择书籍、标题与描述，再选择「专题研究」「知识刷新」或「事实审核」。交付物可选择研究报告或 <code>PPTX</code> 演示文稿。创建后启动任务，运行会进入本地持久化队列；页面展示阶段与进度，允许取消和失败后重试。完成后可以查看报告或下载经过校验的 PPTX 文件，目前不提供应用内幻灯片预览。</p>
+          <ul class="manual-points">
+            <li><strong>外部资料：</strong>外部研究默认关闭。只有专题研究任务中你明确开启，并指定允许的域名和请求次数后，才会读取受限的 HTTPS 文本；这些外部参考与书内引用分开标识。</li>
+            <li><strong>检查实际执行：</strong>在任务详情打开「运行检查器」，查看本次生效的 Prompt、Skill 快照、配置、工具白名单与事件时间线，便于追查任务为什么得出某个结果。</li>
+            <li><strong>写回知识：</strong>研究结果如需进入正式 Wiki，同样先形成候选并由你审核，不会直接修改原书或绕过审核。</li>
+          </ul>
+
+          <h3>配置文档与 Skills</h3>
+          <p>「知识 → 配置」可以分别管理每本书的规则文档和 Skills。书籍规则用于描述领域、术语、边界等，保存于 SQLite；Skill 是运行时可读取的完整指令，页面「查看内容」可以检查正文、版本与来源，不再只能凭名称猜测它会做什么。</p>
+          <table class="info-table">
+            <thead><tr><th>内置 Skill</th><th>用途</th></tr></thead>
+            <tbody>
+              <tr><td><code>book-ingest</code></td><td>智能编译：从来源提取并整合可追溯的主题知识</td></tr>
+              <tr><td><code>book-query</code></td><td>问答：按证据回答、处理冲突与不确定性</td></tr>
+              <tr><td><code>book-research</code></td><td>研究：规划问题、整理证据并形成报告</td></tr>
+              <tr><td><code>book-lint</code></td><td>质量检查：诊断引用、论断与知识结构问题</td></tr>
+              <tr><td><code>book-presentation</code></td><td>演示交付：组织可生成 PPTX 的结构化内容</td></tr>
+              <tr><td><code>book-synthesis</code></td><td>跨章节综合：归并主题、别名与关系</td></tr>
+              <tr><td><code>markdown-collection</code></td><td>Markdown 文集：适配非传统章节式资料</td></tr>
+            </tbody>
+          </table>
+          <p>7 个内置 Skill 可以查看完整内容和历史版本；内置正文只读，需要调整时可「复制为自定义」再编辑。自定义 Skill 还支持导入受限的 Markdown ZIP。绑定时先选择书籍，再设置启用状态与作用范围，例如「问答与研究」「仅问答」「仅研究」「仅智能编译」或「全部场景」。问答与研究 Skill 只有对当前书籍启用且范围匹配时才注入；<code>book-ingest</code> 是智能编译的内置兜底，PPT 任务也有内置演示 Skill 兜底。不要把 Skill 当成能执行任意脚本的插件。</p>
+          <div class="callout subtle"><span class="callout-icon">🔎</span><span>本批内置 Skill 已直接替换并启用为当前版本，未声称经过样例评测。后续发布自定义候选仍按页面提供的评测与发布流程进行；请先查看完整指令，并用小范围书籍验证输出是否合适。</span></div>
+
+          <h3>Token 用量、备份与排错</h3>
+          <ul class="manual-points">
+            <li><strong>Token 用量：</strong>在「配置 → Token 用量」按时间范围和调用方查看用量。ACP 运行时无法准确拆分的记录会标记为估算，不应当作供应商账单。</li>
+            <li><strong>数据保护：</strong>在「配置 → 数据保护」创建并下载 SQLite 一致快照；也可导出单本书的 JSON 或 Markdown Wiki。恢复备份会替换当前数据库，务必核对文件并先保留现有备份。</li>
+            <li><strong>编译卡住或失败：</strong>先看书籍知识库的阶段和最后错误，再检查 Runtime 连通性、来源同步状态；研究任务则可用「运行检查器」核对本次配置与事件。重新编译前不必删除原书或知识库。</li>
+          </ul>
+          <div class="callout"><span class="callout-icon">🔒</span><span><strong>数据边界：</strong>Wiki 的实体、引用、候选、审计和任务产物存在本机 SQLite；导出不是实时同步。模型会接收到任务所需的检索片段，因此使用第三方供应商时请自行确认其数据政策。智能编译和研究流程不会直接写回或更改原书 Markdown 文件。</span></div>
         </section>
 <!-- current-manual:end -->
           <div class="docs-end"><span>你已读完全部章节</span><p>使用手册现已独立于应用，可在这里随时查阅。</p><a class="button button-secondary" href="../">返回产品首页 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div>

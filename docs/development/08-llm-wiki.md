@@ -55,6 +55,10 @@
 
 迁移 028 增加 `skill_benchmark_cases/runs/case_results`。每次真实模型基准只发起两次聚合 Harness 调用：当前已发布版本与候选版本各处理同一评测集，避免逐样例启动进程。`skill_benchmark` Run 固定无 MCP 工具和能力令牌，Prompt 只包含所测版本指令与合成样例；输出只进入基准结果表，不进入知识变更集。服务端按必需概念、禁用内容、引用覆盖、引用有效性和非空输出确定性评分，保存逐样例回答和原始 Agent Run 引用。发布门槛同时要求离线结构评测通过、候选真实分数达到 suite 门槛、至少 80% 的样例通过且相对基线回退不超过 0.03。服务重启会把未完成基准明确标为失败，用户可重新运行，不会无限停在排队状态。普通迁移和单元测试只使用种子样例与假 Runtime，不依赖在线供应商。
 
+迁移 029 将仓库内 `backend/skills/book-ingest/SKILL.md` 作为语义建库指令的唯一正文来源，写入 `book-ingest` v3 候选版的 `skill_files`，并保存实际 SHA-256、字节数、父版本及固定的开源方法参考。该指令明确批次输入边界、证据清单、跨片段主题归并、新增/更新/争议分流、严格 JSON 输出和提交前自检。v3 保持 `candidate`，不修改当前发布版本和运行时指纹；本轮仅验证迁移与资源可读性，不运行 Skill 质量评测或真实模型基准。后续发布仍遵守既有门槛。
+
+迁移 030 应产品所有者要求，将 `book-ingest` v3 与其余六个内置 Skill 的完整新版正文直接发布为当前版本，不经过本次质量评测或真实模型基准。七份原文均保存在 `backend/skills/*/SKILL.md`，迁移在同一事务中写入版本文件、内容 SHA-256 和字节数；旧版及用户自定义 Skill 保留不变，现有书籍的绑定开关和用途范围也不改。问答/研究只有在对应 Skill 已绑定启用时才注入，演示文稿按现有报告到 PPTX 的解析上限设计；编译回退到新版 `book-ingest` 后，版本哈希变化会使旧编译检查点失效，下一次智能编译将重新分析来源。此迁移是明确的一次性内置版本切换，不放宽今后通过页面发布候选版本的原有评测门槛。
+
 原 `Memory`、`WikiDashboard`、`WikiWorkbench`、`Explore`、`Ingest` 页面及 Wiki/Explore/Knowledge Insights handlers、旧 Markdown Wiki Engine 已移除。Vue Router 仍保留一个发布周期的静态跳转；旧 `Wiki/*.md` 不删除、不自动导入，新系统也不再读取。由此避免 SQLite Book Wiki 与 Obsidian Markdown Wiki 双写。
 
 本地开发仍使用固定命令 `npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp`。Runtime Profile 可将 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 兼容供应商注入 Harness；真实密钥只从用户指定的环境变量读取。Book Wiki 只处理 Markdown 文件夹并固定使用 DeepSeek Harness。ACP 的 `UsageUpdate` 只作为真实上下文占用展示；供应商未上报输入/输出明细时，计费统计继续标为 `estimated`。

@@ -4,11 +4,11 @@ import test from 'node:test'
 
 const root = new URL('../', import.meta.url)
 const read = (path) => readFile(new URL(path, root), 'utf8')
-const productChapters = ['reader', 'timeline', 'tasks']
+const productChapters = ['reader', 'timeline', 'tasks', 'wiki']
 const chapters = ['install', ...productChapters]
 const removedChapters = ['intro', 'wiki-dashboard', 'wiki-workbench', 'explore', 'ingest', 'knowledge', 'code-repo', 'config', 'workflow', 'getting-started']
 
-test('manual contains installation plus only the three verified product chapters', async () => {
+test('manual contains installation and the four current product chapters', async () => {
   const html = await read('manual/index.html')
   const body = html.match(/<!-- current-manual:start -->([\s\S]*?)<!-- current-manual:end -->/)?.[1]
   assert.ok(body, 'keep explicit boundaries around the current manual content')
@@ -20,8 +20,26 @@ test('manual contains installation plus only the three verified product chapters
     assert.doesNotMatch(body, new RegExp(`id="${id}"`))
     assert.doesNotMatch(html, new RegExp(`href="#${id}"`))
   }
-  assert.match(html, /功能部分只介绍阅境轩、时光机和任务中枢/)
+  assert.match(html, /功能部分介绍阅境轩、时光机、任务中枢和书籍 Wiki/)
   assert.doesNotMatch(html, /迁移版|内容待核实/)
+})
+
+test('wiki manual explains the complete reviewable workflow and configuration limits', async () => {
+  const html = await read('manual/index.html')
+  const wiki = html.match(/<section id="wiki"[\s\S]*?<\/section>\s*<!-- current-manual:end -->/)?.[0]
+  assert.ok(wiki, 'Wiki chapter should be part of the maintained manual')
+  for (const phrase of [
+    'Markdown 文件夹', '建立知识库', '同步', '智能编译', '审核', '批准并应用',
+    'Wiki 工作台', '知识问答', '来源预览', '研究任务', 'PPTX',
+    'Agent Runtime', '验证已保存配置', 'Skills', 'book-ingest', '仅智能编译',
+    '运行检查器', 'Token 用量', '数据保护', 'SQLite', 'Markdown Wiki',
+  ]) {
+    assert.match(wiki, new RegExp(phrase), `missing Wiki guidance: ${phrase}`)
+  }
+  assert.match(wiki, /外部研究[^。]*默认关闭/)
+  assert.match(wiki, /问答与研究[^。]*启用/)
+  assert.match(wiki, /来源变更|指纹变化/)
+  assert.match(wiki, /不会[^。]*直接[^。]*原书/)
 })
 
 test('manual records the current storage and interaction boundaries', async () => {

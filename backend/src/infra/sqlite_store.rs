@@ -4,6 +4,7 @@
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, DatabaseName, OpenFlags};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -189,7 +190,92 @@ const MIGRATIONS: &[Migration] = &[
         description: "real-model skill benchmark cases and comparison runs",
         sql: include_str!("../../migrations/028_skill_model_benchmarks.sql"),
     },
+    Migration {
+        version: 29,
+        description: "detailed, reviewable semantic ingest skill candidate",
+        sql: include_str!("../../migrations/029_detailed_ingest_skill.sql"),
+    },
+    Migration {
+        version: 30,
+        description: "publish detailed built-in knowledge skills",
+        sql: include_str!("../../migrations/030_publish_detailed_builtin_skills.sql"),
+    },
 ];
+
+fn seed_detailed_ingest_skill(conn: &Connection) -> Result<(), BrainError> {
+    seed_builtin_skill_file(
+        conn,
+        "skill-version-book-ingest-v3",
+        "builtin-book-ingest-v3-pending",
+        include_str!("../../skills/book-ingest/SKILL.md"),
+    )
+}
+
+fn seed_detailed_builtin_skills(conn: &Connection) -> Result<(), BrainError> {
+    for (version_id, placeholder, content) in [
+        (
+            "skill-version-book-query-v3",
+            "builtin-book-query-v3-pending",
+            include_str!("../../skills/book-query/SKILL.md"),
+        ),
+        (
+            "skill-version-book-research-v3",
+            "builtin-book-research-v3-pending",
+            include_str!("../../skills/book-research/SKILL.md"),
+        ),
+        (
+            "skill-version-book-presentation-v3",
+            "builtin-book-presentation-v3-pending",
+            include_str!("../../skills/book-presentation/SKILL.md"),
+        ),
+        (
+            "skill-version-book-lint-v2",
+            "builtin-book-lint-v2-pending",
+            include_str!("../../skills/book-lint/SKILL.md"),
+        ),
+        (
+            "skill-version-book-synthesis-v2",
+            "builtin-book-synthesis-v2-pending",
+            include_str!("../../skills/book-synthesis/SKILL.md"),
+        ),
+        (
+            "skill-version-markdown-collection-v2",
+            "builtin-markdown-collection-v2-pending",
+            include_str!("../../skills/markdown-collection/SKILL.md"),
+        ),
+    ] {
+        seed_builtin_skill_file(conn, version_id, placeholder, content)?;
+    }
+    Ok(())
+}
+
+fn seed_builtin_skill_file(
+    conn: &Connection,
+    version_id: &str,
+    placeholder: &str,
+    content: &str,
+) -> Result<(), BrainError> {
+    let content_hash = hex::encode(Sha256::digest(content.as_bytes()));
+    let size_bytes = i64::try_from(content.len())
+        .map_err(|_| BrainError::Internal("内置 Skill 大小超出限制".to_string()))?;
+    let updated = conn.execute(
+        "UPDATE skill_versions SET content_hash = ?1
+         WHERE id = ?2 AND content_hash = ?3",
+        params![&content_hash, version_id, placeholder],
+    )?;
+    if updated != 1 {
+        return Err(BrainError::Internal(format!(
+            "内置 Skill 版本 {version_id} 缺失或重复"
+        )));
+    }
+    conn.execute(
+        "INSERT INTO skill_files
+            (skill_version_id, relative_path, media_type, content_text, content_hash, size_bytes)
+         VALUES (?1, 'SKILL.md', 'text/markdown', ?2, ?3, ?4)",
+        params![version_id, content, content_hash, size_bytes],
+    )?;
+    Ok(())
+}
 
 impl SqliteStore {
     /// Open (or create) the database at `db_path`, enable WAL, run pending migrations.
@@ -272,6 +358,18 @@ impl SqliteStore {
                 let _ = conn.execute_batch("ROLLBACK;");
                 return Err(BrainError::Internal(format!(
                     "迁移 v{} 执行失败: {e}",
+                    migration.version
+                )));
+            }
+            let seed_result = match migration.version {
+                29 => seed_detailed_ingest_skill(&conn),
+                30 => seed_detailed_builtin_skills(&conn),
+                _ => Ok(()),
+            };
+            if let Err(error) = seed_result {
+                let _ = conn.execute_batch("ROLLBACK;");
+                return Err(BrainError::Internal(format!(
+                    "迁移 v{} Skill 内容写入失败: {error}",
                     migration.version
                 )));
             }
@@ -1245,7 +1343,7 @@ mod tests {
                     [],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )?;
-                assert_eq!(counts, (7, 11, 11));
+                assert_eq!(counts, (7, 18, 18));
                 let candidates: i64 = conn.query_row(
                     "SELECT COUNT(*) FROM skill_versions WHERE release_state = 'candidate'",
                     [],
@@ -1267,19 +1365,213 @@ mod tests {
                     [],
                     |row| row.get(0),
                 )?;
-                assert_eq!(current, "skill-version-book-query-v1");
+                assert_eq!(current, "skill-version-book-query-v3");
                 let presentation: String = conn.query_row(
                     "SELECT current_version_id FROM skills WHERE id = 'skill-book-presentation'",
                     [],
                     |row| row.get(0),
                 )?;
-                assert_eq!(presentation, "skill-version-book-presentation-v1");
+                assert_eq!(presentation, "skill-version-book-presentation-v3");
                 let synthesis: String = conn.query_row(
                     "SELECT current_version_id FROM skills WHERE id = 'skill-book-synthesis'",
                     [],
                     |row| row.get(0),
                 )?;
-                assert_eq!(synthesis, "skill-version-book-synthesis-v1");
+                assert_eq!(synthesis, "skill-version-book-synthesis-v2");
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_migrations_publish_detailed_ingest_skill_as_current_version() {
+        let dir = TempDir::new().unwrap();
+        let store = SqliteStore::new(&dir.path().join("detailed-ingest.db")).unwrap();
+
+        store
+            .with_connection(|conn| {
+                let (current_version, release_state, content, content_hash, size_bytes, source_ref):
+                    (String, String, String, String, i64, String) = conn.query_row(
+                    "SELECT s.current_version_id, sv.release_state, f.content_text,
+                            f.content_hash, f.size_bytes, o.source_ref
+                     FROM skills s
+                     JOIN skill_versions sv ON sv.skill_id = s.id
+                     JOIN skill_files f ON f.skill_version_id = sv.id AND f.relative_path = 'SKILL.md'
+                     JOIN skill_version_origins o ON o.skill_version_id = sv.id
+                     WHERE s.id = 'skill-book-ingest' AND sv.revision = 3",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+                )?;
+                assert_eq!(current_version, "skill-version-book-ingest-v3");
+                assert_eq!(release_state, "published");
+                assert_eq!(content, include_str!("../../skills/book-ingest/SKILL.md"));
+                assert_eq!(content_hash, hex::encode(Sha256::digest(content.as_bytes())));
+                assert_eq!(size_bytes, content.len() as i64);
+                assert!(content.chars().count() > 1_500);
+                for section in [
+                    "## 适用范围与边界",
+                    "## 执行步骤",
+                    "## 分流规则",
+                    "## 输出契约",
+                    "## 自检清单",
+                ] {
+                    assert!(content.contains(section), "missing section: {section}");
+                }
+                assert_eq!(source_ref.len(), 40);
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_migration_030_publishes_all_detailed_builtin_skill_files() {
+        let dir = TempDir::new().unwrap();
+        let store = SqliteStore::new(&dir.path().join("detailed-skills.db")).unwrap();
+        let expected = [
+            (
+                "book-ingest",
+                3,
+                include_str!("../../skills/book-ingest/SKILL.md"),
+            ),
+            (
+                "book-query",
+                3,
+                include_str!("../../skills/book-query/SKILL.md"),
+            ),
+            (
+                "book-research",
+                3,
+                include_str!("../../skills/book-research/SKILL.md"),
+            ),
+            (
+                "book-presentation",
+                3,
+                include_str!("../../skills/book-presentation/SKILL.md"),
+            ),
+            (
+                "book-lint",
+                2,
+                include_str!("../../skills/book-lint/SKILL.md"),
+            ),
+            (
+                "book-synthesis",
+                2,
+                include_str!("../../skills/book-synthesis/SKILL.md"),
+            ),
+            (
+                "markdown-collection",
+                2,
+                include_str!("../../skills/markdown-collection/SKILL.md"),
+            ),
+        ];
+        store
+            .with_connection(|conn| {
+                for (slug, revision, expected_content) in expected {
+                    let (current_version, version_id, release_state, content, content_hash, size_bytes):
+                        (String, String, String, String, String, i64) = conn.query_row(
+                        "SELECT s.current_version_id, sv.id, sv.release_state, sf.content_text,
+                                sf.content_hash, sf.size_bytes
+                         FROM skills s
+                         JOIN skill_versions sv ON sv.skill_id = s.id AND sv.revision = ?2
+                         JOIN skill_files sf ON sf.skill_version_id = sv.id AND sf.relative_path = 'SKILL.md'
+                         WHERE s.slug = ?1",
+                        params![slug, revision],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+                    )?;
+                    assert_eq!(current_version, version_id, "{slug} should be active");
+                    assert_eq!(release_state, "published");
+                    assert_eq!(content, expected_content);
+                    assert_eq!(content_hash, hex::encode(Sha256::digest(content.as_bytes())));
+                    assert_eq!(size_bytes, content.len() as i64);
+                    assert!(content.chars().count() > 700, "{slug} is still too terse");
+                    assert!(content.chars().count() <= 3_000 || slug == "book-ingest",
+                        "{slug} will be truncated by the runtime prompt");
+                }
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_migration_030_keeps_existing_user_skill_and_app_state() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("upgrade-from-029.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             CREATE TABLE _migrations (
+                 version INTEGER PRIMARY KEY,
+                 description TEXT NOT NULL,
+                 applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+             );",
+        )
+        .unwrap();
+        for migration in MIGRATIONS.iter().filter(|migration| migration.version < 30) {
+            conn.execute_batch(migration.sql).unwrap();
+            if migration.version == 29 {
+                seed_detailed_ingest_skill(&conn).unwrap();
+            }
+            conn.execute(
+                "INSERT INTO _migrations (version, description) VALUES (?1, ?2)",
+                params![migration.version, migration.description],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO app_state (key, value) VALUES ('test-user-state', ?1)",
+            params!["{\"books\":[\"user-data\"]}"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO skills
+                (id, slug, name, source_type, status, current_version_id, created_at, updated_at)
+             VALUES ('skill-user-review', 'user-review', '用户 Skill', 'custom', 'ready',
+                     'skill-version-user-review-v1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            [],
+        )
+        .unwrap();
+        let custom_content = "我的自定义审校规则";
+        let custom_hash = hex::encode(Sha256::digest(custom_content.as_bytes()));
+        conn.execute(
+            "INSERT INTO skill_versions (id, skill_id, revision, content_hash, release_state, created_at)
+             VALUES ('skill-version-user-review-v1', 'skill-user-review', 1, ?1,
+                     'published', CURRENT_TIMESTAMP)",
+            params![custom_hash],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO skill_files
+                (skill_version_id, relative_path, media_type, content_text, content_hash, size_bytes)
+             VALUES ('skill-version-user-review-v1', 'SKILL.md', 'text/markdown', ?1, ?2, ?3)",
+            params![custom_content, custom_hash, custom_content.len() as i64],
+        )
+        .unwrap();
+        drop(conn);
+
+        let store = SqliteStore::new(&db_path).unwrap();
+        store
+            .with_connection(|conn| {
+                let state: String = conn.query_row(
+                    "SELECT value FROM app_state WHERE key = 'test-user-state'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(state, "{\"books\":[\"user-data\"]}");
+                let custom: (String, String) = conn.query_row(
+                    "SELECT s.current_version_id, f.content_text FROM skills s
+                     JOIN skill_files f ON f.skill_version_id = s.current_version_id
+                     WHERE s.id = 'skill-user-review' AND f.relative_path = 'SKILL.md'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+                assert_eq!(custom.0, "skill-version-user-review-v1");
+                assert_eq!(custom.1, "我的自定义审校规则");
+                let ingest: String = conn.query_row(
+                    "SELECT current_version_id FROM skills WHERE id = 'skill-book-ingest'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(ingest, "skill-version-book-ingest-v3");
                 Ok(())
             })
             .unwrap();

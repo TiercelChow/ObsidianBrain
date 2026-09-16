@@ -45,6 +45,9 @@
 .manual-content :is(.feature-icon, .tab-icon, .config-emoji, .explore-icon, .insight-emoji) { display: block; width: auto; height: auto; font-size: 1.5rem; margin: 0 0 .6rem; background: none; }
 .manual-content :is(.flow-diagram, .pipeline) { display: flex; align-items: stretch; margin: 1.5rem 0; }
 .manual-content :is(.flow-step, .pipe-stage) { flex: 1; min-width: 0; padding: 1.2rem .6rem; border-radius: 1rem; text-align: center; background: var(--bg-glass); }
+.manual-content #wiki .flow-step { display: flex; flex-direction: column; align-items: center; gap: .35rem; border: 1px solid var(--border-glass); }
+.manual-content #wiki .flow-icon { display: block; margin: 0; color: var(--accent-strong); font: 700 .8rem var(--font-mono); }
+.manual-content #wiki .flow-desc { display: block; margin: 0; }
 .manual-content :is(.flow-icon, .pipe-icon) { font-size: 1.6rem; margin-bottom: .5rem; }
 .manual-content :is(.flow-label, .pipe-label) { font-weight: 650; font-size: .95rem; }
 .manual-content :is(.flow-desc, .pipe-desc) { font-size: .75rem; line-height: 1.65; color: var(--text-muted); margin-top: .35rem; }
