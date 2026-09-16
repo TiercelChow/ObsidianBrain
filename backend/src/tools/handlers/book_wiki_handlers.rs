@@ -1407,6 +1407,122 @@ impl ToolHandler for SaveCustomWikiSkillHandler {
 
 pub struct SetWikiSkillBindingHandler;
 
+pub struct EvaluateWikiSkillVersionHandler;
+
+#[async_trait]
+impl ToolHandler for EvaluateWikiSkillVersionHandler {
+    fn name(&self) -> &str {
+        "evaluate_wiki_skill_version"
+    }
+
+    fn description(&self) -> &str {
+        "使用固定的离线结构评测集检查一个 Wiki Skill 候选版本，并保存与当前版本的对比结果"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "skill_id": { "type": "string" },
+                "version_id": { "type": "string" },
+                "suite_slug": {
+                    "type": "string",
+                    "enum": ["semantic-ingest", "grounded-query", "evidence-research", "evidence-presentation"]
+                }
+            },
+            "required": ["skill_id", "version_id", "suite_slug"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(ctx.book_wiki_service.store().evaluate_wiki_skill_version(
+            required_string(&args, "skill_id")?,
+            required_string(&args, "version_id")?,
+            required_string(&args, "suite_slug")?,
+        )?)
+        .map_err(|error| BrainError::Internal(format!("Skill 评测结果序列化失败: {error}")))
+    }
+}
+
+pub struct PublishWikiSkillVersionHandler;
+
+#[async_trait]
+impl ToolHandler for PublishWikiSkillVersionHandler {
+    fn name(&self) -> &str {
+        "publish_wiki_skill_version"
+    }
+
+    fn description(&self) -> &str {
+        "发布一个已通过固定评测的 Wiki Skill 候选版本"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "skill_id": { "type": "string" },
+                "version_id": { "type": "string" }
+            },
+            "required": ["skill_id", "version_id"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(ctx.book_wiki_service.store().publish_wiki_skill_version(
+            required_string(&args, "skill_id")?,
+            required_string(&args, "version_id")?,
+        )?)
+        .map_err(|error| BrainError::Internal(format!("Skill 发布结果序列化失败: {error}")))
+    }
+}
+
+pub struct RollbackWikiSkillVersionHandler;
+
+#[async_trait]
+impl ToolHandler for RollbackWikiSkillVersionHandler {
+    fn name(&self) -> &str {
+        "rollback_wiki_skill_version"
+    }
+
+    fn description(&self) -> &str {
+        "把 Wiki Skill 回滚到一个历史已发布版本"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "skill_id": { "type": "string" },
+                "version_id": { "type": "string" }
+            },
+            "required": ["skill_id", "version_id"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(ctx.book_wiki_service.store().rollback_wiki_skill_version(
+            required_string(&args, "skill_id")?,
+            required_string(&args, "version_id")?,
+        )?)
+        .map_err(|error| BrainError::Internal(format!("Skill 回滚结果序列化失败: {error}")))
+    }
+}
+
 #[async_trait]
 impl ToolHandler for SetWikiSkillBindingHandler {
     fn name(&self) -> &str {

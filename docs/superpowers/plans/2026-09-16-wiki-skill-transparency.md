@@ -14,10 +14,10 @@
 
 ## 后续批次
 
-- 引入许可证明确的开源 Skill 候选与来源元数据。
-- 建立固定评测集、候选/发布状态、A/B 结果和回滚机制。
+- [已完成] 引入许可证明确的开源 Skill 候选与来源元数据。
+- [已完成] 建立固定离线评测集、候选/发布状态、基线对比结果和回滚机制。
 - [已完成] 让语义编译真实消费 `book-ingest`/书籍级 ingest Skill，并把 Skill/Prompt/模型纳入编译指纹。
-- 增加 New / Update / Disputed / No material 分流、引用审计与级联影响分析。
+- [已完成] 增加 New / Update / Disputed / No material 分流、引用审计与级联影响分析。
 
 ## 安全边界
 

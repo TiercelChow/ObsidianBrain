@@ -214,7 +214,7 @@
             <section class="skill-detail-versions">
               <h4>版本历史</h4>
               <button v-for="version in skillDetail.versions" :key="version.id" type="button" :class="{ active: version.id === activeSkillVersionId }" @click="selectSkillVersion(version.id)">
-                <span>Revision {{ version.revision }}</span><small>{{ formatSkillDate(version.created_at) }}</small>
+                <span>Revision {{ version.revision }}<em :class="`is-${version.release_state}`">{{ skillReleaseLabel(version.release_state) }}</em></span><small>{{ formatSkillDate(version.created_at) }}</small>
               </button>
             </section>
           </aside>
@@ -223,6 +223,27 @@
               <button v-for="file in activeSkillVersion?.files || []" :key="file.relative_path" type="button" :class="{ active: file.relative_path === activeSkillFilePath }" @click="activeSkillFilePath = file.relative_path">{{ file.relative_path }}</button>
             </nav>
             <header v-if="activeSkillFile"><div><strong>{{ activeSkillFile.relative_path }}</strong><span>{{ activeSkillFile.media_type }} · {{ formatBytes(activeSkillFile.size_bytes) }}</span></div><code>{{ activeSkillFile.content_hash }}</code></header>
+            <div v-if="activeSkillVersion" class="skill-version-audit">
+              <section>
+                <strong>版本说明</strong>
+                <p>{{ activeSkillVersion.changelog || '没有版本说明' }}</p>
+                <template v-if="activeSkillVersion.origin">
+                  <a :href="activeSkillVersion.origin.repository_url" target="_blank" rel="noreferrer">{{ activeSkillVersion.origin.attribution || '查看上游来源' }}</a>
+                  <small>{{ activeSkillVersion.origin.license_spdx }} · {{ activeSkillVersion.origin.source_ref || '未固定引用' }}</small>
+                  <p>{{ activeSkillVersion.origin.adaptation_notes }}</p>
+                </template>
+                <small v-else>项目自有或用户创建内容，没有外部来源声明。</small>
+              </section>
+              <section>
+                <strong>固定离线评测</strong>
+                <template v-if="activeSkillVersion.latest_evaluation">
+                  <div class="skill-eval-score" :class="{ passed: activeSkillVersion.latest_evaluation.passed }"><b>{{ Math.round(activeSkillVersion.latest_evaluation.score * 100) }}</b><span>/ 100</span><em>{{ activeSkillVersion.latest_evaluation.passed ? '通过' : '未通过' }}</em></div>
+                  <small v-if="activeSkillVersion.latest_evaluation.baseline_score != null">当前基线 {{ Math.round(activeSkillVersion.latest_evaluation.baseline_score * 100) }} 分</small>
+                  <p>{{ activeSkillVersion.latest_evaluation.findings.filter(item => !item.passed).map(item => item.name).join('、') || '所有结构与安全检查均已通过。' }}</p>
+                </template>
+                <p v-else>尚未运行固定评测。评测只检查结构与安全规则，不代表真实模型回答质量。</p>
+              </section>
+            </div>
             <pre v-if="activeSkillFile">{{ activeSkillFile.content_text }}</pre>
             <div v-else class="knowledge-empty"><strong>当前版本没有可显示文件</strong></div>
           </section>
@@ -230,6 +251,9 @@
         <div class="knowledge-modal-actions">
           <el-button v-if="skillDetail?.skill.source_type === 'builtin'" @click="cloneSkillToCustom">复制为自定义</el-button>
           <el-button v-if="skillDetail?.skill.source_type === 'custom'" @click="editDetailedSkill">编辑当前版本</el-button>
+          <el-button v-if="activeSkillVersion?.release_state === 'candidate'" :loading="skillVersionAction === 'evaluate'" @click="evaluateActiveSkillVersion">运行固定评测</el-button>
+          <el-button v-if="activeSkillVersion?.release_state === 'candidate'" type="primary" :loading="skillVersionAction === 'publish'" :disabled="!activeSkillVersion.latest_evaluation?.passed" @click="publishActiveSkillVersion">发布此版本</el-button>
+          <el-button v-if="activeSkillVersion?.release_state === 'published' && activeSkillVersion.id !== skillDetail?.current_version_id" :loading="skillVersionAction === 'rollback'" @click="rollbackActiveSkillVersion">回滚到此版本</el-button>
           <el-button type="primary" @click="skillDetailVisible = false">完成</el-button>
         </div>
       </div>
@@ -260,6 +284,7 @@ import {
   getAgentUsageStats,
   bookWikiExportDownloadUrl,
   createKnowledgeBackup,
+  evaluateWikiSkillVersion,
   getWikiSkillDetail,
   importWikiSkillArchive,
   knowledgeBackupDownloadUrl,
@@ -267,9 +292,11 @@ import {
   listKnowledgeBackups,
   listWikiSkills,
   restoreKnowledgeBackup,
+  rollbackWikiSkillVersion,
   saveAgentRuntimeProfile,
   saveBookWikiConfigDocument,
   saveCustomWikiSkill,
+  publishWikiSkillVersion,
   setWikiSkillBinding,
   uploadAndRestoreKnowledgeBackup,
   verifyAgentRuntime,
@@ -320,6 +347,7 @@ const skillDetailLoading = ref(false)
 const skillDetail = ref<WikiSkillDetail | null>(null)
 const activeSkillVersionId = ref('')
 const activeSkillFilePath = ref('')
+const skillVersionAction = ref('')
 const skillDraft = reactive({ id: '', slug: '', name: '', description: '', instructions: '', revision: 0 })
 const activeDocument = computed(() => documents.value.find(document => document.id === activeDocumentId.value))
 const activeSkillVersion = computed(() => skillDetail.value?.versions.find(version => version.id === activeSkillVersionId.value) || null)
@@ -374,6 +402,18 @@ function formatBackupDate(value: string) {
 function formatSkillDate(value: string) {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function skillReleaseLabel(state: 'candidate' | 'published' | 'retired') {
+  return state === 'candidate' ? '候选' : state === 'published' ? '已发布' : '已退役'
+}
+
+function skillEvaluationSuite(slug: string) {
+  if (slug === 'book-ingest') return 'semantic-ingest'
+  if (slug === 'book-query') return 'grounded-query'
+  if (slug === 'book-research') return 'evidence-research'
+  if (slug === 'book-presentation') return 'evidence-presentation'
+  return 'grounded-query'
 }
 
 function backupReasonLabel(reason: string) {
@@ -526,6 +566,68 @@ function selectSkillVersion(versionId: string) {
   activeSkillVersionId.value = versionId
   const version = skillDetail.value?.versions.find(item => item.id === versionId)
   activeSkillFilePath.value = version?.files.find(file => file.relative_path === 'SKILL.md')?.relative_path || version?.files[0]?.relative_path || ''
+}
+
+async function refreshSkillDetail(selectedVersionId?: string) {
+  const skillId = skillDetail.value?.skill.id
+  if (!skillId) return
+  const response = await getWikiSkillDetail(skillId, activeBaseId.value || undefined)
+  if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || 'Skill 详情刷新失败')
+  const detail = response.result
+  skillDetail.value = detail
+  const selected = detail.versions.find(version => version.id === selectedVersionId)
+    || detail.versions.find(version => version.id === detail.current_version_id)
+    || detail.versions[0]
+  if (selected) selectSkillVersion(selected.id)
+}
+
+async function evaluateActiveSkillVersion() {
+  if (!skillDetail.value || !activeSkillVersion.value) return
+  skillVersionAction.value = 'evaluate'
+  try {
+    const response = await evaluateWikiSkillVersion(skillDetail.value.skill.id, activeSkillVersion.value.id, skillEvaluationSuite(skillDetail.value.skill.slug))
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '固定评测失败')
+    await refreshSkillDetail(activeSkillVersion.value.id)
+    ElMessage.success(response.result.passed ? `固定评测通过：${Math.round(response.result.score * 100)} 分` : `固定评测未通过：${Math.round(response.result.score * 100)} 分`)
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    skillVersionAction.value = ''
+  }
+}
+
+async function publishActiveSkillVersion() {
+  if (!skillDetail.value || !activeSkillVersion.value) return
+  skillVersionAction.value = 'publish'
+  try {
+    const response = await publishWikiSkillVersion(skillDetail.value.skill.id, activeSkillVersion.value.id)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || 'Skill 发布失败')
+    skillDetail.value = response.result
+    selectSkillVersion(response.result.current_version_id)
+    await loadSkills()
+    ElMessage.success('候选版本已发布，后续运行会使用新版本')
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    skillVersionAction.value = ''
+  }
+}
+
+async function rollbackActiveSkillVersion() {
+  if (!skillDetail.value || !activeSkillVersion.value) return
+  skillVersionAction.value = 'rollback'
+  try {
+    const response = await rollbackWikiSkillVersion(skillDetail.value.skill.id, activeSkillVersion.value.id)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || 'Skill 回滚失败')
+    skillDetail.value = response.result
+    selectSkillVersion(response.result.current_version_id)
+    await loadSkills()
+    ElMessage.success('已回滚到所选版本')
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    skillVersionAction.value = ''
+  }
 }
 
 function customSkillSlug(slug: string) {
@@ -870,9 +972,13 @@ onMounted(initialize)
 .skill-detail-access > div span { padding: 4px 7px; border-radius: 999px; background: var(--accent-light); color: var(--accent); font-size: 8px; }
 .skill-detail-access small { color: var(--text-faint); font-size: 9px; line-height: 1.5; }
 .skill-detail-versions button { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 36px; padding: 0 10px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--text-muted); font: inherit; font-size: 10px; cursor: pointer; }
+.skill-detail-versions button > span { display: flex; align-items: center; gap: 6px; }
+.skill-detail-versions button em { padding: 2px 5px; border-radius: 999px; background: var(--bg-soft); color: var(--text-faint); font-size: 7px; font-style: normal; }
+.skill-detail-versions button em.is-candidate { background: color-mix(in srgb, var(--warning, #d97706) 13%, transparent); color: var(--warning, #b45309); }
+.skill-detail-versions button em.is-published { background: var(--accent-light); color: var(--accent); }
 .skill-detail-versions button:hover, .skill-detail-versions button.active { border-color: var(--accent-border); background: var(--accent-light); color: var(--accent); }
 .skill-detail-versions small { color: var(--text-faint); font-size: 8px; }
-.skill-detail-content { min-width: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
+.skill-detail-content { min-width: 0; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); }
 .skill-file-tabs { display: flex; gap: 5px; overflow-x: auto; padding: 10px 12px; border-bottom: 1px solid var(--border-faint); }
 .skill-file-tabs button { min-height: 30px; padding: 0 9px; border: 1px solid var(--border-faint); border-radius: 9px; background: transparent; color: var(--text-muted); font: inherit; font-family: var(--font-mono); font-size: 9px; white-space: nowrap; cursor: pointer; }
 .skill-file-tabs button.active { border-color: var(--accent-border); background: var(--accent-light); color: var(--accent); }
@@ -880,6 +986,16 @@ onMounted(initialize)
 .skill-detail-content > header div { min-width: 0; display: grid; gap: 2px; }
 .skill-detail-content > header strong { color: var(--text-primary); font-size: 11px; }
 .skill-detail-content > header span, .skill-detail-content > header code { overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.skill-version-audit { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border-faint); background: color-mix(in srgb, var(--bg-base) 42%, transparent); }
+.skill-version-audit section { min-width: 0; display: grid; align-content: start; gap: 4px; padding: 10px; border: 1px solid var(--border-faint); border-radius: 12px; }
+.skill-version-audit strong { color: var(--text-primary); font-size: 10px; }
+.skill-version-audit p, .skill-version-audit small { margin: 0; color: var(--text-faint); font-size: 8px; line-height: 1.55; }
+.skill-version-audit a { overflow: hidden; color: var(--accent); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.skill-eval-score { display: flex; align-items: baseline; gap: 3px; color: var(--text-muted); }
+.skill-eval-score b { color: var(--text-primary); font-size: 18px; }
+.skill-eval-score span { font-size: 8px; }
+.skill-eval-score em { margin-left: auto; padding: 3px 6px; border-radius: 999px; background: color-mix(in srgb, var(--danger, #dc2626) 12%, transparent); color: var(--danger, #dc2626); font-size: 8px; font-style: normal; }
+.skill-eval-score.passed em { background: var(--accent-light); color: var(--accent); }
 .skill-detail-content > pre { max-height: min(58vh, 620px); margin: 0; overflow: auto; padding: 18px; background: color-mix(in srgb, var(--bg-base) 56%, transparent); color: var(--text-secondary); font-family: var(--font-mono); font-size: 11px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
 @media (max-width: 768px) {
   .settings-layout { display: block; }
@@ -903,6 +1019,7 @@ onMounted(initialize)
   .wiki-export-card { align-items: stretch; flex-direction: column; }
   .wiki-export-actions { width: 100%; grid-template-columns: 1fr 1fr; }
   .wiki-export-actions .knowledge-select { grid-column: 1 / -1; }
+  .skill-version-audit { grid-template-columns: 1fr; }
   .wiki-export-actions a .el-button { width: 100%; }
   .backup-card { align-items: flex-start; flex-wrap: wrap; }
   .backup-copy { width: calc(100% - 58px); flex: auto; }

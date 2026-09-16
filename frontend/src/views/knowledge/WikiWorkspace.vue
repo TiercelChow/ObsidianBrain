@@ -146,16 +146,21 @@
         <div class="knowledge-modal-head"><div><h3>审核语义 Wiki 变更</h3><p>批准后在一个事务中写入正式条目、论断、关系、版本和引用。</p></div><span v-if="activeReview" class="knowledge-status" :class="`is-${activeReview.risk_level === 'high' ? 'warning' : 'draft'}`">{{ activeReview.risk_level }} risk</span></div>
         <div v-if="activeReview" class="review-content">
           <div class="review-summary"><strong>{{ activeReview.title }}</strong><span>{{ activeReview.reason }}</span></div>
+          <div class="review-audit-grid">
+            <section><span>变更分类</span><strong>{{ activeReview.classification_summary.new }} 新增 · {{ activeReview.classification_summary.update }} 更新 · {{ activeReview.classification_summary.disputed }} 争议</strong></section>
+            <section><span>引用审计</span><strong :class="{ warning: !activeReview.citation_audit.passed }">{{ activeReview.citation_audit.passed ? '通过' : `${activeReview.citation_audit.issues.length} 项问题` }}</strong><small>{{ activeReview.citation_audit.entry_citations }} 条目引用 · {{ activeReview.citation_audit.claim_citations }} 论断引用</small></section>
+            <section><span>级联影响</span><strong>{{ activeReview.impact_summary.entries }} 个实体</strong><small>{{ activeReview.impact_summary.claims }} 论断 · {{ activeReview.impact_summary.relations }} 关系 · {{ activeReview.impact_summary.citations }} 历史引用</small></section>
+          </div>
           <article v-for="change in activeReview.changes" :key="change.id" class="review-change">
-            <header><span>{{ changeOperationLabel(change.operation, change.expected_revision) }}</span><strong>{{ String(change.after.title || change.object_id) }}</strong><code>{{ String(change.after.entry_type || '') }}</code></header>
+            <header><span>{{ changeClassificationLabel(change.classification) }}</span><span>{{ changeOperationLabel(change.operation, change.expected_revision) }}</span><strong>{{ String(change.after.title || change.object_id) }}</strong><code>{{ String(change.after.entry_type || '') }}</code></header>
             <p>{{ String(change.after.summary || '') }}</p>
-            <div><span>引用 {{ Array.isArray(change.after.citations) ? change.after.citations.length : 0 }}</span><span v-if="change.expected_revision">基于 Revision {{ change.expected_revision }}</span></div>
+            <div><span>引用 {{ Array.isArray(change.after.citations) ? change.after.citations.length : 0 }}</span><span>影响 {{ change.impact.claims }} 论断 / {{ change.impact.relations }} 关系</span><span v-if="change.citation_audit.inherited_claims">{{ change.citation_audit.inherited_claims }} 条论断继承条目引用</span><span v-if="change.expected_revision">基于 Revision {{ change.expected_revision }}</span></div>
             <details v-if="change.before" class="review-diff"><summary>查看变更前后</summary><div><section><b>修改前</b><pre>{{ JSON.stringify(change.before, null, 2) }}</pre></section><section><b>修改后</b><pre>{{ JSON.stringify(change.after, null, 2) }}</pre></section></div></details>
           </article>
           <el-input v-model="reviewNote" type="textarea" :rows="2" :maxlength="2000" placeholder="可选：记录审核说明" />
         </div>
         <div v-else class="knowledge-empty"><strong>没有待审核变更</strong><span>智能编译生成的候选会显示在这里。</span></div>
-        <div class="knowledge-modal-actions"><el-button @click="reviewVisible = false">稍后处理</el-button><template v-if="activeReview"><el-button :loading="resolvingReview" @click="resolveReview('reject')">驳回</el-button><el-button type="primary" :loading="resolvingReview" @click="resolveReview('approve')">批准并应用</el-button></template></div>
+        <div class="knowledge-modal-actions"><el-button @click="reviewVisible = false">稍后处理</el-button><template v-if="activeReview"><el-button :loading="resolvingReview" @click="resolveReview('reject')">驳回</el-button><el-button type="primary" :loading="resolvingReview" :disabled="!activeReview.citation_audit.passed" @click="resolveReview('approve')">批准并应用</el-button></template></div>
       </div>
     </MotionModal>
 
@@ -665,6 +670,10 @@ function changeOperationLabel(operation: string, expectedRevision?: number | nul
   return operation === 'create' ? '新增' : '更新'
 }
 
+function changeClassificationLabel(classification: 'new' | 'update' | 'disputed') {
+  return ({ new: '新增知识', update: '补充既有', disputed: '存在争议' })[classification]
+}
+
 function syncLabel(status: string) {
   return ({ clean: '已同步', outdated: '待同步', failed: '同步失败', scanning: '扫描中' } as Record<string, string>)[status] || status
 }
@@ -733,6 +742,11 @@ onBeforeUnmount(() => {
 .review-summary { display: grid; gap: 4px; padding: 12px; border-radius: 13px; background: var(--accent-light); }
 .review-summary strong { font-size: 14px; }
 .review-summary span { color: var(--text-muted); font-size: 11px; }
+.review-audit-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.review-audit-grid section { min-width: 0; display: grid; gap: 3px; padding: 11px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); }
+.review-audit-grid span, .review-audit-grid small { color: var(--text-faint); font-size: 9px; }
+.review-audit-grid strong { color: var(--text-primary); font-size: 11px; }
+.review-audit-grid strong.warning { color: var(--danger, #dc2626); }
 .review-change { display: grid; gap: 8px; padding: 13px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); }
 .review-change header { display: flex; align-items: center; gap: 8px; }
 .review-change header span { padding: 3px 7px; border-radius: 999px; background: var(--accent-light); color: var(--accent); font-size: 9px; }
@@ -817,7 +831,7 @@ onBeforeUnmount(() => {
 .mobile-sync-button { display: none; }
 @media (max-width: 768px) {
   .workspace-alert { align-items: flex-start; display: grid; }
-  .review-diff > div, .graph-columns { grid-template-columns: 1fr; }
+  .review-diff > div, .graph-columns, .review-audit-grid { grid-template-columns: 1fr; }
   .graph-path-builder > div:first-of-type { grid-template-columns: 1fr auto; }
   .graph-path-builder > div:first-of-type > span { display: none; }
   .wiki-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 46px; align-items: stretch; }

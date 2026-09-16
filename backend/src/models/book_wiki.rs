@@ -474,12 +474,51 @@ pub struct WikiSkillFile {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct WikiSkillOrigin {
+    pub repository_url: String,
+    pub source_path: String,
+    pub source_ref: String,
+    pub license_spdx: String,
+    pub attribution: String,
+    pub adaptation_notes: String,
+    pub reviewed_at: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct WikiSkillEvaluationFinding {
+    pub case_id: String,
+    pub name: String,
+    pub passed: bool,
+    pub missing_concepts: Vec<String>,
+    pub forbidden_concepts: Vec<String>,
+    pub weight: f64,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct WikiSkillEvaluationRun {
+    pub id: String,
+    pub skill_version_id: String,
+    pub suite_id: String,
+    pub suite_name: String,
+    pub score: f64,
+    pub baseline_score: Option<f64>,
+    pub passed: bool,
+    pub findings: Vec<WikiSkillEvaluationFinding>,
+    pub created_at: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct WikiSkillVersion {
     pub id: String,
     pub revision: i64,
     pub content_hash: String,
+    pub release_state: String,
+    pub parent_version_id: Option<String>,
+    pub changelog: String,
     pub created_at: String,
     pub files: Vec<WikiSkillFile>,
+    pub origin: Option<WikiSkillOrigin>,
+    pub latest_evaluation: Option<WikiSkillEvaluationRun>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -521,6 +560,9 @@ pub struct KnowledgeChange {
     pub object_type: String,
     pub object_id: String,
     pub expected_revision: Option<i64>,
+    pub classification: String,
+    pub citation_audit: Value,
+    pub impact: Value,
     pub before: Option<Value>,
     pub after: Value,
 }
@@ -537,6 +579,9 @@ pub struct KnowledgeChangeSet {
     pub created_at: String,
     pub resolved_at: Option<String>,
     pub resolved_by: Option<String>,
+    pub classification_summary: Value,
+    pub citation_audit: Value,
+    pub impact_summary: Value,
     pub changes: Vec<KnowledgeChange>,
 }
 

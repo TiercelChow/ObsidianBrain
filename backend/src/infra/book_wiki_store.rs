@@ -17,7 +17,8 @@ use crate::models::book_wiki::{
     KnowledgeGraphOverview, KnowledgeGraphPath, KnowledgeGraphRelation, KnowledgeGraphSnapshot,
     KnowledgeHealthIssue, KnowledgeHealthReport, KnowledgeMessage, KnowledgeRelationSummary,
     KnowledgeTask, ReaderBook, RuntimeProfile, RuntimeProviderConfig, SourceDocumentSummary,
-    SourceSpanSnapshot, WikiSkill, WikiSkillDetail, WikiSkillFile, WikiSkillVersion,
+    SourceSpanSnapshot, WikiSkill, WikiSkillDetail, WikiSkillEvaluationFinding,
+    WikiSkillEvaluationRun, WikiSkillFile, WikiSkillOrigin, WikiSkillVersion,
 };
 
 const LEGACY_BOOKS_KEY: &str = "reader_books";
@@ -2840,6 +2841,11 @@ impl BookWikiStore {
         let review_id = stable_id("review", &change_set_id);
         let now = Utc::now().to_rfc3339();
         let mut risk_level = "low";
+        let mut classification_counts = [0_i64; 3];
+        let mut audit_entry_citations = 0_i64;
+        let mut audit_claim_citations = 0_i64;
+        let mut audit_issues = Vec::<String>::new();
+        let mut impact_totals = [0_i64; 4];
         self.db.transaction(|conn| {
             conn.execute(
                 "INSERT INTO knowledge_change_sets
@@ -2930,17 +2936,47 @@ impl BookWikiStore {
                     }
                     None => ("create", None, None),
                 };
+                let requested_classification = candidate
+                    .get("_classification")
+                    .and_then(serde_json::Value::as_str);
+                let classification = if expected_revision.is_none() {
+                    "new"
+                } else if requested_classification == Some("disputed") {
+                    risk_level = "high";
+                    "disputed"
+                } else {
+                    "update"
+                };
+                match classification {
+                    "new" => classification_counts[0] += 1,
+                    "update" => classification_counts[1] += 1,
+                    "disputed" => classification_counts[2] += 1,
+                    _ => unreachable!(),
+                }
+                let (citation_audit, entry_citations, claim_citations, issues) =
+                    semantic_candidate_citation_audit(candidate)?;
+                audit_entry_citations += entry_citations;
+                audit_claim_citations += claim_citations;
+                audit_issues.extend(issues);
+                let impact =
+                    knowledge_change_impact(conn, &object_id, expected_revision.is_none())?;
+                impact_totals[0] += impact["entries"].as_i64().unwrap_or(0);
+                impact_totals[1] += impact["claims"].as_i64().unwrap_or(0);
+                impact_totals[2] += impact["relations"].as_i64().unwrap_or(0);
+                impact_totals[3] += impact["citations"].as_i64().unwrap_or(0);
                 let mut after = candidate.clone();
                 if let Some(object) = after.as_object_mut() {
                     object.remove("_operation");
+                    object.remove("_classification");
                 }
                 let operation = requested_operation.unwrap_or(default_operation);
                 after["id"] = serde_json::Value::String(object_id.clone());
                 conn.execute(
                     "INSERT INTO knowledge_changes
                      (id, change_set_id, ordinal, operation, object_type, object_id,
-                      expected_revision, before_json, after_json)
-                     VALUES (?1, ?2, ?3, ?4, 'entry', ?5, ?6, ?7, ?8)",
+                      expected_revision, classification, citation_audit_json, impact_json,
+                      before_json, after_json)
+                     VALUES (?1, ?2, ?3, ?4, 'entry', ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                     params![
                         stable_id("change", &format!("{change_set_id}:{ordinal}")),
                         change_set_id,
@@ -2948,14 +2984,44 @@ impl BookWikiStore {
                         operation,
                         object_id,
                         expected_revision,
+                        classification,
+                        citation_audit.to_string(),
+                        impact.to_string(),
                         before.map(|value| value.to_string()),
                         after.to_string(),
                     ],
                 )?;
             }
+            let classification_summary = serde_json::json!({
+                "new": classification_counts[0],
+                "update": classification_counts[1],
+                "disputed": classification_counts[2],
+                "no_material": 0,
+            });
+            let citation_audit = serde_json::json!({
+                "passed": audit_issues.is_empty(),
+                "entry_citations": audit_entry_citations,
+                "claim_citations": audit_claim_citations,
+                "issues": audit_issues,
+            });
+            let impact_summary = serde_json::json!({
+                "entries": impact_totals[0],
+                "claims": impact_totals[1],
+                "relations": impact_totals[2],
+                "citations": impact_totals[3],
+            });
             conn.execute(
-                "UPDATE knowledge_change_sets SET risk_level = ?2 WHERE id = ?1",
-                params![change_set_id, risk_level],
+                "UPDATE knowledge_change_sets
+                 SET risk_level = ?2, classification_summary_json = ?3,
+                     citation_audit_json = ?4, impact_summary_json = ?5
+                 WHERE id = ?1",
+                params![
+                    change_set_id,
+                    risk_level,
+                    classification_summary.to_string(),
+                    citation_audit.to_string(),
+                    impact_summary.to_string(),
+                ],
             )?;
             conn.execute(
                 "INSERT INTO knowledge_reviews
@@ -2976,6 +3042,79 @@ impl BookWikiStore {
             Ok(())
         })?;
         self.get_change_set(&change_set_id)
+    }
+
+    pub fn create_no_material_change_set(
+        &self,
+        base_id: &str,
+        run_id: &str,
+        title: &str,
+        reason: &str,
+        idempotency_key: &str,
+    ) -> Result<KnowledgeChangeSet, BrainError> {
+        self.get_active_base(base_id)?;
+        self.get_agent_run(run_id)?;
+        if let Some(existing) = self.find_change_set_by_idempotency(idempotency_key)? {
+            return Ok(existing);
+        }
+        let change_set_id = stable_id("change-set", idempotency_key);
+        let now = Utc::now().to_rfc3339();
+        self.db.with_connection(|conn| {
+            conn.execute(
+                "INSERT INTO knowledge_change_sets
+                 (id, knowledge_base_id, agent_run_id, title, reason, risk_level, status,
+                  idempotency_key, classification_summary_json, citation_audit_json,
+                  impact_summary_json, created_at, resolved_at, resolved_by)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'low', 'applied', ?6,
+                         '{\"new\":0,\"update\":0,\"disputed\":0,\"no_material\":1}',
+                         '{\"passed\":true,\"entry_citations\":0,\"claim_citations\":0,\"issues\":[]}',
+                         '{\"entries\":0,\"claims\":0,\"relations\":0,\"citations\":0}',
+                         ?7, ?7, 'agent')",
+                params![
+                    change_set_id,
+                    base_id,
+                    run_id,
+                    title.trim(),
+                    reason.trim(),
+                    idempotency_key,
+                    now,
+                ],
+            )?;
+            Ok(())
+        })?;
+        self.get_change_set(&change_set_id)
+    }
+
+    pub fn mark_semantic_compile_no_material(
+        &self,
+        base_id: &str,
+        change_set_id: &str,
+        processed_sources: i64,
+        total_sources: i64,
+    ) -> Result<KnowledgeBaseSummary, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        self.db.with_connection(|conn| {
+            conn.execute(
+                "UPDATE knowledge_bases
+                 SET compile_mode = 'smart', compile_state = 'ready', compile_error = NULL,
+                     compile_processed_sources = ?3, compile_total_sources = ?4,
+                     compile_phase = 'completed',
+                     compile_message = '智能编译完成，没有发现需要审核的实质变化',
+                     compile_active_run_id = NULL, compile_change_set_id = ?2,
+                     compile_cancel_requested = 0, compile_heartbeat_at = ?5,
+                     last_compiled_at = ?5, revision = revision + 1, updated_at = ?5
+                 WHERE id = ?1",
+                params![
+                    base_id,
+                    change_set_id,
+                    processed_sources,
+                    total_sources,
+                    now
+                ],
+            )?;
+            Ok(())
+        })?;
+        self.get_base(base_id)
     }
 
     pub fn list_change_sets(
@@ -3001,7 +3140,8 @@ impl BookWikiStore {
             let raw = conn
                 .query_row(
                     "SELECT id, knowledge_base_id, agent_run_id, title, reason, risk_level,
-                            status, created_at, resolved_at, resolved_by
+                            status, created_at, resolved_at, resolved_by,
+                            classification_summary_json, citation_audit_json, impact_summary_json
                      FROM knowledge_change_sets WHERE id = ?1",
                     params![change_set_id],
                     |row| {
@@ -3016,6 +3156,9 @@ impl BookWikiStore {
                             row.get::<_, String>(7)?,
                             row.get::<_, Option<String>>(8)?,
                             row.get::<_, Option<String>>(9)?,
+                            row.get::<_, String>(10)?,
+                            row.get::<_, String>(11)?,
+                            row.get::<_, String>(12)?,
                         ))
                     },
                 )
@@ -3023,7 +3166,7 @@ impl BookWikiStore {
                 .ok_or_else(|| BrainError::KnowledgeNotFound(change_set_id.to_string()))?;
             let mut stmt = conn.prepare(
                 "SELECT id, ordinal, operation, object_type, object_id, expected_revision,
-                        before_json, after_json
+                        classification, citation_audit_json, impact_json, before_json, after_json
                  FROM knowledge_changes WHERE change_set_id = ?1 ORDER BY ordinal",
             )?;
             let changes = stmt
@@ -3035,8 +3178,11 @@ impl BookWikiStore {
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
                         row.get::<_, Option<i64>>(5)?,
-                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, String>(6)?,
                         row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, String>(10)?,
                     ))
                 })?
                 .map(|row| {
@@ -3048,14 +3194,21 @@ impl BookWikiStore {
                         object_type: row.3,
                         object_id: row.4,
                         expected_revision: row.5,
+                        classification: row.6,
+                        citation_audit: serde_json::from_str(&row.7).map_err(|error| {
+                            BrainError::Internal(format!("变更引用审计解析失败: {error}"))
+                        })?,
+                        impact: serde_json::from_str(&row.8).map_err(|error| {
+                            BrainError::Internal(format!("变更影响范围解析失败: {error}"))
+                        })?,
                         before: row
-                            .6
+                            .9
                             .map(|value| serde_json::from_str(&value))
                             .transpose()
                             .map_err(|error| {
                                 BrainError::Internal(format!("变更前快照解析失败: {error}"))
                             })?,
-                        after: serde_json::from_str(&row.7).map_err(|error| {
+                        after: serde_json::from_str(&row.10).map_err(|error| {
                             BrainError::Internal(format!("变更后快照解析失败: {error}"))
                         })?,
                     })
@@ -3072,6 +3225,15 @@ impl BookWikiStore {
                 created_at: raw.7,
                 resolved_at: raw.8,
                 resolved_by: raw.9,
+                classification_summary: serde_json::from_str(&raw.10).map_err(|error| {
+                    BrainError::Internal(format!("变更分类汇总解析失败: {error}"))
+                })?,
+                citation_audit: serde_json::from_str(&raw.11).map_err(|error| {
+                    BrainError::Internal(format!("变更集引用审计解析失败: {error}"))
+                })?,
+                impact_summary: serde_json::from_str(&raw.12).map_err(|error| {
+                    BrainError::Internal(format!("变更集影响范围解析失败: {error}"))
+                })?,
                 changes,
             })
         })
@@ -4128,7 +4290,8 @@ impl BookWikiStore {
                 })?;
             let version_rows = {
                 let mut stmt = conn.prepare(
-                    "SELECT id, revision, content_hash, created_at
+                    "SELECT id, revision, content_hash, release_state, parent_version_id,
+                            changelog, created_at
                      FROM skill_versions WHERE skill_id = ?1 ORDER BY revision DESC",
                 )?;
                 let rows = stmt.query_map(params![skill_id], |row| {
@@ -4137,12 +4300,24 @@ impl BookWikiStore {
                         row.get::<_, i64>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
                     ))
                 })?;
                 rows.collect::<Result<Vec<_>, _>>()?
             };
             let mut versions = Vec::with_capacity(version_rows.len());
-            for (id, revision, content_hash, created_at) in version_rows {
+            for (
+                id,
+                revision,
+                content_hash,
+                release_state,
+                parent_version_id,
+                changelog,
+                created_at,
+            ) in version_rows
+            {
                 let files = {
                     let mut stmt = conn.prepare(
                         "SELECT relative_path, media_type, content_text, content_hash, size_bytes
@@ -4159,12 +4334,37 @@ impl BookWikiStore {
                     })?;
                     rows.collect::<Result<Vec<_>, _>>()?
                 };
+                let origin = conn
+                    .query_row(
+                        "SELECT repository_url, source_path, source_ref, license_spdx,
+                                attribution, adaptation_notes, reviewed_at
+                         FROM skill_version_origins WHERE skill_version_id = ?1",
+                        params![id],
+                        |row| {
+                            Ok(WikiSkillOrigin {
+                                repository_url: row.get(0)?,
+                                source_path: row.get(1)?,
+                                source_ref: row.get(2)?,
+                                license_spdx: row.get(3)?,
+                                attribution: row.get(4)?,
+                                adaptation_notes: row.get(5)?,
+                                reviewed_at: row.get(6)?,
+                            })
+                        },
+                    )
+                    .optional()?;
+                let latest_evaluation = latest_skill_evaluation(conn, &id)?;
                 versions.push(WikiSkillVersion {
                     id,
                     revision,
                     content_hash,
+                    release_state,
+                    parent_version_id,
+                    changelog,
                     created_at,
                     files,
+                    origin,
+                    latest_evaluation,
                 });
             }
             Ok((current_version_id, versions))
@@ -4174,6 +4374,206 @@ impl BookWikiStore {
             current_version_id,
             versions,
         })
+    }
+
+    pub fn evaluate_wiki_skill_version(
+        &self,
+        skill_id: &str,
+        version_id: &str,
+        suite_slug: &str,
+    ) -> Result<WikiSkillEvaluationRun, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        self.db.transaction(|conn| {
+            let (content, current_version_id, skill_slug) = conn
+                .query_row(
+                    "SELECT sf.content_text, s.current_version_id, s.slug
+                     FROM skill_versions sv
+                     JOIN skills s ON s.id = sv.skill_id
+                     JOIN skill_files sf ON sf.skill_version_id = sv.id
+                                        AND sf.relative_path = 'SKILL.md'
+                     WHERE sv.id = ?1 AND sv.skill_id = ?2",
+                    params![version_id, skill_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .optional()?
+                .ok_or_else(|| BrainError::KnowledgeNotFound(version_id.to_string()))?;
+            let current_version_id = current_version_id.ok_or_else(|| {
+                BrainError::Internal("Skill 当前版本不存在，数据库状态已损坏".to_string())
+            })?;
+            let expected_suite = match skill_slug.as_str() {
+                "book-ingest" => Some("semantic-ingest"),
+                "book-query" => Some("grounded-query"),
+                "book-research" => Some("evidence-research"),
+                "book-presentation" => Some("evidence-presentation"),
+                _ => None,
+            };
+            if expected_suite.is_some_and(|expected| expected != suite_slug) {
+                return Err(BrainError::KnowledgeValidation(format!(
+                    "Skill {skill_slug} 必须使用固定评测集 {}",
+                    expected_suite.unwrap_or_default()
+                )));
+            }
+            let (suite_id, suite_name, pass_score) = conn
+                .query_row(
+                    "SELECT id, name, pass_score FROM skill_evaluation_suites WHERE slug = ?1",
+                    params![suite_slug],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, f64>(2)?,
+                        ))
+                    },
+                )
+                .optional()?
+                .ok_or_else(|| {
+                    BrainError::KnowledgeValidation(format!(
+                        "未知的 Skill 固定评测集: {suite_slug}"
+                    ))
+                })?;
+            let cases = load_skill_evaluation_cases(conn, &suite_id)?;
+            let (score, findings) = score_skill_instructions(&content, &cases);
+            let baseline_score = if current_version_id == version_id {
+                None
+            } else {
+                let baseline_content = conn.query_row(
+                    "SELECT content_text FROM skill_files
+                     WHERE skill_version_id = ?1 AND relative_path = 'SKILL.md'",
+                    params![current_version_id],
+                    |row| row.get::<_, String>(0),
+                )?;
+                Some(score_skill_instructions(&baseline_content, &cases).0)
+            };
+            let passed = score + f64::EPSILON >= pass_score;
+            let findings_json = serde_json::to_string(&findings).map_err(|error| {
+                BrainError::Internal(format!("Skill 评测结果序列化失败: {error}"))
+            })?;
+            let run_id = stable_id(
+                "skill-evaluation",
+                &format!("{version_id}:{suite_id}:{now}:{score}"),
+            );
+            conn.execute(
+                "INSERT INTO skill_evaluation_runs
+                 (id, skill_version_id, suite_id, baseline_version_id, score, baseline_score,
+                  passed, findings_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    run_id,
+                    version_id,
+                    suite_id,
+                    if current_version_id == version_id {
+                        None
+                    } else {
+                        Some(current_version_id)
+                    },
+                    score,
+                    baseline_score,
+                    passed,
+                    findings_json,
+                    now,
+                ],
+            )?;
+            Ok(WikiSkillEvaluationRun {
+                id: run_id,
+                skill_version_id: version_id.to_string(),
+                suite_id,
+                suite_name,
+                score,
+                baseline_score,
+                passed,
+                findings,
+                created_at: now,
+            })
+        })
+    }
+
+    pub fn publish_wiki_skill_version(
+        &self,
+        skill_id: &str,
+        version_id: &str,
+    ) -> Result<WikiSkillDetail, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        self.db.transaction(|conn| {
+            let release_state = conn
+                .query_row(
+                    "SELECT release_state FROM skill_versions WHERE id = ?1 AND skill_id = ?2",
+                    params![version_id, skill_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+                .ok_or_else(|| BrainError::KnowledgeNotFound(version_id.to_string()))?;
+            if release_state != "candidate" {
+                return Err(BrainError::KnowledgeValidation(
+                    "只有候选版本可以执行发布".to_string(),
+                ));
+            }
+            let passed = conn
+                .query_row(
+                    "SELECT passed FROM skill_evaluation_runs
+                     WHERE skill_version_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                    params![version_id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if !passed {
+                return Err(BrainError::KnowledgeValidation(
+                    "候选版本必须先通过固定评测才能发布".to_string(),
+                ));
+            }
+            conn.execute(
+                "UPDATE skill_versions SET release_state = 'published' WHERE id = ?1",
+                params![version_id],
+            )?;
+            conn.execute(
+                "UPDATE skills SET current_version_id = ?2, updated_at = ?3 WHERE id = ?1",
+                params![skill_id, version_id, now],
+            )?;
+            Ok(())
+        })?;
+        self.get_wiki_skill_detail(skill_id, None)
+    }
+
+    pub fn rollback_wiki_skill_version(
+        &self,
+        skill_id: &str,
+        version_id: &str,
+    ) -> Result<WikiSkillDetail, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        self.db.transaction(|conn| {
+            let (release_state, current_version_id) = conn
+                .query_row(
+                    "SELECT sv.release_state, s.current_version_id
+                     FROM skill_versions sv JOIN skills s ON s.id = sv.skill_id
+                     WHERE sv.id = ?1 AND sv.skill_id = ?2",
+                    params![version_id, skill_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                )
+                .optional()?
+                .ok_or_else(|| BrainError::KnowledgeNotFound(version_id.to_string()))?;
+            if release_state != "published" {
+                return Err(BrainError::KnowledgeValidation(
+                    "只能回滚到已通过发布流程的历史版本".to_string(),
+                ));
+            }
+            if current_version_id.as_deref() == Some(version_id) {
+                return Err(BrainError::KnowledgeValidation(
+                    "目标版本已经是当前版本".to_string(),
+                ));
+            }
+            conn.execute(
+                "UPDATE skills SET current_version_id = ?2, updated_at = ?3 WHERE id = ?1",
+                params![skill_id, version_id, now],
+            )?;
+            Ok(())
+        })?;
+        self.get_wiki_skill_detail(skill_id, None)
     }
 
     pub fn enabled_wiki_skills(
@@ -4299,10 +4699,34 @@ impl BookWikiStore {
                     params![id, slug, name, description, now],
                 )?;
             }
+            let parent_version_id = if revision > 1 {
+                conn.query_row(
+                    "SELECT current_version_id FROM skills WHERE id = ?1",
+                    params![id],
+                    |row| row.get::<_, Option<String>>(0),
+                )?
+            } else {
+                None
+            };
             conn.execute(
-                "INSERT INTO skill_versions (id, skill_id, revision, content_hash, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![version_id, id, revision, content_hash, now],
+                "INSERT INTO skill_versions
+                 (id, skill_id, revision, content_hash, release_state, parent_version_id,
+                  changelog, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    version_id,
+                    id,
+                    revision,
+                    content_hash,
+                    "published",
+                    parent_version_id,
+                    if revision == 1 {
+                        "初始版本"
+                    } else {
+                        "用户编辑产生的候选版本"
+                    },
+                    now
+                ],
             )?;
             conn.execute(
                 "INSERT INTO skill_files
@@ -5805,6 +6229,136 @@ fn parse_string_list(raw: &str, label: &str) -> Result<Vec<String>, BrainError> 
         .map_err(|error| BrainError::Internal(format!("{label}解析失败: {error}")))
 }
 
+#[derive(Clone)]
+struct SkillEvaluationCase {
+    id: String,
+    name: String,
+    required_concepts: Vec<String>,
+    forbidden_concepts: Vec<String>,
+    weight: f64,
+}
+
+fn load_skill_evaluation_cases(
+    conn: &rusqlite::Connection,
+    suite_id: &str,
+) -> Result<Vec<SkillEvaluationCase>, BrainError> {
+    let mut statement = conn.prepare(
+        "SELECT id, name, required_concepts_json, forbidden_concepts_json, weight
+         FROM skill_evaluation_cases WHERE suite_id = ?1 ORDER BY ordinal",
+    )?;
+    let cases = statement
+        .query_map(params![suite_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, f64>(4)?,
+            ))
+        })?
+        .map(|row| {
+            let (id, name, required, forbidden, weight) = row?;
+            Ok(SkillEvaluationCase {
+                id,
+                name,
+                required_concepts: parse_string_list(&required, "Skill 评测必需概念")?,
+                forbidden_concepts: parse_string_list(&forbidden, "Skill 评测禁用概念")?,
+                weight,
+            })
+        })
+        .collect();
+    cases
+}
+
+fn score_skill_instructions(
+    content: &str,
+    cases: &[SkillEvaluationCase],
+) -> (f64, Vec<WikiSkillEvaluationFinding>) {
+    let normalized = content.to_lowercase();
+    let mut earned = 0.0;
+    let total = cases.iter().map(|case| case.weight).sum::<f64>();
+    let findings = cases
+        .iter()
+        .map(|case| {
+            let missing_concepts = case
+                .required_concepts
+                .iter()
+                .filter(|concept| !normalized.contains(&concept.to_lowercase()))
+                .cloned()
+                .collect::<Vec<_>>();
+            let forbidden_concepts = case
+                .forbidden_concepts
+                .iter()
+                .filter(|concept| normalized.contains(&concept.to_lowercase()))
+                .cloned()
+                .collect::<Vec<_>>();
+            let passed = missing_concepts.is_empty() && forbidden_concepts.is_empty();
+            if passed {
+                earned += case.weight;
+            }
+            WikiSkillEvaluationFinding {
+                case_id: case.id.clone(),
+                name: case.name.clone(),
+                passed,
+                missing_concepts,
+                forbidden_concepts,
+                weight: case.weight,
+            }
+        })
+        .collect::<Vec<_>>();
+    let score = if total <= f64::EPSILON {
+        0.0
+    } else {
+        (earned / total).clamp(0.0, 1.0)
+    };
+    (score, findings)
+}
+
+fn latest_skill_evaluation(
+    conn: &rusqlite::Connection,
+    version_id: &str,
+) -> Result<Option<WikiSkillEvaluationRun>, BrainError> {
+    let row = conn
+        .query_row(
+            "SELECT ser.id, ser.skill_version_id, ser.suite_id, ses.name, ser.score,
+                    ser.baseline_score, ser.passed, ser.findings_json, ser.created_at
+             FROM skill_evaluation_runs ser
+             JOIN skill_evaluation_suites ses ON ses.id = ser.suite_id
+             WHERE ser.skill_version_id = ?1 ORDER BY ser.created_at DESC LIMIT 1",
+            params![version_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, f64>(4)?,
+                    row.get::<_, Option<f64>>(5)?,
+                    row.get::<_, bool>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                ))
+            },
+        )
+        .optional()?;
+    row.map(|row| {
+        Ok(WikiSkillEvaluationRun {
+            id: row.0,
+            skill_version_id: row.1,
+            suite_id: row.2,
+            suite_name: row.3,
+            score: row.4,
+            baseline_score: row.5,
+            passed: row.6,
+            findings: serde_json::from_str(&row.7).map_err(|error| {
+                BrainError::Internal(format!("Skill 评测结果解析失败: {error}"))
+            })?,
+            created_at: row.8,
+        })
+    })
+    .transpose()
+}
+
 fn validate_skill_scope(value: &str) -> Result<(), BrainError> {
     if matches!(value, "qa" | "research" | "both" | "ingest" | "all") {
         Ok(())
@@ -5982,6 +6536,16 @@ fn validate_semantic_candidate(
             "知识候选 slug 格式不安全".to_string(),
         ));
     }
+    if let Some(classification) = candidate
+        .get("_classification")
+        .and_then(serde_json::Value::as_str)
+    {
+        if !matches!(classification, "new" | "update" | "disputed") {
+            return Err(BrainError::KnowledgeValidation(
+                "知识候选分类只能是 new、update 或 disputed".to_string(),
+            ));
+        }
+    }
     for key in ["title", "summary", "content_md"] {
         let value = required_json_string(candidate, key)?;
         let limit = if key == "content_md" { 30_000 } else { 1_000 };
@@ -6051,6 +6615,97 @@ fn validate_semantic_candidate(
         }
     }
     Ok(())
+}
+
+fn semantic_candidate_citation_audit(
+    candidate: &serde_json::Value,
+) -> Result<(serde_json::Value, i64, i64, Vec<String>), BrainError> {
+    let entry_citations = json_string_list(candidate, "citations")?;
+    let mut explicit_claim_citations = 0_i64;
+    let mut inherited_claims = 0_i64;
+    let mut issues = Vec::new();
+    if let Some(claims) = candidate
+        .get("claims")
+        .and_then(serde_json::Value::as_array)
+    {
+        for (index, claim) in claims.iter().enumerate() {
+            let citations = json_string_list(claim, "citations")?;
+            if citations.is_empty() {
+                inherited_claims += 1;
+                if entry_citations.is_empty() {
+                    issues.push(format!("第 {} 条论断没有可继承的引用", index + 1));
+                }
+            } else {
+                explicit_claim_citations += citations.len() as i64;
+            }
+        }
+    }
+    let effective_claim_citations =
+        explicit_claim_citations + inherited_claims.saturating_mul(entry_citations.len() as i64);
+    let audit = serde_json::json!({
+        "passed": issues.is_empty(),
+        "entry_citations": entry_citations.len(),
+        "explicit_claim_citations": explicit_claim_citations,
+        "inherited_claims": inherited_claims,
+        "effective_claim_citations": effective_claim_citations,
+        "issues": issues.clone(),
+    });
+    Ok((
+        audit,
+        entry_citations.len() as i64,
+        effective_claim_citations,
+        issues,
+    ))
+}
+
+fn knowledge_change_impact(
+    conn: &rusqlite::Connection,
+    entry_id: &str,
+    is_new: bool,
+) -> Result<serde_json::Value, BrainError> {
+    if is_new {
+        return Ok(serde_json::json!({
+            "entries": 1,
+            "claims": 0,
+            "relations": 0,
+            "citations": 0,
+            "relation_entry_ids": [],
+        }));
+    }
+    let claims = conn.query_row(
+        "SELECT COUNT(*) FROM knowledge_claims WHERE entry_id = ?1",
+        params![entry_id],
+        |row| row.get::<_, i64>(0),
+    )?;
+    let relations = conn.query_row(
+        "SELECT COUNT(*) FROM knowledge_relations
+         WHERE from_entry_id = ?1 OR to_entry_id = ?1",
+        params![entry_id],
+        |row| row.get::<_, i64>(0),
+    )?;
+    let citations = conn.query_row(
+        "SELECT COUNT(*) FROM knowledge_citations kc
+         WHERE kc.entry_id = ?1 OR kc.claim_id IN
+               (SELECT id FROM knowledge_claims WHERE entry_id = ?1)",
+        params![entry_id],
+        |row| row.get::<_, i64>(0),
+    )?;
+    let relation_entry_ids = {
+        let mut statement = conn.prepare(
+            "SELECT DISTINCT CASE WHEN from_entry_id = ?1 THEN to_entry_id ELSE from_entry_id END
+             FROM knowledge_relations WHERE from_entry_id = ?1 OR to_entry_id = ?1
+             ORDER BY 1 LIMIT 50",
+        )?;
+        let rows = statement.query_map(params![entry_id], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    Ok(serde_json::json!({
+        "entries": 1,
+        "claims": claims,
+        "relations": relations,
+        "citations": citations,
+        "relation_entry_ids": relation_entry_ids,
+    }))
 }
 
 fn validate_change_revision(
@@ -6216,11 +6871,16 @@ fn apply_entry_change(
                 .get("confidence")
                 .and_then(serde_json::Value::as_f64)
                 .map(|value| value.clamp(0.0, 1.0));
+            let verification_status = if change.classification == "disputed" {
+                "disputed"
+            } else {
+                "unverified"
+            };
             conn.execute(
                 "INSERT INTO knowledge_claims
                  (id, knowledge_base_id, entry_id, predicate, object_text, claim_text,
                   confidence, verification_status, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'unverified', ?8, ?8)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
                 params![
                     claim_id,
                     change_set.knowledge_base_id,
@@ -6229,6 +6889,7 @@ fn apply_entry_change(
                     object_text,
                     claim_text,
                     claim_confidence,
+                    verification_status,
                     now,
                 ],
             )?;
@@ -7534,6 +8195,54 @@ mod tests {
     }
 
     #[test]
+    fn test_builtin_skill_candidate_requires_evaluation_then_can_publish_and_rollback() {
+        let (store, _dir) = test_store();
+        let detail = store
+            .get_wiki_skill_detail("skill-book-ingest", None)
+            .unwrap();
+        let candidate = detail
+            .versions
+            .iter()
+            .find(|version| version.release_state == "candidate")
+            .unwrap();
+        assert_eq!(candidate.revision, 2);
+        assert_eq!(candidate.origin.as_ref().unwrap().license_spdx, "MIT");
+        assert!(store
+            .publish_wiki_skill_version("skill-book-ingest", &candidate.id)
+            .unwrap_err()
+            .to_string()
+            .contains("固定评测"));
+        assert!(store
+            .evaluate_wiki_skill_version("skill-book-ingest", &candidate.id, "grounded-query")
+            .unwrap_err()
+            .to_string()
+            .contains("必须使用固定评测集"));
+
+        let evaluation = store
+            .evaluate_wiki_skill_version("skill-book-ingest", &candidate.id, "semantic-ingest")
+            .unwrap();
+        assert!(evaluation.passed);
+        assert_eq!(evaluation.score, 1.0);
+        assert!(evaluation.baseline_score.is_some_and(|score| score < 1.0));
+
+        let published = store
+            .publish_wiki_skill_version("skill-book-ingest", &candidate.id)
+            .unwrap();
+        assert_eq!(published.current_version_id, candidate.id);
+        assert_eq!(published.skill.revision, 2);
+        assert!(published.versions[0].latest_evaluation.is_some());
+
+        let rolled_back = store
+            .rollback_wiki_skill_version("skill-book-ingest", "skill-version-book-ingest-v1")
+            .unwrap();
+        assert_eq!(
+            rolled_back.current_version_id,
+            "skill-version-book-ingest-v1"
+        );
+        assert_eq!(rolled_back.skill.revision, 1);
+    }
+
+    #[test]
     fn test_agent_run_inspection_persists_effective_prompt_and_snapshots() {
         let (store, _dir) = test_store();
         store
@@ -7668,6 +8377,10 @@ mod tests {
                 &[semantic_candidate("span-change", "语义主题")],
             )
             .unwrap();
+        assert_eq!(first.changes[0].classification, "new");
+        assert_eq!(first.classification_summary["new"], 1);
+        assert_eq!(first.citation_audit["passed"], true);
+        assert_eq!(first.impact_summary["entries"], 1);
         store.resolve_change_set(&first.id, true, "确认").unwrap();
         let second = store
             .create_semantic_change_set(
@@ -7679,6 +8392,10 @@ mod tests {
                 &[semantic_candidate("span-change", "待更新标题")],
             )
             .unwrap();
+        assert_eq!(second.changes[0].classification, "update");
+        assert_eq!(second.classification_summary["update"], 1);
+        assert_eq!(second.changes[0].impact["claims"], 1);
+        assert_eq!(second.changes[0].impact["citations"], 2);
         let entry_id = second.changes[0].object_id.clone();
         store
             .db
@@ -7697,6 +8414,111 @@ mod tests {
         assert!(conflict.to_string().contains("需要重新生成"));
         assert_eq!(store.get_change_set(&second.id).unwrap().status, "proposed");
         assert_eq!(store.get_entry(&entry_id).unwrap().entry.title, "语义主题");
+    }
+
+    #[test]
+    fn test_no_material_compile_record_finishes_without_pending_review() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-no-material", "/tmp/book-no-material")])
+            .unwrap();
+        let base = store.initialize_base("book-no-material").unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_ingest",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        let change_set = store
+            .create_no_material_change_set(
+                &base.id,
+                &run.id,
+                "无实质变化",
+                "固定检查完成",
+                "no-material-compile",
+            )
+            .unwrap();
+        assert_eq!(change_set.status, "applied");
+        assert!(change_set.changes.is_empty());
+        assert_eq!(change_set.classification_summary["no_material"], 1);
+
+        let ready = store
+            .mark_semantic_compile_no_material(&base.id, &change_set.id, 1, 1)
+            .unwrap();
+        assert_eq!(ready.compile_state, "ready");
+        assert_eq!(ready.compile_phase, "completed");
+        assert_eq!(ready.pending_review_count, 0);
+    }
+
+    #[test]
+    fn test_disputed_semantic_update_is_high_risk_and_marks_claims_disputed() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-disputed", "/tmp/book-disputed")])
+            .unwrap();
+        let base = store.initialize_base("book-disputed").unwrap();
+        store
+            .sync_markdown_sources(
+                &base.id,
+                &[sample_source(
+                    "disputed",
+                    "source-entry-disputed",
+                    "span-disputed",
+                )],
+            )
+            .unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_ingest",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        let first = store
+            .create_semantic_change_set(
+                &base.id,
+                &run.id,
+                "初始知识",
+                "测试",
+                "disputed-first",
+                &[semantic_candidate("span-disputed", "原结论")],
+            )
+            .unwrap();
+        store.resolve_change_set(&first.id, true, "确认").unwrap();
+
+        let mut disputed = semantic_candidate("span-disputed", "存在冲突的结论");
+        disputed["_classification"] = serde_json::Value::String("disputed".to_string());
+        let change_set = store
+            .create_semantic_change_set(
+                &base.id,
+                &run.id,
+                "争议知识",
+                "来源无法消解",
+                "disputed-second",
+                &[disputed],
+            )
+            .unwrap();
+        assert_eq!(change_set.risk_level, "high");
+        assert_eq!(change_set.changes[0].classification, "disputed");
+        store
+            .resolve_change_set(&change_set.id, true, "保留争议")
+            .unwrap();
+        let verification_status = store
+            .db
+            .with_connection(|conn| {
+                conn.query_row(
+                    "SELECT verification_status FROM knowledge_claims
+                     WHERE entry_id = ?1 LIMIT 1",
+                    params![change_set.changes[0].object_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(Into::into)
+            })
+            .unwrap();
+        assert_eq!(verification_status, "disputed");
     }
 
     #[test]

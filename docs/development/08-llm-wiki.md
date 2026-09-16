@@ -49,6 +49,10 @@
 
 迁移 025 给来源编译检查点增加 `compile_fingerprint`，并把 Skill 绑定范围扩展为 `qa/research/both/ingest/all`。指纹由编译协议 revision、Runtime Profile 与模型、有效配置文档内容哈希、实际启用 Skill 的 revision 与内容哈希组成。准备和执行阶段都按当前指纹查询待编译来源；任一输入变化都会让全书来源重新进入编译，但相同指纹仍只处理内容版本变化的来源。没有启用 `ingest` Skill 时回退到内置 `book-ingest`；启用自定义编译 Skill 后只注入这些 Skill，硬编码的安全、引用和 JSON Schema 约束仍位于其上层并由服务端二次校验。
 
+迁移 026 为 `skill_versions` 增加发布状态、父版本和变更说明，通过 `skill_version_origins` 保存许可证与适配来源；固定评测集、用例和结果分别存入 `skill_evaluation_suites/cases/runs`。评测器首版是确定性文本契约检查，按权重比较候选与当前版本，只允许通过的候选切换为当前版本；回滚只接受历史 `published` 版本。首批 v2 候选为项目独立重写内容，许可证不明确的开源项目不进入可发布来源。
+
+迁移 027 为变更集和单项变更增加分类、引用审计和影响快照。服务端根据正式实体是否存在复核 `new/update`，仅允许模型显式把既有实体标为 `disputed`；争议变更应用后，其原子论断以 `disputed` 验证状态保存。引用审计统计条目引用、显式论断引用与继承引用，级联影响在生成候选时冻结现有论断、关系和引用数量，审核界面据此展示应用范围。模型返回空候选时创建状态为 `applied` 的 `no_material` 记录，照常推进来源检查点并把知识库标记为 ready，而不增加待审核数量。
+
 原 `Memory`、`WikiDashboard`、`WikiWorkbench`、`Explore`、`Ingest` 页面及 Wiki/Explore/Knowledge Insights handlers、旧 Markdown Wiki Engine 已移除。Vue Router 仍保留一个发布周期的静态跳转；旧 `Wiki/*.md` 不删除、不自动导入，新系统也不再读取。由此避免 SQLite Book Wiki 与 Obsidian Markdown Wiki 双写。
 
 本地开发仍使用固定命令 `npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp`。Runtime Profile 可将 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 兼容供应商注入 Harness；真实密钥只从用户指定的环境变量读取。Book Wiki 只处理 Markdown 文件夹并固定使用 DeepSeek Harness。ACP 的 `UsageUpdate` 只作为真实上下文占用展示；供应商未上报输入/输出明细时，计费统计继续标为 `estimated`。
@@ -742,7 +746,7 @@ Agent 回答只能引用工具返回的 entry/span ID。后端在保存前验证
 
 当前页面继续复用已有 Tool API Envelope；Skill ZIP 上传和成果下载使用资源型 HTTP 端点。下面列出的是逐步迁移后的目标资源 API，不代表每条路由已经存在。
 
-当前新增 Tool 包括 `compile_book_knowledge_base`、`cancel_book_knowledge_compile`、`list_knowledge_change_sets`、`resolve_knowledge_change_set`、`lint_book_knowledge_base`、`save_knowledge_answer`、`cancel_knowledge_task`、`list_wiki_skills`、`save_custom_wiki_skill`、`set_wiki_skill_binding` 和 `get_agent_run_events`；智能编译和研究任务的启动 Tool 都只负责入队。资源端点覆盖 Skill ZIP 上传、成果下载、数据库快照下载/上传恢复与单书 JSON/Markdown 导出；`book_fetch_external` 仅存在于带能力令牌的本机 Agent MCP 端点，不进入普通页面 Tool API。
+当前新增 Tool 包括 `compile_book_knowledge_base`、`cancel_book_knowledge_compile`、`list_knowledge_change_sets`、`resolve_knowledge_change_set`、`lint_book_knowledge_base`、`save_knowledge_answer`、`cancel_knowledge_task`、`list_wiki_skills`、`get_wiki_skill_detail`、`save_custom_wiki_skill`、`evaluate_wiki_skill_version`、`publish_wiki_skill_version`、`rollback_wiki_skill_version`、`set_wiki_skill_binding`、`get_agent_run_events` 和 `get_agent_run_inspection`；智能编译和研究任务的启动 Tool 都只负责入队。资源端点覆盖 Skill ZIP 上传、成果下载、数据库快照下载/上传恢复与单书 JSON/Markdown 导出；`book_fetch_external` 仅存在于带能力令牌的本机 Agent MCP 端点，不进入普通页面 Tool API。
 
 ### 13.1 前端 API
 

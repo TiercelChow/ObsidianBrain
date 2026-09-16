@@ -340,8 +340,44 @@ export interface WikiSkillVersion {
   id: string
   revision: number
   content_hash: string
+  release_state: 'candidate' | 'published' | 'retired'
+  parent_version_id?: string | null
+  changelog: string
   created_at: string
   files: WikiSkillFile[]
+  origin?: WikiSkillOrigin | null
+  latest_evaluation?: WikiSkillEvaluationRun | null
+}
+
+export interface WikiSkillOrigin {
+  repository_url: string
+  source_path: string
+  source_ref: string
+  license_spdx: string
+  attribution: string
+  adaptation_notes: string
+  reviewed_at: string
+}
+
+export interface WikiSkillEvaluationFinding {
+  case_id: string
+  name: string
+  passed: boolean
+  missing_concepts: string[]
+  forbidden_concepts: string[]
+  weight: number
+}
+
+export interface WikiSkillEvaluationRun {
+  id: string
+  skill_version_id: string
+  suite_id: string
+  suite_name: string
+  score: number
+  baseline_score?: number | null
+  passed: boolean
+  findings: WikiSkillEvaluationFinding[]
+  created_at: string
 }
 
 export interface WikiSkillDetail {
@@ -429,6 +465,22 @@ export interface KnowledgeChange {
   object_type: 'entry' | 'claim' | 'relation'
   object_id: string
   expected_revision?: number | null
+  classification: 'new' | 'update' | 'disputed'
+  citation_audit: {
+    passed: boolean
+    entry_citations: number
+    explicit_claim_citations: number
+    inherited_claims: number
+    effective_claim_citations: number
+    issues: string[]
+  }
+  impact: {
+    entries: number
+    claims: number
+    relations: number
+    citations: number
+    relation_entry_ids: string[]
+  }
   before?: Record<string, unknown> | null
   after: Record<string, unknown>
 }
@@ -444,6 +496,9 @@ export interface KnowledgeChangeSet {
   created_at: string
   resolved_at?: string | null
   resolved_by?: string | null
+  classification_summary: { new: number; update: number; disputed: number; no_material: number }
+  citation_audit: { passed: boolean; entry_citations: number; claim_citations: number; issues: string[] }
+  impact_summary: { entries: number; claims: number; relations: number; citations: number }
   changes: KnowledgeChange[]
 }
 
@@ -908,6 +963,28 @@ export function saveCustomWikiSkill(input: {
     instructions: input.instructions,
     ...(input.expectedRevision ? { expected_revision: input.expectedRevision } : {}),
   }) as unknown as Promise<ToolEnvelope<WikiSkill>>
+}
+
+export function evaluateWikiSkillVersion(skillId: string, versionId: string, suiteSlug: string) {
+  return callTool('evaluate_wiki_skill_version', {
+    skill_id: skillId,
+    version_id: versionId,
+    suite_slug: suiteSlug,
+  }) as unknown as Promise<ToolEnvelope<WikiSkillEvaluationRun>>
+}
+
+export function publishWikiSkillVersion(skillId: string, versionId: string) {
+  return callTool('publish_wiki_skill_version', {
+    skill_id: skillId,
+    version_id: versionId,
+  }) as unknown as Promise<ToolEnvelope<WikiSkillDetail>>
+}
+
+export function rollbackWikiSkillVersion(skillId: string, versionId: string) {
+  return callTool('rollback_wiki_skill_version', {
+    skill_id: skillId,
+    version_id: versionId,
+  }) as unknown as Promise<ToolEnvelope<WikiSkillDetail>>
 }
 
 export function importWikiSkillArchive(file: File) {

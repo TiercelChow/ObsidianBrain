@@ -192,6 +192,15 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(SaveCustomWikiSkillHandler))
         .await;
     registry
+        .register(Arc::new(EvaluateWikiSkillVersionHandler))
+        .await;
+    registry
+        .register(Arc::new(PublishWikiSkillVersionHandler))
+        .await;
+    registry
+        .register(Arc::new(RollbackWikiSkillVersionHandler))
+        .await;
+    registry
         .register(Arc::new(SetWikiSkillBindingHandler))
         .await;
     registry.register(Arc::new(GetAgentRunEventsHandler)).await;

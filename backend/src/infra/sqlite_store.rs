@@ -174,6 +174,16 @@ const MIGRATIONS: &[Migration] = &[
         description: "skill-aware semantic compile fingerprints",
         sql: include_str!("../../migrations/025_compile_skill_fingerprint.sql"),
     },
+    Migration {
+        version: 26,
+        description: "skill provenance, evaluation, publishing, and rollback",
+        sql: include_str!("../../migrations/026_skill_quality_release.sql"),
+    },
+    Migration {
+        version: 27,
+        description: "semantic change classification, citation audit, and impact summaries",
+        sql: include_str!("../../migrations/027_semantic_change_audit.sql"),
+    },
 ];
 
 impl SqliteStore {
@@ -1230,7 +1240,13 @@ mod tests {
                     [],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )?;
-                assert_eq!(counts, (7, 7, 7));
+                assert_eq!(counts, (7, 11, 11));
+                let candidates: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM skill_versions WHERE release_state = 'candidate'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(candidates, 4);
                 let current: String = conn.query_row(
                     "SELECT current_version_id FROM skills WHERE id = 'skill-book-query'",
                     [],
