@@ -313,6 +313,8 @@ const { renderMarkdown, enhance, cleanup } = useMarkdownRender(() => {})
 
 function compileLabel(base: KnowledgeBaseSummary) {
   if (base.compile_mode === 'chapter' && base.compile_state === 'not_started') return '章节索引'
+  if (base.compile_phase === 'waiting_review') return '待审核'
+  if (base.compile_phase === 'cancelling') return '停止中'
   const labels: Record<string, string> = {
     not_started: '待编译', outdated: '待更新', compiling: '编译中', ready: '智能 Wiki', failed: '编译失败',
   }

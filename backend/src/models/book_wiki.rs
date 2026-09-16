@@ -78,6 +78,15 @@ pub struct KnowledgeBaseSummary {
     pub last_compiled_at: Option<String>,
     pub compile_processed_sources: i64,
     pub compile_total_sources: i64,
+    pub compile_phase: String,
+    pub compile_message: String,
+    pub compile_current_batch: i64,
+    pub compile_total_batches: i64,
+    pub compile_active_run_id: Option<String>,
+    pub compile_change_set_id: Option<String>,
+    pub compile_started_at: Option<String>,
+    pub compile_heartbeat_at: Option<String>,
+    pub compile_cancel_requested: bool,
     pub pending_review_count: i64,
     pub source_count: i64,
     pub entry_count: i64,
@@ -419,6 +428,26 @@ pub struct AgentRunEvent {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct AgentRunInspectionSnapshot {
+    pub run_id: String,
+    pub prompt_text: String,
+    pub prompt_hash: String,
+    pub prompt_characters: i64,
+    pub skill_snapshots: Value,
+    pub config_snapshots: Value,
+    pub tool_names: Vec<String>,
+    pub evidence_refs: Value,
+    pub created_at: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct AgentRunInspection {
+    pub run: AgentRun,
+    pub events: Vec<AgentRunEvent>,
+    pub snapshot: Option<AgentRunInspectionSnapshot>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct WikiSkill {
     pub id: String,
     pub slug: String,
@@ -433,6 +462,31 @@ pub struct WikiSkill {
     pub enabled: bool,
     pub usage_scope: String,
     pub updated_at: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct WikiSkillFile {
+    pub relative_path: String,
+    pub media_type: String,
+    pub content_text: String,
+    pub content_hash: String,
+    pub size_bytes: i64,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct WikiSkillVersion {
+    pub id: String,
+    pub revision: i64,
+    pub content_hash: String,
+    pub created_at: String,
+    pub files: Vec<WikiSkillFile>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct WikiSkillDetail {
+    pub skill: WikiSkill,
+    pub current_version_id: String,
+    pub versions: Vec<WikiSkillVersion>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]

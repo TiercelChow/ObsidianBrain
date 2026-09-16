@@ -159,6 +159,21 @@ const MIGRATIONS: &[Migration] = &[
         description: "per-task external research grants and safe built-in skills",
         sql: include_str!("../../migrations/022_external_research_and_safe_skills.sql"),
     },
+    Migration {
+        version: 23,
+        description: "background semantic compilation progress and recovery",
+        sql: include_str!("../../migrations/023_background_compile_progress.sql"),
+    },
+    Migration {
+        version: 24,
+        description: "auditable agent prompts and skill snapshots",
+        sql: include_str!("../../migrations/024_agent_run_inspection.sql"),
+    },
+    Migration {
+        version: 25,
+        description: "skill-aware semantic compile fingerprints",
+        sql: include_str!("../../migrations/025_compile_skill_fingerprint.sql"),
+    },
 ];
 
 impl SqliteStore {
@@ -487,7 +502,9 @@ impl SqliteStore {
             conn.query_row(
                 "SELECT
                     (SELECT COUNT(*) FROM agent_runs WHERE status IN ('queued', 'running')) +
-                    (SELECT COUNT(*) FROM knowledge_tasks WHERE status IN ('queued', 'running'))",
+                    (SELECT COUNT(*) FROM knowledge_tasks WHERE status IN ('queued', 'running')) +
+                    (SELECT COUNT(*) FROM knowledge_bases
+                       WHERE compile_state = 'compiling' AND compile_phase != 'waiting_review')",
                 [],
                 |row| row.get(0),
             )
@@ -495,7 +512,7 @@ impl SqliteStore {
         };
         if active_work > 0 {
             return Err(BrainError::KnowledgeValidation(format!(
-                "仍有 {active_work} 项知识任务或 Agent 运行中，请结束后再恢复"
+                "仍有 {active_work} 项智能编译、知识任务或 Agent 运行中，请结束后再恢复"
             )));
         }
 

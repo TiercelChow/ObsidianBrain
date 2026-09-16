@@ -115,6 +115,9 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(CompileBookKnowledgeBaseHandler))
         .await;
     registry
+        .register(Arc::new(CancelBookKnowledgeCompileHandler))
+        .await;
+    registry
         .register(Arc::new(ListKnowledgeChangeSetsHandler))
         .await;
     registry
@@ -184,6 +187,7 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(RestoreKnowledgeBackupHandler))
         .await;
     registry.register(Arc::new(ListWikiSkillsHandler)).await;
+    registry.register(Arc::new(GetWikiSkillDetailHandler)).await;
     registry
         .register(Arc::new(SaveCustomWikiSkillHandler))
         .await;
@@ -191,6 +195,9 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(SetWikiSkillBindingHandler))
         .await;
     registry.register(Arc::new(GetAgentRunEventsHandler)).await;
+    registry
+        .register(Arc::new(GetAgentRunInspectionHandler))
+        .await;
     registry
         .register(Arc::new(GetKnowledgeTaskActivityHandler))
         .await;

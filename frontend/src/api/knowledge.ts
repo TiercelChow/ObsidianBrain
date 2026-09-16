@@ -14,6 +14,15 @@ export interface KnowledgeBaseSummary {
   sync_state: 'clean' | 'outdated' | 'scanning' | 'extracting' | 'ingesting' | 'failed'
   compile_mode: 'chapter' | 'smart'
   compile_state: 'not_started' | 'outdated' | 'compiling' | 'ready' | 'failed'
+  compile_phase: string
+  compile_message: string | null
+  compile_current_batch: number
+  compile_total_batches: number
+  compile_active_run_id: string | null
+  compile_change_set_id: string | null
+  compile_started_at: string | null
+  compile_heartbeat_at: string | null
+  compile_cancel_requested: boolean
   compile_error?: string | null
   health_state: 'healthy' | 'warning' | 'needs_review'
   last_error?: string | null
@@ -315,8 +324,30 @@ export interface WikiSkill {
   revision: number
   instructions: string
   enabled: boolean
-  usage_scope: 'qa' | 'research' | 'both'
+  usage_scope: 'qa' | 'research' | 'both' | 'ingest' | 'all'
   updated_at: string
+}
+
+export interface WikiSkillFile {
+  relative_path: string
+  media_type: string
+  content_text: string
+  content_hash: string
+  size_bytes: number
+}
+
+export interface WikiSkillVersion {
+  id: string
+  revision: number
+  content_hash: string
+  created_at: string
+  files: WikiSkillFile[]
+}
+
+export interface WikiSkillDetail {
+  skill: WikiSkill
+  current_version_id: string
+  versions: WikiSkillVersion[]
 }
 
 export interface AgentRunEvent {
@@ -341,6 +372,43 @@ export interface AgentRun {
   started_at?: string | null
   finished_at?: string | null
   created_at: string
+}
+
+export interface AgentRunSkillSnapshot {
+  id: string
+  slug: string
+  name: string
+  revision: number
+  instructions: string
+  permissions: string[]
+  requirements: string[]
+  application_mode?: 'prompt_injected' | 'declared_only'
+}
+
+export interface AgentRunConfigSnapshot {
+  id: string
+  scope: string
+  name: string
+  revision: number
+  content_md: string
+}
+
+export interface AgentRunInspectionSnapshot {
+  run_id: string
+  prompt_text: string
+  prompt_hash: string
+  prompt_characters: number
+  skill_snapshots: AgentRunSkillSnapshot[]
+  config_snapshots: AgentRunConfigSnapshot[]
+  tool_names: string[]
+  evidence_refs: Record<string, unknown>
+  created_at: string
+}
+
+export interface AgentRunInspection {
+  run: AgentRun
+  events: AgentRunEvent[]
+  snapshot?: AgentRunInspectionSnapshot | null
 }
 
 export type KnowledgeChatStreamEvent =
@@ -384,6 +452,17 @@ export interface SemanticCompileResult {
   change_set: KnowledgeChangeSet
   processed_sources: number
   total_sources: number
+}
+
+export interface SemanticCompileQueueResult {
+  knowledge_base: KnowledgeBaseSummary
+  queued: boolean
+  message: string
+}
+
+export interface SemanticCompileCancelResult {
+  knowledge_base: KnowledgeBaseSummary
+  cancel_requested: boolean
 }
 
 export interface KnowledgeHealthIssue {
@@ -449,7 +528,13 @@ export function deleteBookKnowledgeBase(knowledgeBaseId: string, confirmation: s
 export function compileBookKnowledgeBase(knowledgeBaseId: string) {
   return callTool('compile_book_knowledge_base', {
     knowledge_base_id: knowledgeBaseId,
-  }, { timeout: 900_000 }) as unknown as Promise<ToolEnvelope<SemanticCompileResult>>
+  }) as unknown as Promise<ToolEnvelope<SemanticCompileQueueResult>>
+}
+
+export function cancelBookKnowledgeCompile(knowledgeBaseId: string) {
+  return callTool('cancel_book_knowledge_compile', {
+    knowledge_base_id: knowledgeBaseId,
+  }) as unknown as Promise<ToolEnvelope<SemanticCompileCancelResult>>
 }
 
 export function listKnowledgeChangeSets(knowledgeBaseId: string, status?: KnowledgeChangeSet['status']) {
@@ -800,6 +885,13 @@ export function listWikiSkills(knowledgeBaseId?: string) {
   }) as unknown as Promise<ToolEnvelope<{ skills: WikiSkill[] }>>
 }
 
+export function getWikiSkillDetail(skillId: string, knowledgeBaseId?: string) {
+  return callTool('get_wiki_skill_detail', {
+    skill_id: skillId,
+    ...(knowledgeBaseId ? { knowledge_base_id: knowledgeBaseId } : {}),
+  }) as unknown as Promise<ToolEnvelope<WikiSkillDetail>>
+}
+
 export function saveCustomWikiSkill(input: {
   skillId?: string
   slug: string
@@ -844,6 +936,12 @@ export function setWikiSkillBinding(input: {
 export function getAgentRunEvents(runId: string) {
   return callTool('get_agent_run_events', { run_id: runId }) as unknown as Promise<
     ToolEnvelope<{ events: AgentRunEvent[] }>
+  >
+}
+
+export function getAgentRunInspection(runId: string) {
+  return callTool('get_agent_run_inspection', { run_id: runId }) as unknown as Promise<
+    ToolEnvelope<AgentRunInspection>
   >
 }
 

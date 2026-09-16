@@ -25,10 +25,15 @@ pub struct AgentPromptRequest {
     pub prompt: String,
     pub patch_paths: Vec<PathBuf>,
     pub credential_env: Option<String>,
+    pub timeout: Option<Duration>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AgentRuntimeEvent {
+    Phase {
+        phase: String,
+        message: String,
+    },
     TextDelta {
         delta: String,
     },
@@ -105,6 +110,7 @@ impl DeepSeekHarnessRuntime {
             return Err(harness_error("ACP 会话目录必须是已存在的绝对目录"));
         }
 
+        let request_timeout = request.timeout.unwrap_or(self.timeout);
         let mut command_parts = shell_words::split(&request.command)
             .map_err(|error| harness_error(format!("无法解析 ACP 启动命令: {error}")))?;
         if command_parts.is_empty() {
@@ -118,10 +124,18 @@ impl DeepSeekHarnessRuntime {
             command_parts.push("--patch".to_string());
             command_parts.push(patch_path.to_string_lossy().to_string());
         }
+        emit_event(
+            events.as_ref(),
+            AgentRuntimeEvent::Phase {
+                phase: "launching".to_string(),
+                message: "正在启动 DeepSeek Harness 进程".to_string(),
+            },
+        );
         let agent = AcpAgent::new(AcpAgentConfig::new(command).args(command_parts));
         let cwd = request.cwd;
         let model = request.model;
         let prompt = request.prompt;
+        let operation_events = events.clone();
 
         let operation = agent_client_protocol::Client
             .builder()
@@ -143,12 +157,26 @@ impl DeepSeekHarnessRuntime {
                     .send_request(InitializeRequest::new(ProtocolVersion::V1))
                     .block_task()
                     .await?;
+                emit_event(
+                    operation_events.as_ref(),
+                    AgentRuntimeEvent::Phase {
+                        phase: "connected".to_string(),
+                        message: "Harness ACP 连接已建立".to_string(),
+                    },
+                );
 
                 connection
                     .build_session(&cwd)
                     .block_task()
                     .run_until(async move |mut session| {
                         let mut cancel = cancel;
+                        emit_event(
+                            operation_events.as_ref(),
+                            AgentRuntimeEvent::Phase {
+                                phase: "session_ready".to_string(),
+                                message: "ACP 会话已就绪".to_string(),
+                            },
+                        );
                         if !model.trim().is_empty() {
                             session
                                 .connection()
@@ -161,6 +189,13 @@ impl DeepSeekHarnessRuntime {
                                 .await?;
                         }
                         session.send_prompt(prompt)?;
+                        emit_event(
+                            operation_events.as_ref(),
+                            AgentRuntimeEvent::Phase {
+                                phase: "request_sent".to_string(),
+                                message: "模型请求已提交，正在等待返回".to_string(),
+                            },
+                        );
                         let mut output = String::new();
                         let mut cancel_channel_closed = false;
                         loop {
@@ -205,9 +240,14 @@ impl DeepSeekHarnessRuntime {
                     .await
             });
 
-        let answer = tokio::time::timeout(self.timeout, operation)
+        let answer = tokio::time::timeout(request_timeout, operation)
             .await
-            .map_err(|_| harness_error("DeepSeek Harness 在 180 秒内没有完成回答"))?
+            .map_err(|_| {
+                harness_error(format!(
+                    "DeepSeek Harness 在 {}内没有完成回答",
+                    duration_label(request_timeout)
+                ))
+            })?
             .map_err(|error| {
                 if error.to_string().contains(AGENT_RUNTIME_CANCELLED) {
                     BrainError::KnowledgeValidation("Agent 运行已取消".to_string())
@@ -301,6 +341,14 @@ fn emit_event(
 ) {
     if let Some(events) = events {
         let _ = events.send(event);
+    }
+}
+
+fn duration_label(duration: Duration) -> String {
+    if duration.subsec_nanos() == 0 {
+        format!("{} 秒", duration.as_secs())
+    } else {
+        format!("{} 毫秒", duration.as_millis())
     }
 }
 
@@ -414,6 +462,12 @@ fn acp_error_message(detail: &str, credential_env: Option<&str>) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_duration_label_reports_the_effective_request_deadline() {
+        assert_eq!(duration_label(Duration::from_secs(600)), "600 秒");
+        assert_eq!(duration_label(Duration::from_millis(25)), "25 毫秒");
+    }
+
     fn profile(executable: &str, enabled: bool) -> RuntimeProfile {
         RuntimeProfile {
             id: "runtime-test".to_string(),
@@ -515,6 +569,7 @@ mod tests {
                 prompt: "test".to_string(),
                 patch_paths: Vec::new(),
                 credential_env: None,
+                timeout: None,
             })
             .await
             .unwrap_err();
@@ -534,6 +589,7 @@ mod tests {
                 prompt: "只回答：连接成功".to_string(),
                 patch_paths: Vec::new(),
                 credential_env: None,
+                timeout: None,
             })
             .await
             .expect("real ACP response");

@@ -107,6 +107,43 @@
             <b>S{{ index + 1 }}</b><span>{{ entry.title }}</span><small>{{ entry.source_path || '数据库实体' }}</small>
           </button>
         </div>
+        <details v-if="activeInspection" class="run-inspector">
+          <summary><span><el-icon><View /></el-icon><b>运行检查器</b></span><small>{{ activeInspection.run.runtime }} · {{ activeInspection.run.status }}</small></summary>
+          <div class="run-inspector-body">
+            <div class="run-inspector-metrics">
+              <span><small>Run</small><code>{{ activeInspection.run.id }}</code></span>
+              <span><small>任务类型</small><strong>{{ activeInspection.run.task_type }}</strong></span>
+              <span><small>Prompt</small><strong>{{ activeInspection.snapshot?.prompt_characters || 0 }} 字符</strong></span>
+              <span><small>事件</small><strong>{{ inspectionEvents.length }} 个阶段</strong></span>
+            </div>
+            <section v-if="activeInspection.snapshot?.skill_snapshots.length" class="run-inspector-section">
+              <h4>Skill 快照</h4>
+              <div class="run-skill-list"><span v-for="skill in activeInspection.snapshot.skill_snapshots" :key="skill.id"><b>{{ skill.name }}</b><small>{{ skill.slug }} · Revision {{ skill.revision }} · {{ skill.application_mode === 'declared_only' ? '仅声明' : '已注入 Prompt' }}</small></span></div>
+            </section>
+            <section v-if="activeInspection.snapshot?.config_snapshots.length" class="run-inspector-section">
+              <h4>配置快照</h4>
+              <div class="run-config-list">
+                <details v-for="config in activeInspection.snapshot.config_snapshots" :key="config.id">
+                  <summary><span><b>{{ config.name }}</b><small>{{ config.scope }} · Revision {{ config.revision }}</small></span><em>查看</em></summary>
+                  <pre>{{ config.content_md }}</pre>
+                </details>
+              </div>
+            </section>
+            <section class="run-inspector-section">
+              <h4>工具白名单</h4>
+              <div class="run-tool-list"><code v-for="tool in activeInspection.snapshot?.tool_names || []" :key="tool">{{ tool }}</code><span v-if="!activeInspection.snapshot?.tool_names.length">本次运行没有挂载工具</span></div>
+            </section>
+            <section v-if="inspectionEvents.length" class="run-inspector-section">
+              <h4>运行时间线</h4>
+              <ol class="run-event-list"><li v-for="event in inspectionEvents" :key="event.sequence"><i></i><div><strong>{{ event.message || event.event_type }}</strong><small>{{ event.phase || event.event_type }} · {{ formatDate(event.created_at) }}</small></div></li></ol>
+            </section>
+            <details v-if="activeInspection.snapshot" class="effective-prompt">
+              <summary><b>有效 Prompt</b><span>{{ activeInspection.snapshot.prompt_hash }}</span></summary>
+              <pre>{{ activeInspection.snapshot.prompt_text }}</pre>
+            </details>
+            <p v-else class="run-inspector-legacy">这是透明化功能上线前的历史运行，没有保存 Prompt 与 Skill 快照。</p>
+          </div>
+        </details>
         <div class="knowledge-modal-actions">
           <el-button v-if="activeTask.status === 'failed'" :loading="executingTaskId === activeTask.id" @click="runTask(activeTask)">重新运行</el-button>
           <el-button type="primary" @click="resultVisible = false">完成</el-button>
@@ -117,7 +154,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { DataAnalysis, Download, Loading, Operation, Plus, Refresh, Select, VideoPlay, View } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -128,12 +165,14 @@ import {
   createKnowledgeTask,
   cancelKnowledgeTask,
   executeKnowledgeTask,
+  getAgentRunInspection,
   getKnowledgeTaskResult,
   getKnowledgeTaskActivity,
   listBookKnowledgeBases,
   listKnowledgeTasks,
   knowledgeArtifactDownloadUrl,
   type KnowledgeArtifact,
+  type AgentRunInspection,
   type KnowledgeBaseSummary,
   type KnowledgeEntrySummary,
   type KnowledgeTask,
@@ -153,7 +192,9 @@ const resultVisible = ref(false)
 const activeTask = ref<KnowledgeTask | null>(null)
 const activeEvidence = ref<KnowledgeEntrySummary[]>([])
 const activeArtifacts = ref<KnowledgeArtifact[]>([])
+const activeInspection = ref<AgentRunInspection | null>(null)
 const taskActivity = ref<Record<string, string>>({})
+const inspectionEvents = computed(() => (activeInspection.value?.events || []).filter(event => event.event_type !== 'run.text_delta'))
 const draft = reactive({ knowledgeBaseId: '', title: '', description: '', taskType: 'research' as KnowledgeTask['task_type'], deliverableType: 'report' as KnowledgeTask['deliverable_type'], externalResearchEnabled: false, externalDomains: '', externalRequestLimit: 6 })
 let viewActive = true
 
@@ -259,6 +300,7 @@ async function runTask(task: KnowledgeTask) {
     activeTask.value = result.result.task
     activeEvidence.value = result.result.evidence
     activeArtifacts.value = result.result.artifacts
+    await loadRunInspection(result.result.run_id)
     resultVisible.value = true
     ElMessage.success(result.result.artifacts.length ? '报告与演示文稿已生成' : '研究报告已生成')
   } catch (error) {
@@ -313,11 +355,22 @@ async function openResult(task: KnowledgeTask) {
     activeTask.value = response.result.task
     activeEvidence.value = response.result.evidence
     activeArtifacts.value = response.result.artifacts
+    await loadRunInspection(response.result.run_id)
     resultVisible.value = true
   } catch (error) {
     ElMessage.error((error as Error).message)
   } finally {
     loadingResultId.value = ''
+  }
+}
+
+async function loadRunInspection(runId: string) {
+  activeInspection.value = null
+  try {
+    const response = await getAgentRunInspection(runId)
+    if (response.status === 'success' && response.result) activeInspection.value = response.result
+  } catch (error) {
+    console.warn('Agent 运行检查信息加载失败', error)
   }
 }
 
@@ -380,7 +433,7 @@ onBeforeUnmount(() => { viewActive = false })
 .external-grant-head span, .external-grant > p { color: var(--text-faint); font-size: 10px; line-height: 1.55; }
 .external-limit-row { display: flex; align-items: center; gap: 9px; color: var(--text-muted); font-size: 11px; }
 .external-limit-row :deep(.el-input-number) { width: 116px; }
-.task-result-modal { width: min(720px, calc(100vw - 28px)); }
+.task-result-modal { width: min(900px, calc(100vw - 28px)); }
 .task-result-modal .knowledge-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .task-result-heading > span { color: var(--accent); font-size: 10px; font-weight: 680; }
 .task-result-heading h3 { margin-top: 5px; }
@@ -401,6 +454,43 @@ onBeforeUnmount(() => { viewActive = false })
 .task-result-evidence span, .task-result-evidence small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-result-evidence span { font-size: 11px; font-weight: 650; }
 .task-result-evidence small { color: var(--text-faint); font-size: 9px; }
+.run-inspector { overflow: hidden; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); }
+.run-inspector > summary { min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 13px; color: var(--text-primary); cursor: pointer; list-style: none; }
+.run-inspector > summary::-webkit-details-marker, .effective-prompt > summary::-webkit-details-marker { display: none; }
+.run-inspector > summary > span { display: flex; align-items: center; gap: 7px; color: var(--accent); font-size: 12px; }
+.run-inspector > summary small { color: var(--text-faint); font-family: var(--font-mono); font-size: 9px; }
+.run-inspector-body { display: grid; gap: 13px; padding: 13px; border-top: 1px solid var(--border-faint); }
+.run-inspector-metrics { display: grid; grid-template-columns: 1.4fr repeat(3, 1fr); gap: 7px; }
+.run-inspector-metrics > span { min-width: 0; display: grid; gap: 3px; padding: 9px; border-radius: 10px; background: color-mix(in srgb, var(--bg-base) 44%, transparent); }
+.run-inspector-metrics small, .run-inspector-section h4 { color: var(--text-faint); font-size: 8px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
+.run-inspector-metrics strong, .run-inspector-metrics code { overflow: hidden; color: var(--text-primary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.run-inspector-section { display: grid; gap: 7px; }
+.run-inspector-section h4 { margin: 0; }
+.run-skill-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.run-skill-list > span { min-width: 0; display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--accent-border); border-radius: 10px; background: var(--accent-light); }
+.run-skill-list b { overflow: hidden; color: var(--text-primary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.run-skill-list small { color: var(--text-faint); font-family: var(--font-mono); font-size: 8px; }
+.run-config-list { display: grid; gap: 5px; }
+.run-config-list details { overflow: hidden; border: 1px solid var(--border-faint); border-radius: 9px; background: color-mix(in srgb, var(--bg-base) 38%, transparent); }
+.run-config-list summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; cursor: pointer; list-style: none; }
+.run-config-list summary::-webkit-details-marker { display: none; }
+.run-config-list summary > span { min-width: 0; display: grid; gap: 2px; }
+.run-config-list summary b { overflow: hidden; color: var(--text-primary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.run-config-list summary small, .run-config-list summary em { color: var(--text-faint); font-family: var(--font-mono); font-size: 8px; font-style: normal; }
+.run-config-list pre { max-height: 220px; margin: 0; overflow: auto; padding: 11px; border-top: 1px solid var(--border-faint); color: var(--text-secondary); font-family: var(--font-mono); font-size: 9px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.run-tool-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.run-tool-list code, .run-tool-list span { padding: 4px 7px; border-radius: 7px; background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-muted); font-size: 8px; }
+.run-event-list { max-height: 210px; display: grid; gap: 0; overflow: auto; margin: 0; padding: 0; list-style: none; }
+.run-event-list li { min-height: 38px; display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 7px; align-items: start; }
+.run-event-list li > i { width: 7px; height: 7px; margin-top: 5px; border: 2px solid var(--accent); border-radius: 50%; background: var(--bg-base); }
+.run-event-list li > div { display: grid; gap: 2px; padding: 0 0 9px 8px; border-left: 1px solid var(--border-faint); }
+.run-event-list strong { color: var(--text-secondary); font-size: 10px; font-weight: 600; }
+.run-event-list small { color: var(--text-faint); font-size: 8px; }
+.effective-prompt { overflow: hidden; border: 1px solid var(--border-faint); border-radius: 11px; }
+.effective-prompt > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 11px; color: var(--text-secondary); font-size: 10px; cursor: pointer; list-style: none; }
+.effective-prompt > summary span { max-width: 66%; overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.effective-prompt pre { max-height: 360px; margin: 0; overflow: auto; padding: 13px; border-top: 1px solid var(--border-faint); background: color-mix(in srgb, var(--bg-base) 55%, transparent); color: var(--text-secondary); font-family: var(--font-mono); font-size: 9px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
+.run-inspector-legacy { color: var(--text-faint); font-size: 9px; }
 @keyframes task-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes task-live-pulse { 60%, 100% { box-shadow: 0 0 0 7px transparent; } }
 @media (max-width: 768px) {
@@ -413,5 +503,7 @@ onBeforeUnmount(() => { viewActive = false })
   .task-action span { display: none; }
   .task-main > p { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .task-result-evidence { grid-template-columns: 1fr; }
+  .run-inspector-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .run-skill-list { grid-template-columns: 1fr; }
 }
 </style>

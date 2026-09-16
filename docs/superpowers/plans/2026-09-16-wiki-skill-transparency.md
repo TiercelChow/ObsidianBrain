@@ -1,0 +1,34 @@
+# Book Wiki Skill 透明化与质量基线实施计划
+
+## 目标
+
+在不改变知识数据权威边界的前提下，让内置与自定义 Skill 的内容、资源、版本和权限可查看，让每次 Agent 运行可以追溯到最终提示词、Skill/配置快照、工具白名单与证据引用。
+
+## 第一批：透明化基础
+
+1. 增加 Skill 详情模型与接口，返回当前绑定、全部版本及每个版本的文本资源。
+2. Wiki 配置页的全部 Skill 均可打开详情；内置 Skill 只读，自定义 Skill 可编辑；内置 Skill 可复制为自定义版本。
+3. 增加 Agent 运行检查快照，保存提示词哈希与正文、Skill/配置文档快照、工具白名单和证据引用。
+4. 研究任务结果页展示运行概要、Skill 版本、工具列表和可展开的有效 Prompt。
+5. 为 Store、Tool 注册和前端关键交互增加回归测试。
+
+## 后续批次
+
+- 引入许可证明确的开源 Skill 候选与来源元数据。
+- 建立固定评测集、候选/发布状态、A/B 结果和回滚机制。
+- [已完成] 让语义编译真实消费 `book-ingest`/书籍级 ingest Skill，并把 Skill/Prompt/模型纳入编译指纹。
+- 增加 New / Update / Disputed / No material 分流、引用审计与级联影响分析。
+
+## 安全边界
+
+- Skill 仍不能扩大 Run Capability 或覆盖后端安全规则。
+- Prompt 快照不得包含 API Key、请求头或凭据值。
+- 脚本型 Skill 继续保持不可执行。
+- 所有正式知识写入仍经过结构校验、变更集与事务审核。
+
+## 验证
+
+- `cargo fmt --check`
+- `cargo clippy -- -D warnings`
+- `cargo test`
+- 前端单元测试与生产构建

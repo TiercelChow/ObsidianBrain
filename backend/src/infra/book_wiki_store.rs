@@ -8,15 +8,16 @@ use rusqlite::{params, OptionalExtension};
 use crate::error::BrainError;
 use crate::infra::sqlite_store::SqliteStore;
 use crate::models::book_wiki::{
-    AgentRun, AgentRunEvent, AgentTokenUsage, AgentUsageCaller, AgentUsagePoint, AgentUsageStats,
-    AgentUsageTotals, BookKind, BookKnowledgeCard, ConfigDocument, KnowledgeArtifact,
-    KnowledgeBaseSummary, KnowledgeBridgeEntry, KnowledgeChange, KnowledgeChangeSet,
-    KnowledgeCitation, KnowledgeClaimSummary, KnowledgeConversationDetail,
-    KnowledgeConversationSummary, KnowledgeEntryDetail, KnowledgeEntryPage, KnowledgeEntrySummary,
-    KnowledgeEntryVersionSummary, KnowledgeGraphOverview, KnowledgeGraphPath,
-    KnowledgeGraphRelation, KnowledgeGraphSnapshot, KnowledgeHealthIssue, KnowledgeHealthReport,
-    KnowledgeMessage, KnowledgeRelationSummary, KnowledgeTask, ReaderBook, RuntimeProfile,
-    RuntimeProviderConfig, SourceDocumentSummary, SourceSpanSnapshot, WikiSkill,
+    AgentRun, AgentRunEvent, AgentRunInspection, AgentRunInspectionSnapshot, AgentTokenUsage,
+    AgentUsageCaller, AgentUsagePoint, AgentUsageStats, AgentUsageTotals, BookKind,
+    BookKnowledgeCard, ConfigDocument, KnowledgeArtifact, KnowledgeBaseSummary,
+    KnowledgeBridgeEntry, KnowledgeChange, KnowledgeChangeSet, KnowledgeCitation,
+    KnowledgeClaimSummary, KnowledgeConversationDetail, KnowledgeConversationSummary,
+    KnowledgeEntryDetail, KnowledgeEntryPage, KnowledgeEntrySummary, KnowledgeEntryVersionSummary,
+    KnowledgeGraphOverview, KnowledgeGraphPath, KnowledgeGraphRelation, KnowledgeGraphSnapshot,
+    KnowledgeHealthIssue, KnowledgeHealthReport, KnowledgeMessage, KnowledgeRelationSummary,
+    KnowledgeTask, ReaderBook, RuntimeProfile, RuntimeProviderConfig, SourceDocumentSummary,
+    SourceSpanSnapshot, WikiSkill, WikiSkillDetail, WikiSkillFile, WikiSkillVersion,
 };
 
 const LEGACY_BOOKS_KEY: &str = "reader_books";
@@ -550,6 +551,11 @@ impl BookWikiStore {
             return Ok(base);
         }
         if lifecycle != "active" {
+            if base.compile_state == "compiling" {
+                return Err(BrainError::KnowledgeValidation(
+                    "智能编译仍在执行或等待审核，请先完成或停止编译".to_string(),
+                ));
+            }
             let active_tasks = self.db.with_connection(|conn| {
                 conn.query_row(
                     "SELECT COUNT(*) FROM knowledge_tasks
@@ -583,6 +589,11 @@ impl BookWikiStore {
         if confirmation != base.book_name && confirmation != base.id {
             return Err(BrainError::KnowledgeValidation(
                 "删除确认内容必须与书名或知识库 ID 完全一致".to_string(),
+            ));
+        }
+        if base.compile_state == "compiling" {
+            return Err(BrainError::KnowledgeValidation(
+                "智能编译仍在执行或等待审核，不能删除知识库".to_string(),
             ));
         }
         let active_tasks = self.db.with_connection(|conn| {
@@ -640,6 +651,11 @@ impl BookWikiStore {
                         kb.compile_error, kb.health_state, kb.last_error,
                         kb.last_synced_at, kb.last_scanned_at, kb.last_compiled_at,
                         kb.compile_processed_sources, kb.compile_total_sources,
+                        kb.compile_phase, kb.compile_message,
+                        kb.compile_current_batch, kb.compile_total_batches,
+                        kb.compile_active_run_id, kb.compile_change_set_id,
+                        kb.compile_started_at, kb.compile_heartbeat_at,
+                        kb.compile_cancel_requested,
                         kb.pending_review_count,
                         (SELECT COUNT(*) FROM source_documents sd
                           WHERE sd.knowledge_base_id = kb.id AND sd.sync_status = 'current'),
@@ -1054,6 +1070,7 @@ impl BookWikiStore {
     pub fn list_source_spans_pending_compile(
         &self,
         base_id: &str,
+        compile_fingerprint: &str,
     ) -> Result<Vec<SourceSpanSnapshot>, BrainError> {
         self.get_base(base_id)?;
         self.db.with_connection(|conn| {
@@ -1070,10 +1087,11 @@ impl BookWikiStore {
                    AND sd.sync_status = 'current'
                    AND sd.current_version_id = ss.source_version_id
                    AND (checkpoint.source_version_id IS NULL
-                        OR checkpoint.source_version_id != ss.source_version_id)
+                        OR checkpoint.source_version_id != ss.source_version_id
+                        OR checkpoint.compile_fingerprint != ?2)
                  ORDER BY sd.ordinal, ss.ordinal",
             )?;
-            let rows = stmt.query_map(params![base_id], |row| {
+            let rows = stmt.query_map(params![base_id, compile_fingerprint], |row| {
                 Ok(SourceSpanSnapshot {
                     id: row.get(0)?,
                     source_document_id: row.get(1)?,
@@ -1193,6 +1211,7 @@ impl BookWikiStore {
         base_id: &str,
         spans: &[SourceSpanSnapshot],
         change_set_id: &str,
+        compile_fingerprint: &str,
     ) -> Result<(), BrainError> {
         let versions = spans
             .iter()
@@ -1224,18 +1243,20 @@ impl BookWikiStore {
                 conn.execute(
                     "INSERT INTO knowledge_compile_checkpoints
                      (knowledge_base_id, source_document_id, source_version_id,
-                      last_change_set_id, compiled_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5)
+                      last_change_set_id, compiled_at, compile_fingerprint)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                      ON CONFLICT(knowledge_base_id, source_document_id) DO UPDATE SET
                         source_version_id = excluded.source_version_id,
                         last_change_set_id = excluded.last_change_set_id,
-                        compiled_at = excluded.compiled_at",
+                        compiled_at = excluded.compiled_at,
+                        compile_fingerprint = excluded.compile_fingerprint",
                     params![
                         base_id,
                         source_document_id,
                         source_version_id,
                         change_set_id,
                         now,
+                        compile_fingerprint,
                     ],
                 )?;
             }
@@ -1310,6 +1331,180 @@ impl BookWikiStore {
         if updated == 0 {
             return Err(BrainError::KnowledgeNotFound(base_id.to_string()));
         }
+        self.get_base(base_id)
+    }
+
+    pub fn begin_semantic_compile(
+        &self,
+        base_id: &str,
+        total_sources: i64,
+    ) -> Result<KnowledgeBaseSummary, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        let updated = self.db.with_connection(|conn| {
+            Ok(conn.execute(
+                "UPDATE knowledge_bases
+                 SET compile_mode = 'smart', compile_state = 'compiling', compile_error = NULL,
+                     compile_processed_sources = 0, compile_total_sources = ?2,
+                     compile_phase = 'queued', compile_message = '智能编译已进入后台队列',
+                     compile_current_batch = 0, compile_total_batches = 0,
+                     compile_active_run_id = NULL, compile_change_set_id = NULL,
+                     compile_started_at = ?3, compile_heartbeat_at = ?3,
+                     compile_cancel_requested = 0,
+                     revision = revision + 1, updated_at = ?3
+                 WHERE id = ?1 AND compile_state != 'compiling'",
+                params![base_id, total_sources, now],
+            )?)
+        })?;
+        if updated == 0 {
+            self.get_base(base_id)?;
+            return Err(BrainError::KnowledgeValidation(
+                "智能编译已经在后台执行，请勿重复启动".to_string(),
+            ));
+        }
+        self.get_base(base_id)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_compile_activity(
+        &self,
+        base_id: &str,
+        phase: &str,
+        message: &str,
+        current_batch: i64,
+        total_batches: i64,
+        active_run_id: Option<&str>,
+    ) -> Result<(), BrainError> {
+        let now = Utc::now().to_rfc3339();
+        let updated = self.db.with_connection(|conn| {
+            Ok(conn.execute(
+                "UPDATE knowledge_bases
+                 SET compile_phase = ?2, compile_message = ?3,
+                     compile_current_batch = ?4, compile_total_batches = ?5,
+                     compile_active_run_id = ?6, compile_heartbeat_at = ?7,
+                     updated_at = ?7
+                 WHERE id = ?1 AND compile_state = 'compiling'",
+                params![
+                    base_id,
+                    phase,
+                    message,
+                    current_batch,
+                    total_batches,
+                    active_run_id,
+                    now
+                ],
+            )?)
+        })?;
+        if updated == 0 {
+            return Err(BrainError::KnowledgeValidation(
+                "智能编译已经结束或知识库不存在".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn heartbeat_semantic_compile(&self, base_id: &str) -> Result<bool, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        self.db.with_connection(|conn| {
+            Ok(conn.execute(
+                "UPDATE knowledge_bases SET compile_heartbeat_at = ?2
+                 WHERE id = ?1 AND compile_state = 'compiling'",
+                params![base_id, now],
+            )? == 1)
+        })
+    }
+
+    pub fn request_semantic_compile_cancel(
+        &self,
+        base_id: &str,
+    ) -> Result<KnowledgeBaseSummary, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        let updated = self.db.with_connection(|conn| {
+            Ok(conn.execute(
+                "UPDATE knowledge_bases
+                 SET compile_cancel_requested = 1, compile_phase = 'cancelling',
+                     compile_message = '正在停止当前模型调用', updated_at = ?2
+                 WHERE id = ?1 AND compile_state = 'compiling'
+                   AND compile_phase != 'waiting_review'",
+                params![base_id, now],
+            )?)
+        })?;
+        if updated == 0 {
+            return Err(BrainError::KnowledgeValidation(
+                "当前没有可以取消的智能编译".to_string(),
+            ));
+        }
+        self.get_base(base_id)
+    }
+
+    pub fn is_semantic_compile_cancel_requested(&self, base_id: &str) -> Result<bool, BrainError> {
+        self.db.with_connection(|conn| {
+            conn.query_row(
+                "SELECT compile_cancel_requested FROM knowledge_bases WHERE id = ?1",
+                params![base_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| BrainError::KnowledgeNotFound(base_id.to_string()))
+        })
+    }
+
+    pub fn finish_semantic_compile_failure(
+        &self,
+        base_id: &str,
+        error: &str,
+        cancelled: bool,
+    ) -> Result<KnowledgeBaseSummary, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        self.db.with_connection(|conn| {
+            conn.execute(
+                "UPDATE knowledge_bases
+                 SET compile_state = 'failed', compile_error = ?2,
+                     compile_phase = ?3, compile_message = ?2,
+                     compile_active_run_id = NULL, compile_cancel_requested = 0,
+                     compile_heartbeat_at = ?4, last_compiled_at = ?4,
+                     revision = revision + 1, updated_at = ?4
+                 WHERE id = ?1",
+                params![
+                    base_id,
+                    error,
+                    if cancelled { "cancelled" } else { "failed" },
+                    now
+                ],
+            )?;
+            Ok(())
+        })?;
+        self.get_base(base_id)
+    }
+
+    pub fn mark_semantic_compile_waiting_review(
+        &self,
+        base_id: &str,
+        change_set_id: &str,
+        processed_sources: i64,
+        total_sources: i64,
+    ) -> Result<KnowledgeBaseSummary, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        self.db.with_connection(|conn| {
+            conn.execute(
+                "UPDATE knowledge_bases
+                 SET compile_state = 'compiling', compile_error = NULL,
+                     compile_processed_sources = ?3, compile_total_sources = ?4,
+                     compile_phase = 'waiting_review',
+                     compile_message = '智能编译完成，等待审核知识变更',
+                     compile_active_run_id = NULL, compile_change_set_id = ?2,
+                     compile_cancel_requested = 0, compile_heartbeat_at = ?5,
+                     revision = revision + 1, updated_at = ?5
+                 WHERE id = ?1",
+                params![
+                    base_id,
+                    change_set_id,
+                    processed_sources,
+                    total_sources,
+                    now
+                ],
+            )?;
+            Ok(())
+        })?;
         self.get_base(base_id)
     }
 
@@ -2942,6 +3137,16 @@ impl BookWikiStore {
                      WHERE last_change_set_id = ?1",
                     params![change_set_id],
                 )?;
+                conn.execute(
+                    "UPDATE knowledge_bases
+                     SET compile_state = 'outdated', compile_error = NULL,
+                         compile_phase = 'rejected',
+                         compile_message = '知识变更已驳回，可以重新运行智能编译',
+                         compile_active_run_id = NULL, compile_change_set_id = NULL,
+                         compile_cancel_requested = 0, updated_at = ?2
+                     WHERE id = ?1 AND compile_change_set_id = ?3",
+                    params![change_set.knowledge_base_id, now, change_set_id],
+                )?;
                 if let Some(task_id) = related_task_id.as_deref() {
                     conn.execute(
                         "UPDATE knowledge_tasks
@@ -2994,6 +3199,9 @@ impl BookWikiStore {
             conn.execute(
                 "UPDATE knowledge_bases
                  SET compile_mode = 'smart', compile_state = 'ready', compile_error = NULL,
+                     compile_phase = 'completed', compile_message = '智能 Wiki 已审核并应用',
+                     compile_active_run_id = NULL, compile_change_set_id = NULL,
+                     compile_cancel_requested = 0,
                      last_compiled_at = ?2, updated_at = ?2
                  WHERE id = ?1",
                 params![change_set.knowledge_base_id, now],
@@ -3484,8 +3692,11 @@ impl BookWikiStore {
             conn.execute(
                 "UPDATE knowledge_bases
                  SET compile_state = 'failed', compile_error = '服务重启中断了智能编译，请重新开始',
+                     compile_phase = 'failed', compile_message = '服务重启中断了智能编译，请重新开始',
+                     compile_active_run_id = NULL, compile_cancel_requested = 0,
+                     compile_heartbeat_at = ?1,
                      updated_at = ?1
-                 WHERE compile_state = 'compiling'",
+                 WHERE compile_state = 'compiling' AND compile_phase != 'waiting_review'",
                 params![now],
             )?;
             Ok(recovered)
@@ -3895,6 +4106,76 @@ impl BookWikiStore {
         })
     }
 
+    pub fn get_wiki_skill_detail(
+        &self,
+        skill_id: &str,
+        base_id: Option<&str>,
+    ) -> Result<WikiSkillDetail, BrainError> {
+        let skill = self
+            .list_wiki_skills(base_id)?
+            .into_iter()
+            .find(|skill| skill.id == skill_id)
+            .ok_or_else(|| BrainError::KnowledgeNotFound(skill_id.to_string()))?;
+        let (current_version_id, versions) = self.db.with_connection(|conn| {
+            let current_version_id = conn
+                .query_row(
+                    "SELECT current_version_id FROM skills WHERE id = ?1",
+                    params![skill_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )?
+                .ok_or_else(|| {
+                    BrainError::Internal("Skill 当前版本不存在，数据库状态已损坏".to_string())
+                })?;
+            let version_rows = {
+                let mut stmt = conn.prepare(
+                    "SELECT id, revision, content_hash, created_at
+                     FROM skill_versions WHERE skill_id = ?1 ORDER BY revision DESC",
+                )?;
+                let rows = stmt.query_map(params![skill_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
+            let mut versions = Vec::with_capacity(version_rows.len());
+            for (id, revision, content_hash, created_at) in version_rows {
+                let files = {
+                    let mut stmt = conn.prepare(
+                        "SELECT relative_path, media_type, content_text, content_hash, size_bytes
+                         FROM skill_files WHERE skill_version_id = ?1 ORDER BY relative_path",
+                    )?;
+                    let rows = stmt.query_map(params![id], |row| {
+                        Ok(WikiSkillFile {
+                            relative_path: row.get(0)?,
+                            media_type: row.get(1)?,
+                            content_text: row.get(2)?,
+                            content_hash: row.get(3)?,
+                            size_bytes: row.get(4)?,
+                        })
+                    })?;
+                    rows.collect::<Result<Vec<_>, _>>()?
+                };
+                versions.push(WikiSkillVersion {
+                    id,
+                    revision,
+                    content_hash,
+                    created_at,
+                    files,
+                });
+            }
+            Ok((current_version_id, versions))
+        })?;
+        Ok(WikiSkillDetail {
+            skill,
+            current_version_id,
+            versions,
+        })
+    }
+
     pub fn enabled_wiki_skills(
         &self,
         base_id: &str,
@@ -3907,7 +4188,10 @@ impl BookWikiStore {
             .filter(|skill| {
                 skill.enabled
                     && skill.status == "ready"
-                    && (skill.usage_scope == "both" || skill.usage_scope == usage_scope)
+                    && (skill.usage_scope == "all"
+                        || skill.usage_scope == usage_scope
+                        || (skill.usage_scope == "both"
+                            && matches!(usage_scope, "qa" | "research")))
             })
             .collect())
     }
@@ -4737,6 +5021,102 @@ impl BookWikiStore {
         })
     }
 
+    pub fn save_agent_run_inspection(
+        &self,
+        run_id: &str,
+        prompt_text: &str,
+        skill_snapshots: &serde_json::Value,
+        config_snapshots: &serde_json::Value,
+        tool_names: &[String],
+        evidence_refs: &serde_json::Value,
+    ) -> Result<(), BrainError> {
+        self.get_agent_run(run_id)?;
+        let skill_snapshots_json = serde_json::to_string(skill_snapshots)
+            .map_err(|error| BrainError::Internal(format!("Skill 运行快照序列化失败: {error}")))?;
+        let config_snapshots_json = serde_json::to_string(config_snapshots)
+            .map_err(|error| BrainError::Internal(format!("配置运行快照序列化失败: {error}")))?;
+        let tool_names_json = serde_json::to_string(tool_names)
+            .map_err(|error| BrainError::Internal(format!("工具白名单序列化失败: {error}")))?;
+        let evidence_refs_json = serde_json::to_string(evidence_refs)
+            .map_err(|error| BrainError::Internal(format!("证据引用序列化失败: {error}")))?;
+        let now = Utc::now().to_rfc3339();
+        self.db.with_connection(|conn| {
+            conn.execute(
+                "INSERT INTO agent_run_inspections
+                 (run_id, prompt_text, prompt_hash, prompt_characters, skill_snapshots_json,
+                  config_snapshots_json, tool_names_json, evidence_refs_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    run_id,
+                    prompt_text,
+                    stable_id("prompt", prompt_text),
+                    prompt_text.chars().count() as i64,
+                    skill_snapshots_json,
+                    config_snapshots_json,
+                    tool_names_json,
+                    evidence_refs_json,
+                    now,
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn get_agent_run_inspection(&self, run_id: &str) -> Result<AgentRunInspection, BrainError> {
+        let run = self.get_agent_run(run_id)?;
+        let events = self.list_agent_run_events(run_id)?;
+        let snapshot = self.db.with_connection(|conn| {
+            conn.query_row(
+                "SELECT run_id, prompt_text, prompt_hash, prompt_characters,
+                        skill_snapshots_json, config_snapshots_json, tool_names_json,
+                        evidence_refs_json, created_at
+                 FROM agent_run_inspections WHERE run_id = ?1",
+                params![run_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+        })?;
+        let snapshot = snapshot
+            .map(|row| -> Result<AgentRunInspectionSnapshot, BrainError> {
+                Ok(AgentRunInspectionSnapshot {
+                    run_id: row.0,
+                    prompt_text: row.1,
+                    prompt_hash: row.2,
+                    prompt_characters: row.3,
+                    skill_snapshots: serde_json::from_str(&row.4).map_err(|error| {
+                        BrainError::Internal(format!("Skill 运行快照解析失败: {error}"))
+                    })?,
+                    config_snapshots: serde_json::from_str(&row.5).map_err(|error| {
+                        BrainError::Internal(format!("配置运行快照解析失败: {error}"))
+                    })?,
+                    tool_names: parse_string_list(&row.6, "Agent 工具白名单")?,
+                    evidence_refs: serde_json::from_str(&row.7).map_err(|error| {
+                        BrainError::Internal(format!("证据引用解析失败: {error}"))
+                    })?,
+                    created_at: row.8,
+                })
+            })
+            .transpose()?;
+        Ok(AgentRunInspection {
+            run,
+            events,
+            snapshot,
+        })
+    }
+
     pub fn complete_agent_run(
         &self,
         run_id: &str,
@@ -5304,11 +5684,20 @@ fn map_base_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<KnowledgeBaseSu
         last_compiled_at: row.get(16)?,
         compile_processed_sources: row.get(17)?,
         compile_total_sources: row.get(18)?,
-        pending_review_count: row.get(19)?,
-        source_count: row.get(20)?,
-        entry_count: row.get(21)?,
-        claim_count: row.get(22)?,
-        task_count: row.get(23)?,
+        compile_phase: row.get(19)?,
+        compile_message: row.get(20)?,
+        compile_current_batch: row.get(21)?,
+        compile_total_batches: row.get(22)?,
+        compile_active_run_id: row.get(23)?,
+        compile_change_set_id: row.get(24)?,
+        compile_started_at: row.get(25)?,
+        compile_heartbeat_at: row.get(26)?,
+        compile_cancel_requested: row.get(27)?,
+        pending_review_count: row.get(28)?,
+        source_count: row.get(29)?,
+        entry_count: row.get(30)?,
+        claim_count: row.get(31)?,
+        task_count: row.get(32)?,
     })
 }
 
@@ -5417,11 +5806,11 @@ fn parse_string_list(raw: &str, label: &str) -> Result<Vec<String>, BrainError> 
 }
 
 fn validate_skill_scope(value: &str) -> Result<(), BrainError> {
-    if matches!(value, "qa" | "research" | "both") {
+    if matches!(value, "qa" | "research" | "both" | "ingest" | "all") {
         Ok(())
     } else {
         Err(BrainError::KnowledgeValidation(
-            "Skill 使用范围仅支持 qa、research 或 both".to_string(),
+            "Skill 使用范围仅支持 qa、research、both、ingest 或 all".to_string(),
         ))
     }
 }
@@ -6991,6 +7380,28 @@ mod tests {
             created.id
         );
 
+        let ingest = store
+            .set_wiki_skill_binding(&base.id, &created.id, true, "ingest")
+            .unwrap();
+        assert_eq!(ingest.usage_scope, "ingest");
+        assert!(store
+            .enabled_wiki_skills(&base.id, "research")
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store.enabled_wiki_skills(&base.id, "ingest").unwrap()[0].id,
+            created.id
+        );
+
+        store
+            .set_wiki_skill_binding(&base.id, &created.id, true, "all")
+            .unwrap();
+        assert_eq!(store.enabled_wiki_skills(&base.id, "qa").unwrap().len(), 1);
+        assert_eq!(
+            store.enabled_wiki_skills(&base.id, "ingest").unwrap().len(),
+            1
+        );
+
         let updated = store
             .save_custom_wiki_skill(
                 Some(&created.id),
@@ -7081,6 +7492,97 @@ mod tests {
             })
             .unwrap();
         assert_eq!(file_count, 2);
+    }
+
+    #[test]
+    fn test_wiki_skill_detail_exposes_versions_and_text_resources() {
+        let (store, _dir) = test_store();
+        let files = vec![
+            (
+                "SKILL.md".to_string(),
+                "---\nname: source-review\ndescription: 核对来源\n---\n先读取证据，再回答。"
+                    .to_string(),
+            ),
+            (
+                "references/checklist.md".to_string(),
+                "# 核对清单\n- 引用必须属于当前书籍".to_string(),
+            ),
+        ];
+        let imported = store
+            .import_custom_wiki_skill("source-review", "来源核对", "核对来源", &files)
+            .unwrap();
+        store
+            .save_custom_wiki_skill(
+                Some(&imported.id),
+                &imported.slug,
+                &imported.name,
+                &imported.description,
+                "先读取证据，再检查反例，最后回答。",
+                Some(imported.revision),
+            )
+            .unwrap();
+
+        let detail = store.get_wiki_skill_detail(&imported.id, None).unwrap();
+        assert_eq!(detail.skill.id, imported.id);
+        assert_eq!(detail.versions.len(), 2);
+        assert_eq!(detail.versions[0].revision, 2);
+        assert_eq!(detail.versions[1].files.len(), 2);
+        assert!(detail.versions[1]
+            .files
+            .iter()
+            .any(|file| file.relative_path == "references/checklist.md"));
+    }
+
+    #[test]
+    fn test_agent_run_inspection_persists_effective_prompt_and_snapshots() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-inspection", "/tmp/book-inspection")])
+            .unwrap();
+        let base = store.initialize_base("book-inspection").unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({ "question": "什么是证据链？" }),
+            )
+            .unwrap();
+        store
+            .save_agent_run_inspection(
+                &run.id,
+                "系统规则\n<question>什么是证据链？</question>",
+                &serde_json::json!([{
+                    "id": "skill-book-query",
+                    "slug": "book-query",
+                    "revision": 1
+                }]),
+                &serde_json::json!([{
+                    "document_type": "purpose",
+                    "revision": 1
+                }]),
+                &["knowledge_search_entries".to_string()],
+                &serde_json::json!({ "entry_ids": ["entry-1"] }),
+            )
+            .unwrap();
+        assert!(store
+            .save_agent_run_inspection(
+                &run.id,
+                "后续内容不得覆盖原始快照",
+                &serde_json::json!([]),
+                &serde_json::json!([]),
+                &[],
+                &serde_json::json!({}),
+            )
+            .is_err());
+
+        let inspection = store.get_agent_run_inspection(&run.id).unwrap();
+        assert_eq!(inspection.run.id, run.id);
+        let snapshot = inspection.snapshot.unwrap();
+        assert_eq!(snapshot.prompt_characters, 33);
+        assert!(snapshot.prompt_text.contains("证据链"));
+        assert_eq!(snapshot.tool_names, vec!["knowledge_search_entries"]);
+        assert_eq!(snapshot.skill_snapshots[0]["revision"], 1);
     }
 
     #[test]
@@ -7214,7 +7716,9 @@ mod tests {
                 )],
             )
             .unwrap();
-        let spans = store.list_source_spans_pending_compile(&base.id).unwrap();
+        let spans = store
+            .list_source_spans_pending_compile(&base.id, "compile-v1")
+            .unwrap();
         let run = store
             .start_agent_run(
                 &base.id,
@@ -7234,12 +7738,20 @@ mod tests {
             )
             .unwrap();
         store
-            .record_compile_checkpoints(&base.id, &spans, &change_set.id)
+            .record_compile_checkpoints(&base.id, &spans, &change_set.id, "compile-v1")
             .unwrap();
         assert!(store
-            .list_source_spans_pending_compile(&base.id)
+            .list_source_spans_pending_compile(&base.id, "compile-v1")
             .unwrap()
             .is_empty());
+        assert_eq!(
+            store
+                .list_source_spans_pending_compile(&base.id, "compile-v2")
+                .unwrap()
+                .len(),
+            1,
+            "changing the effective compile context must invalidate the checkpoint"
+        );
 
         store
             .resolve_change_set(&change_set.id, false, "需要重新分析")
@@ -7247,7 +7759,7 @@ mod tests {
 
         assert_eq!(
             store
-                .list_source_spans_pending_compile(&base.id)
+                .list_source_spans_pending_compile(&base.id, "compile-v1")
                 .unwrap()
                 .len(),
             1
@@ -7510,6 +8022,57 @@ mod tests {
             .authorize_external_research_request(&run.id, "example.com")
             .unwrap_err();
         assert!(error.to_string().contains("未授权"));
+    }
+
+    #[test]
+    fn test_compile_activity_is_claimed_once_and_recovered_when_stale() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-compile-job", "/tmp/book-compile-job")])
+            .unwrap();
+        let base = store.initialize_base("book-compile-job").unwrap();
+
+        let started = store.begin_semantic_compile(&base.id, 12).unwrap();
+        assert_eq!(started.compile_state, "compiling");
+        assert_eq!(started.compile_phase, "queued");
+        assert_eq!(started.compile_total_sources, 12);
+        assert!(store.begin_semantic_compile(&base.id, 12).is_err());
+
+        store
+            .update_compile_activity(
+                &base.id,
+                "thinking",
+                "模型正在分析第 1/3 批",
+                1,
+                3,
+                Some("run-1"),
+            )
+            .unwrap();
+        let active = store.get_base(&base.id).unwrap();
+        assert_eq!(active.compile_phase, "thinking");
+        assert_eq!(active.compile_current_batch, 1);
+        assert_eq!(active.compile_total_batches, 3);
+        assert_eq!(active.compile_active_run_id.as_deref(), Some("run-1"));
+
+        store.recover_interrupted_tasks().unwrap();
+        let recovered = store.get_base(&base.id).unwrap();
+        assert_eq!(recovered.compile_state, "failed");
+        assert_eq!(recovered.compile_phase, "failed");
+        assert!(recovered.compile_message.contains("服务重启"));
+        assert!(recovered.compile_active_run_id.is_none());
+
+        store.begin_semantic_compile(&base.id, 12).unwrap();
+        store
+            .mark_semantic_compile_waiting_review(&base.id, "change-set-1", 12, 12)
+            .unwrap();
+        store.recover_interrupted_tasks().unwrap();
+        let review = store.get_base(&base.id).unwrap();
+        assert_eq!(review.compile_state, "compiling");
+        assert_eq!(review.compile_phase, "waiting_review");
+        assert_eq!(
+            review.compile_change_set_id.as_deref(),
+            Some("change-set-1")
+        );
     }
 
     #[test]

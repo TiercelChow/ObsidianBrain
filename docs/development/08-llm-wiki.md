@@ -1,9 +1,9 @@
 # 阅境轩·书籍知识库（Book Wiki）— 开发设计文档 v3
 
 > **文档编号**: DEV-08
-> **版本**: v3.9
+> **版本**: v3.13
 > **状态**: Book Wiki v3 核心闭环、授权外部研究与旧模块退役已落地
-> **最后更新**: 2026-09-15
+> **最后更新**: 2026-09-16
 > **对应需求**: [REQ-08](../requirement/08-llm-wiki.md)
 > **关联需求**: [REQ-10 阅境轩书架](../requirement/10-reader-bookshelf.md)
 
@@ -13,7 +13,11 @@
 
 迁移 016–018 已把章节索引升级所需的数据边界补齐。来源同步采用文档版本和不可变片段，重复同步保持 revision 幂等，文件更新不会级联删除旧证据；会话与成果引用保存当时的实体/路径快照。旧知识库继续保持 `chapter/not_started`，只有用户点击智能编译才会发生模型调用。
 
-`compile_semantic_wiki` 按当前来源分批执行，超长章节会继续切块而不是静默截断。每批读取已有语义 Wiki 和前批候选，归并概念、别名、论断与关系；无效 JSON 仅重试一次。模型结果必须通过服务端 entry type、字段长度、当前 span 引用和数量限制校验，再写入 `knowledge_change_sets`。批准时再次校验来源与 expected revision，并在一个 SQLite 事务中写入条目、论断、关系、引用和版本；人工保护条目的修改始终为高风险。
+`compile_semantic_wiki` 按当前来源分批执行，超长章节会继续切块而不是静默截断。单批来源正文预算为 48,000 字符，最多保留 5 个跨片段归并后的高价值候选，并通过 Harness 供应商 Patch 将单批输出限制为 4,096 token。编译专用路由显式关闭推理等级、将供应商自动重试从默认最多 5 次压缩为最多 1 次；这些限制不影响知识问答和研究任务。模型只返回短摘要、别名、原子论断、关系和引用，不再重复撰写 `content_md`；服务端根据摘要和论断生成可检索正文，并再次执行字段限长。知识摄入请求的单批截止时间为 180 秒。每批读取已有语义 Wiki 和前批候选，归并概念、别名、论断与关系；无效 JSON 仅重试一次。模型结果必须通过服务端 entry type、当前 span 引用和数量限制校验，再写入 `knowledge_change_sets`。批准时再次校验来源与 expected revision，并在一个 SQLite 事务中写入条目、论断、关系、引用和版本；人工保护条目的修改始终为高风险。
+
+语义编译的来源批次已经完整内联到提示词，变更集也由 `BookWikiService` 校验和持久化，因此编译 Run 不挂载 MCP 工具目录，避免无用的工具发现、工具 Schema token 和额外 Agent 回合。问答与研究任务仍按最小权限挂载知识工具；能力令牌 TTL 至少覆盖对应运行超时并额外保留 60 秒收尾窗口。ACP 适配器会记录进程启动、连接建立、会话就绪和请求提交等阶段，即使第三方兼容端点只在整段回答结束时推送文本，前端也能区分“尚未连接”和“模型已收到请求”。
+
+迁移 023 为知识库增加编译阶段、说明、来源/批次进度、当前 Run、变更集、启动时间、心跳和取消标记。`compile_book_knowledge_base` 只原子领取任务并立即返回，实际编译由与 HTTP 请求生命周期解耦的 Tokio 任务执行；后台 Supervisor 捕获异常退出并落库为失败。运行事件被投影为准备、连接 Runtime、思考、工具、生成、重试、收尾和待审核阶段，前端定时读取知识库摘要。取消会同时写入持久化请求并通知活跃 ACP Run；服务启动时仍为 `compiling` 的历史记录会转为明确失败，允许用户重新编译。
 
 迁移 019 增加 `knowledge_compile_checkpoints`、新版 `knowledge_entries_fts` 和 `source_spans_fts`。编译只读取检查点缺失或版本不同的当前来源，变更集创建成功后记录文档版本；驳回候选会删除其检查点，避免来源被永久跳过。FTS 写入与来源/实体事务同步，连续中文同时写入二元组，查询按标题、别名、摘要和正文加权；升级数据库在首次检索时一次性重建旧内容索引。
 
@@ -40,6 +44,10 @@
 实体分页已经下推为 SQLite `LIMIT/OFFSET`，查询总数单独聚合；FTS 查询不再为了补足 limit 再执行正文 `LIKE` 全表扫描。发布前显式规模测试构造十万来源片段，验证目标召回和 `VIRTUAL TABLE INDEX` 查询计划；默认测试保留该用例但标为显式规模回归，避免每次开发循环重复生成大库。
 
 迁移 022 为研究任务增加显式外部研究开关、域名白名单、请求额度与已用次数。只有带开关的 `knowledge_task_research` Run 才会获得 `book_fetch_external`；MCP 网关先验证 Run Capability，再原子消费额度，最后解析 DNS 并拒绝非公网地址。读取器固定 HTTPS/443、关闭重定向、只接受文本 MIME、限制 15 秒与 512 KiB，并把访问摘要写入 Run 事件。`book-synthesis` 和 `markdown-collection` 同批进入内置 Skill Registry；它们仍只能改变分析/输出格式，不能扩大工具权限。脚本型 Skill 继续保持不可执行，直到有独立沙箱、审批和资源配额。
+
+迁移 024 增加 `agent_run_inspections`。`BookWikiService::run_audited` 在启动 Runtime 前保存最终有效 Prompt、稳定哈希、字符数、Skill/配置内容快照、工具白名单和证据引用；快照与 Run 一对一且运行后不可随当前配置变化。Skill 详情接口从 `skills/skill_versions/skill_files` 返回完整版本和文本资源；内置 Skill 保持只读，前端通过复制生成新的自定义 Skill。问答、研究与智能编译都把本次实际注入的 Skill 记录为 `prompt_injected`。
+
+迁移 025 给来源编译检查点增加 `compile_fingerprint`，并把 Skill 绑定范围扩展为 `qa/research/both/ingest/all`。指纹由编译协议 revision、Runtime Profile 与模型、有效配置文档内容哈希、实际启用 Skill 的 revision 与内容哈希组成。准备和执行阶段都按当前指纹查询待编译来源；任一输入变化都会让全书来源重新进入编译，但相同指纹仍只处理内容版本变化的来源。没有启用 `ingest` Skill 时回退到内置 `book-ingest`；启用自定义编译 Skill 后只注入这些 Skill，硬编码的安全、引用和 JSON Schema 约束仍位于其上层并由服务端二次校验。
 
 原 `Memory`、`WikiDashboard`、`WikiWorkbench`、`Explore`、`Ingest` 页面及 Wiki/Explore/Knowledge Insights handlers、旧 Markdown Wiki Engine 已移除。Vue Router 仍保留一个发布周期的静态跳转；旧 `Wiki/*.md` 不删除、不自动导入，新系统也不再读取。由此避免 SQLite Book Wiki 与 Obsidian Markdown Wiki 双写。
 
@@ -645,6 +653,22 @@ Harness 只能看到当前 Run Capability 中列出的受控工具；Rust 服务
 - 要求工具在目标 Harness Profile 中可用
 - 声明权限没有超过知识库策略
 
+Skill 详情查询必须一次返回当前绑定状态、当前版本、全部版本和每版文件资源。页面允许查看内置 Skill 的原始文本、资源哈希、权限和依赖，但保存接口继续拒绝修改内置记录；“复制为自定义”会创建独立 slug 和首个版本，之后按现有 revision 规则编辑。
+
+绑定范围中 `both` 只代表问答与研究，`ingest` 仅进入智能编译，`all` 覆盖三类场景。语义编译把最终选中 Skill 的结构化快照直接放入 `<compile_skills>`，并把同一组 Skill ID 写入 Run 输入与检查快照，页面所见与 Runtime 所收保持一致。
+
+### 10.4 运行检查快照
+
+每次 `run_audited` 在调用 DeepSeek Harness 之前写入一条不可变检查快照，包含：
+
+- 实际发送给 Runtime 的最终 Prompt、稳定哈希和字符数；
+- 当前有效配置文档的 ID、作用域、名称、revision 和正文；
+- 选中 Skill 的 ID、slug、revision、instructions、权限、依赖与应用方式；
+- 本 Run 允许使用的工具名和显式证据 ID；
+- 与 `agent_run_events` 组合后的可恢复时间线。
+
+旧运行允许没有快照，查询接口返回 `snapshot: null`，前端显示“历史运行未记录检查快照”，不得推测当时 Prompt。检查快照用于可解释性和问题定位，不替代能力令牌校验，也不能反向授予工具权限。
+
 ---
 
 ## 11. 问答实现
@@ -718,7 +742,7 @@ Agent 回答只能引用工具返回的 entry/span ID。后端在保存前验证
 
 当前页面继续复用已有 Tool API Envelope；Skill ZIP 上传和成果下载使用资源型 HTTP 端点。下面列出的是逐步迁移后的目标资源 API，不代表每条路由已经存在。
 
-当前新增 Tool 包括 `compile_book_knowledge_base`、`list_knowledge_change_sets`、`resolve_knowledge_change_set`、`lint_book_knowledge_base`、`save_knowledge_answer`、`cancel_knowledge_task`、`list_wiki_skills`、`save_custom_wiki_skill`、`set_wiki_skill_binding` 和 `get_agent_run_events`；研究任务的 execute Tool 只负责入队。资源端点覆盖 Skill ZIP 上传、成果下载、数据库快照下载/上传恢复与单书 JSON/Markdown 导出；`book_fetch_external` 仅存在于带能力令牌的本机 Agent MCP 端点，不进入普通页面 Tool API。
+当前新增 Tool 包括 `compile_book_knowledge_base`、`cancel_book_knowledge_compile`、`list_knowledge_change_sets`、`resolve_knowledge_change_set`、`lint_book_knowledge_base`、`save_knowledge_answer`、`cancel_knowledge_task`、`list_wiki_skills`、`save_custom_wiki_skill`、`set_wiki_skill_binding` 和 `get_agent_run_events`；智能编译和研究任务的启动 Tool 都只负责入队。资源端点覆盖 Skill ZIP 上传、成果下载、数据库快照下载/上传恢复与单书 JSON/Markdown 导出；`book_fetch_external` 仅存在于带能力令牌的本机 Agent MCP 端点，不进入普通页面 Tool API。
 
 ### 13.1 前端 API
 
@@ -764,7 +788,7 @@ POST   /v1/wiki-skills/import
 
 ### 13.2 SSE
 
-问答已通过 SSE 消费原生增量；研究任务继续使用持久化 `agent_run_events` 和状态轮询，以便离开页面后恢复。SSE 连接断开会触发运行取消，持久化事件仍是审计和恢复事实来源。
+问答已通过 SSE 消费原生增量；研究任务继续使用持久化 `agent_run_events`，智能编译使用知识库上的持久化阶段与进度，两者都由前端状态轮询恢复，因此允许离开页面。SSE 连接断开会触发问答运行取消，持久化事件仍是审计和恢复事实来源。
 
 事件至少包括：
 
@@ -1001,3 +1025,5 @@ JSON Bundle 以 `manifest.json` 加多个 JSONL 数据集组成，覆盖来源�
 - 问答和研究任务可追溯到来源、配置和 Skill 版本。
 - 审核、幂等、取消、恢复、备份和导出均经过验证。
 - 旧知识五页面和旧 Wiki 工作流完成退役。
+
+Skill 上游筛选、许可证结论与首批评测门槛见 [Book Wiki 开源 Skill 来源审查](../superpowers/specs/2026-09-16-wiki-skill-source-review.md)。第三方候选在固定评测与人工发布机制完成前不得替换当前内置版本。

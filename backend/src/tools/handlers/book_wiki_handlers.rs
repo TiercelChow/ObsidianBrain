@@ -201,7 +201,7 @@ impl ToolHandler for CompileBookKnowledgeBaseHandler {
     }
 
     fn description(&self) -> &str {
-        "分批分析当前来源，生成跨章节语义 Wiki 变更集供用户审核"
+        "将跨章节语义 Wiki 编译加入后台队列，并立即返回可轮询状态"
     }
 
     fn input_schema(&self) -> Value {
@@ -213,12 +213,45 @@ impl ToolHandler for CompileBookKnowledgeBaseHandler {
     }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
-        let result = ctx
+        let knowledge_base = ctx
             .book_wiki_service
-            .compile_semantic_wiki(required_string(&args, "knowledge_base_id")?)
-            .await?;
-        serde_json::to_value(result)
-            .map_err(|error| BrainError::Internal(format!("语义编译结果序列化失败: {error}")))
+            .queue_semantic_compile(required_string(&args, "knowledge_base_id")?)?;
+        Ok(json!({
+            "knowledge_base": knowledge_base,
+            "queued": true,
+            "message": "智能编译任务已进入后台，可以离开当前页面"
+        }))
+    }
+}
+
+pub struct CancelBookKnowledgeCompileHandler;
+
+#[async_trait]
+impl ToolHandler for CancelBookKnowledgeCompileHandler {
+    fn name(&self) -> &str {
+        "cancel_book_knowledge_compile"
+    }
+
+    fn description(&self) -> &str {
+        "请求取消一本书当前正在执行的后台智能编译"
+    }
+
+    fn input_schema(&self) -> Value {
+        required_id_schema("knowledge_base_id")
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let knowledge_base = ctx
+            .book_wiki_service
+            .request_semantic_compile_cancel(required_string(&args, "knowledge_base_id")?)?;
+        Ok(json!({
+            "knowledge_base": knowledge_base,
+            "cancel_requested": true
+        }))
     }
 }
 
@@ -1254,6 +1287,8 @@ impl ToolHandler for RestoreKnowledgeBackupHandler {
 
 pub struct ListWikiSkillsHandler;
 
+pub struct GetWikiSkillDetailHandler;
+
 #[async_trait]
 impl ToolHandler for ListWikiSkillsHandler {
     fn name(&self) -> &str {
@@ -1284,6 +1319,41 @@ impl ToolHandler for ListWikiSkillsHandler {
                 args.get("knowledge_base_id").and_then(Value::as_str)
             )?
         }))
+    }
+}
+
+#[async_trait]
+impl ToolHandler for GetWikiSkillDetailHandler {
+    fn name(&self) -> &str {
+        "get_wiki_skill_detail"
+    }
+
+    fn description(&self) -> &str {
+        "读取 Wiki Skill 的完整内容、全部版本、资源文件、权限和当前书籍绑定"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "skill_id": { "type": "string" },
+                "knowledge_base_id": { "type": "string" }
+            },
+            "required": ["skill_id"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(ctx.book_wiki_service.store().get_wiki_skill_detail(
+            required_string(&args, "skill_id")?,
+            args.get("knowledge_base_id").and_then(Value::as_str),
+        )?)
+        .map_err(|error| BrainError::Internal(format!("Skill 详情序列化失败: {error}")))
     }
 }
 
@@ -1344,7 +1414,7 @@ impl ToolHandler for SetWikiSkillBindingHandler {
     }
 
     fn description(&self) -> &str {
-        "为一本书启用或停用 Wiki Skill，并限制到问答或研究任务"
+        "为一本书启用或停用 Wiki Skill，并限制到问答、研究或智能编译场景"
     }
 
     fn input_schema(&self) -> Value {
@@ -1356,7 +1426,7 @@ impl ToolHandler for SetWikiSkillBindingHandler {
                 "enabled": { "type": "boolean" },
                 "usage_scope": {
                     "type": "string",
-                    "enum": ["qa", "research", "both"]
+                    "enum": ["qa", "research", "both", "ingest", "all"]
                 }
             },
             "required": ["knowledge_base_id", "skill_id", "enabled", "usage_scope"],
@@ -1383,6 +1453,8 @@ impl ToolHandler for SetWikiSkillBindingHandler {
 }
 
 pub struct GetAgentRunEventsHandler;
+
+pub struct GetAgentRunInspectionHandler;
 
 pub struct GetKnowledgeTaskActivityHandler;
 
@@ -1444,6 +1516,34 @@ impl ToolHandler for GetAgentRunEventsHandler {
                 required_string(&args, "run_id")?
             )?
         }))
+    }
+}
+
+#[async_trait]
+impl ToolHandler for GetAgentRunInspectionHandler {
+    fn name(&self) -> &str {
+        "get_agent_run_inspection"
+    }
+
+    fn description(&self) -> &str {
+        "读取 Agent 运行、阶段事件、有效 Prompt、Skill/配置快照和工具白名单"
+    }
+
+    fn input_schema(&self) -> Value {
+        required_id_schema("run_id")
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(
+            ctx.book_wiki_service
+                .store()
+                .get_agent_run_inspection(required_string(&args, "run_id")?)?,
+        )
+        .map_err(|error| BrainError::Internal(format!("Agent 运行检查信息序列化失败: {error}")))
     }
 }
 

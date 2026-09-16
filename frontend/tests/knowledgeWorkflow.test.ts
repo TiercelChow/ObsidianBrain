@@ -103,11 +103,28 @@ test('wiki settings manage versioned skills per book and keep execution instruct
   assert.match(settings, /导入 ZIP/)
   assert.match(settings, /importWikiSkillArchive/)
   assert.match(settings, /skill\.usage_scope/)
+  assert.match(settings, /仅智能编译/)
+  assert.match(settings, /全部场景/)
   assert.match(settings, /setWikiSkillBinding/)
   assert.match(api, /list_wiki_skills/)
   assert.match(api, /save_custom_wiki_skill/)
   assert.match(api, /set_wiki_skill_binding/)
   assert.match(api, /knowledge\/skills\/import/)
+})
+
+test('wiki skills expose inspectable resources, history, permissions, and a safe clone flow', async () => {
+  const [settings, api] = await Promise.all([
+    source('src/views/knowledge/WikiSettings.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+
+  assert.match(settings, /查看内容/)
+  assert.match(settings, /Skill 内容与版本/)
+  assert.match(settings, /skillDetail\.versions/)
+  assert.match(settings, /权限与依赖/)
+  assert.match(settings, /复制为自定义/)
+  assert.match(api, /get_wiki_skill_detail/)
+  assert.match(api, /WikiSkillDetail/)
 })
 
 test('wiki settings expose consistent database snapshots and guarded restore flows', async () => {
@@ -150,6 +167,22 @@ test('knowledge tasks expose durable execution controls and real presentation ar
   assert.match(api, /knowledge\/artifacts/)
 })
 
+test('knowledge task results expose an auditable run inspector', async () => {
+  const [view, api] = await Promise.all([
+    source('src/views/knowledge/KnowledgeTasks.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+
+  assert.match(view, /运行检查器/)
+  assert.match(view, /有效 Prompt/)
+  assert.match(view, /配置快照/)
+  assert.match(view, /activeInspection/)
+  assert.match(view, /getAgentRunInspection/)
+  assert.match(api, /get_agent_run_inspection/)
+  assert.match(api, /AgentRunInspection/)
+  assert.match(api, /AgentRunConfigSnapshot/)
+})
+
 test('external research stays opt-in, domain scoped, and rate limited per task', async () => {
   const [view, api] = await Promise.all([
     source('src/views/knowledge/KnowledgeTasks.vue'),
@@ -184,6 +217,26 @@ test('knowledge pages distinguish source synchronization from wiki compilation',
   assert.match(workspace, /批准并应用/)
   assert.match(api, /compile_mode: 'chapter' \| 'smart'/)
   assert.match(api, /compile_state: 'not_started' \| 'outdated' \| 'compiling' \| 'ready' \| 'failed'/)
+})
+
+test('smart wiki compilation runs in background and exposes recoverable live progress', async () => {
+  const [bases, api] = await Promise.all([
+    source('src/views/knowledge/KnowledgeBases.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+
+  assert.match(api, /compile_phase:/)
+  assert.match(api, /compile_message:/)
+  assert.match(api, /compile_current_batch:/)
+  assert.match(api, /compile_total_batches:/)
+  assert.match(api, /compile_active_run_id/)
+  assert.match(api, /compile_change_set_id/)
+  assert.match(api, /cancel_book_knowledge_compile/)
+  assert.match(bases, /任务已进入后台，可以离开当前页面/)
+  assert.match(bases, /cancelBookKnowledgeCompile/)
+  assert.match(bases, /setInterval/)
+  assert.match(bases, /compile-phase/)
+  assert.match(bases, /查看并审核/)
 })
 
 test('wiki workspace supports reviewed structure changes, paging, and an on-demand graph canvas', async () => {
