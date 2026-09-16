@@ -184,6 +184,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "semantic change classification, citation audit, and impact summaries",
         sql: include_str!("../../migrations/027_semantic_change_audit.sql"),
     },
+    Migration {
+        version: 28,
+        description: "real-model skill benchmark cases and comparison runs",
+        sql: include_str!("../../migrations/028_skill_model_benchmarks.sql"),
+    },
 ];
 
 impl SqliteStore {
@@ -1247,6 +1252,16 @@ mod tests {
                     |row| row.get(0),
                 )?;
                 assert_eq!(candidates, 4);
+                let benchmark_counts: (i64, i64, i64, i64) = conn.query_row(
+                    "SELECT
+                        (SELECT COUNT(*) FROM skill_benchmark_cases WHERE suite_id = 'skill-suite-ingest'),
+                        (SELECT COUNT(*) FROM skill_benchmark_cases WHERE suite_id = 'skill-suite-query'),
+                        (SELECT COUNT(*) FROM skill_benchmark_cases WHERE suite_id = 'skill-suite-research'),
+                        (SELECT COUNT(*) FROM skill_benchmark_cases WHERE suite_id = 'skill-suite-presentation')",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )?;
+                assert_eq!(benchmark_counts, (12, 8, 6, 6));
                 let current: String = conn.query_row(
                     "SELECT current_version_id FROM skills WHERE id = 'skill-book-query'",
                     [],

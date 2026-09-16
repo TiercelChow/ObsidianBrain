@@ -17,8 +17,9 @@ use crate::models::book_wiki::{
     KnowledgeGraphOverview, KnowledgeGraphPath, KnowledgeGraphRelation, KnowledgeGraphSnapshot,
     KnowledgeHealthIssue, KnowledgeHealthReport, KnowledgeMessage, KnowledgeRelationSummary,
     KnowledgeTask, ReaderBook, RuntimeProfile, RuntimeProviderConfig, SourceDocumentSummary,
-    SourceSpanSnapshot, WikiSkill, WikiSkillDetail, WikiSkillEvaluationFinding,
-    WikiSkillEvaluationRun, WikiSkillFile, WikiSkillOrigin, WikiSkillVersion,
+    SourceSpanSnapshot, WikiSkill, WikiSkillBenchmarkCase, WikiSkillBenchmarkCaseResult,
+    WikiSkillBenchmarkRun, WikiSkillDetail, WikiSkillEvaluationFinding, WikiSkillEvaluationRun,
+    WikiSkillFile, WikiSkillOrigin, WikiSkillVersion,
 };
 
 const LEGACY_BOOKS_KEY: &str = "reader_books";
@@ -88,6 +89,15 @@ pub struct ExternalResearchAuthorization {
     pub host: String,
     pub request_number: i64,
     pub request_limit: i64,
+}
+
+pub struct WikiSkillBenchmarkCompletion<'a> {
+    pub baseline_agent_run_id: &'a str,
+    pub candidate_agent_run_id: &'a str,
+    pub baseline_score: f64,
+    pub candidate_score: f64,
+    pub metrics: &'a serde_json::Value,
+    pub results: &'a [WikiSkillBenchmarkCaseResult],
 }
 
 #[derive(Clone, Debug)]
@@ -3861,6 +3871,14 @@ impl BookWikiStore {
                  WHERE compile_state = 'compiling' AND compile_phase != 'waiting_review'",
                 params![now],
             )?;
+            conn.execute(
+                "UPDATE skill_benchmark_runs
+                 SET status = 'failed',
+                     error = '服务重启中断了真实模型基准，请重新运行',
+                     completed_at = ?1
+                 WHERE status IN ('queued', 'running')",
+                params![now],
+            )?;
             Ok(recovered)
         })
     }
@@ -4354,6 +4372,7 @@ impl BookWikiStore {
                     )
                     .optional()?;
                 let latest_evaluation = latest_skill_evaluation(conn, &id)?;
+                let latest_benchmark = latest_skill_benchmark(conn, &id)?;
                 versions.push(WikiSkillVersion {
                     id,
                     revision,
@@ -4365,6 +4384,7 @@ impl BookWikiStore {
                     files,
                     origin,
                     latest_evaluation,
+                    latest_benchmark,
                 });
             }
             Ok((current_version_id, versions))
@@ -4493,6 +4513,323 @@ impl BookWikiStore {
         })
     }
 
+    pub fn prepare_wiki_skill_benchmark(
+        &self,
+        skill_id: &str,
+        version_id: &str,
+        suite_slug: &str,
+        base_id: &str,
+        runtime_profile_id: &str,
+        model: &str,
+    ) -> Result<WikiSkillBenchmarkRun, BrainError> {
+        self.get_active_base(base_id)?;
+        let now = Utc::now().to_rfc3339();
+        let run_id = uuid::Uuid::new_v4().to_string();
+        self.db.transaction(|conn| {
+            let (release_state, current_version_id, skill_slug) = conn
+                .query_row(
+                    "SELECT sv.release_state, s.current_version_id, s.slug
+                     FROM skill_versions sv JOIN skills s ON s.id = sv.skill_id
+                     WHERE sv.id = ?1 AND sv.skill_id = ?2",
+                    params![version_id, skill_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .optional()?
+                .ok_or_else(|| BrainError::KnowledgeNotFound(version_id.to_string()))?;
+            if release_state != "candidate" {
+                return Err(BrainError::KnowledgeValidation(
+                    "只有候选 Skill 版本可以运行真实模型基准".to_string(),
+                ));
+            }
+            let structurally_passed = conn
+                .query_row(
+                    "SELECT passed FROM skill_evaluation_runs
+                     WHERE skill_version_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                    params![version_id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if !structurally_passed {
+                return Err(BrainError::KnowledgeValidation(
+                    "候选版本必须先通过固定评测才能运行真实模型基准".to_string(),
+                ));
+            }
+            let baseline_version_id = current_version_id.ok_or_else(|| {
+                BrainError::Internal("Skill 当前版本不存在，数据库状态已损坏".to_string())
+            })?;
+            if baseline_version_id == version_id {
+                return Err(BrainError::KnowledgeValidation(
+                    "候选版本不能与当前基线版本相同".to_string(),
+                ));
+            }
+            let expected_suite = expected_skill_suite(&skill_slug).ok_or_else(|| {
+                BrainError::KnowledgeValidation("自定义 Skill 暂不支持内置真实模型基准".to_string())
+            })?;
+            if expected_suite != suite_slug {
+                return Err(BrainError::KnowledgeValidation(format!(
+                    "Skill {skill_slug} 必须使用固定基准集 {expected_suite}"
+                )));
+            }
+            let (suite_id, total_cases) = conn
+                .query_row(
+                    "SELECT ses.id, COUNT(sbc.id)
+                     FROM skill_evaluation_suites ses
+                     LEFT JOIN skill_benchmark_cases sbc ON sbc.suite_id = ses.id
+                     WHERE ses.slug = ?1 GROUP BY ses.id",
+                    params![suite_slug],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .optional()?
+                .ok_or_else(|| {
+                    BrainError::KnowledgeValidation(format!("未知的 Skill 基准集: {suite_slug}"))
+                })?;
+            if total_cases == 0 {
+                return Err(BrainError::KnowledgeValidation(
+                    "真实模型基准集为空，无法运行".to_string(),
+                ));
+            }
+            let in_progress = conn.query_row(
+                "SELECT COUNT(*) FROM skill_benchmark_runs
+                 WHERE skill_version_id = ?1 AND status IN ('queued', 'running')",
+                params![version_id],
+                |row| row.get::<_, i64>(0),
+            )?;
+            if in_progress > 0 {
+                return Err(BrainError::KnowledgeValidation(
+                    "该候选版本已有正在运行的真实模型基准".to_string(),
+                ));
+            }
+            conn.execute(
+                "INSERT INTO skill_benchmark_runs
+                 (id, skill_id, skill_version_id, baseline_version_id, suite_id,
+                  knowledge_base_id, runtime_profile_id, model, status, total_cases,
+                  completed_cases, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued', ?9, 0, ?10)",
+                params![
+                    run_id,
+                    skill_id,
+                    version_id,
+                    baseline_version_id,
+                    suite_id,
+                    base_id,
+                    runtime_profile_id,
+                    model,
+                    total_cases,
+                    now,
+                ],
+            )?;
+            Ok(())
+        })?;
+        self.get_wiki_skill_benchmark(&run_id)
+    }
+
+    pub fn start_wiki_skill_benchmark(
+        &self,
+        run_id: &str,
+    ) -> Result<WikiSkillBenchmarkRun, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        let updated = self.db.with_connection(|conn| {
+            Ok(conn.execute(
+                "UPDATE skill_benchmark_runs SET status = 'running', started_at = ?2, error = NULL
+                 WHERE id = ?1 AND status = 'queued'",
+                params![run_id, now],
+            )?)
+        })?;
+        if updated == 0 {
+            return Err(BrainError::KnowledgeValidation(
+                "真实模型基准不在等待执行状态".to_string(),
+            ));
+        }
+        self.get_wiki_skill_benchmark(run_id)
+    }
+
+    pub fn mark_wiki_skill_benchmark_candidate_complete(
+        &self,
+        run_id: &str,
+    ) -> Result<WikiSkillBenchmarkRun, BrainError> {
+        let updated = self.db.with_connection(|conn| {
+            Ok(conn.execute(
+                "UPDATE skill_benchmark_runs SET completed_cases = total_cases
+                 WHERE id = ?1 AND status = 'running'",
+                params![run_id],
+            )?)
+        })?;
+        if updated == 0 {
+            return Err(BrainError::KnowledgeValidation(
+                "真实模型基准不在执行状态".to_string(),
+            ));
+        }
+        self.get_wiki_skill_benchmark(run_id)
+    }
+
+    pub fn load_wiki_skill_benchmark_cases(
+        &self,
+        suite_id: &str,
+    ) -> Result<Vec<WikiSkillBenchmarkCase>, BrainError> {
+        self.db
+            .with_connection(|conn| load_skill_benchmark_cases(conn, suite_id))
+    }
+
+    pub fn wiki_skill_version_instructions(&self, version_id: &str) -> Result<String, BrainError> {
+        self.db.with_connection(|conn| {
+            conn.query_row(
+                "SELECT content_text FROM skill_files
+                 WHERE skill_version_id = ?1 AND relative_path = 'SKILL.md'",
+                params![version_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or_else(|| BrainError::KnowledgeNotFound(version_id.to_string()))
+        })
+    }
+
+    pub fn complete_wiki_skill_benchmark(
+        &self,
+        run_id: &str,
+        completion: WikiSkillBenchmarkCompletion<'_>,
+    ) -> Result<WikiSkillBenchmarkRun, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        let score_delta = completion.candidate_score - completion.baseline_score;
+        self.db.transaction(|conn| {
+            let (status, pass_score, total_cases) = conn
+                .query_row(
+                    "SELECT sbr.status, ses.pass_score, sbr.total_cases
+                     FROM skill_benchmark_runs sbr
+                     JOIN skill_evaluation_suites ses ON ses.id = sbr.suite_id
+                     WHERE sbr.id = ?1",
+                    params![run_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, f64>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    },
+                )
+                .optional()?
+                .ok_or_else(|| BrainError::KnowledgeNotFound(run_id.to_string()))?;
+            if status != "running" {
+                return Err(BrainError::KnowledgeValidation(
+                    "只能完成正在运行的真实模型基准".to_string(),
+                ));
+            }
+            let candidate_results = completion
+                .results
+                .iter()
+                .filter(|result| result.variant == "candidate")
+                .count() as i64;
+            let baseline_results = completion
+                .results
+                .iter()
+                .filter(|result| result.variant == "baseline")
+                .count() as i64;
+            let candidate_passed_cases = completion
+                .results
+                .iter()
+                .filter(|result| result.variant == "candidate" && result.passed)
+                .count() as i64;
+            if candidate_results != total_cases || baseline_results != total_cases {
+                return Err(BrainError::KnowledgeValidation(
+                    "真实模型基准结果数量与固定样例不一致".to_string(),
+                ));
+            }
+            for result in completion.results {
+                let citations_json = serde_json::to_string(&result.citations).map_err(|error| {
+                    BrainError::Internal(format!("Skill 基准引用序列化失败: {error}"))
+                })?;
+                let metrics_json = serde_json::to_string(&result.metrics).map_err(|error| {
+                    BrainError::Internal(format!("Skill 基准指标序列化失败: {error}"))
+                })?;
+                let agent_run_id = if result.variant == "candidate" {
+                    completion.candidate_agent_run_id
+                } else {
+                    completion.baseline_agent_run_id
+                };
+                conn.execute(
+                    "INSERT INTO skill_benchmark_case_results
+                     (run_id, case_id, variant, agent_run_id, response_text, citations_json,
+                      metrics_json, score, passed, error)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    params![
+                        run_id,
+                        result.case_id,
+                        result.variant,
+                        agent_run_id,
+                        result.response_text,
+                        citations_json,
+                        metrics_json,
+                        result.score,
+                        result.passed,
+                        result.error,
+                    ],
+                )?;
+            }
+            let passed = completion.candidate_score + f64::EPSILON >= pass_score
+                && score_delta + f64::EPSILON >= -0.03
+                && candidate_passed_cases as f64 / total_cases as f64 + f64::EPSILON >= 0.8;
+            let metrics_json = serde_json::to_string(completion.metrics).map_err(|error| {
+                BrainError::Internal(format!("Skill 基准汇总序列化失败: {error}"))
+            })?;
+            conn.execute(
+                "UPDATE skill_benchmark_runs
+                 SET status = 'completed', completed_cases = total_cases,
+                     candidate_score = ?2, baseline_score = ?3, score_delta = ?4,
+                     passed = ?5, metrics_json = ?6, completed_at = ?7, error = NULL
+                 WHERE id = ?1",
+                params![
+                    run_id,
+                    completion.candidate_score.clamp(0.0, 1.0),
+                    completion.baseline_score.clamp(0.0, 1.0),
+                    score_delta,
+                    i64::from(passed),
+                    metrics_json,
+                    now,
+                ],
+            )?;
+            Ok(())
+        })?;
+        self.get_wiki_skill_benchmark(run_id)
+    }
+
+    pub fn fail_wiki_skill_benchmark(
+        &self,
+        run_id: &str,
+        error: &str,
+    ) -> Result<WikiSkillBenchmarkRun, BrainError> {
+        let now = Utc::now().to_rfc3339();
+        let updated = self.db.with_connection(|conn| {
+            Ok(conn.execute(
+                "UPDATE skill_benchmark_runs
+                 SET status = 'failed', error = ?2, completed_at = ?3
+                 WHERE id = ?1 AND status IN ('queued', 'running')",
+                params![run_id, error, now],
+            )?)
+        })?;
+        if updated == 0 {
+            return Err(BrainError::KnowledgeValidation(
+                "真实模型基准已经结束".to_string(),
+            ));
+        }
+        self.get_wiki_skill_benchmark(run_id)
+    }
+
+    pub fn get_wiki_skill_benchmark(
+        &self,
+        run_id: &str,
+    ) -> Result<WikiSkillBenchmarkRun, BrainError> {
+        self.db.with_connection(|conn| {
+            load_skill_benchmark_run(conn, run_id)?
+                .ok_or_else(|| BrainError::KnowledgeNotFound(format!("Skill 基准运行 {run_id}")))
+        })
+    }
+
     pub fn publish_wiki_skill_version(
         &self,
         skill_id: &str,
@@ -4500,11 +4837,13 @@ impl BookWikiStore {
     ) -> Result<WikiSkillDetail, BrainError> {
         let now = Utc::now().to_rfc3339();
         self.db.transaction(|conn| {
-            let release_state = conn
+            let (release_state, current_version_id) = conn
                 .query_row(
-                    "SELECT release_state FROM skill_versions WHERE id = ?1 AND skill_id = ?2",
+                    "SELECT sv.release_state, s.current_version_id
+                     FROM skill_versions sv JOIN skills s ON s.id = sv.skill_id
+                     WHERE sv.id = ?1 AND sv.skill_id = ?2",
                     params![version_id, skill_id],
-                    |row| row.get::<_, String>(0),
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
                 )
                 .optional()?
                 .ok_or_else(|| BrainError::KnowledgeNotFound(version_id.to_string()))?;
@@ -4525,6 +4864,30 @@ impl BookWikiStore {
             if !passed {
                 return Err(BrainError::KnowledgeValidation(
                     "候选版本必须先通过固定评测才能发布".to_string(),
+                ));
+            }
+            let benchmark = conn
+                .query_row(
+                    "SELECT status = 'completed' AND passed = 1, baseline_version_id
+                     FROM skill_benchmark_runs
+                     WHERE skill_version_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                    params![version_id],
+                    |row| Ok((row.get::<_, bool>(0)?, row.get::<_, String>(1)?)),
+                )
+                .optional()?;
+            let Some((benchmark_passed, baseline_version_id)) = benchmark else {
+                return Err(BrainError::KnowledgeValidation(
+                    "候选版本必须先通过真实模型基准才能发布".to_string(),
+                ));
+            };
+            if !benchmark_passed {
+                return Err(BrainError::KnowledgeValidation(
+                    "候选版本必须先通过真实模型基准才能发布".to_string(),
+                ));
+            }
+            if current_version_id.as_deref() != Some(baseline_version_id.as_str()) {
+                return Err(BrainError::KnowledgeValidation(
+                    "当前 Skill 版本已变化，请重新运行真实模型基准".to_string(),
                 ));
             }
             conn.execute(
@@ -5811,6 +6174,31 @@ impl BookWikiStore {
         })
     }
 
+    pub fn get_agent_run_observation(&self, run_id: &str) -> Result<serde_json::Value, BrainError> {
+        self.db.with_connection(|conn| {
+            conn.query_row(
+                "SELECT input_tokens, output_tokens, reasoning_tokens,
+                        cache_read_tokens, cache_write_tokens, usage_source,
+                        CAST(ROUND((julianday(finished_at) - julianday(started_at)) * 86400000) AS INTEGER)
+                 FROM agent_runs WHERE id = ?1 AND status = 'completed'",
+                params![run_id],
+                |row| {
+                    Ok(serde_json::json!({
+                        "input_tokens": row.get::<_, i64>(0)?,
+                        "output_tokens": row.get::<_, i64>(1)?,
+                        "reasoning_tokens": row.get::<_, i64>(2)?,
+                        "cache_read_tokens": row.get::<_, i64>(3)?,
+                        "cache_write_tokens": row.get::<_, i64>(4)?,
+                        "usage_source": row.get::<_, String>(5)?,
+                        "duration_ms": row.get::<_, Option<i64>>(6)?.unwrap_or(0),
+                    }))
+                },
+            )
+            .optional()?
+            .ok_or_else(|| BrainError::KnowledgeNotFound(format!("已完成 Agent Run {run_id}")))
+        })
+    }
+
     pub fn get_latest_completed_task_run(
         &self,
         task_id: &str,
@@ -6357,6 +6745,192 @@ fn latest_skill_evaluation(
         })
     })
     .transpose()
+}
+
+fn expected_skill_suite(skill_slug: &str) -> Option<&'static str> {
+    match skill_slug {
+        "book-ingest" => Some("semantic-ingest"),
+        "book-query" => Some("grounded-query"),
+        "book-research" => Some("evidence-research"),
+        "book-presentation" => Some("evidence-presentation"),
+        _ => None,
+    }
+}
+
+fn load_skill_benchmark_cases(
+    conn: &rusqlite::Connection,
+    suite_id: &str,
+) -> Result<Vec<WikiSkillBenchmarkCase>, BrainError> {
+    let mut statement = conn.prepare(
+        "SELECT id, suite_id, ordinal, name, scenario_type, fixture_json,
+                expectations_json, weight
+         FROM skill_benchmark_cases WHERE suite_id = ?1 ORDER BY ordinal",
+    )?;
+    let rows = statement.query_map(params![suite_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, f64>(7)?,
+        ))
+    })?;
+    rows.map(|row| {
+        let row = row?;
+        Ok(WikiSkillBenchmarkCase {
+            id: row.0,
+            suite_id: row.1,
+            ordinal: row.2,
+            name: row.3,
+            scenario_type: row.4,
+            fixture: serde_json::from_str(&row.5).map_err(|error| {
+                BrainError::Internal(format!("Skill 基准输入解析失败: {error}"))
+            })?,
+            expectations: serde_json::from_str(&row.6).map_err(|error| {
+                BrainError::Internal(format!("Skill 基准期望解析失败: {error}"))
+            })?,
+            weight: row.7,
+        })
+    })
+    .collect()
+}
+
+fn load_skill_benchmark_run(
+    conn: &rusqlite::Connection,
+    run_id: &str,
+) -> Result<Option<WikiSkillBenchmarkRun>, BrainError> {
+    let row = conn
+        .query_row(
+            "SELECT sbr.id, sbr.skill_id, sbr.skill_version_id, sbr.baseline_version_id,
+                    sbr.suite_id, ses.name, sbr.knowledge_base_id, sbr.runtime_profile_id,
+                    sbr.model, sbr.status, sbr.total_cases, sbr.completed_cases,
+                    sbr.candidate_score, sbr.baseline_score, sbr.score_delta, sbr.passed,
+                    sbr.metrics_json, sbr.error, sbr.started_at, sbr.completed_at, sbr.created_at
+             FROM skill_benchmark_runs sbr
+             JOIN skill_evaluation_suites ses ON ses.id = sbr.suite_id
+             WHERE sbr.id = ?1",
+            params![run_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, i64>(10)?,
+                    row.get::<_, i64>(11)?,
+                    row.get::<_, Option<f64>>(12)?,
+                    row.get::<_, Option<f64>>(13)?,
+                    row.get::<_, Option<f64>>(14)?,
+                    row.get::<_, bool>(15)?,
+                    row.get::<_, String>(16)?,
+                    row.get::<_, Option<String>>(17)?,
+                    row.get::<_, Option<String>>(18)?,
+                    row.get::<_, Option<String>>(19)?,
+                    row.get::<_, String>(20)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let metrics = serde_json::from_str(&row.16)
+        .map_err(|error| BrainError::Internal(format!("Skill 基准汇总解析失败: {error}")))?;
+    let mut statement = conn.prepare(
+        "SELECT sbcr.case_id, sbc.name, sbcr.variant, sbcr.agent_run_id,
+                sbcr.response_text, sbcr.citations_json, sbcr.metrics_json,
+                sbcr.score, sbcr.passed, sbcr.error
+         FROM skill_benchmark_case_results sbcr
+         JOIN skill_benchmark_cases sbc ON sbc.id = sbcr.case_id
+         WHERE sbcr.run_id = ?1
+         ORDER BY sbcr.variant, sbc.ordinal",
+    )?;
+    let result_rows = statement.query_map(params![run_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, f64>(7)?,
+            row.get::<_, bool>(8)?,
+            row.get::<_, Option<String>>(9)?,
+        ))
+    })?;
+    let results = result_rows
+        .map(|result| {
+            let result = result?;
+            Ok(WikiSkillBenchmarkCaseResult {
+                case_id: result.0,
+                name: result.1,
+                variant: result.2,
+                agent_run_id: result.3,
+                response_text: result.4,
+                citations: serde_json::from_str(&result.5).map_err(|error| {
+                    BrainError::Internal(format!("Skill 基准引用解析失败: {error}"))
+                })?,
+                metrics: serde_json::from_str(&result.6).map_err(|error| {
+                    BrainError::Internal(format!("Skill 基准指标解析失败: {error}"))
+                })?,
+                score: result.7,
+                passed: result.8,
+                error: result.9,
+            })
+        })
+        .collect::<Result<Vec<_>, BrainError>>()?;
+    Ok(Some(WikiSkillBenchmarkRun {
+        id: row.0,
+        skill_id: row.1,
+        skill_version_id: row.2,
+        baseline_version_id: row.3,
+        suite_id: row.4,
+        suite_name: row.5,
+        knowledge_base_id: row.6,
+        runtime_profile_id: row.7,
+        model: row.8,
+        status: row.9,
+        total_cases: row.10,
+        completed_cases: row.11,
+        candidate_score: row.12,
+        baseline_score: row.13,
+        score_delta: row.14,
+        passed: row.15,
+        metrics,
+        error: row.17,
+        results,
+        started_at: row.18,
+        completed_at: row.19,
+        created_at: row.20,
+    }))
+}
+
+fn latest_skill_benchmark(
+    conn: &rusqlite::Connection,
+    version_id: &str,
+) -> Result<Option<WikiSkillBenchmarkRun>, BrainError> {
+    let run_id = conn
+        .query_row(
+            "SELECT id FROM skill_benchmark_runs
+             WHERE skill_version_id = ?1 ORDER BY created_at DESC LIMIT 1",
+            params![version_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    run_id
+        .map(|run_id| load_skill_benchmark_run(conn, &run_id))
+        .transpose()
+        .map(Option::flatten)
 }
 
 fn validate_skill_scope(value: &str) -> Result<(), BrainError> {
@@ -8197,6 +8771,13 @@ mod tests {
     #[test]
     fn test_builtin_skill_candidate_requires_evaluation_then_can_publish_and_rollback() {
         let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book(
+                "book-skill-benchmark",
+                "/tmp/book-skill-benchmark",
+            )])
+            .unwrap();
+        let base = store.initialize_base("book-skill-benchmark").unwrap();
         let detail = store
             .get_wiki_skill_detail("skill-book-ingest", None)
             .unwrap();
@@ -8213,6 +8794,18 @@ mod tests {
             .to_string()
             .contains("固定评测"));
         assert!(store
+            .prepare_wiki_skill_benchmark(
+                "skill-book-ingest",
+                &candidate.id,
+                "semantic-ingest",
+                &base.id,
+                "runtime-deepseek-harness",
+                "test-model",
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("固定评测"));
+        assert!(store
             .evaluate_wiki_skill_version("skill-book-ingest", &candidate.id, "grounded-query")
             .unwrap_err()
             .to_string()
@@ -8224,6 +8817,145 @@ mod tests {
         assert!(evaluation.passed);
         assert_eq!(evaluation.score, 1.0);
         assert!(evaluation.baseline_score.is_some_and(|score| score < 1.0));
+        assert!(store
+            .publish_wiki_skill_version("skill-book-ingest", &candidate.id)
+            .unwrap_err()
+            .to_string()
+            .contains("真实模型基准"));
+
+        let benchmark = store
+            .prepare_wiki_skill_benchmark(
+                "skill-book-ingest",
+                &candidate.id,
+                "semantic-ingest",
+                &base.id,
+                "runtime-deepseek-harness",
+                "test-model",
+            )
+            .unwrap();
+        assert_eq!(benchmark.status, "queued");
+        let benchmark = store.start_wiki_skill_benchmark(&benchmark.id).unwrap();
+        assert_eq!(benchmark.status, "running");
+        let benchmark = store
+            .mark_wiki_skill_benchmark_candidate_complete(&benchmark.id)
+            .unwrap();
+        assert_eq!(benchmark.completed_cases, benchmark.total_cases);
+        let cases = store
+            .load_wiki_skill_benchmark_cases(&benchmark.suite_id)
+            .unwrap();
+        assert_eq!(cases.len(), 12);
+        let baseline_run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "skill_benchmark",
+                &serde_json::json!({ "variant": "baseline" }),
+            )
+            .unwrap();
+        let candidate_run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "skill_benchmark",
+                &serde_json::json!({ "variant": "candidate" }),
+            )
+            .unwrap();
+        let results = ["baseline", "candidate"]
+            .into_iter()
+            .flat_map(|variant| {
+                cases.iter().map(move |case| WikiSkillBenchmarkCaseResult {
+                    case_id: case.id.clone(),
+                    name: case.name.clone(),
+                    variant: variant.to_string(),
+                    agent_run_id: None,
+                    response_text: "通过".to_string(),
+                    citations: Vec::new(),
+                    metrics: serde_json::json!({ "score": 1.0 }),
+                    score: 1.0,
+                    passed: true,
+                    error: None,
+                })
+            })
+            .collect::<Vec<_>>();
+        let metrics = serde_json::json!({ "score_delta": 0.1 });
+        let incomplete_results = results
+            .iter()
+            .cloned()
+            .map(|mut result| {
+                if result.variant == "candidate" {
+                    result.passed = false;
+                }
+                result
+            })
+            .collect::<Vec<_>>();
+        let incomplete = store
+            .complete_wiki_skill_benchmark(
+                &benchmark.id,
+                WikiSkillBenchmarkCompletion {
+                    baseline_agent_run_id: &baseline_run.id,
+                    candidate_agent_run_id: &candidate_run.id,
+                    baseline_score: 0.8,
+                    candidate_score: 0.9,
+                    metrics: &metrics,
+                    results: &incomplete_results,
+                },
+            )
+            .unwrap();
+        assert!(!incomplete.passed, "high score cannot bypass failed cases");
+        let benchmark = store
+            .prepare_wiki_skill_benchmark(
+                "skill-book-ingest",
+                &candidate.id,
+                "semantic-ingest",
+                &base.id,
+                "runtime-deepseek-harness",
+                "test-model",
+            )
+            .unwrap();
+        let benchmark = store.start_wiki_skill_benchmark(&benchmark.id).unwrap();
+        let benchmark = store
+            .complete_wiki_skill_benchmark(
+                &benchmark.id,
+                WikiSkillBenchmarkCompletion {
+                    baseline_agent_run_id: &baseline_run.id,
+                    candidate_agent_run_id: &candidate_run.id,
+                    baseline_score: 0.8,
+                    candidate_score: 0.9,
+                    metrics: &metrics,
+                    results: &results,
+                },
+            )
+            .unwrap();
+        assert_eq!(benchmark.status, "completed");
+        assert!(benchmark.passed);
+        assert_eq!(benchmark.results.len(), 24);
+
+        store
+            .db
+            .with_connection(|conn| {
+                conn.execute(
+                    "UPDATE skills SET current_version_id = ?2 WHERE id = ?1",
+                    params!["skill-book-ingest", candidate.id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(store
+            .publish_wiki_skill_version("skill-book-ingest", &candidate.id)
+            .unwrap_err()
+            .to_string()
+            .contains("当前 Skill 版本已变化"));
+        store
+            .db
+            .with_connection(|conn| {
+                conn.execute(
+                    "UPDATE skills SET current_version_id = 'skill-version-book-ingest-v1'
+                     WHERE id = 'skill-book-ingest'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
 
         let published = store
             .publish_wiki_skill_version("skill-book-ingest", &candidate.id)
@@ -8240,6 +8972,69 @@ mod tests {
             "skill-version-book-ingest-v1"
         );
         assert_eq!(rolled_back.skill.revision, 1);
+    }
+
+    #[test]
+    fn test_interrupted_skill_benchmarks_fail_and_can_be_restarted() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book(
+                "book-benchmark-restart",
+                "/tmp/book-benchmark-restart",
+            )])
+            .unwrap();
+        let base = store.initialize_base("book-benchmark-restart").unwrap();
+        let candidate = store
+            .get_wiki_skill_detail("skill-book-ingest", None)
+            .unwrap()
+            .versions
+            .into_iter()
+            .find(|version| version.release_state == "candidate")
+            .unwrap();
+        store
+            .evaluate_wiki_skill_version("skill-book-ingest", &candidate.id, "semantic-ingest")
+            .unwrap();
+
+        let queued = store
+            .prepare_wiki_skill_benchmark(
+                "skill-book-ingest",
+                &candidate.id,
+                "semantic-ingest",
+                &base.id,
+                "runtime-deepseek-harness",
+                "test-model",
+            )
+            .unwrap();
+        store.recover_interrupted_tasks().unwrap();
+        let queued = store.get_wiki_skill_benchmark(&queued.id).unwrap();
+        assert_eq!(queued.status, "failed");
+        assert!(queued.error.unwrap().contains("服务重启"));
+
+        let running = store
+            .prepare_wiki_skill_benchmark(
+                "skill-book-ingest",
+                &candidate.id,
+                "semantic-ingest",
+                &base.id,
+                "runtime-deepseek-harness",
+                "test-model",
+            )
+            .unwrap();
+        store.start_wiki_skill_benchmark(&running.id).unwrap();
+        store.recover_interrupted_tasks().unwrap();
+        let running = store.get_wiki_skill_benchmark(&running.id).unwrap();
+        assert_eq!(running.status, "failed");
+        assert!(running.error.unwrap().contains("服务重启"));
+        assert!(store
+            .prepare_wiki_skill_benchmark(
+                "skill-book-ingest",
+                &candidate.id,
+                "semantic-ingest",
+                &base.id,
+                "runtime-deepseek-harness",
+                "test-model",
+            )
+            .is_ok());
     }
 
     #[test]

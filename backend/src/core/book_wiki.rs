@@ -6,28 +6,30 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::core::agent_tool_gateway::{AGENT_EXTERNAL_RESEARCH_TOOL, AGENT_KNOWLEDGE_TOOLS};
 use crate::core::presentation::{render_pptx, spec_from_report, validate_pptx};
 use crate::error::BrainError;
 use crate::infra::book_wiki_store::{
-    stable_id, BookWikiStore, MarkdownSourceDraft, SourceSectionDraft,
+    stable_id, BookWikiStore, MarkdownSourceDraft, SourceSectionDraft, WikiSkillBenchmarkCompletion,
 };
 use crate::infra::deepseek_harness::{AgentPromptRequest, AgentRuntime, AgentRuntimeEvent};
 use crate::models::book_wiki::{
     AgentTokenUsage, ConfigDocument, KnowledgeAnswer, KnowledgeBaseSummary, KnowledgeChangeSet,
     KnowledgeEntryDetail, KnowledgeEntrySummary, KnowledgeMessage, KnowledgeTask,
     KnowledgeTaskExecution, RuntimeProfile, RuntimeVerification, SemanticCompileResult,
-    SourceSpanSnapshot, WikiSkill,
+    SourceSpanSnapshot, WikiSkill, WikiSkillBenchmarkCase, WikiSkillBenchmarkCaseResult,
+    WikiSkillBenchmarkRun,
 };
 
 const MAX_MARKDOWN_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_SCAN_DEPTH: usize = 24;
-const SEMANTIC_SOURCE_BATCH_CHARACTERS: usize = 48_000;
+const SEMANTIC_SOURCE_BATCH_CHARACTERS: usize = 20_000;
 const SEMANTIC_MAX_CANDIDATES_PER_BATCH: usize = 5;
-const SEMANTIC_MAX_OUTPUT_TOKENS: u32 = 4_096;
+const SEMANTIC_MAX_OUTPUT_TOKENS: u32 = 8_192;
+const SEMANTIC_RETRY_MAX_OUTPUT_TOKENS: u32 = 12_288;
 const SEMANTIC_MAX_SUMMARY_CHARACTERS: usize = 160;
 const SEMANTIC_MAX_CONTENT_CHARACTERS: usize = 500;
 const SEMANTIC_MAX_ALIASES: usize = 3;
@@ -37,6 +39,8 @@ const SEMANTIC_MAX_CITATIONS: usize = 6;
 const SEMANTIC_MAX_CLAIM_CHARACTERS: usize = 160;
 const SEMANTIC_MAX_RELATION_EVIDENCE_CHARACTERS: usize = 120;
 const SEMANTIC_COMPILE_TIMEOUT: Duration = Duration::from_secs(180);
+const SKILL_BENCHMARK_TIMEOUT: Duration = Duration::from_secs(180);
+const SKILL_BENCHMARK_MAX_OUTPUT_TOKENS: u32 = 4_096;
 const SEMANTIC_COMPILE_PROTOCOL_REVISION: &str = "semantic-compact-v2";
 const AGENT_CAPABILITY_MIN_TTL_SECONDS: i64 = 300;
 const AGENT_CAPABILITY_TTL_BUFFER_SECONDS: i64 = 60;
@@ -455,6 +459,163 @@ impl BookWikiService {
             }
         });
         Ok(queued)
+    }
+
+    pub fn queue_wiki_skill_benchmark(
+        self: &Arc<Self>,
+        base_id: &str,
+        skill_id: &str,
+        version_id: &str,
+        suite_slug: &str,
+    ) -> Result<WikiSkillBenchmarkRun, BrainError> {
+        let profile = self.active_runtime_profile()?;
+        let queued = self.store.prepare_wiki_skill_benchmark(
+            skill_id,
+            version_id,
+            suite_slug,
+            base_id,
+            &profile.id,
+            &profile.model,
+        )?;
+        let service = self.clone();
+        let run_id = queued.id.clone();
+        let execution_run_id = run_id.clone();
+        let execution = tokio::spawn(async move {
+            service
+                .execute_wiki_skill_benchmark(&execution_run_id)
+                .await
+        });
+        let supervisor = self.clone();
+        tokio::spawn(async move {
+            match execution.await {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => {
+                    let _ = supervisor
+                        .store
+                        .fail_wiki_skill_benchmark(&run_id, &error.to_string());
+                    tracing::warn!(benchmark_run_id = %run_id, error = %error, "Skill 真实模型基准失败");
+                }
+                Err(error) => {
+                    let message = format!("Skill 真实模型基准异常结束: {error}");
+                    let _ = supervisor
+                        .store
+                        .fail_wiki_skill_benchmark(&run_id, &message);
+                    tracing::error!(benchmark_run_id = %run_id, error = %error, "Skill 真实模型基准任务异常结束");
+                }
+            }
+        });
+        Ok(queued)
+    }
+
+    async fn execute_wiki_skill_benchmark(
+        &self,
+        run_id: &str,
+    ) -> Result<WikiSkillBenchmarkRun, BrainError> {
+        let run = self.store.start_wiki_skill_benchmark(run_id)?;
+        let profile = self.active_runtime_profile()?;
+        if profile.id != run.runtime_profile_id || profile.model != run.model {
+            return Err(BrainError::KnowledgeValidation(
+                "真实模型基准排队后运行时或模型已变化，请重新运行".to_string(),
+            ));
+        }
+        let cases = self.store.load_wiki_skill_benchmark_cases(&run.suite_id)?;
+        let baseline_instructions = self
+            .store
+            .wiki_skill_version_instructions(&run.baseline_version_id)?;
+        let candidate_instructions = self
+            .store
+            .wiki_skill_version_instructions(&run.skill_version_id)?;
+
+        let (candidate_agent_run_id, candidate_answer) = self
+            .run_skill_benchmark_variant(
+                &run,
+                &profile,
+                &cases,
+                "candidate",
+                &run.skill_version_id,
+                &candidate_instructions,
+            )
+            .await?;
+        let candidate_outputs = parse_skill_benchmark_outputs(&candidate_answer)?;
+        self.store
+            .mark_wiki_skill_benchmark_candidate_complete(run_id)?;
+        let (baseline_agent_run_id, baseline_answer) = self
+            .run_skill_benchmark_variant(
+                &run,
+                &profile,
+                &cases,
+                "baseline",
+                &run.baseline_version_id,
+                &baseline_instructions,
+            )
+            .await?;
+
+        let baseline_outputs = parse_skill_benchmark_outputs(&baseline_answer)?;
+        let (candidate_score, mut candidate_results, candidate_metrics) =
+            score_skill_benchmark_outputs(
+                &cases,
+                &candidate_outputs,
+                "candidate",
+                &candidate_agent_run_id,
+            );
+        let (baseline_score, mut baseline_results, baseline_metrics) =
+            score_skill_benchmark_outputs(
+                &cases,
+                &baseline_outputs,
+                "baseline",
+                &baseline_agent_run_id,
+            );
+        let candidate_runtime = self
+            .store
+            .get_agent_run_observation(&candidate_agent_run_id)?;
+        let baseline_runtime = self
+            .store
+            .get_agent_run_observation(&baseline_agent_run_id)?;
+        candidate_results.append(&mut baseline_results);
+        let metrics = serde_json::json!({
+            "candidate": { "quality": candidate_metrics, "runtime": candidate_runtime },
+            "baseline": { "quality": baseline_metrics, "runtime": baseline_runtime },
+            "score_delta": candidate_score - baseline_score,
+            "regression_tolerance": 0.03,
+        });
+        self.store.complete_wiki_skill_benchmark(
+            run_id,
+            WikiSkillBenchmarkCompletion {
+                baseline_agent_run_id: &baseline_agent_run_id,
+                candidate_agent_run_id: &candidate_agent_run_id,
+                baseline_score,
+                candidate_score,
+                metrics: &metrics,
+                results: &candidate_results,
+            },
+        )
+    }
+
+    async fn run_skill_benchmark_variant(
+        &self,
+        run: &WikiSkillBenchmarkRun,
+        profile: &RuntimeProfile,
+        cases: &[WikiSkillBenchmarkCase],
+        variant: &str,
+        version_id: &str,
+        instructions: &str,
+    ) -> Result<(String, String), BrainError> {
+        let input = serde_json::json!({
+            "benchmark_run_id": run.id,
+            "benchmark_variant": variant,
+            "skill_id": run.skill_id,
+            "skill_version_id": version_id,
+            "case_ids": cases.iter().map(|case| case.id.as_str()).collect::<Vec<_>>(),
+        });
+        self.run_audited(
+            &run.knowledge_base_id,
+            "skill_benchmark",
+            &input,
+            profile,
+            build_skill_benchmark_prompt(instructions, cases),
+            None,
+        )
+        .await
     }
 
     pub fn request_semantic_compile_cancel(
@@ -881,7 +1042,7 @@ impl BookWikiService {
             .flatten()
             .filter_map(serde_json::Value::as_str)
             .collect::<HashSet<_>>();
-        let skill_snapshots = self
+        let mut skill_snapshots = self
             .store
             .list_wiki_skills(Some(base_id))?
             .into_iter()
@@ -899,6 +1060,33 @@ impl BookWikiService {
                 })
             })
             .collect::<Vec<_>>();
+        if task_type == "skill_benchmark" {
+            if let (Some(skill_id), Some(version_id)) = (
+                input.get("skill_id").and_then(serde_json::Value::as_str),
+                input
+                    .get("skill_version_id")
+                    .and_then(serde_json::Value::as_str),
+            ) {
+                let detail = self.store.get_wiki_skill_detail(skill_id, Some(base_id))?;
+                let version = detail
+                    .versions
+                    .iter()
+                    .find(|version| version.id == version_id)
+                    .ok_or_else(|| BrainError::KnowledgeNotFound(version_id.to_string()))?;
+                skill_snapshots.push(serde_json::json!({
+                    "id": detail.skill.id,
+                    "slug": detail.skill.slug,
+                    "name": detail.skill.name,
+                    "version_id": version.id,
+                    "revision": version.revision,
+                    "content_hash": version.content_hash,
+                    "files": version.files,
+                    "permissions": detail.skill.permissions,
+                    "requirements": detail.skill.requirements,
+                    "application_mode": "benchmark_prompt_injected",
+                }));
+            }
+        }
         let config_snapshots = self
             .store
             .list_config_documents(Some(base_id))?
@@ -922,6 +1110,9 @@ impl BookWikiService {
             "knowledge_task_id",
             "conversation_id",
             "compile_fingerprint",
+            "benchmark_run_id",
+            "benchmark_variant",
+            "skill_version_id",
         ] {
             if let Some(value) = input.get(key) {
                 evidence_refs.insert(key.to_string(), value.clone());
@@ -1000,7 +1191,7 @@ impl BookWikiService {
             RuntimeInvocation {
                 prompt,
                 timeout: request_timeout,
-                max_output_tokens: runtime_max_output_tokens_for_task(task_type),
+                max_output_tokens: runtime_max_output_tokens_for_invocation(task_type, input),
                 capability_token: capability
                     .as_ref()
                     .map(|capability| capability.token.as_str()),
@@ -1355,7 +1546,7 @@ impl BookWikiService {
                 "compile_fingerprint": &compile_fingerprint,
                 "timeout_seconds": SEMANTIC_COMPILE_TIMEOUT.as_secs(),
             });
-            let (mut run_id, answer) = self
+            let first_result = self
                 .run_audited(
                     base_id,
                     "knowledge_ingest",
@@ -1364,10 +1555,41 @@ impl BookWikiService {
                     prompt.clone(),
                     None,
                 )
-                .await?;
+                .await;
+            let (mut run_id, answer, retried_empty) = match first_result {
+                Ok((run_id, answer)) => (run_id, answer, false),
+                Err(error) if is_recoverable_empty_answer(&error) => {
+                    self.store.update_compile_activity(
+                        base_id,
+                        "retrying",
+                        &format!(
+                            "第 {current_batch}/{total_batches} 批未收到正文，正在提高输出预算重试"
+                        ),
+                        current_batch,
+                        total_batches,
+                        None,
+                    )?;
+                    let retry_input = semantic_retry_input(&input, &error);
+                    let retry_prompt = format!(
+                        "{prompt}\n\n上一次调用未返回正文。请只返回简洁的 JSON 对象；没有高价值主题时返回 {{\"entries\":[]}}。"
+                    );
+                    let (run_id, answer) = self
+                        .run_audited(
+                            base_id,
+                            "knowledge_ingest",
+                            &retry_input,
+                            &profile,
+                            retry_prompt,
+                            None,
+                        )
+                        .await?;
+                    (run_id, answer, true)
+                }
+                Err(error) => return Err(error),
+            };
             let parsed = match parse_semantic_candidates(&answer) {
                 Ok(parsed) => parsed,
-                Err(first_error) => {
+                Err(first_error) if !retried_empty => {
                     self.store.update_compile_activity(
                         base_id,
                         "retrying",
@@ -1376,18 +1598,7 @@ impl BookWikiService {
                         total_batches,
                         None,
                     )?;
-                    let retry_input = serde_json::json!({
-                        "batch": batch_index + 1,
-                        "batch_count": batches.len(),
-                        "compile_base_id": base_id,
-                        "retry": 1,
-                        "reason": first_error.to_string(),
-                        "source_span_ids": batch.iter().map(|span| &span.id).collect::<Vec<_>>(),
-                        "skill_ids": skills.iter().map(|skill| &skill.id).collect::<Vec<_>>(),
-                        "model": &profile.model,
-                        "compile_fingerprint": &compile_fingerprint,
-                        "timeout_seconds": SEMANTIC_COMPILE_TIMEOUT.as_secs(),
-                    });
+                    let retry_input = semantic_retry_input(&input, &first_error);
                     let retry_prompt = format!(
                         "{prompt}\n\n上一次结果未通过 JSON 校验：{first_error}。请重新返回严格符合约定的单个 JSON 对象，不要添加围栏或解释。"
                     );
@@ -1404,6 +1615,7 @@ impl BookWikiService {
                     run_id = retry_run_id;
                     parse_semantic_candidates(&retry_answer)?
                 }
+                Err(error) => return Err(error),
             };
             for candidate in parsed {
                 merge_semantic_candidate(&mut candidates, candidate)?;
@@ -1696,16 +1908,53 @@ fn is_cancelled_agent_error(error: &BrainError) -> bool {
     matches!(error, BrainError::KnowledgeValidation(message) if message == "Agent 运行已取消")
 }
 
+fn is_recoverable_empty_answer(error: &BrainError) -> bool {
+    matches!(error, BrainError::LlmApiError { provider, detail }
+        if provider == "deepseek_harness"
+            && (detail.contains("空回答") || detail.contains("未返回正文")))
+}
+
+fn semantic_retry_input(input: &serde_json::Value, error: &BrainError) -> serde_json::Value {
+    let mut retry_input = input.clone();
+    retry_input["retry"] = serde_json::json!(1);
+    retry_input["reason"] = serde_json::json!(error.to_string());
+    retry_input
+}
+
 fn compile_cancellation_key(base_id: &str) -> String {
     format!("compile:{base_id}")
 }
 
 fn runtime_timeout_for_task(task_type: &str) -> Option<Duration> {
-    (task_type == "knowledge_ingest").then_some(SEMANTIC_COMPILE_TIMEOUT)
+    match task_type {
+        "knowledge_ingest" => Some(SEMANTIC_COMPILE_TIMEOUT),
+        "skill_benchmark" => Some(SKILL_BENCHMARK_TIMEOUT),
+        _ => None,
+    }
 }
 
 fn runtime_max_output_tokens_for_task(task_type: &str) -> Option<u32> {
-    (task_type == "knowledge_ingest").then_some(SEMANTIC_MAX_OUTPUT_TOKENS)
+    match task_type {
+        "knowledge_ingest" => Some(SEMANTIC_MAX_OUTPUT_TOKENS),
+        "skill_benchmark" => Some(SKILL_BENCHMARK_MAX_OUTPUT_TOKENS),
+        _ => None,
+    }
+}
+
+fn runtime_max_output_tokens_for_invocation(
+    task_type: &str,
+    input: &serde_json::Value,
+) -> Option<u32> {
+    if task_type == "knowledge_ingest"
+        && input
+            .get("retry")
+            .and_then(serde_json::Value::as_u64)
+            .is_some_and(|retry| retry > 0)
+    {
+        Some(SEMANTIC_RETRY_MAX_OUTPUT_TOKENS)
+    } else {
+        runtime_max_output_tokens_for_task(task_type)
+    }
 }
 
 fn capability_ttl_seconds(request_timeout: Option<Duration>) -> i64 {
@@ -1836,6 +2085,7 @@ fn agent_tools_for_task_type(task_type: &str) -> Vec<&'static str> {
         // Attaching the full MCP tool catalog here only enlarges the request and
         // gives the agent an unnecessary path into another tool-call turn.
         "knowledge_ingest" => Vec::new(),
+        "skill_benchmark" => Vec::new(),
         task_type if task_type.starts_with("knowledge_task_") => AGENT_KNOWLEDGE_TOOLS.to_vec(),
         _ => vec!["book_get_context", "knowledge_report_progress"],
     }
@@ -2104,6 +2354,228 @@ fn parse_semantic_candidates(answer: &str) -> Result<Vec<serde_json::Value>, Bra
         .cloned()
         .map(normalize_semantic_candidate)
         .collect())
+}
+
+#[derive(Deserialize)]
+struct SkillBenchmarkEnvelope {
+    cases: Vec<SkillBenchmarkOutput>,
+}
+
+#[derive(Deserialize)]
+struct SkillBenchmarkOutput {
+    case_id: String,
+    #[serde(default)]
+    response: String,
+    #[serde(default)]
+    citations: Vec<String>,
+}
+
+fn build_skill_benchmark_prompt(instructions: &str, cases: &[WikiSkillBenchmarkCase]) -> String {
+    let fixtures = cases
+        .iter()
+        .map(|case| {
+            serde_json::json!({
+                "case_id": case.id,
+                "scenario_type": case.scenario_type,
+                "input": case.fixture,
+            })
+        })
+        .collect::<Vec<_>>();
+    let fixtures_json = serde_json::to_string(&fixtures).unwrap_or_else(|_| "[]".to_string());
+    format!(
+        "你正在执行一个只读、固定样例的 Skill 基准。不得调用工具，不得写入知识库，不得使用样例之外的事实。\n\
+         对每个样例独立应用下方 Skill；response 必须简洁但保留动作、条件、证据边界或结构要求，citations 只能填写样例 context 中存在的 id。\n\
+         只返回单个 JSON 对象，格式为 {{\"cases\":[{{\"case_id\":\"...\",\"response\":\"...\",\"citations\":[\"S1\"]}}]}}。\n\
+         必须覆盖所有 case_id，不要输出 Markdown 围栏或额外解释。\n\n\
+         <skill_instructions>\n{instructions}\n</skill_instructions>\n\n\
+         <benchmark_cases>\n{fixtures_json}\n</benchmark_cases>"
+    )
+}
+
+fn parse_skill_benchmark_outputs(answer: &str) -> Result<Vec<SkillBenchmarkOutput>, BrainError> {
+    let trimmed = answer.trim();
+    let json_slice = if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        trimmed
+    } else {
+        let start = trimmed.find('{').ok_or_else(|| {
+            BrainError::KnowledgeValidation("Skill 基准结果不是有效 JSON".to_string())
+        })?;
+        let end = trimmed.rfind('}').ok_or_else(|| {
+            BrainError::KnowledgeValidation("Skill 基准结果不是有效 JSON".to_string())
+        })?;
+        &trimmed[start..=end]
+    };
+    let envelope: SkillBenchmarkEnvelope = serde_json::from_str(json_slice).map_err(|error| {
+        BrainError::KnowledgeValidation(format!("Skill 基准 JSON 解析失败: {error}"))
+    })?;
+    if envelope.cases.is_empty() {
+        return Err(BrainError::KnowledgeValidation(
+            "Skill 基准结果没有 cases".to_string(),
+        ));
+    }
+    Ok(envelope.cases)
+}
+
+fn score_skill_benchmark_outputs(
+    cases: &[WikiSkillBenchmarkCase],
+    outputs: &[SkillBenchmarkOutput],
+    variant: &str,
+    agent_run_id: &str,
+) -> (f64, Vec<WikiSkillBenchmarkCaseResult>, serde_json::Value) {
+    let outputs = outputs
+        .iter()
+        .map(|output| (output.case_id.as_str(), output))
+        .collect::<HashMap<_, _>>();
+    let mut weighted_score = 0.0;
+    let total_weight = cases.iter().map(|case| case.weight).sum::<f64>();
+    let mut passed_cases = 0_usize;
+    let mut citation_sum = 0.0;
+    let mut adherence_sum = 0.0;
+    let results = cases
+        .iter()
+        .map(|case| {
+            let output = outputs.get(case.id.as_str()).copied();
+            let response = output.map(|output| output.response.trim()).unwrap_or("");
+            let normalized = response.to_lowercase();
+            let citations = output
+                .map(|output| output.citations.clone())
+                .unwrap_or_default();
+            let required_terms = case
+                .expectations
+                .get("required_terms")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>();
+            let forbidden_terms = case
+                .expectations
+                .get("forbidden_terms")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>();
+            let required_citations = case
+                .expectations
+                .get("required_citations")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>();
+            let required_hits = required_terms
+                .iter()
+                .filter(|term| normalized.contains(&term.to_lowercase()))
+                .count();
+            let adherence = if required_terms.is_empty() {
+                1.0
+            } else {
+                required_hits as f64 / required_terms.len() as f64
+            };
+            let safety = if forbidden_terms
+                .iter()
+                .any(|term| normalized.contains(&term.to_lowercase()))
+            {
+                0.0
+            } else {
+                1.0
+            };
+            let citation_score = if required_citations.is_empty() {
+                1.0
+            } else {
+                required_citations
+                    .iter()
+                    .filter(|required| citations.iter().any(|actual| actual == **required))
+                    .count() as f64
+                    / required_citations.len() as f64
+            };
+            let allowed_citations = case
+                .fixture
+                .get("context")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|item| item.get("id").and_then(serde_json::Value::as_str))
+                .collect::<HashSet<_>>();
+            let citation_validity = if citations
+                .iter()
+                .all(|citation| allowed_citations.contains(citation.as_str()))
+            {
+                1.0
+            } else {
+                0.0
+            };
+            let non_empty = if response.is_empty() { 0.0 } else { 1.0 };
+            let score = ((adherence + safety + citation_score + citation_validity + non_empty)
+                / 5.0)
+                .clamp(0.0, 1.0);
+            let passed = score + f64::EPSILON >= 0.75
+                && adherence + f64::EPSILON >= 0.75
+                && safety == 1.0
+                && citation_score == 1.0
+                && citation_validity == 1.0
+                && non_empty == 1.0;
+            passed_cases += usize::from(passed);
+            citation_sum += citation_score;
+            adherence_sum += adherence;
+            weighted_score += score * case.weight;
+            WikiSkillBenchmarkCaseResult {
+                case_id: case.id.clone(),
+                name: case.name.clone(),
+                variant: variant.to_string(),
+                agent_run_id: Some(agent_run_id.to_string()),
+                response_text: response.to_string(),
+                citations,
+                metrics: serde_json::json!({
+                    "instruction_adherence": adherence,
+                    "citation_coverage": citation_score,
+                    "citation_validity": citation_validity,
+                    "safety": safety,
+                    "non_empty": non_empty,
+                    "missing_required_terms": required_terms
+                        .iter()
+                        .filter(|term| !normalized.contains(&term.to_lowercase()))
+                        .copied()
+                        .collect::<Vec<_>>(),
+                }),
+                score,
+                passed,
+                error: output.is_none().then(|| "模型未返回该固定样例".to_string()),
+            }
+        })
+        .collect::<Vec<_>>();
+    let case_count = cases.len().max(1) as f64;
+    let overall = if total_weight <= f64::EPSILON {
+        0.0
+    } else {
+        (weighted_score / total_weight).clamp(0.0, 1.0)
+    };
+    let metrics = serde_json::json!({
+        "overall_score": overall,
+        "passed_cases": passed_cases,
+        "total_cases": cases.len(),
+        "pass_rate": passed_cases as f64 / case_count,
+        "citation_coverage": citation_sum / case_count,
+        "instruction_adherence": adherence_sum / case_count,
+        "duplicate_entity_avoidance": selected_case_average(&results, &["bench-ingest-05", "bench-ingest-07"]),
+        "conflict_retention": selected_case_average(&results, &["bench-ingest-03", "bench-query-03", "bench-research-04"]),
+        "no_material_accuracy": selected_case_average(&results, &["bench-ingest-04", "bench-ingest-11"]),
+        "evidence_boundary": selected_case_average(&results, &["bench-query-02", "bench-query-06", "bench-research-05"]),
+    });
+    (overall, results, metrics)
+}
+
+fn selected_case_average(results: &[WikiSkillBenchmarkCaseResult], case_ids: &[&str]) -> f64 {
+    let selected = results
+        .iter()
+        .filter(|result| case_ids.contains(&result.case_id.as_str()))
+        .collect::<Vec<_>>();
+    if selected.is_empty() {
+        0.0
+    } else {
+        selected.iter().map(|result| result.score).sum::<f64>() / selected.len() as f64
+    }
 }
 
 fn normalize_semantic_candidate(mut candidate: serde_json::Value) -> serde_json::Value {
@@ -2742,6 +3214,7 @@ mod tests {
     use crate::infra::sqlite_store::SqliteStore;
     use crate::models::book_wiki::{BookKind, ReaderBook, RuntimeProviderConfig};
     use async_trait::async_trait;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -2927,6 +3400,9 @@ mod tests {
 
     #[test]
     fn test_semantic_compile_bounds_runtime_without_changing_qa_deadline() {
+        assert_eq!(SEMANTIC_SOURCE_BATCH_CHARACTERS, 20_000);
+        assert_eq!(SEMANTIC_MAX_OUTPUT_TOKENS, 8_192);
+        assert_eq!(SEMANTIC_RETRY_MAX_OUTPUT_TOKENS, 12_288);
         assert_eq!(
             runtime_timeout_for_task("knowledge_ingest"),
             Some(SEMANTIC_COMPILE_TIMEOUT)
@@ -2937,7 +3413,111 @@ mod tests {
             Some(SEMANTIC_MAX_OUTPUT_TOKENS)
         );
         assert_eq!(runtime_max_output_tokens_for_task("knowledge_qa"), None);
+        assert_eq!(
+            runtime_timeout_for_task("skill_benchmark"),
+            Some(SKILL_BENCHMARK_TIMEOUT)
+        );
+        assert_eq!(
+            runtime_max_output_tokens_for_task("skill_benchmark"),
+            Some(SKILL_BENCHMARK_MAX_OUTPUT_TOKENS)
+        );
+        assert!(allowed_agent_tools("skill_benchmark", &serde_json::json!({})).is_empty());
         assert_eq!(capability_ttl_seconds(Some(Duration::from_secs(600))), 660);
+    }
+
+    #[test]
+    fn test_semantic_compile_retries_only_empty_harness_answers() {
+        let empty = BrainError::LlmApiError {
+            provider: "deepseek_harness".to_string(),
+            detail: "DeepSeek Harness 返回了空回答 (stop_reason=end_turn)".to_string(),
+        };
+        let exhausted = BrainError::LlmApiError {
+            provider: "deepseek_harness".to_string(),
+            detail: "DeepSeek Harness 达到输出 token 上限且未返回正文 (stop_reason=max_tokens)"
+                .to_string(),
+        };
+        let refusal = BrainError::LlmApiError {
+            provider: "deepseek_harness".to_string(),
+            detail: "DeepSeek Harness 拒绝回答 (stop_reason=refusal)".to_string(),
+        };
+        assert!(is_recoverable_empty_answer(&empty));
+        assert!(is_recoverable_empty_answer(&exhausted));
+        assert!(!is_recoverable_empty_answer(&refusal));
+        assert!(!is_recoverable_empty_answer(
+            &BrainError::KnowledgeValidation("Agent 运行已取消".to_string())
+        ));
+        let input = serde_json::json!({ "batch": 1, "source_span_ids": ["span-1"] });
+        let retried = semantic_retry_input(&input, &empty);
+        assert_eq!(retried["retry"], 1);
+        assert_eq!(retried["source_span_ids"], input["source_span_ids"]);
+        assert!(input.get("retry").is_none());
+        assert_eq!(
+            runtime_max_output_tokens_for_invocation("knowledge_ingest", &input),
+            Some(SEMANTIC_MAX_OUTPUT_TOKENS)
+        );
+        assert_eq!(
+            runtime_max_output_tokens_for_invocation("knowledge_ingest", &retried),
+            Some(SEMANTIC_RETRY_MAX_OUTPUT_TOKENS)
+        );
+        assert_eq!(
+            runtime_max_output_tokens_for_invocation("knowledge_qa", &retried),
+            None
+        );
+    }
+
+    #[test]
+    fn test_skill_benchmark_scoring_penalizes_missing_citations_and_terms() {
+        let cases = vec![WikiSkillBenchmarkCase {
+            id: "case-1".to_string(),
+            suite_id: "suite-1".to_string(),
+            ordinal: 1,
+            name: "证据不足".to_string(),
+            scenario_type: "qa".to_string(),
+            fixture: serde_json::json!({
+                "prompt": "答案是什么？",
+                "context": [{ "id": "Q1", "content": "现有材料不足以得出结论。" }]
+            }),
+            expectations: serde_json::json!({
+                "required_terms": ["证据不足"],
+                "forbidden_terms": ["编造"],
+                "required_citations": ["Q1"]
+            }),
+            weight: 1.0,
+        }];
+        let good = parse_skill_benchmark_outputs(
+            r#"{"cases":[{"case_id":"case-1","response":"证据不足，不能下结论。","citations":["Q1"]}]}"#,
+        )
+        .unwrap();
+        let bad = parse_skill_benchmark_outputs(
+            r#"{"cases":[{"case_id":"case-1","response":"这是编造的确定结论。","citations":[]}]}"#,
+        )
+        .unwrap();
+        let invalid_citation = parse_skill_benchmark_outputs(
+            r#"{"cases":[{"case_id":"case-1","response":"证据不足，不能下结论。","citations":["Q1","OTHER"]}]}"#,
+        )
+        .unwrap();
+        let missing_citation = parse_skill_benchmark_outputs(
+            r#"{"cases":[{"case_id":"case-1","response":"证据不足，不能下结论。","citations":[]}]}"#,
+        )
+        .unwrap();
+
+        let (good_score, good_results, _) =
+            score_skill_benchmark_outputs(&cases, &good, "candidate", "run-good");
+        let (bad_score, bad_results, _) =
+            score_skill_benchmark_outputs(&cases, &bad, "baseline", "run-bad");
+        let (invalid_citation_score, invalid_citation_results, _) =
+            score_skill_benchmark_outputs(&cases, &invalid_citation, "candidate", "run-invalid");
+        let (missing_citation_score, missing_citation_results, _) =
+            score_skill_benchmark_outputs(&cases, &missing_citation, "candidate", "run-missing");
+
+        assert_eq!(good_score, 1.0);
+        assert!(good_results[0].passed);
+        assert!(bad_score < good_score);
+        assert!(!bad_results[0].passed);
+        assert!(invalid_citation_score < good_score);
+        assert!(!invalid_citation_results[0].passed);
+        assert!(missing_citation_score < good_score);
+        assert!(!missing_citation_results[0].passed);
     }
 
     #[test]
@@ -3083,6 +3663,89 @@ mod tests {
         assert!(store.get_base_by_book_id("book-pdf").unwrap().is_none());
     }
 
+    #[tokio::test]
+    async fn test_queue_skill_benchmark_completes_in_background_with_audited_runs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let book_path = dir.path().join("benchmark-book");
+        std::fs::create_dir(&book_path).expect("book dir");
+        std::fs::write(book_path.join("chapter.md"), "# 第一章\n固定样例测试内容。")
+            .expect("source write");
+        let db = Arc::new(SqliteStore::new(&dir.path().join("benchmark.db")).expect("db"));
+        let store = BookWikiStore::new(db);
+        store
+            .save_reader_books(&[ReaderBook {
+                id: "book-benchmark".to_string(),
+                path: book_path.to_string_lossy().to_string(),
+                kind: BookKind::Folder,
+                name: "基准测试书".to_string(),
+                description: String::new(),
+                category: String::new(),
+                added_at: 1,
+                progress: None,
+            }])
+            .expect("save book");
+        let service = Arc::new(BookWikiService::new(store.clone(), Arc::new(FakeRuntime)));
+        let synced = service
+            .initialize_and_sync("book-benchmark")
+            .expect("initialize");
+        store
+            .evaluate_wiki_skill_version(
+                "skill-book-query",
+                "skill-version-book-query-v2",
+                "grounded-query",
+            )
+            .expect("structural evaluation");
+
+        let queued = service
+            .queue_wiki_skill_benchmark(
+                &synced.knowledge_base.id,
+                "skill-book-query",
+                "skill-version-book-query-v2",
+                "grounded-query",
+            )
+            .expect("queue benchmark");
+        let completed = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let run = store
+                    .get_wiki_skill_benchmark(&queued.id)
+                    .expect("benchmark run");
+                if matches!(run.status.as_str(), "completed" | "failed") {
+                    break run;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("benchmark timeout");
+
+        assert_eq!(completed.status, "completed");
+        assert!(completed.passed);
+        assert_eq!(completed.results.len(), 16);
+        assert!(completed
+            .results
+            .iter()
+            .all(|result| result.agent_run_id.is_some()));
+        let candidate_run_id = completed
+            .results
+            .iter()
+            .find(|result| result.variant == "candidate")
+            .and_then(|result| result.agent_run_id.as_deref())
+            .expect("candidate run id");
+        let inspection = store
+            .get_agent_run_inspection(candidate_run_id)
+            .expect("benchmark inspection");
+        let snapshot = inspection.snapshot.expect("benchmark snapshot");
+        assert!(snapshot.tool_names.is_empty());
+        assert_eq!(
+            snapshot.skill_snapshots[0]["version_id"],
+            "skill-version-book-query-v2"
+        );
+        assert_eq!(
+            snapshot.skill_snapshots[0]["application_mode"],
+            "benchmark_prompt_injected"
+        );
+    }
+
     struct FakeRuntime;
 
     #[async_trait]
@@ -3121,6 +3784,33 @@ mod tests {
                     }]
                 }).to_string());
             }
+            if request.prompt.contains("只读、固定样例的 Skill 基准") {
+                let cases_json = request
+                    .prompt
+                    .split_once("<benchmark_cases>\n")
+                    .and_then(|(_, remainder)| remainder.split_once("\n</benchmark_cases>"))
+                    .map(|(value, _)| value)
+                    .unwrap_or("[]");
+                let cases: Vec<serde_json::Value> =
+                    serde_json::from_str(cases_json).expect("benchmark cases json");
+                let response = "新增 更新 争议 条件 无实质变化 别名 论断 归并 依赖 方向 A100 64 来源 事务 快照 127.0.0.1 证据不足 冲突 旧版 新版 速度 安全 部署 事实 推断 重试 读多写少 命中率 研究计划 证据 证据矩阵 增量 全量 书内 外部 分歧 知识差距 待验证 停止条件 范围 受众 目标 问题 行动 每页 观点 讲者备注 32 禁止编造 页脚";
+                return Ok(serde_json::json!({
+                    "cases": cases.into_iter().map(|case| {
+                        let citations = case
+                            .pointer("/input/context")
+                            .and_then(serde_json::Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|item| item.get("id").and_then(serde_json::Value::as_str))
+                            .collect::<Vec<_>>();
+                        serde_json::json!({
+                            "case_id": case.get("case_id").and_then(serde_json::Value::as_str).unwrap_or(""),
+                            "response": response,
+                            "citations": citations,
+                        })
+                    }).collect::<Vec<_>>()
+                }).to_string());
+            }
             if request.prompt.contains("一项研究任务") {
                 assert!(request.prompt.contains("任务标题：梳理核心架构"));
                 assert!(request.prompt.contains("[S1] 核心架构"));
@@ -3137,6 +3827,28 @@ mod tests {
                 assert!(request.prompt.contains("用户: 核心架构是什么？"));
             }
             Ok("核心架构采用分层设计。[S1]".to_string())
+        }
+    }
+
+    struct EmptySemanticRuntime {
+        failures: usize,
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl AgentRuntime for EmptySemanticRuntime {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            if request.prompt.contains("语义 Wiki 编译器") {
+                let call = self.calls.fetch_add(1, Ordering::SeqCst);
+                if call < self.failures {
+                    return Err(BrainError::LlmApiError {
+                        provider: "deepseek_harness".to_string(),
+                        detail: "DeepSeek Harness 达到输出 token 上限且未返回正文 (stop_reason=max_tokens)"
+                            .to_string(),
+                    });
+                }
+            }
+            FakeRuntime.prompt(request).await
         }
     }
 
@@ -3438,6 +4150,67 @@ mod tests {
 
         assert!(error.to_string().contains("取消"));
         assert_eq!(store.get_task(&task.id).unwrap().status, "cancelled");
+    }
+
+    #[tokio::test]
+    async fn test_semantic_compile_retries_empty_answer_once() {
+        for failures in [1, 2] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let book_path = dir.path().join("book-empty-answer");
+            std::fs::create_dir(&book_path).expect("book dir");
+            std::fs::write(
+                book_path.join("chapter.md"),
+                "# 分层架构\n界面层负责交互，服务层负责编排，存储层负责持久化。",
+            )
+            .expect("source");
+            let db = Arc::new(SqliteStore::new(&dir.path().join("semantic.db")).expect("db"));
+            let store = BookWikiStore::new(db);
+            store
+                .save_reader_books(&[ReaderBook {
+                    id: "book-empty-answer".to_string(),
+                    path: book_path.to_string_lossy().to_string(),
+                    kind: BookKind::Folder,
+                    name: "空回答重试测试书".to_string(),
+                    description: String::new(),
+                    category: String::new(),
+                    added_at: 1,
+                    progress: None,
+                }])
+                .expect("save book");
+            let calls = Arc::new(AtomicUsize::new(0));
+            let service = BookWikiService::new(
+                store.clone(),
+                Arc::new(EmptySemanticRuntime {
+                    failures,
+                    calls: calls.clone(),
+                }),
+            );
+            let synced = service
+                .initialize_and_sync("book-empty-answer")
+                .expect("sync");
+            let result = service
+                .compile_semantic_wiki(&synced.knowledge_base.id)
+                .await;
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
+            if failures == 1 {
+                assert_eq!(
+                    result.expect("retry recovers").change_set.status,
+                    "proposed"
+                );
+            } else {
+                assert!(result
+                    .expect_err("retry is bounded")
+                    .to_string()
+                    .contains("max_tokens"));
+                assert_eq!(
+                    store
+                        .get_base(&synced.knowledge_base.id)
+                        .unwrap()
+                        .compile_state,
+                    "failed"
+                );
+            }
+        }
     }
 
     #[tokio::test]

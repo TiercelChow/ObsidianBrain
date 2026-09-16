@@ -243,6 +243,25 @@
                 </template>
                 <p v-else>尚未运行固定评测。评测只检查结构与安全规则，不代表真实模型回答质量。</p>
               </section>
+              <section>
+                <strong>真实模型基准</strong>
+                <template v-if="activeSkillVersion.latest_benchmark">
+                  <div v-if="['queued', 'running'].includes(activeSkillVersion.latest_benchmark.status)" class="skill-benchmark-running">
+                    <el-icon class="is-loading"><Loading /></el-icon><span>{{ benchmarkProgressLabel(activeSkillVersion.latest_benchmark) }}</span>
+                  </div>
+                  <template v-else-if="activeSkillVersion.latest_benchmark.status === 'completed'">
+                    <div class="skill-eval-score" :class="{ passed: activeSkillVersion.latest_benchmark.passed }"><b>{{ Math.round((activeSkillVersion.latest_benchmark.candidate_score || 0) * 100) }}</b><span>/ 100</span><em>{{ activeSkillVersion.latest_benchmark.passed ? '通过' : '需改进' }}</em></div>
+                    <small>当前版 {{ Math.round((activeSkillVersion.latest_benchmark.baseline_score || 0) * 100) }} 分 · 差异 {{ formatBenchmarkDelta(activeSkillVersion.latest_benchmark.score_delta) }}</small>
+                    <p>{{ benchmarkSummary(activeSkillVersion.latest_benchmark) }}</p>
+                    <details v-if="activeSkillVersion.latest_benchmark.results.length" class="skill-benchmark-details">
+                      <summary>查看候选版逐样例结果</summary>
+                      <div><article v-for="result in activeSkillVersion.latest_benchmark.results.filter(item => item.variant === 'candidate')" :key="result.case_id"><header><span>{{ result.name }}</span><em :class="{ passed: result.passed }">{{ Math.round(result.score * 100) }}</em></header><p>{{ result.response_text || result.error || '没有返回内容' }}</p><small>{{ result.citations.length ? `引用：${result.citations.join('、')}` : '没有引用' }}</small></article></div>
+                    </details>
+                  </template>
+                  <p v-else class="skill-benchmark-error">{{ activeSkillVersion.latest_benchmark.error || '真实模型基准运行失败' }}</p>
+                </template>
+                <p v-else>尚未运行。它会在只读、无工具权限的 Harness 会话中对比当前版和候选版。</p>
+              </section>
             </div>
             <pre v-if="activeSkillFile">{{ activeSkillFile.content_text }}</pre>
             <div v-else class="knowledge-empty"><strong>当前版本没有可显示文件</strong></div>
@@ -252,7 +271,8 @@
           <el-button v-if="skillDetail?.skill.source_type === 'builtin'" @click="cloneSkillToCustom">复制为自定义</el-button>
           <el-button v-if="skillDetail?.skill.source_type === 'custom'" @click="editDetailedSkill">编辑当前版本</el-button>
           <el-button v-if="activeSkillVersion?.release_state === 'candidate'" :loading="skillVersionAction === 'evaluate'" @click="evaluateActiveSkillVersion">运行固定评测</el-button>
-          <el-button v-if="activeSkillVersion?.release_state === 'candidate'" type="primary" :loading="skillVersionAction === 'publish'" :disabled="!activeSkillVersion.latest_evaluation?.passed" @click="publishActiveSkillVersion">发布此版本</el-button>
+          <el-button v-if="activeSkillVersion?.release_state === 'candidate'" :loading="skillVersionAction === 'benchmark'" :disabled="!activeSkillVersion.latest_evaluation?.passed || ['queued', 'running'].includes(activeSkillVersion.latest_benchmark?.status || '')" @click="benchmarkActiveSkillVersion">运行真实基准</el-button>
+          <el-button v-if="activeSkillVersion?.release_state === 'candidate'" type="primary" :loading="skillVersionAction === 'publish'" :disabled="!activeSkillVersion.latest_evaluation?.passed || !activeSkillVersion.latest_benchmark?.passed" @click="publishActiveSkillVersion">发布此版本</el-button>
           <el-button v-if="activeSkillVersion?.release_state === 'published' && activeSkillVersion.id !== skillDetail?.current_version_id" :loading="skillVersionAction === 'rollback'" @click="rollbackActiveSkillVersion">回滚到此版本</el-button>
           <el-button type="primary" @click="skillDetailVisible = false">完成</el-button>
         </div>
@@ -282,6 +302,7 @@ import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import {
   getBookWikiSettings,
   getAgentUsageStats,
+  getWikiSkillBenchmark,
   bookWikiExportDownloadUrl,
   createKnowledgeBackup,
   evaluateWikiSkillVersion,
@@ -296,6 +317,7 @@ import {
   saveAgentRuntimeProfile,
   saveBookWikiConfigDocument,
   saveCustomWikiSkill,
+  startWikiSkillBenchmark,
   publishWikiSkillVersion,
   setWikiSkillBinding,
   uploadAndRestoreKnowledgeBackup,
@@ -308,6 +330,7 @@ import {
   type RuntimeProfile,
   type WikiSkill,
   type WikiSkillDetail,
+  type WikiSkillBenchmarkRun,
 } from '@/api/knowledge'
 
 const section = ref<'runtime' | 'usage' | 'protection' | 'documents' | 'skills'>('runtime')
@@ -348,6 +371,7 @@ const skillDetail = ref<WikiSkillDetail | null>(null)
 const activeSkillVersionId = ref('')
 const activeSkillFilePath = ref('')
 const skillVersionAction = ref('')
+const skillBenchmarkPollingRunId = ref('')
 const skillDraft = reactive({ id: '', slug: '', name: '', description: '', instructions: '', revision: 0 })
 const activeDocument = computed(() => documents.value.find(document => document.id === activeDocumentId.value))
 const activeSkillVersion = computed(() => skillDetail.value?.versions.find(version => version.id === activeSkillVersionId.value) || null)
@@ -414,6 +438,24 @@ function skillEvaluationSuite(slug: string) {
   if (slug === 'book-research') return 'evidence-research'
   if (slug === 'book-presentation') return 'evidence-presentation'
   return 'grounded-query'
+}
+
+function formatBenchmarkDelta(value?: number | null) {
+  const points = Math.round((value || 0) * 100)
+  return `${points > 0 ? '+' : ''}${points} 分`
+}
+
+function benchmarkProgressLabel(run: WikiSkillBenchmarkRun) {
+  if (run.status === 'queued') return `等待运行 · ${run.total_cases} 个固定样例`
+  if (run.completed_cases >= run.total_cases) return '候选版已完成，正在运行当前版对照'
+  return `正在运行候选版 · ${run.total_cases} 个固定样例`
+}
+
+function benchmarkSummary(run: WikiSkillBenchmarkRun) {
+  const candidate = run.results.filter(result => result.variant === 'candidate')
+  const failed = candidate.filter(result => !result.passed)
+  if (!failed.length) return '候选版通过全部真实样例。发布仍需满足总分及相对当前版的回退门槛。'
+  return `未通过：${failed.slice(0, 3).map(result => result.name).join('、')}${failed.length > 3 ? ` 等 ${failed.length} 项` : ''}`
 }
 
 function backupReasonLabel(reason: string) {
@@ -553,7 +595,12 @@ async function openSkillDetail(skill: WikiSkill) {
     const detail = response.result
     skillDetail.value = detail
     const current = detail.versions.find(version => version.id === detail.current_version_id) || detail.versions[0]
-    if (current) selectSkillVersion(current.id)
+    if (current) {
+      selectSkillVersion(current.id)
+      if (current.latest_benchmark && ['queued', 'running'].includes(current.latest_benchmark.status)) {
+        void resumeSkillBenchmark(current.latest_benchmark, current.id)
+      }
+    }
   } catch (error) {
     skillDetailVisible.value = false
     ElMessage.error((error as Error).message)
@@ -566,6 +613,9 @@ function selectSkillVersion(versionId: string) {
   activeSkillVersionId.value = versionId
   const version = skillDetail.value?.versions.find(item => item.id === versionId)
   activeSkillFilePath.value = version?.files.find(file => file.relative_path === 'SKILL.md')?.relative_path || version?.files[0]?.relative_path || ''
+  if (version?.latest_benchmark && ['queued', 'running'].includes(version.latest_benchmark.status)) {
+    void resumeSkillBenchmark(version.latest_benchmark, version.id)
+  }
 }
 
 async function refreshSkillDetail(selectedVersionId?: string) {
@@ -594,6 +644,66 @@ async function evaluateActiveSkillVersion() {
   } finally {
     skillVersionAction.value = ''
   }
+}
+
+async function benchmarkActiveSkillVersion() {
+  if (!skillDetail.value || !activeSkillVersion.value || !activeBaseId.value) return
+  const versionId = activeSkillVersion.value.id
+  skillVersionAction.value = 'benchmark'
+  try {
+    const response = await startWikiSkillBenchmark(
+      activeBaseId.value,
+      skillDetail.value.skill.id,
+      versionId,
+      skillEvaluationSuite(skillDetail.value.skill.slug),
+    )
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '真实模型基准启动失败')
+    updateSkillBenchmark(versionId, response.result)
+    const run = await pollSkillBenchmark(response.result, versionId)
+    if (run.status === 'completed') {
+      ElMessage.success(run.passed ? `真实模型基准通过：${Math.round((run.candidate_score || 0) * 100)} 分` : '真实模型基准完成，候选版本尚未达到发布门槛')
+    } else if (run.status === 'failed') {
+      throw new Error(run.error || '真实模型基准运行失败')
+    }
+    await refreshSkillDetail(versionId)
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    skillVersionAction.value = ''
+  }
+}
+
+async function pollSkillBenchmark(initial: WikiSkillBenchmarkRun, versionId: string) {
+  let run = initial
+  skillBenchmarkPollingRunId.value = run.id
+  try {
+    while (['queued', 'running'].includes(run.status) && skillDetailVisible.value && skillBenchmarkPollingRunId.value === run.id) {
+      await new Promise(resolve => window.setTimeout(resolve, 1500))
+      if (!skillDetailVisible.value || skillBenchmarkPollingRunId.value !== run.id) break
+      const polled = await getWikiSkillBenchmark(run.id)
+      if (polled.status !== 'success' || !polled.result) throw new Error(polled.error?.message || '真实模型基准状态读取失败')
+      run = polled.result
+      updateSkillBenchmark(versionId, run)
+    }
+    return run
+  } finally {
+    if (skillBenchmarkPollingRunId.value === run.id) skillBenchmarkPollingRunId.value = ''
+  }
+}
+
+async function resumeSkillBenchmark(run: WikiSkillBenchmarkRun, versionId: string) {
+  if (skillBenchmarkPollingRunId.value === run.id) return
+  try {
+    const completed = await pollSkillBenchmark(run, versionId)
+    if (!['queued', 'running'].includes(completed.status)) await refreshSkillDetail(versionId)
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
+
+function updateSkillBenchmark(versionId: string, benchmark: WikiSkillBenchmarkRun) {
+  const version = skillDetail.value?.versions.find(item => item.id === versionId)
+  if (version) version.latest_benchmark = benchmark
 }
 
 async function publishActiveSkillVersion() {
@@ -986,7 +1096,7 @@ onMounted(initialize)
 .skill-detail-content > header div { min-width: 0; display: grid; gap: 2px; }
 .skill-detail-content > header strong { color: var(--text-primary); font-size: 11px; }
 .skill-detail-content > header span, .skill-detail-content > header code { overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
-.skill-version-audit { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border-faint); background: color-mix(in srgb, var(--bg-base) 42%, transparent); }
+.skill-version-audit { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border-faint); background: color-mix(in srgb, var(--bg-base) 42%, transparent); }
 .skill-version-audit section { min-width: 0; display: grid; align-content: start; gap: 4px; padding: 10px; border: 1px solid var(--border-faint); border-radius: 12px; }
 .skill-version-audit strong { color: var(--text-primary); font-size: 10px; }
 .skill-version-audit p, .skill-version-audit small { margin: 0; color: var(--text-faint); font-size: 8px; line-height: 1.55; }
@@ -996,6 +1106,16 @@ onMounted(initialize)
 .skill-eval-score span { font-size: 8px; }
 .skill-eval-score em { margin-left: auto; padding: 3px 6px; border-radius: 999px; background: color-mix(in srgb, var(--danger, #dc2626) 12%, transparent); color: var(--danger, #dc2626); font-size: 8px; font-style: normal; }
 .skill-eval-score.passed em { background: var(--accent-light); color: var(--accent); }
+.skill-benchmark-running { display: flex; align-items: center; gap: 6px; color: var(--accent); font-size: 9px; line-height: 1.5; }
+.skill-benchmark-error { color: var(--danger, #dc2626) !important; }
+.skill-benchmark-details summary { color: var(--accent); font-size: 9px; cursor: pointer; }
+.skill-benchmark-details > div { max-height: 180px; margin-top: 7px; overflow: auto; display: grid; gap: 6px; }
+.skill-benchmark-details article { display: grid; gap: 3px; padding: 7px; border-radius: 8px; background: var(--bg-soft); }
+.skill-benchmark-details article header { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.skill-benchmark-details article header span { color: var(--text-secondary); font-size: 8px; font-weight: 650; }
+.skill-benchmark-details article header em { color: var(--danger, #dc2626); font-size: 8px; font-style: normal; }
+.skill-benchmark-details article header em.passed { color: var(--accent); }
+.skill-benchmark-details article p, .skill-benchmark-details article small { color: var(--text-faint); font-size: 8px; line-height: 1.45; }
 .skill-detail-content > pre { max-height: min(58vh, 620px); margin: 0; overflow: auto; padding: 18px; background: color-mix(in srgb, var(--bg-base) 56%, transparent); color: var(--text-secondary); font-family: var(--font-mono); font-size: 11px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
 @media (max-width: 768px) {
   .settings-layout { display: block; }

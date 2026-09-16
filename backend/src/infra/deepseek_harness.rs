@@ -5,7 +5,7 @@ use std::time::Duration;
 use agent_client_protocol::schema::v1::{
     CancelNotification, ContentBlock, ContentChunk, InitializeRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, ToolCallStatus,
+    SetSessionConfigOptionRequest, StopReason, ToolCallStatus,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::util::MatchDispatch;
@@ -198,7 +198,7 @@ impl DeepSeekHarnessRuntime {
                         );
                         let mut output = String::new();
                         let mut cancel_channel_closed = false;
-                        loop {
+                        let stop_reason = loop {
                             tokio::select! {
                                 update = session.read_update() => {
                                     match update? {
@@ -215,7 +215,7 @@ impl DeepSeekHarnessRuntime {
                                                 .await
                                                 .otherwise_ignore()?;
                                         }
-                                        SessionMessage::StopReason(_) => break,
+                                        SessionMessage::StopReason(reason) => break reason,
                                         _ => {}
                                     }
                                 }
@@ -234,13 +234,23 @@ impl DeepSeekHarnessRuntime {
                                     }
                                 }
                             }
-                        }
-                        Ok(output)
+                        };
+                        emit_event(
+                            operation_events.as_ref(),
+                            AgentRuntimeEvent::Phase {
+                                phase: "stopped".to_string(),
+                                message: format!(
+                                    "ACP 会话结束：{}",
+                                    stop_reason_code(stop_reason)
+                                ),
+                            },
+                        );
+                        Ok((output, stop_reason))
                     })
                     .await
             });
 
-        let answer = tokio::time::timeout(request_timeout, operation)
+        let (answer, stop_reason) = tokio::time::timeout(request_timeout, operation)
             .await
             .map_err(|_| {
                 harness_error(format!(
@@ -258,8 +268,10 @@ impl DeepSeekHarnessRuntime {
                     ))
                 }
             })?;
-        if answer.trim().is_empty() {
-            return Err(harness_error("DeepSeek Harness 返回了空回答"));
+        if answer.trim().is_empty()
+            || matches!(stop_reason, StopReason::Refusal | StopReason::Cancelled)
+        {
+            return Err(empty_answer_error(stop_reason));
         }
         Ok(answer)
     }
@@ -350,6 +362,33 @@ fn duration_label(duration: Duration) -> String {
     } else {
         format!("{} 毫秒", duration.as_millis())
     }
+}
+
+fn stop_reason_code(reason: StopReason) -> &'static str {
+    match reason {
+        StopReason::EndTurn => "end_turn",
+        StopReason::MaxTokens => "max_tokens",
+        StopReason::MaxTurnRequests => "max_turn_requests",
+        StopReason::Refusal => "refusal",
+        StopReason::Cancelled => "cancelled",
+        _ => "unknown",
+    }
+}
+
+fn empty_answer_error(reason: StopReason) -> BrainError {
+    let detail = match reason {
+        StopReason::MaxTokens => "DeepSeek Harness 达到输出 token 上限且未返回正文",
+        StopReason::MaxTurnRequests => "DeepSeek Harness 达到请求轮次上限且未返回正文",
+        StopReason::Refusal => "DeepSeek Harness 拒绝回答",
+        StopReason::Cancelled => {
+            return BrainError::KnowledgeValidation("Agent 运行已取消".to_string())
+        }
+        _ => "DeepSeek Harness 返回了空回答",
+    };
+    harness_error(format!(
+        "{detail} (stop_reason={})",
+        stop_reason_code(reason)
+    ))
 }
 
 pub fn inspect_runtime_profiles(profiles: Vec<RuntimeProfile>) -> Vec<RuntimeHealth> {
@@ -556,6 +595,21 @@ mod tests {
             }
         );
         assert!(received.try_recv().is_err());
+    }
+
+    #[test]
+    fn test_empty_answer_reports_acp_stop_reason() {
+        let exhausted =
+            empty_answer_error(agent_client_protocol::schema::v1::StopReason::MaxTokens);
+        assert!(exhausted.to_string().contains("输出 token 上限"));
+        assert!(exhausted.to_string().contains("max_tokens"));
+
+        let ended = empty_answer_error(agent_client_protocol::schema::v1::StopReason::EndTurn);
+        assert!(ended.to_string().contains("空回答"));
+        assert!(ended.to_string().contains("end_turn"));
+
+        let refused = empty_answer_error(agent_client_protocol::schema::v1::StopReason::Refusal);
+        assert!(refused.to_string().contains("拒绝回答"));
     }
 
     #[tokio::test]

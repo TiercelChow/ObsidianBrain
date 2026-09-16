@@ -31,7 +31,7 @@ test('product site describes installation, configuration and module usage', asyn
 test('product site describes the database-native Book Wiki workflow and current limits', async () => {
   const html = await read('index.html')
 
-  for (const phrase of ['每本书一个独立知识库', '跨章节归并', '人工审核', 'PPTX', 'SQLite', '外部研究默认关闭', '授权域名']) {
+  for (const phrase of ['每本书一个独立知识库', '跨章节归并', '人工审核', '真实样例基准', 'PPTX', 'SQLite', '外部研究默认关闭', '授权域名']) {
     assert.match(html, new RegExp(phrase), `missing Book Wiki phrase: ${phrase}`)
   }
 

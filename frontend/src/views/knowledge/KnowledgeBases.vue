@@ -369,6 +369,7 @@ function compilePhaseLabel(base: KnowledgeBaseSummary) {
     queued: '已进入后台队列', preparing: '正在准备来源', invoking: '正在连接模型',
     runtime: '正在准备模型请求', launching: '正在启动运行时', connected: '运行时已连接',
     session_ready: '模型会话已就绪', request_sent: '正在等待模型返回',
+    stopped: '模型已结束，正在校验返回',
     thinking: '模型正在分析', tool: '正在调用知识工具',
     generating: '正在生成知识候选', retrying: '正在校正模型结果',
     batch_completed: '本批分析完成', finalizing: '正在保存候选变更',

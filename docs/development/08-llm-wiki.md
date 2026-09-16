@@ -13,7 +13,7 @@
 
 迁移 016–018 已把章节索引升级所需的数据边界补齐。来源同步采用文档版本和不可变片段，重复同步保持 revision 幂等，文件更新不会级联删除旧证据；会话与成果引用保存当时的实体/路径快照。旧知识库继续保持 `chapter/not_started`，只有用户点击智能编译才会发生模型调用。
 
-`compile_semantic_wiki` 按当前来源分批执行，超长章节会继续切块而不是静默截断。单批来源正文预算为 48,000 字符，最多保留 5 个跨片段归并后的高价值候选，并通过 Harness 供应商 Patch 将单批输出限制为 4,096 token。编译专用路由显式关闭推理等级、将供应商自动重试从默认最多 5 次压缩为最多 1 次；这些限制不影响知识问答和研究任务。模型只返回短摘要、别名、原子论断、关系和引用，不再重复撰写 `content_md`；服务端根据摘要和论断生成可检索正文，并再次执行字段限长。知识摄入请求的单批截止时间为 180 秒。每批读取已有语义 Wiki 和前批候选，归并概念、别名、论断与关系；无效 JSON 仅重试一次。模型结果必须通过服务端 entry type、当前 span 引用和数量限制校验，再写入 `knowledge_change_sets`。批准时再次校验来源与 expected revision，并在一个 SQLite 事务中写入条目、论断、关系、引用和版本；人工保护条目的修改始终为高风险。
+`compile_semantic_wiki` 按当前来源分批执行，超长章节会继续切块而不是静默截断。单批来源正文预算为 20,000 字符，最多保留 5 个跨片段归并后的高价值候选，并通过 Harness 供应商 Patch 将首次调用的输出上限设为 8,192 token，必要时单次恢复调用设为 12,288 token。编译专用路由显式关闭推理等级、将供应商自动重试从默认最多 5 次压缩为最多 1 次；这些限制不影响知识问答和研究任务。模型只返回短摘要、别名、原子论断、关系和引用，不再重复撰写 `content_md`；服务端根据摘要和论断生成可检索正文，并再次执行字段限长。知识摄入请求的单批截止时间为 180 秒。每批读取已有语义 Wiki 和前批候选，归并概念、别名、论断与关系；ACP 已结束但没有正文时记录停止原因，并以更高输出预算重试一次；无效 JSON 也最多重试一次，两种情况合计每批不超过两次模型调用。拒绝回答和用户取消不重试。模型结果必须通过服务端 entry type、当前 span 引用和数量限制校验，再写入 `knowledge_change_sets`。批准时再次校验来源与 expected revision，并在一个 SQLite 事务中写入条目、论断、关系、引用和版本；人工保护条目的修改始终为高风险。
 
 语义编译的来源批次已经完整内联到提示词，变更集也由 `BookWikiService` 校验和持久化，因此编译 Run 不挂载 MCP 工具目录，避免无用的工具发现、工具 Schema token 和额外 Agent 回合。问答与研究任务仍按最小权限挂载知识工具；能力令牌 TTL 至少覆盖对应运行超时并额外保留 60 秒收尾窗口。ACP 适配器会记录进程启动、连接建立、会话就绪和请求提交等阶段，即使第三方兼容端点只在整段回答结束时推送文本，前端也能区分“尚未连接”和“模型已收到请求”。
 
@@ -52,6 +52,8 @@
 迁移 026 为 `skill_versions` 增加发布状态、父版本和变更说明，通过 `skill_version_origins` 保存许可证与适配来源；固定评测集、用例和结果分别存入 `skill_evaluation_suites/cases/runs`。评测器首版是确定性文本契约检查，按权重比较候选与当前版本，只允许通过的候选切换为当前版本；回滚只接受历史 `published` 版本。首批 v2 候选为项目独立重写内容，许可证不明确的开源项目不进入可发布来源。
 
 迁移 027 为变更集和单项变更增加分类、引用审计和影响快照。服务端根据正式实体是否存在复核 `new/update`，仅允许模型显式把既有实体标为 `disputed`；争议变更应用后，其原子论断以 `disputed` 验证状态保存。引用审计统计条目引用、显式论断引用与继承引用，级联影响在生成候选时冻结现有论断、关系和引用数量，审核界面据此展示应用范围。模型返回空候选时创建状态为 `applied` 的 `no_material` 记录，照常推进来源检查点并把知识库标记为 ready，而不增加待审核数量。
+
+迁移 028 增加 `skill_benchmark_cases/runs/case_results`。每次真实模型基准只发起两次聚合 Harness 调用：当前已发布版本与候选版本各处理同一评测集，避免逐样例启动进程。`skill_benchmark` Run 固定无 MCP 工具和能力令牌，Prompt 只包含所测版本指令与合成样例；输出只进入基准结果表，不进入知识变更集。服务端按必需概念、禁用内容、引用覆盖、引用有效性和非空输出确定性评分，保存逐样例回答和原始 Agent Run 引用。发布门槛同时要求离线结构评测通过、候选真实分数达到 suite 门槛、至少 80% 的样例通过且相对基线回退不超过 0.03。服务重启会把未完成基准明确标为失败，用户可重新运行，不会无限停在排队状态。普通迁移和单元测试只使用种子样例与假 Runtime，不依赖在线供应商。
 
 原 `Memory`、`WikiDashboard`、`WikiWorkbench`、`Explore`、`Ingest` 页面及 Wiki/Explore/Knowledge Insights handlers、旧 Markdown Wiki Engine 已移除。Vue Router 仍保留一个发布周期的静态跳转；旧 `Wiki/*.md` 不删除、不自动导入，新系统也不再读取。由此避免 SQLite Book Wiki 与 Obsidian Markdown Wiki 双写。
 
@@ -746,7 +748,7 @@ Agent 回答只能引用工具返回的 entry/span ID。后端在保存前验证
 
 当前页面继续复用已有 Tool API Envelope；Skill ZIP 上传和成果下载使用资源型 HTTP 端点。下面列出的是逐步迁移后的目标资源 API，不代表每条路由已经存在。
 
-当前新增 Tool 包括 `compile_book_knowledge_base`、`cancel_book_knowledge_compile`、`list_knowledge_change_sets`、`resolve_knowledge_change_set`、`lint_book_knowledge_base`、`save_knowledge_answer`、`cancel_knowledge_task`、`list_wiki_skills`、`get_wiki_skill_detail`、`save_custom_wiki_skill`、`evaluate_wiki_skill_version`、`publish_wiki_skill_version`、`rollback_wiki_skill_version`、`set_wiki_skill_binding`、`get_agent_run_events` 和 `get_agent_run_inspection`；智能编译和研究任务的启动 Tool 都只负责入队。资源端点覆盖 Skill ZIP 上传、成果下载、数据库快照下载/上传恢复与单书 JSON/Markdown 导出；`book_fetch_external` 仅存在于带能力令牌的本机 Agent MCP 端点，不进入普通页面 Tool API。
+当前新增 Tool 包括 `compile_book_knowledge_base`、`cancel_book_knowledge_compile`、`list_knowledge_change_sets`、`resolve_knowledge_change_set`、`lint_book_knowledge_base`、`save_knowledge_answer`、`cancel_knowledge_task`、`list_wiki_skills`、`get_wiki_skill_detail`、`save_custom_wiki_skill`、`evaluate_wiki_skill_version`、`start_wiki_skill_benchmark`、`get_wiki_skill_benchmark`、`publish_wiki_skill_version`、`rollback_wiki_skill_version`、`set_wiki_skill_binding`、`get_agent_run_events` 和 `get_agent_run_inspection`；智能编译、真实模型基准和研究任务的启动 Tool 都只负责入队。资源端点覆盖 Skill ZIP 上传、成果下载、数据库快照下载/上传恢复与单书 JSON/Markdown 导出；`book_fetch_external` 仅存在于带能力令牌的本机 Agent MCP 端点，不进入普通页面 Tool API。
 
 ### 13.1 前端 API
 

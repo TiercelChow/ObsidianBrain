@@ -1451,6 +1451,85 @@ impl ToolHandler for EvaluateWikiSkillVersionHandler {
 
 pub struct PublishWikiSkillVersionHandler;
 
+pub struct StartWikiSkillBenchmarkHandler;
+
+#[async_trait]
+impl ToolHandler for StartWikiSkillBenchmarkHandler {
+    fn name(&self) -> &str {
+        "start_wiki_skill_benchmark"
+    }
+
+    fn description(&self) -> &str {
+        "在受限的 DeepSeek Harness 中后台运行固定真实样例，对比 Wiki Skill 候选版本与当前版本"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": { "type": "string" },
+                "skill_id": { "type": "string" },
+                "version_id": { "type": "string" },
+                "suite_slug": {
+                    "type": "string",
+                    "enum": ["semantic-ingest", "grounded-query", "evidence-research", "evidence-presentation"]
+                }
+            },
+            "required": ["knowledge_base_id", "skill_id", "version_id", "suite_slug"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(ctx.book_wiki_service.queue_wiki_skill_benchmark(
+            required_string(&args, "knowledge_base_id")?,
+            required_string(&args, "skill_id")?,
+            required_string(&args, "version_id")?,
+            required_string(&args, "suite_slug")?,
+        )?)
+        .map_err(|error| BrainError::Internal(format!("Skill 基准运行序列化失败: {error}")))
+    }
+}
+
+pub struct GetWikiSkillBenchmarkHandler;
+
+#[async_trait]
+impl ToolHandler for GetWikiSkillBenchmarkHandler {
+    fn name(&self) -> &str {
+        "get_wiki_skill_benchmark"
+    }
+
+    fn description(&self) -> &str {
+        "读取 Wiki Skill 真实模型基准的状态、分数、差异指标与逐样例结果"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": { "run_id": { "type": "string" } },
+            "required": ["run_id"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(
+            ctx.book_wiki_service
+                .store()
+                .get_wiki_skill_benchmark(required_string(&args, "run_id")?)?,
+        )
+        .map_err(|error| BrainError::Internal(format!("Skill 基准运行序列化失败: {error}")))
+    }
+}
+
 #[async_trait]
 impl ToolHandler for PublishWikiSkillVersionHandler {
     fn name(&self) -> &str {

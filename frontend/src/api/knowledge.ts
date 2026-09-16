@@ -347,6 +347,7 @@ export interface WikiSkillVersion {
   files: WikiSkillFile[]
   origin?: WikiSkillOrigin | null
   latest_evaluation?: WikiSkillEvaluationRun | null
+  latest_benchmark?: WikiSkillBenchmarkRun | null
 }
 
 export interface WikiSkillOrigin {
@@ -377,6 +378,44 @@ export interface WikiSkillEvaluationRun {
   baseline_score?: number | null
   passed: boolean
   findings: WikiSkillEvaluationFinding[]
+  created_at: string
+}
+
+export interface WikiSkillBenchmarkCaseResult {
+  case_id: string
+  name: string
+  variant: 'baseline' | 'candidate'
+  agent_run_id?: string | null
+  response_text: string
+  citations: string[]
+  metrics: Record<string, unknown>
+  score: number
+  passed: boolean
+  error?: string | null
+}
+
+export interface WikiSkillBenchmarkRun {
+  id: string
+  skill_id: string
+  skill_version_id: string
+  baseline_version_id: string
+  suite_id: string
+  suite_name: string
+  knowledge_base_id: string
+  runtime_profile_id: string
+  model: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  total_cases: number
+  completed_cases: number
+  candidate_score?: number | null
+  baseline_score?: number | null
+  score_delta?: number | null
+  passed: boolean
+  metrics: Record<string, unknown>
+  error?: string | null
+  results: WikiSkillBenchmarkCaseResult[]
+  started_at?: string | null
+  completed_at?: string | null
   created_at: string
 }
 
@@ -971,6 +1010,26 @@ export function evaluateWikiSkillVersion(skillId: string, versionId: string, sui
     version_id: versionId,
     suite_slug: suiteSlug,
   }) as unknown as Promise<ToolEnvelope<WikiSkillEvaluationRun>>
+}
+
+export function startWikiSkillBenchmark(
+  knowledgeBaseId: string,
+  skillId: string,
+  versionId: string,
+  suiteSlug: string,
+) {
+  return callTool('start_wiki_skill_benchmark', {
+    knowledge_base_id: knowledgeBaseId,
+    skill_id: skillId,
+    version_id: versionId,
+    suite_slug: suiteSlug,
+  }) as unknown as Promise<ToolEnvelope<WikiSkillBenchmarkRun>>
+}
+
+export function getWikiSkillBenchmark(runId: string) {
+  return callTool('get_wiki_skill_benchmark', {
+    run_id: runId,
+  }) as unknown as Promise<ToolEnvelope<WikiSkillBenchmarkRun>>
 }
 
 export function publishWikiSkillVersion(skillId: string, versionId: string) {

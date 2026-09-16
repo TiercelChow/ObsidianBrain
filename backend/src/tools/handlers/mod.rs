@@ -195,6 +195,12 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(EvaluateWikiSkillVersionHandler))
         .await;
     registry
+        .register(Arc::new(StartWikiSkillBenchmarkHandler))
+        .await;
+    registry
+        .register(Arc::new(GetWikiSkillBenchmarkHandler))
+        .await;
+    registry
         .register(Arc::new(PublishWikiSkillVersionHandler))
         .await;
     registry

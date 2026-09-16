@@ -507,6 +507,58 @@ pub struct WikiSkillEvaluationRun {
     pub created_at: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct WikiSkillBenchmarkCase {
+    pub id: String,
+    pub suite_id: String,
+    pub ordinal: i64,
+    pub name: String,
+    pub scenario_type: String,
+    pub fixture: Value,
+    pub expectations: Value,
+    pub weight: f64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct WikiSkillBenchmarkCaseResult {
+    pub case_id: String,
+    pub name: String,
+    pub variant: String,
+    pub agent_run_id: Option<String>,
+    pub response_text: String,
+    pub citations: Vec<String>,
+    pub metrics: Value,
+    pub score: f64,
+    pub passed: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct WikiSkillBenchmarkRun {
+    pub id: String,
+    pub skill_id: String,
+    pub skill_version_id: String,
+    pub baseline_version_id: String,
+    pub suite_id: String,
+    pub suite_name: String,
+    pub knowledge_base_id: String,
+    pub runtime_profile_id: String,
+    pub model: String,
+    pub status: String,
+    pub total_cases: i64,
+    pub completed_cases: i64,
+    pub candidate_score: Option<f64>,
+    pub baseline_score: Option<f64>,
+    pub score_delta: Option<f64>,
+    pub passed: bool,
+    pub metrics: Value,
+    pub error: Option<String>,
+    pub results: Vec<WikiSkillBenchmarkCaseResult>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub created_at: String,
+}
+
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct WikiSkillVersion {
     pub id: String,
@@ -519,6 +571,7 @@ pub struct WikiSkillVersion {
     pub files: Vec<WikiSkillFile>,
     pub origin: Option<WikiSkillOrigin>,
     pub latest_evaluation: Option<WikiSkillEvaluationRun>,
+    pub latest_benchmark: Option<WikiSkillBenchmarkRun>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
