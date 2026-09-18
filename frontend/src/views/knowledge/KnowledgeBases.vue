@@ -433,7 +433,7 @@ onBeforeUnmount(() => {
 .overview-strip > div:first-child { padding-left: 0; border-left: 0; }
 .overview-strip strong { font-size: 25px; font-weight: 720; font-variant-numeric: tabular-nums; }
 .overview-strip span { color: var(--text-faint); font-size: 12px; }
-.book-wiki-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.book-wiki-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 14px; }
 .book-wiki-card { min-width: 0; display: grid; grid-template-columns: 82px 1fr; gap: 18px; padding: 19px; animation: knowledge-card-in var(--motion-slow) var(--ease-spring-gentle) both; animation-delay: calc(var(--order) * 36ms); }
 .book-cover { height: 108px; display: grid; place-content: center; justify-items: center; gap: 8px; border-radius: 15px 12px 12px 15px; background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 78%, #9b7bff), color-mix(in srgb, var(--accent) 56%, #263b9d)); color: white; box-shadow: 7px 8px 20px color-mix(in srgb, var(--accent) 18%, transparent), inset -5px 0 10px rgba(0,0,0,.1), inset 1px 0 rgba(255,255,255,.3); }
 .book-cover .el-icon { font-size: 27px; }

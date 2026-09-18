@@ -2,7 +2,6 @@
   <div class="knowledge-page">
     <header class="page-header knowledge-heading">
       <div>
-        <div class="knowledge-eyebrow">BOOK WIKI</div>
         <h1 class="page-title">{{ title }}</h1>
         <p class="page-subtitle">{{ subtitle }}</p>
       </div>

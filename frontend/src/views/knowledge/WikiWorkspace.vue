@@ -749,10 +749,10 @@ onBeforeUnmount(() => {
 .entry-source { overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .entry-empty, .entry-loading { display: flex; justify-content: center; gap: 7px; padding: 32px 10px; color: var(--text-faint); font-size: 12px; }
 .entry-load-more { width: calc(100% - 10px); min-height: 38px; margin: 5px; border: 0; border-radius: 11px; background: var(--bg-glass-subtle); color: var(--accent); cursor: pointer; }
-.entry-detail { max-height: calc(100vh - 208px); overflow: auto; padding: 30px clamp(22px, 4vw, 62px); }
+.entry-detail { max-height: calc(100vh - 208px); overflow: auto; padding: 22px clamp(18px, 2vw, 32px); }
 .entry-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border-faint); }
 .entry-detail-head > div:first-child { min-width: 0; }
-.entry-detail-head h2 { margin: 6px 0 4px; overflow-wrap: anywhere; font-size: clamp(24px, 3vw, 36px); font-weight: 730; }
+.entry-detail-head h2 { margin: 6px 0 4px; overflow-wrap: anywhere; font-size: clamp(20px, 2vw, 26px); font-weight: 690; }
 .entry-detail-head p { overflow-wrap: anywhere; color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; }
 .entry-detail-actions { display: flex; align-items: center; gap: 9px; flex: none; }
 .detail-loading { min-height: 300px; display: grid; place-content: center; color: var(--accent); font-size: 24px; }
@@ -760,6 +760,11 @@ onBeforeUnmount(() => {
 .entity-meta-strip { display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 18px; }
 .entity-meta-strip span { padding: 5px 9px; border: 1px solid var(--border-faint); border-radius: 999px; background: var(--bg-glass-subtle); color: var(--text-muted); font-size: 10px; }
 .entity-markdown { color: var(--text-secondary); font-size: 15px; line-height: 1.8; overflow-wrap: anywhere; }
+@media (min-width: 1101px) {
+  .wiki-workspace { min-height: 0; overflow: hidden; }
+  .entry-list { min-height: 0; max-height: none; }
+  .entry-detail { max-height: none; }
+}
 .review-modal { max-height: min(780px, calc(100dvh - 48px)); }
 .review-content { min-height: 0; display: grid; align-content: start; gap: 10px; flex: 1; overflow: auto; padding: 0 24px 12px; overscroll-behavior: contain; }
 .review-summary { display: grid; gap: 4px; padding: 12px; border-radius: 13px; background: var(--accent-light); }

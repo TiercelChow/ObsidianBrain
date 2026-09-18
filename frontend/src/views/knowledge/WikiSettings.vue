@@ -942,7 +942,7 @@ onMounted(initialize)
 </script>
 
 <style scoped>
-.settings-layout { min-height: 585px; display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 12px; }
+.settings-layout { min-height: 0; display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 12px; }
 .settings-nav { align-self: start; display: grid; gap: 4px; padding: 7px; }
 .settings-nav button { display: flex; align-items: center; gap: 11px; min-height: 58px; padding: 9px 11px; border: 0; border-radius: 13px; background: transparent; color: var(--text-muted); text-align: left; cursor: pointer; transition: var(--transition-interactive); }
 .settings-nav button:hover { background: var(--bg-hover); color: var(--text-primary); }
@@ -951,14 +951,14 @@ onMounted(initialize)
 .settings-nav button span { display: grid; gap: 2px; }
 .settings-nav strong { color: inherit; font-size: 13px; }
 .settings-nav small { color: var(--text-faint); font-size: 10px; }
-.settings-main { min-width: 0; container-type: inline-size; padding: clamp(20px, 3vw, 34px); }
-.settings-section-head { margin-bottom: 25px; padding-bottom: 20px; border-bottom: 1px solid var(--border-faint); }
+.settings-main { min-width: 0; container-type: inline-size; padding: clamp(16px, 1.8vw, 24px); }
+.settings-section-head { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border-faint); }
 .settings-section-head.split { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
 .settings-section-head span { color: var(--accent); font-size: 10px; font-weight: 720; letter-spacing: .08em; }
-.settings-section-head h2 { margin: 5px 0 4px; font-size: 24px; }
+.settings-section-head h2 { margin: 5px 0 4px; font-size: 20px; font-weight: 680; }
 .settings-section-head p { color: var(--text-muted); font-size: 12px; }
 .settings-loading { min-height: 260px; display: grid; place-content: center; color: var(--accent); }
-.runtime-card { max-width: 720px; display: grid; gap: 15px; padding: 18px; border: 1px solid var(--border-faint); border-radius: 17px; background: var(--bg-glass-subtle); }
+.runtime-card { min-width: 0; display: grid; gap: 15px; padding: 18px; border: 1px solid var(--border-faint); border-radius: 17px; background: var(--bg-glass-subtle); }
 .runtime-title { display: flex; align-items: center; gap: 11px; }
 .runtime-logo { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 14px; background: linear-gradient(145deg, var(--accent), #3c3fae); color: white; font-size: 12px; font-weight: 760; box-shadow: 0 8px 18px color-mix(in srgb, var(--accent) 22%, transparent); }
 .runtime-title > div:nth-child(2) { min-width: 0; flex: 1; }

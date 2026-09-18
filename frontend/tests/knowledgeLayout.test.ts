@@ -54,3 +54,45 @@ test('narrow Wiki navigation keeps all actions reachable and long content contai
   assert.match(tasks, /\.task-main footer\s*\{[^}]*flex-wrap:\s*wrap/)
   assert.match(tasks, /\.task-topline\s*\{[^}]*flex-wrap:\s*wrap/)
 })
+
+test('Wiki pages share the global page width and title rhythm', async () => {
+  const [shell, shared, bases, settings] = await Promise.all([
+    source('src/components/knowledge/KnowledgePageShell.vue'),
+    source('src/styles/knowledge.css'),
+    source('src/views/knowledge/KnowledgeBases.vue'),
+    source('src/views/knowledge/WikiSettings.vue'),
+  ])
+
+  assert.doesNotMatch(shell, /knowledge-eyebrow/)
+  assert.doesNotMatch(shared, /max-width:\s*1440px/)
+  assert.doesNotMatch(shared, /\.knowledge-heading\s+\.page-title/)
+  assert.match(bases, /\.book-wiki-grid\s*\{[^}]*repeat\(auto-fit/)
+  assert.doesNotMatch(settings, /\.runtime-card\s*\{[^}]*max-width:\s*720px/)
+  assert.doesNotMatch(settings, /\.settings-layout\s*\{[^}]*min-height:\s*585px/)
+})
+
+test('desktop Wiki reading surfaces fill the available height without clipping their own scroll areas', async () => {
+  const [shared, workspace, chat] = await Promise.all([
+    source('src/styles/knowledge.css'),
+    source('src/views/knowledge/WikiWorkspace.vue'),
+    source('src/views/knowledge/KnowledgeChat.vue'),
+  ])
+
+  assert.match(shared, /\.knowledge-page:has\(\.wiki-workspace\)/)
+  assert.match(shared, /\.knowledge-page:has\(\.chat-layout\)/)
+  assert.match(workspace, /\.entry-list\s*\{[^}]*max-height:\s*none/)
+  assert.match(workspace, /\.entry-detail\s*\{[^}]*max-height:\s*none/)
+  assert.match(chat, /\.message-list\s*\{[^}]*min-height:\s*0;[^}]*max-height:\s*none/)
+})
+
+test('mobile Wiki chat keeps its composer above the global dock', async () => {
+  const [shared, chat] = await Promise.all([
+    source('src/styles/knowledge.css'),
+    source('src/views/knowledge/KnowledgeChat.vue'),
+  ])
+
+  assert.match(shared, /\.app-main \.route-stage:has\(\.chat-layout\)\s*\{[^}]*height:\s*calc\(100dvh[^}]*var\(--mobile-dock-height\)/)
+  assert.match(shared, /\.knowledge-page:has\(\.chat-layout\)\s+\.knowledge-content\s*\{[^}]*flex:\s*1/)
+  assert.match(chat, /\.chat-panel\s*\{[^}]*min-height:\s*0;[^}]*flex:\s*1/)
+  assert.match(chat, /\.chat-composer\s*\{[^}]*flex:\s*none/)
+})
