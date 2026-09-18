@@ -1202,9 +1202,20 @@ impl BookWikiService {
         tokio::pin!(runtime);
         let mut thinking_recorded = false;
         let mut generation_recorded = false;
+        let mut stream_disconnected = false;
         let runtime_result = loop {
             tokio::select! {
                 result = &mut runtime => break result,
+                _ = async {
+                    if let Some(stream) = stream {
+                        stream.closed().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                }, if !stream_disconnected => {
+                    stream_disconnected = true;
+                    let _ = cancel_tx.send(true);
+                }
                 event = event_rx.recv() => {
                     let Some(event) = event else { continue };
                     if matches!(event, AgentRuntimeEvent::Thinking) && thinking_recorded {
@@ -3993,6 +4004,64 @@ mod tests {
                 .len(),
             4
         );
+    }
+
+    #[tokio::test]
+    async fn test_ask_streaming_cancels_runtime_when_client_disconnects() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let book_path = dir.path().join("book-chat-disconnect");
+        std::fs::create_dir(&book_path).expect("book dir");
+        std::fs::write(
+            book_path.join("source.md"),
+            "# 核心观点\n用于问答断线测试的证据。",
+        )
+        .expect("source write");
+        let db = Arc::new(SqliteStore::new(&dir.path().join("chat-disconnect.db")).expect("db"));
+        let store = BookWikiStore::new(db);
+        store
+            .save_reader_books(&[ReaderBook {
+                id: "book-chat-disconnect".to_string(),
+                path: book_path.to_string_lossy().to_string(),
+                kind: BookKind::Folder,
+                name: "问答断线测试".to_string(),
+                description: String::new(),
+                category: String::new(),
+                added_at: 1,
+                progress: None,
+            }])
+            .expect("save book");
+        let started = Arc::new(tokio::sync::Notify::new());
+        let service = BookWikiService::new(
+            store.clone(),
+            Arc::new(BlockingRuntime {
+                started: started.clone(),
+            }),
+        );
+        let synced = service
+            .initialize_and_sync("book-chat-disconnect")
+            .expect("sync");
+        let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let ask =
+            service.ask_streaming(&synced.knowledge_base.id, "核心观点是什么？", None, events);
+        tokio::pin!(ask);
+        tokio::select! {
+            _ = &mut ask => panic!("blocking runtime must still be running"),
+            _ = started.notified() => {}
+        }
+        let run_id = loop {
+            match receiver.try_recv() {
+                Ok(KnowledgeChatStreamEvent::RunStarted { run_id }) => break run_id,
+                Ok(_) => {}
+                Err(error) => panic!("run start event missing: {error}"),
+            }
+        };
+        drop(receiver);
+        let error = tokio::time::timeout(Duration::from_secs(2), ask)
+            .await
+            .expect("runtime stopped after disconnect")
+            .expect_err("disconnected question should be cancelled");
+        assert!(error.to_string().contains("取消"));
+        assert_eq!(store.get_agent_run(&run_id).unwrap().status, "cancelled");
     }
 
     #[tokio::test]

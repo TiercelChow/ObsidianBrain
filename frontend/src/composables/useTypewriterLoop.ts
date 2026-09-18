@@ -46,7 +46,7 @@ export function useTypewriterLoop(active: Ref<boolean>, phrases: () => string[])
     }, 900)
   }
 
-  watch(active, (isActive) => {
+  watch([active, () => phrases().join('\u0000')], ([isActive]) => {
     stop()
     phraseIndex = 0
     characterIndex = 0

@@ -20,6 +20,14 @@ test('knowledge chat persists conversations and restores their cited messages', 
   assert.match(answer, /data-source-index/)
   assert.match(chat, /streamBookKnowledge/)
   assert.match(chat, /event\.type === 'text_delta'/)
+  assert.match(chat, /const assistantMessage = messages\.value\[assistantIndex\]/)
+  assert.match(chat, /createStreamedTextBuffer/)
+  assert.match(chat, /await textBuffer\.drain\(\)/)
+  assert.match(chat.split('function newConversation')[1]?.split('function replaceChatQuery')[0] ?? '', /followOutput\.value = true/)
+  assert.match(chat.split('async function openConversation')[1]?.split('async function changeKnowledgeBase')[0] ?? '', /followOutput\.value = true/)
+  assert.match(chat, /message\.id !== streamingMessageId/)
+  assert.match(chat, /chat-run-status/)
+  assert.match(chat, /停止生成/)
   assert.doesNotMatch(chat, /revealAssistantAnswer/)
   assert.match(chat, /listKnowledgeConversations/)
   assert.match(chat, /getKnowledgeConversation/)
@@ -29,6 +37,8 @@ test('knowledge chat persists conversations and restores their cited messages', 
   assert.match(api, /conversation_id: string/)
   assert.match(api, /knowledge\/chat\/stream/)
   assert.match(api, /text\/event-stream/)
+  assert.match(api, /createSseDataParser/)
+  assert.match(api, /parser\.push\(decoder\.decode\(value, \{ stream: !done \}\)\)/)
 })
 
 test('knowledge chat previews numbered sources before an explicit workspace navigation', async () => {
@@ -56,7 +66,7 @@ test('knowledge thinking label loops as a reduced-motion aware typewriter', asyn
   ])
 
   assert.match(chat, /useTypewriterLoop/)
-  assert.match(chat, /正在梳理关键线索/)
+  assert.match(chat, /streamPhase\.value/)
   assert.match(typewriter, /prefers-reduced-motion: reduce/)
   assert.match(typewriter, /phrase\.slice\(0, characterIndex\)/)
 })
@@ -193,6 +203,11 @@ test('knowledge task results expose an auditable run inspector', async () => {
   assert.match(api, /get_agent_run_inspection/)
   assert.match(api, /AgentRunInspection/)
   assert.match(api, /AgentRunConfigSnapshot/)
+  assert.match(view, /resultTab === 'inspector'/)
+  assert.match(view, /inspectionLoading/)
+  assert.match(view, /inspectionError/)
+  assert.match(view, /重新加载检查器/)
+  assert.match(view, /canFocusDocument\(document\)/)
 })
 
 test('external research stays opt-in, domain scoped, and rate limited per task', async () => {

@@ -15,8 +15,8 @@
         <el-icon><Search /></el-icon>
         <input v-model="query" placeholder="搜索标题、摘要与正文" @input="scheduleSearch" />
       </label>
-      <button class="mobile-sync-button" type="button" :disabled="syncing" aria-label="同步来源" @click="syncActive">
-        <el-icon :class="{ 'is-loading': syncing }"><Refresh /></el-icon>
+      <button class="mobile-actions-button" type="button" :disabled="!activeBase" aria-label="Wiki 操作" @click="mobileActionsVisible = true">
+        <el-icon><MoreFilled /></el-icon>
       </button>
     </div>
 
@@ -141,6 +141,19 @@
       </article>
     </section>
 
+    <MotionModal v-model="mobileActionsVisible" aria-label="Wiki 操作">
+      <div class="knowledge-modal-card wiki-action-sheet">
+        <div class="knowledge-modal-head"><div><h3>Wiki 操作</h3><p>{{ activeBase?.book_name || '当前知识库' }}</p></div></div>
+        <div class="wiki-action-list">
+          <button type="button" :disabled="!activeBase?.pending_review_count" @click="runMobileAction('review')"><el-icon><Checked /></el-icon><span><strong>审核候选</strong><small>{{ activeBase?.pending_review_count || 0 }} 项待处理变更</small></span></button>
+          <button type="button" :disabled="!activeBase" @click="runMobileAction('graph')"><el-icon><Connection /></el-icon><span><strong>关系洞察</strong><small>查看连接与孤立实体</small></span></button>
+          <button type="button" :disabled="!activeBase || linting" @click="runMobileAction('lint')"><el-icon><DataAnalysis /></el-icon><span><strong>知识体检</strong><small>检查证据与结构</small></span></button>
+          <button type="button" :disabled="syncing || activeBase?.lifecycle !== 'active' || !activeBase?.source_available" @click="runMobileAction('sync')"><el-icon><Refresh /></el-icon><span><strong>同步来源</strong><small>读取原书的最新 Markdown</small></span></button>
+        </div>
+        <div class="knowledge-modal-actions"><el-button @click="mobileActionsVisible = false">完成</el-button></div>
+      </div>
+    </MotionModal>
+
     <MotionModal v-model="reviewVisible" aria-label="审核 Wiki 变更" size="wide">
       <div class="knowledge-modal-card review-modal">
         <div class="knowledge-modal-head"><div><h3>审核语义 Wiki 变更</h3><p>批准后在一个事务中写入正式条目、论断、关系、版本和引用。</p></div><span v-if="activeReview" class="knowledge-status" :class="`is-${activeReview.risk_level === 'high' ? 'warning' : 'draft'}`">{{ activeReview.risk_level }} risk</span></div>
@@ -227,7 +240,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, Checked, Connection, DataAnalysis, Document, Edit, Loading, Refresh, Search, Tickets } from '@element-plus/icons-vue'
+import { ArrowLeft, Checked, Connection, DataAnalysis, Document, Edit, Loading, MoreFilled, Refresh, Search, Tickets } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import KnowledgeGraphCanvas from '@/components/knowledge/KnowledgeGraphCanvas.vue'
@@ -275,6 +288,7 @@ const syncing = ref(false)
 const pendingReviews = ref<KnowledgeChangeSet[]>([])
 const activeReview = ref<KnowledgeChangeSet | null>(null)
 const reviewVisible = ref(false)
+const mobileActionsVisible = ref(false)
 const reviewNote = ref('')
 const resolvingReview = ref(false)
 const linting = ref(false)
@@ -444,6 +458,14 @@ function openReviews() {
   activeReview.value = pendingReviews.value[0] || null
   reviewNote.value = ''
   reviewVisible.value = true
+}
+
+function runMobileAction(action: 'review' | 'graph' | 'lint' | 'sync') {
+  mobileActionsVisible.value = false
+  if (action === 'review') openReviews()
+  else if (action === 'graph') void openGraph()
+  else if (action === 'lint') void runLint()
+  else void syncActive()
 }
 
 async function resolveReview(decision: 'approve' | 'reject') {
@@ -712,9 +734,9 @@ onBeforeUnmount(() => {
 .wiki-workspace { min-height: 570px; display: grid; grid-template-columns: minmax(250px, 320px) minmax(0, 1fr); gap: 12px; }
 .entry-pane, .entry-detail { min-height: 0; overflow: hidden; }
 .entry-pane { display: flex; flex-direction: column; }
-.entry-pane-head { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border-faint); }
+.entry-pane-head { min-height: 68px; display: grid; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border-faint); }
 .entry-pane-head > div { min-width: 0; display: grid; gap: 2px; }
-.entry-pane-head > .entry-statuses { flex: 0 0 auto; justify-items: end; gap: 5px; }
+.entry-pane-head > .entry-statuses { display: flex; flex-wrap: wrap; gap: 5px; }
 .entry-pane-head strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .entry-pane-head span:not(.knowledge-status) { color: var(--text-faint); font-size: 11px; }
 .entry-list { flex: 1; max-height: calc(100vh - 260px); overflow: auto; padding: 7px; }
@@ -729,36 +751,37 @@ onBeforeUnmount(() => {
 .entry-load-more { width: calc(100% - 10px); min-height: 38px; margin: 5px; border: 0; border-radius: 11px; background: var(--bg-glass-subtle); color: var(--accent); cursor: pointer; }
 .entry-detail { max-height: calc(100vh - 208px); overflow: auto; padding: 30px clamp(22px, 4vw, 62px); }
 .entry-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border-faint); }
-.entry-detail-head h2 { margin: 6px 0 4px; font-size: clamp(24px, 3vw, 36px); font-weight: 730; }
-.entry-detail-head p { color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; }
-.entry-detail-actions { display: flex; align-items: center; gap: 9px; }
+.entry-detail-head > div:first-child { min-width: 0; }
+.entry-detail-head h2 { margin: 6px 0 4px; overflow-wrap: anywhere; font-size: clamp(24px, 3vw, 36px); font-weight: 730; }
+.entry-detail-head p { overflow-wrap: anywhere; color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; }
+.entry-detail-actions { display: flex; align-items: center; gap: 9px; flex: none; }
 .detail-loading { min-height: 300px; display: grid; place-content: center; color: var(--accent); font-size: 24px; }
 .detail-symbol { width: 62px; height: 62px; display: grid; place-items: center; border-radius: 20px; background: var(--accent-light); color: var(--accent); font-size: 27px; }
 .entity-meta-strip { display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 18px; }
 .entity-meta-strip span { padding: 5px 9px; border: 1px solid var(--border-faint); border-radius: 999px; background: var(--bg-glass-subtle); color: var(--text-muted); font-size: 10px; }
 .entity-markdown { color: var(--text-secondary); font-size: 15px; line-height: 1.8; overflow-wrap: anywhere; }
 .review-modal { max-height: min(780px, calc(100dvh - 48px)); }
-.review-content { display: grid; gap: 10px; max-height: min(560px, 62dvh); overflow: auto; padding: 0 2px; }
+.review-content { min-height: 0; display: grid; align-content: start; gap: 10px; flex: 1; overflow: auto; padding: 0 24px 12px; overscroll-behavior: contain; }
 .review-summary { display: grid; gap: 4px; padding: 12px; border-radius: 13px; background: var(--accent-light); }
-.review-summary strong { font-size: 14px; }
-.review-summary span { color: var(--text-muted); font-size: 11px; }
+.review-summary strong { overflow-wrap: anywhere; font-size: 14px; }
+.review-summary span { overflow-wrap: anywhere; color: var(--text-muted); font-size: 11px; }
 .review-audit-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .review-audit-grid section { min-width: 0; display: grid; gap: 3px; padding: 11px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); }
 .review-audit-grid span, .review-audit-grid small { color: var(--text-faint); font-size: 9px; }
 .review-audit-grid strong { color: var(--text-primary); font-size: 11px; }
 .review-audit-grid strong.warning { color: var(--danger, #dc2626); }
 .review-change { display: grid; gap: 8px; padding: 13px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); }
-.review-change header { display: flex; align-items: center; gap: 8px; }
+.review-change header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .review-change header span { padding: 3px 7px; border-radius: 999px; background: var(--accent-light); color: var(--accent); font-size: 9px; }
-.review-change header strong { flex: 1; font-size: 13px; }
+.review-change header strong { min-width: min(100%, 160px); flex: 1; overflow-wrap: anywhere; font-size: 13px; }
 .review-change header code { color: var(--text-faint); font-family: var(--font-mono); font-size: 9px; }
-.review-change p { color: var(--text-muted); font-size: 11px; line-height: 1.6; }
-.review-change > div { display: flex; gap: 12px; color: var(--text-faint); font-size: 9px; }
+.review-change p { overflow-wrap: anywhere; color: var(--text-muted); font-size: 11px; line-height: 1.6; }
+.review-change > div { display: flex; flex-wrap: wrap; gap: 5px 12px; color: var(--text-faint); font-size: 9px; }
 .review-diff { color: var(--text-muted); font-size: 10px; }
 .review-diff summary { width: fit-content; color: var(--accent); cursor: pointer; }
 .review-diff > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
 .review-diff section { min-width: 0; }
-.review-diff pre { max-height: 210px; overflow: auto; margin-top: 5px; padding: 10px; border-radius: 10px; background: var(--code-block-bg); color: var(--code-block-text); font-size: 9px; white-space: pre-wrap; }
+.review-diff pre { max-height: 210px; overflow: auto; margin-top: 5px; padding: 10px; border-radius: 10px; background: var(--code-block-bg); color: var(--code-block-text); font-size: 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .entry-edit-modal { display: grid; gap: 12px; max-height: min(820px, calc(100dvh - 40px)); overflow: auto; }
 .entry-edit-modal > label { display: grid; gap: 6px; color: var(--text-muted); font-size: 11px; }
 .structure-mode-switch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; border: 1px solid var(--border-faint); border-radius: 13px; background: var(--bg-glass-subtle); }
@@ -773,6 +796,7 @@ onBeforeUnmount(() => {
 .split-parts label { display: grid; gap: 5px; color: var(--text-muted); font-size: 10px; }
 .add-split-part { min-height: 38px; border: 1px dashed var(--accent-border); border-radius: 12px; background: var(--accent-light); color: var(--accent); cursor: pointer; }
 .graph-modal { display: grid; gap: 14px; max-height: min(900px, calc(100dvh - 40px)); overflow: auto; }
+.health-modal { overflow-y: auto; }
 .graph-path-builder { display: grid; gap: 9px; padding: 13px; border-radius: 14px; background: var(--bg-glass-subtle); }
 .graph-path-builder > strong { font-size: 12px; }
 .graph-path-builder > div:first-of-type { display: grid; grid-template-columns: 1fr auto 1fr auto; align-items: center; gap: 7px; }
@@ -808,7 +832,8 @@ onBeforeUnmount(() => {
 .citation-section h3 { margin: 0 0 12px; font-size: 15px; }
 .citation-section h3 span { color: var(--text-faint); font-size: 11px; }
 .citation-card { display: grid; gap: 5px; margin-top: 8px; padding: 12px 14px; border-radius: 13px; background: var(--bg-glass-subtle); }
-.citation-card > div { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+.citation-card > div { min-width: 0; display: flex; align-items: center; gap: 7px; font-size: 12px; }
+.citation-card strong { min-width: 0; overflow-wrap: anywhere; }
 .citation-card > span { color: var(--text-faint); font-size: 10px; }
 .citation-card p { color: var(--text-muted); font-size: 11px; }
 .entity-structure-section { margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-faint); }
@@ -828,7 +853,24 @@ onBeforeUnmount(() => {
 .version-list span { overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
 .version-list time { color: var(--text-faint); }
 .mobile-back { display: none; }
-.mobile-sync-button { display: none; }
+.mobile-actions-button { display: none; }
+.mobile-actions-button:disabled { opacity: .45; }
+.wiki-action-list { min-height: 0; display: grid; gap: 6px; overflow-y: auto; padding: 0 16px 10px; }
+.wiki-action-list button { min-width: 0; min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border-faint); border-radius: 13px; background: var(--bg-glass-subtle); color: var(--text-primary); text-align: left; cursor: pointer; }
+.wiki-action-list button:active { background: var(--accent-light); }
+.wiki-action-list button:disabled { opacity: .45; cursor: default; }
+.wiki-action-list button > .el-icon { flex: none; color: var(--accent); font-size: 19px; }
+.wiki-action-list button > span { min-width: 0; display: grid; gap: 2px; }
+.wiki-action-list strong { font-size: 13px; }
+.wiki-action-list small { color: var(--text-faint); font-size: 11px; }
+@media (max-width: 1100px) {
+  .wiki-workspace { min-height: 0; display: block; }
+  .entry-pane { min-height: 500px; }
+  .entry-detail { display: none; max-height: none; }
+  .wiki-workspace.show-detail .entry-pane { display: none; }
+  .wiki-workspace.show-detail .entry-detail { display: block; }
+  .mobile-back { display: flex; align-items: center; gap: 5px; margin: -4px 0 14px; padding: 8px 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; }
+}
 @media (max-width: 768px) {
   .workspace-alert { align-items: flex-start; display: grid; }
   .review-diff > div, .graph-columns, .review-audit-grid { grid-template-columns: 1fr; }
@@ -836,17 +878,17 @@ onBeforeUnmount(() => {
   .graph-path-builder > div:first-of-type > span { display: none; }
   .wiki-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 46px; align-items: stretch; }
   .wiki-toolbar .knowledge-search { grid-column: 1 / -1; grid-row: 2; }
-  .mobile-sync-button { grid-column: 2; grid-row: 1; width: 46px; min-height: 46px; display: grid; place-items: center; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-glass); color: var(--accent); font-size: 17px; }
-  .wiki-workspace { min-height: calc(100dvh - 230px); display: block; }
+  .mobile-actions-button { grid-column: 2; grid-row: 1; width: 46px; min-height: 46px; display: grid; place-items: center; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-glass); color: var(--accent); font-size: 19px; }
+  .wiki-workspace { min-height: calc(100dvh - 230px); }
   .entry-pane, .entry-detail { min-height: calc(100dvh - 230px); }
-  .entry-detail { display: none; max-height: none; padding: 16px; }
-  .wiki-workspace.show-detail .entry-pane { display: none; }
-  .wiki-workspace.show-detail .entry-detail { display: block; animation: mobile-detail-in var(--motion-normal) var(--ease-spring-gentle) both; }
+  .entry-detail { padding: 16px; }
+  .wiki-workspace.show-detail .entry-detail { animation: mobile-detail-in var(--motion-normal) var(--ease-spring-gentle) both; }
   .entry-list { max-height: none; }
-  .mobile-back { display: flex; align-items: center; gap: 5px; margin: -4px 0 14px; padding: 8px 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 13px; }
   .entry-detail-head { display: block; }
   .entry-detail-head .knowledge-status { margin-top: 10px; }
-  .entry-edit-modal, .graph-modal { max-height: min(86dvh, 760px); padding-top: 34px; }
+  .review-content { padding: 0 16px 12px; }
+  .review-modal { max-height: calc(min(88dvh, 760px) - env(safe-area-inset-bottom)); }
+  .entry-edit-modal, .graph-modal { max-height: calc(min(88dvh, 760px) - env(safe-area-inset-bottom)); }
 }
 @keyframes mobile-detail-in { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
 </style>

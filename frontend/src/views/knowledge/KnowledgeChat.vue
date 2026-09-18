@@ -58,7 +58,7 @@
       </aside>
 
       <section class="chat-panel knowledge-surface">
-        <div ref="messageListRef" class="message-list">
+        <div ref="messageListRef" class="message-list" @scroll="onMessageScroll">
           <div v-if="!messages.length && !historyLoading" class="chat-welcome">
             <div class="welcome-symbol"><el-icon><ChatDotRound /></el-icon></div>
             <h2>从这本书开始思考</h2>
@@ -72,39 +72,53 @@
             <div class="message" :class="message.role">
               <span class="message-role">{{ message.role === 'user' ? '你' : '知识库' }}</span>
               <p v-if="message.role === 'user'">{{ message.content }}</p>
-              <KnowledgeAnswerMarkdown
-                v-else
-                :content="message.content"
-                :evidence-count="message.evidence?.length ?? 0"
-                :streaming="streamingMessageId === message.id"
-                @citation="sourceIndex => previewEvidence(message, sourceIndex)"
-              />
-              <button v-if="message.role === 'assistant' && message.runId" class="save-answer" type="button" :disabled="savingRunId === message.runId" @click="saveAnswer(message)">
+              <template v-else>
+                <div v-if="streamingMessageId === message.id && !message.content" class="chat-run-status" role="status" aria-live="polite" :aria-label="streamPhase || '正在处理你的问题'">
+                  <span class="chat-run-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <div class="chat-run-copy">
+                    <strong>正在处理你的问题</strong>
+                    <span aria-hidden="true">{{ thinkingText || streamPhase }}</span>
+                    <div v-if="activitySteps.length > 1" class="chat-run-steps" aria-hidden="true">
+                      <span v-for="(step, index) in activitySteps.slice(0, -1)" :key="`${index}-${step}`">{{ step }}</span>
+                    </div>
+                  </div>
+                </div>
+                <KnowledgeAnswerMarkdown
+                  v-if="message.content"
+                  :content="message.content"
+                  :evidence-count="message.evidence?.length ?? 0"
+                  :streaming="streamingMessageId === message.id"
+                  @citation="sourceIndex => previewEvidence(message, sourceIndex)"
+                  @rendered="followAnswer"
+                />
+              </template>
+              <button v-if="message.role === 'assistant' && message.runId && message.id !== streamingMessageId" class="save-answer" type="button" :disabled="savingRunId === message.runId" @click="saveAnswer(message)">
                 <el-icon :class="{ 'is-loading': savingRunId === message.runId }"><Loading v-if="savingRunId === message.runId" /><Checked v-else /></el-icon>{{ savingRunId === message.runId ? '正在生成候选' : '保存到 Wiki' }}
               </button>
             </div>
-            <div v-if="message.evidence?.length" class="evidence-grid">
-              <button
-                v-for="(entry, evidenceIndex) in message.evidence"
-                :key="entry.id"
-                type="button"
-                @click="previewSource(entry)"
-              >
-                <span><b>S{{ evidenceIndex + 1 }}</b>{{ entry.source_path || '数据库实体' }}</span>
-                <strong>{{ entry.title }}</strong>
-                <p>{{ entry.summary || '预览完整正文与引用' }}</p>
-                <em>预览来源 <el-icon><ArrowRight /></el-icon></em>
-              </button>
-            </div>
+            <section v-if="message.evidence?.length && message.id !== streamingMessageId" class="evidence-section" aria-label="回答参考来源">
+              <header><strong>参考来源</strong><span>{{ message.evidence.length }} 条书内证据</span></header>
+              <div class="evidence-grid">
+                <button
+                  v-for="(entry, evidenceIndex) in message.evidence"
+                  :key="entry.id"
+                  type="button"
+                  @click="previewSource(entry)"
+                >
+                  <span><b>S{{ evidenceIndex + 1 }}</b>{{ entry.source_path || '数据库实体' }}</span>
+                  <strong>{{ entry.title }}</strong>
+                  <p>{{ entry.summary || '预览完整正文与引用' }}</p>
+                  <em>预览来源 <el-icon><ArrowRight /></el-icon></em>
+                </button>
+              </div>
+            </section>
           </template>
-          <div v-if="searching && !streamingMessageId" class="searching-bubble" role="status" aria-live="polite">
-            <i></i><i></i><i></i><span>{{ thinkingText }}<b aria-hidden="true"></b></span>
-          </div>
         </div>
 
         <form class="chat-composer" @submit.prevent="ask(draft)">
           <textarea v-model="draft" :disabled="!activeBaseId" rows="1" placeholder="询问本书中的概念、章节或观点…" @keydown.enter.exact.prevent="ask(draft)"></textarea>
-          <button type="submit" :disabled="!activeBaseId || !draft.trim() || searching" aria-label="发送问题">
+          <button v-if="searching && runtimeReady" type="button" class="is-stop" aria-label="停止生成" @click="stopAnswer"><span class="stop-square"></span></button>
+          <button v-else type="submit" :disabled="!activeBaseId || !draft.trim() || searching" aria-label="发送问题">
             <el-icon><Top /></el-icon>
           </button>
         </form>
@@ -158,6 +172,7 @@ import KnowledgeAnswerMarkdown from '@/components/knowledge/KnowledgeAnswerMarkd
 import MotionModal from '@/components/motion/MotionModal.vue'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { useTypewriterLoop } from '@/composables/useTypewriterLoop'
+import { createStreamedTextBuffer, type StreamedTextBuffer } from '@/utils/streamedText'
 import {
   getBookWikiSettings,
   getKnowledgeConversation,
@@ -192,6 +207,8 @@ const messages = ref<ChatMessage[]>([])
 const searching = ref(false)
 const streamingMessageId = ref('')
 const streamPhase = ref('')
+const activitySteps = ref<string[]>([])
+const followOutput = ref(true)
 const historyLoading = ref(false)
 const runtimeReady = ref(false)
 const runtimeMessage = ref('DeepSeek Harness 尚未连接；当前只返回真实命中的书内证据。')
@@ -206,13 +223,27 @@ let localMessageId = 0
 let historyRequestId = 0
 let sourceRequestId = 0
 let askController: AbortController | null = null
+let activeTextBuffer: StreamedTextBuffer | null = null
 
 const activeBase = computed(() => bases.value.find(base => base.id === activeBaseId.value))
 const starterQuestions = ['这本书的核心主题是什么？', '找出与架构相关的章节', '有哪些内容提到了性能优化？']
-const { text: thinkingText } = useTypewriterLoop(searching, () => runtimeReady.value
-  ? [streamPhase.value, '正在检索书内证据', '正在梳理关键线索', '正在生成可追溯回答']
-  : ['正在检索书内证据', '正在整理匹配结果'])
+const awaitingFirstToken = computed(() => searching.value && Boolean(streamingMessageId.value)
+  && !messages.value.find(message => message.id === streamingMessageId.value)?.content)
+const { text: thinkingText } = useTypewriterLoop(awaitingFirstToken, () => [streamPhase.value || '正在检索书内证据'])
 const { renderMarkdown, enhance, cleanup } = useMarkdownRender(() => {})
+
+function setActivity(phase: string) {
+  const label = phase.trim()
+  if (!label || streamPhase.value === label) return
+  streamPhase.value = label
+  activitySteps.value = [...activitySteps.value.slice(-3), label]
+  followAnswer()
+}
+
+function stopAnswer() {
+  askController?.abort()
+  activeTextBuffer?.cancel()
+}
 
 async function loadContext() {
   try {
@@ -282,6 +313,7 @@ async function openConversation(conversationId: string, parentRequestId?: number
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '会话读取失败')
     if (response.result.knowledge_base_id !== activeBaseId.value) throw new Error('该会话不属于当前知识库')
     activeConversationId.value = response.result.id
+    followOutput.value = true
     messages.value = response.result.messages.map(message => ({
       id: message.id,
       role: message.role,
@@ -310,6 +342,7 @@ async function changeKnowledgeBase() {
 function newConversation(updateRoute = true) {
   ++historyRequestId
   activeConversationId.value = ''
+  followOutput.value = true
   messages.value = []
   historyLoading.value = false
   if (updateRoute) replaceChatQuery()
@@ -329,91 +362,96 @@ async function ask(question: string) {
   if (!value || !activeBaseId.value || searching.value) return
   draft.value = ''
   messages.value.push({ id: `local-${++localMessageId}`, role: 'user', content: value })
+  const assistantIndex = messages.value.length
+  messages.value.push({ id: `local-${++localMessageId}`, role: 'assistant', content: '', evidence: [] })
+  // Always mutate the proxy stored in the reactive array, not the raw object passed to push().
+  const assistantMessage = messages.value[assistantIndex]
+  streamingMessageId.value = assistantMessage.id
+  followOutput.value = true
   searching.value = true
-  await scrollToBottom()
+  setActivity('正在检索书内证据')
+  await scrollToBottom(false)
   try {
     if (runtimeReady.value) {
       askController = new AbortController()
-      let streamedEvidence: KnowledgeEntrySummary[] = []
-      let assistantMessage: ChatMessage | undefined
+      const textBuffer = createStreamedTextBuffer(chunk => { assistantMessage.content += chunk })
+      activeTextBuffer = textBuffer
+      let receivedText = ''
       const result = await streamBookKnowledge(
         activeBaseId.value,
         value,
         activeConversationId.value || undefined,
         (event) => {
           if (event.type === 'evidence') {
-            streamedEvidence = event.evidence
-            if (assistantMessage) assistantMessage.evidence = event.evidence
+            assistantMessage.evidence = event.evidence
+            setActivity(`已检索到 ${event.evidence.length} 条书内证据`)
           } else if (event.type === 'run_started') {
-            assistantMessage = {
-              id: `run-${event.run_id}`,
-              role: 'assistant',
-              content: '',
-              evidence: streamedEvidence,
-              runId: event.run_id,
-            }
-            messages.value.push(assistantMessage)
-            streamingMessageId.value = assistantMessage.id
-            streamPhase.value = '正在连接书籍知识工具'
-            void scrollToBottom(false)
+            assistantMessage.runId = event.run_id
+            setActivity('正在连接书籍知识工具')
           } else if (event.type === 'text_delta') {
-            if (assistantMessage) assistantMessage.content += event.delta
-            streamPhase.value = '正在生成可追溯回答'
-            void scrollToBottom(false)
+            receivedText += event.delta
+            textBuffer.push(event.delta)
+            if (streamPhase.value !== '正在生成可追溯回答') setActivity('正在生成可追溯回答')
           } else if (event.type === 'phase') {
-            streamPhase.value = event.message
+            setActivity(event.message)
           } else if (event.type === 'tool_started') {
-            streamPhase.value = `正在调用：${event.title}`
+            setActivity(`正在调用：${event.title}`)
           } else if (event.type === 'tool_finished') {
-            streamPhase.value = event.status === 'failed' ? '知识工具调用失败，正在调整' : '知识证据已返回，继续分析'
+            setActivity(event.status === 'failed' ? '知识工具调用失败，正在调整' : '知识证据已返回，继续分析')
           }
         },
         askController.signal,
       )
-      if (!assistantMessage) {
-        assistantMessage = {
-          id: `run-${result.run_id}`,
-          role: 'assistant',
-          content: result.answer,
-          evidence: result.evidence,
-          runId: result.run_id,
-        }
-        messages.value.push(assistantMessage)
-      } else {
-        assistantMessage.content = result.answer
-        assistantMessage.evidence = result.evidence
-        assistantMessage.runId = result.run_id
-      }
+      if (result.answer.startsWith(receivedText)) textBuffer.push(result.answer.slice(receivedText.length))
+      else if (!receivedText) textBuffer.push(result.answer)
+      await textBuffer.drain()
+      if (askController.signal.aborted) throw new DOMException('已停止生成', 'AbortError')
+      assistantMessage.content = result.answer
+      assistantMessage.evidence = result.evidence
+      assistantMessage.runId = result.run_id
       streamingMessageId.value = ''
       activeConversationId.value = result.conversation_id
       replaceChatQuery()
-      await refreshConversationList()
+      try {
+        await refreshConversationList()
+      } catch {
+        ElMessage.warning('回答已保存，但历史列表暂未刷新')
+      }
       return
     }
-    await appendEvidenceFallback(value)
+    await appendEvidenceFallback(value, '', assistantMessage)
   } catch (error) {
     const detail = (error as Error).message
+    activeTextBuffer?.cancel()
+    if ((error as Error).name === 'AbortError') {
+      assistantMessage.runId = undefined
+      if (assistantMessage.content) assistantMessage.content += '\n\n_已停止生成，以上内容可能不完整。_'
+      else messages.value.splice(assistantIndex, 1)
+      return
+    }
     if (runtimeReady.value) {
-      if (streamingMessageId.value) {
-        messages.value = messages.value.filter(message => message.id !== streamingMessageId.value)
-        streamingMessageId.value = ''
-      }
       runtimeReady.value = false
       runtimeMessage.value = 'Harness 本次调用失败，本次会话已切换为书内证据检索模式。'
+      assistantMessage.content = ''
+      assistantMessage.runId = undefined
+      setActivity('正在切换到书内证据检索')
       try {
-        await appendEvidenceFallback(value, detail)
+        await appendEvidenceFallback(value, detail, assistantMessage)
       } catch {
-        messages.value.push({ id: `local-${++localMessageId}`, role: 'assistant', content: `Harness 调用失败：${detail}` })
+        assistantMessage.content = `Harness 调用失败：${detail}`
       }
     } else {
-      messages.value.push({ id: `local-${++localMessageId}`, role: 'assistant', content: `检索失败：${detail}` })
+      assistantMessage.content = `检索失败：${detail}`
     }
   } finally {
     askController = null
+    activeTextBuffer?.cancel()
+    activeTextBuffer = null
     streamPhase.value = ''
+    activitySteps.value = []
     streamingMessageId.value = ''
     searching.value = false
-    await scrollToBottom()
+    followAnswer()
   }
 }
 
@@ -432,19 +470,15 @@ async function saveAnswer(message: ChatMessage) {
   }
 }
 
-async function appendEvidenceFallback(question: string, harnessError = '') {
+async function appendEvidenceFallback(question: string, harnessError: string, target: ChatMessage) {
   const response = await listKnowledgeEntries(activeBaseId.value, { query: question, limit: 6 })
   if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '检索失败')
   const evidence = response.result.entries
   const prefix = harnessError ? `Harness 暂时不可用：${harnessError}\n\n` : ''
-  messages.value.push({
-    id: `local-${++localMessageId}`,
-    role: 'assistant',
-    content: evidence.length
-      ? `${prefix}在《${activeBase.value?.book_name || '当前书籍'}》中找到 ${evidence.length} 条相关证据。你可以在下方弹窗中核对原文。`
-      : `${prefix}当前书籍知识库中没有找到足够相关的证据。可以换一个关键词，或先返回知识库页面同步来源。`,
-    evidence,
-  })
+  target.content = evidence.length
+    ? `${prefix}在《${activeBase.value?.book_name || '当前书籍'}》中找到 ${evidence.length} 条相关证据。你可以在下方弹窗中核对原文。`
+    : `${prefix}当前书籍知识库中没有找到足够相关的证据。可以换一个关键词，或先返回知识库页面同步来源。`
+  target.evidence = evidence
 }
 
 async function previewSource(entry: KnowledgeEntrySummary) {
@@ -499,6 +533,15 @@ async function scrollToBottom(smooth = true) {
   })
 }
 
+function onMessageScroll(event: Event) {
+  const element = event.target as HTMLElement
+  followOutput.value = element.scrollHeight - element.clientHeight - element.scrollTop < 96
+}
+
+function followAnswer() {
+  if (followOutput.value) void scrollToBottom(false)
+}
+
 watch(sourceVisible, (visible) => {
   if (!visible) {
     ++sourceRequestId
@@ -511,12 +554,13 @@ onBeforeUnmount(() => {
   ++historyRequestId
   ++sourceRequestId
   askController?.abort()
+  activeTextBuffer?.cancel()
   cleanup()
 })
 </script>
 
 <style scoped>
-.chat-layout { min-height: 590px; display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; }
+.chat-layout { min-width: 0; min-height: 590px; display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; }
 .chat-context { align-self: start; display: grid; gap: 14px; padding: 18px; }
 .context-label { color: var(--text-faint); font-size: 10px; font-weight: 720; letter-spacing: .08em; }
 .context-book { display: flex; align-items: center; gap: 11px; padding: 12px; border-radius: 14px; background: var(--bg-glass-subtle); }
@@ -539,7 +583,7 @@ onBeforeUnmount(() => {
 .runtime-state p { color: var(--text-muted); font-size: 11px; line-height: 1.6; }
 .boundary-note { display: flex; align-items: flex-start; gap: 7px; padding-top: 14px; border-top: 1px solid var(--border-faint); color: var(--text-faint); font-size: 10px; line-height: 1.5; }
 .chat-panel { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
-.message-list { flex: 1; max-height: calc(100vh - 290px); min-height: 480px; overflow: auto; padding: 28px clamp(16px, 5vw, 70px); }
+.message-list { min-width: 0; flex: 1; max-height: calc(100vh - 290px); min-height: 480px; overflow: auto; padding: 28px clamp(16px, 5vw, 70px); }
 .chat-welcome { min-height: 390px; display: grid; place-content: center; justify-items: center; gap: 10px; text-align: center; }
 .welcome-symbol { width: 65px; height: 65px; display: grid; place-items: center; margin-bottom: 5px; border-radius: 22px; background: radial-gradient(circle at 32% 24%, color-mix(in srgb, white 42%, transparent), transparent 42%), var(--accent-light); color: var(--accent); font-size: 28px; box-shadow: var(--shadow-md), var(--inset-highlight); }
 .chat-welcome h2 { font-size: 23px; }
@@ -547,15 +591,30 @@ onBeforeUnmount(() => {
 .chat-welcome > button { width: min(100%, 380px); min-height: 40px; padding: 8px 14px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer; transition: var(--transition-interactive); }
 .chat-welcome > button:hover { border-color: var(--accent-border); color: var(--accent); transform: translateY(-1px); }
 .history-loading { min-height: 320px; display: grid; place-content: center; justify-items: center; gap: 9px; color: var(--text-faint); font-size: 12px; }
-.message { max-width: 78%; display: grid; gap: 5px; margin-bottom: 16px; }
+.message { min-width: 0; max-width: 78%; display: grid; gap: 5px; margin-bottom: 16px; }
+.message.assistant { max-width: min(100%, 760px); }
 .message.user { margin-left: auto; justify-items: end; }
 .message-role { color: var(--text-faint); font-size: 10px; }
-.message > p { padding: 11px 14px; border-radius: 16px 16px 16px 5px; background: var(--bg-glass-subtle); color: var(--text-secondary); font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
+.message > p { padding: 11px 14px; overflow-wrap: anywhere; border-radius: 16px 16px 16px 5px; background: var(--bg-glass-subtle); color: var(--text-secondary); font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
 .message.user p { border-radius: 16px 16px 5px 16px; background: var(--accent); color: white; }
 .save-answer { width: fit-content; display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; border: 0; border-radius: 9px; background: transparent; color: var(--accent); font: inherit; font-size: 10px; font-weight: 650; cursor: pointer; }
 .save-answer:hover { background: var(--accent-light); }
 .save-answer:disabled { opacity: .55; cursor: default; }
-.evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: -6px 0 22px; }
+.chat-run-status { width: min(100%, 520px); min-height: 82px; display: flex; align-items: flex-start; gap: 12px; padding: 14px; border: 1px solid var(--border-faint); border-radius: 16px; background: var(--bg-glass-subtle); }
+.chat-run-mark { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; gap: 3px; flex: none; border-radius: 10px; background: var(--accent-light); }
+.chat-run-mark i { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); animation: chat-run-pulse 900ms ease-in-out infinite alternate; }
+.chat-run-mark i:nth-child(2) { animation-delay: 130ms; }
+.chat-run-mark i:nth-child(3) { animation-delay: 260ms; }
+.chat-run-copy { min-width: 0; display: grid; gap: 4px; }
+.chat-run-copy strong { color: var(--text-primary); font-size: 12px; font-weight: 690; }
+.chat-run-copy > span { min-height: 1.5em; overflow-wrap: anywhere; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.chat-run-steps { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+.chat-run-steps span { max-width: 100%; overflow-wrap: anywhere; padding: 3px 7px; border-radius: 7px; background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--text-faint); font-size: 10px; line-height: 1.35; }
+.evidence-section { max-width: min(100%, 760px); margin: 2px 0 22px; }
+.evidence-section > header { display: flex; align-items: baseline; gap: 8px; margin: 0 0 9px; color: var(--text-muted); }
+.evidence-section > header strong { color: var(--text-secondary); font-size: 11px; font-weight: 700; }
+.evidence-section > header span { color: var(--text-faint); font-size: 10px; }
+.evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .evidence-grid button { min-width: 0; display: grid; gap: 5px; padding: 13px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); color: var(--text-primary); text-align: left; cursor: pointer; transition: var(--transition-interactive); }
 .evidence-grid button:hover { border-color: var(--accent-border); transform: translateY(-1px); }
 .evidence-grid span { overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
@@ -563,17 +622,13 @@ onBeforeUnmount(() => {
 .evidence-grid strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .evidence-grid p { display: -webkit-box; overflow: hidden; color: var(--text-muted); font-size: 11px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .evidence-grid em { display: flex; align-items: center; gap: 3px; margin-top: 3px; color: var(--accent); font-size: 10px; font-style: normal; }
-.searching-bubble { min-height: 22px; display: flex; align-items: center; gap: 4px; color: var(--text-faint); font-size: 11px; }
-.searching-bubble i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: bubble 800ms ease-in-out infinite alternate; }
-.searching-bubble i:nth-child(2) { animation-delay: 120ms; }
-.searching-bubble i:nth-child(3) { animation-delay: 240ms; }
-.searching-bubble span { min-width: 12.5em; margin-left: 5px; }
-.searching-bubble span b { display: inline-block; width: 1px; height: 1em; margin-left: 2px; background: currentColor; vertical-align: -.12em; animation: caret 700ms step-end infinite; }
 .chat-composer { display: flex; align-items: flex-end; gap: 8px; margin: 0 16px 16px; padding: 9px 9px 9px 15px; border: 1px solid var(--border-subtle); border-radius: 18px; background: var(--bg-glass-strong); box-shadow: var(--shadow-md), var(--inset-highlight); }
 .chat-composer:focus-within { border-color: var(--accent-border); }
-.chat-composer textarea { flex: 1; min-height: 38px; max-height: 120px; padding: 8px 0; resize: none; border: 0; background: transparent; color: var(--text-primary); font: inherit; line-height: 1.5; }
+.chat-composer textarea { min-width: 0; flex: 1; min-height: 38px; max-height: 120px; padding: 8px 0; resize: none; border: 0; outline: none; background: transparent; color: var(--text-primary); font: inherit; line-height: 1.5; }
 .chat-composer button { width: 38px; height: 38px; display: grid; place-items: center; flex: none; border: 0; border-radius: 12px; background: var(--accent); color: white; cursor: pointer; }
 .chat-composer button:disabled { opacity: .35; cursor: default; }
+.chat-composer button.is-stop { background: var(--text-primary); }
+.stop-square { width: 11px; height: 11px; border-radius: 3px; background: var(--bg-base); }
 .source-preview-modal { width: 100%; max-height: calc(100dvh - 48px); display: flex; flex-direction: column; }
 .source-preview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 24px 24px 15px; border-bottom: 1px solid var(--border-faint); }
 .source-preview-head > div { min-width: 0; }
@@ -590,11 +645,18 @@ onBeforeUnmount(() => {
 .source-citations { display: grid; gap: 8px; margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border-faint); }
 .source-citations h4 { margin: 0 0 3px; font-size: 14px; }
 .source-citations article { display: grid; gap: 4px; padding: 12px; border-radius: 12px; background: var(--bg-glass-subtle); }
-.source-citations strong { font-size: 11px; }
+.source-citations strong { overflow-wrap: anywhere; font-size: 11px; }
 .source-citations span { color: var(--text-faint); font-size: 9px; }
 .source-citations p { color: var(--text-muted); font-size: 11px; line-height: 1.6; }
-@keyframes bubble { to { transform: translateY(-4px); opacity: .45; } }
-@keyframes caret { 50% { opacity: 0; } }
+@keyframes chat-run-pulse { to { transform: translateY(-2px); opacity: .45; } }
+@media (min-width: 769px) and (max-width: 1150px) {
+  .chat-layout { min-height: 0; display: block; }
+  .chat-context { display: grid; grid-template-columns: minmax(180px, 230px) minmax(0, 1fr); gap: 10px 12px; margin-bottom: 12px; }
+  .context-label, .conversation-history, .runtime-state, .boundary-note { grid-column: 1 / -1; }
+  .conversation-list { max-height: none; display: flex; overflow-x: auto; }
+  .conversation-list > button { flex: 0 0 190px; }
+  .message-list { max-height: min(65dvh, 800px); }
+}
 @media (max-width: 768px) {
   .chat-layout { min-height: 0; display: block; }
   .chat-context { margin-bottom: 10px; padding: 13px; }
@@ -610,13 +672,13 @@ onBeforeUnmount(() => {
   .message { max-width: 92%; }
   .evidence-grid { grid-template-columns: 1fr; }
   .chat-composer { position: sticky; bottom: 0; margin: 0 8px 8px; }
-  .source-preview-modal { width: 100%; max-height: min(88dvh, 760px); border-radius: 24px 24px 0 0; }
+  .source-preview-modal { width: 100%; max-height: calc(min(88dvh, 760px) - env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; }
   .source-preview-head { padding: 34px 16px 13px; }
   .source-preview-head h3 { font-size: 19px; }
   .source-preview-body { padding: 18px 16px; }
   .source-preview-modal .knowledge-modal-actions { padding: 10px 16px 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .searching-bubble i, .searching-bubble span b { animation: none; }
+  .chat-run-mark i { animation: none; }
 }
 </style>

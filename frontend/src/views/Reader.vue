@@ -351,6 +351,7 @@ import MotionDrawer from '@/components/motion/MotionDrawer.vue'
 import BookshelfView from '@/components/reader/BookshelfView.vue'
 import { getMobileReaderToolbarState, isPhoneViewport } from '@/utils/mobileLayoutPolicy'
 import { useModalEnvironment } from '@/composables/useModalEnvironment'
+import { canFocusDocument } from '@/utils/modalFocusPolicy'
 import { searchReaderFiles } from '@/utils/readerFileSearch'
 import { listBookKnowledgeBases, proposeReaderSelection } from '@/api/knowledge'
 
@@ -384,7 +385,9 @@ const fileSearchResults = computed(() => searchReaderFiles(tree.value, rootPath.
 // Auto-focus the input when the overlay opens.
 watch(fileSearchOpen, (v) => {
   if (!v) return
-  nextTick(() => fileSearchInputRef.value?.focus())
+  nextTick(() => {
+    if (fileSearchOpen.value && canFocusDocument(document)) fileSearchInputRef.value?.focus()
+  })
 })
 useModalEnvironment(
   () => fileSearchOpen.value,

@@ -1,4 +1,5 @@
 import { nextTick, onBeforeUnmount, onMounted, watch, type Ref } from 'vue'
+import { canFocusDocument } from '@/utils/modalFocusPolicy'
 
 const focusableSelector = [
   'a[href]',
@@ -55,7 +56,7 @@ export function useModalEnvironment(
     lockPageScroll()
     nextTick(() => {
       const panel = panelRef.value
-      if (!panel || panel.contains(document.activeElement)) return
+      if (!active || !isTopmost() || !canFocusDocument(document) || !panel || panel.contains(document.activeElement)) return
       panel.focus({ preventScroll: true })
     })
   }
@@ -69,7 +70,7 @@ export function useModalEnvironment(
     if (restoreFocus) {
       const target = previousFocus
       nextTick(() => {
-        if (target?.isConnected) target.focus({ preventScroll: true })
+        if (canFocusDocument(document) && target?.isConnected) target.focus({ preventScroll: true })
       })
     }
     previousFocus = null

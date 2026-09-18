@@ -4,6 +4,11 @@
       <el-button :loading="loading" @click="loadCards()"><el-icon><Refresh /></el-icon>刷新</el-button>
     </template>
 
+    <div class="mobile-base-actions">
+      <span>{{ cards.length }} 本 Markdown 书籍</span>
+      <button type="button" :disabled="loading" aria-label="刷新书籍知识库" @click="loadCards()"><el-icon :class="{ 'is-loading': loading }"><Refresh /></el-icon><span>刷新</span></button>
+    </div>
+
     <section v-if="cards.length" class="overview-strip knowledge-surface">
       <div><strong>{{ cards.length }}</strong><span>书架藏书</span></div>
       <div><strong>{{ initializedCount }}</strong><span>已建知识库</span></div>
@@ -173,6 +178,7 @@ import { Collection, FolderOpened, Loading, MagicStick, Refresh } from '@element
 import { useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
+import { canFocusDocument } from '@/utils/modalFocusPolicy'
 import {
   cancelBookKnowledgeCompile,
   compileBookKnowledgeBase,
@@ -408,6 +414,7 @@ function compileProgress(base: NonNullable<BookKnowledgeCard['knowledge_base']>)
 onMounted(() => {
   void loadCards()
   pollingTimer = window.setInterval(() => {
+    if (!canFocusDocument(document)) return
     if (cards.value.some(card => card.knowledge_base?.compile_state === 'compiling' && card.knowledge_base.compile_phase !== 'waiting_review')) {
       void loadCards(true)
     }
@@ -420,6 +427,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.mobile-base-actions { display: none; }
 .overview-strip { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 16px; padding: 18px 22px; }
 .overview-strip > div { display: grid; gap: 2px; padding: 0 20px; border-left: 1px solid var(--border-faint); }
 .overview-strip > div:first-child { padding-left: 0; border-left: 0; }
@@ -432,10 +440,11 @@ onBeforeUnmount(() => {
 .book-cover span { font-size: 10px; font-weight: 760; letter-spacing: .12em; opacity: .8; }
 .book-card-main { min-width: 0; }
 .book-card-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.knowledge-status-stack { display: grid; justify-items: end; gap: 6px; flex: 0 0 auto; }
-.book-card-title-row h2 { margin: 3px 0 0; font-size: 18px; font-weight: 690; line-height: 1.3; }
+.book-card-title-row > div:first-child { min-width: 0; flex: 1; }
+.knowledge-status-stack { min-width: 0; max-width: 50%; display: grid; justify-items: end; gap: 6px; flex: 0 1 auto; }
+.book-card-title-row h2 { margin: 3px 0 0; overflow-wrap: anywhere; font-size: 18px; font-weight: 690; line-height: 1.3; }
 .book-category { color: var(--accent); font-size: 10px; font-weight: 720; letter-spacing: .07em; }
-.book-description { min-height: 20px; margin: 8px 0 4px; color: var(--text-muted); font-size: 13px; }
+.book-description { min-height: 20px; margin: 8px 0 4px; overflow-wrap: anywhere; color: var(--text-muted); font-size: 13px; }
 .book-path { overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .book-stats { display: flex; flex-wrap: wrap; gap: 7px 14px; margin-top: 14px; color: var(--text-muted); font-size: 11px; }
 .book-stats strong { color: var(--text-primary); font-size: 14px; font-variant-numeric: tabular-nums; }
@@ -444,7 +453,7 @@ onBeforeUnmount(() => {
 .compile-phase-dot { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 30%, transparent); animation: compile-pulse 1.8s ease-out infinite; }
 .compile-phase-dot.is-still { animation: none; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 10%, transparent); }
 .compile-phase strong { display: block; font-size: 12px; font-weight: 690; line-height: 1.45; }
-.compile-phase p { margin: 2px 0 0; color: var(--text-muted); font-size: 10px; line-height: 1.5; }
+.compile-phase p { margin: 2px 0 0; overflow-wrap: anywhere; color: var(--text-muted); font-size: 10px; line-height: 1.5; }
 .compile-percent { color: var(--accent); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .compile-progress { position: relative; height: 5px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--accent) 10%, var(--bg-glass-subtle)); }
 .compile-progress i { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 75%, white), var(--accent)); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 28%, transparent); transition: width var(--motion-slow) var(--ease-emphasized); }
@@ -453,11 +462,11 @@ onBeforeUnmount(() => {
 .compile-controls .el-button { margin: 0; }
 .book-uninitialized { margin-top: 13px; padding: 9px 11px; border-radius: 10px; background: var(--bg-glass-subtle); color: var(--text-faint); font-size: 11px; line-height: 1.55; }
 .book-uninitialized.is-warning { color: #b56600; background: color-mix(in srgb, #ff9f0a 10%, var(--bg-glass-subtle)); }
-.book-actions { display: flex; align-items: center; gap: 7px; margin-top: 15px; }
+.book-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 15px; }
 .book-actions .el-button + .el-button { margin-left: 0; }
-.book-error { margin-top: 10px; color: #d52d25; font-size: 11px; }
+.book-error { margin-top: 10px; overflow-wrap: anywhere; color: #d52d25; font-size: 11px; }
 .empty-orb { width: 62px; height: 62px; display: grid; place-items: center; border-radius: 20px; background: var(--accent-light); color: var(--accent); font-size: 28px; }
-.manage-modal { display: grid; gap: 16px; }
+.manage-modal { display: grid; gap: 16px; overflow-y: auto; }
 .manage-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .manage-actions .el-button { margin: 0; }
 .delete-zone { display: grid; gap: 9px; padding: 15px; border: 1px solid color-mix(in srgb, #ff3b30 22%, var(--border-faint)); border-radius: 15px; background: color-mix(in srgb, #ff3b30 5%, var(--bg-glass-subtle)); }
@@ -469,6 +478,9 @@ onBeforeUnmount(() => {
 @media (prefers-reduced-motion: reduce) { .compile-phase-dot { animation: none; } }
 @media (max-width: 1050px) { .book-wiki-grid { grid-template-columns: 1fr; } }
 @media (max-width: 768px) {
+  .mobile-base-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--text-faint); font-size: 12px; }
+  .mobile-base-actions button { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 0 13px; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); color: var(--accent); font: inherit; font-weight: 650; }
+  .mobile-base-actions button:disabled { opacity: .5; }
   .overview-strip { grid-template-columns: repeat(2, 1fr); padding: 8px; }
   .overview-strip > div { padding: 12px; border-left: 0; }
   .overview-strip > div:nth-child(even) { border-left: 1px solid var(--border-faint); }
@@ -476,7 +488,7 @@ onBeforeUnmount(() => {
   .book-wiki-card { grid-template-columns: 62px 1fr; gap: 13px; padding: 15px; }
   .book-cover { height: 86px; border-radius: 13px 10px 10px 13px; }
   .book-card-title-row { display: block; }
-  .knowledge-status-stack { justify-items: start; margin-top: 8px; }
+  .knowledge-status-stack { max-width: 100%; justify-items: start; margin-top: 8px; }
   .compile-activity { grid-column: 1 / -1; }
   .book-actions { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; }
   .book-actions .el-button { width: 100%; margin: 0; }

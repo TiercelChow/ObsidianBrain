@@ -20,6 +20,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   citation: [sourceIndex: number]
+  rendered: []
 }>()
 
 const rootRef = ref<HTMLElement | null>(null)
@@ -30,7 +31,10 @@ function render() {
   window.clearTimeout(renderTimer)
   renderTimer = undefined
   html.value = renderMarkdownDocument(props.content || '').html
-  void nextTick(decorateCitations)
+  void nextTick(() => {
+    decorateCitations()
+    if (rootRef.value) emit('rendered')
+  })
 }
 
 function scheduleRender() {

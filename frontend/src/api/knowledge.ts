@@ -1,5 +1,6 @@
 import api, { callTool } from '@/api'
 import type { ReaderBook, ToolEnvelope } from '@/api/reader'
+import { createSseDataParser } from '@/utils/sseDataParser'
 
 export interface KnowledgeBaseSummary {
   id: string
@@ -812,34 +813,24 @@ export async function streamBookKnowledge(
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
-  let buffer = ''
   let completed: KnowledgeAnswer | undefined
-
-  const consumeBlock = (block: string) => {
-    const data = block
-      .split('\n')
-      .filter(line => line.startsWith('data:'))
-      .map(line => line.slice(5).trimStart())
-      .join('\n')
-    if (!data) return
+  const parser = createSseDataParser((data) => {
     const event = JSON.parse(data) as KnowledgeChatStreamEvent
     onEvent(event)
     if (event.type === 'completed') completed = event.result
     if (event.type === 'error') throw new Error(event.message)
-  }
+  })
 
-  while (true) {
-    const { value, done } = await reader.read()
-    buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, '\n')
-    let boundary = buffer.indexOf('\n\n')
-    while (boundary >= 0) {
-      consumeBlock(buffer.slice(0, boundary))
-      buffer = buffer.slice(boundary + 2)
-      boundary = buffer.indexOf('\n\n')
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      parser.push(decoder.decode(value, { stream: !done }))
+      if (done) break
     }
-    if (done) break
+    parser.finish()
+  } finally {
+    reader.releaseLock()
   }
-  if (buffer.trim()) consumeBlock(buffer)
   if (!completed) throw new Error('问答流在完成前意外关闭')
   return completed
 }
