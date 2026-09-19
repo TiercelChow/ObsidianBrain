@@ -6,7 +6,7 @@
         <button :class="{ active: section === 'usage' }" @click="section = 'usage'"><el-icon><DataAnalysis /></el-icon><span><strong>Token 用量</strong><small>调用趋势与来源</small></span></button>
         <button :class="{ active: section === 'protection' }" @click="section = 'protection'"><el-icon><Lock /></el-icon><span><strong>数据保护</strong><small>备份、下载与恢复</small></span></button>
         <button :class="{ active: section === 'documents' }" @click="section = 'documents'"><el-icon><Document /></el-icon><span><strong>配置文档</strong><small>数据库中的 Markdown</small></span></button>
-        <button :class="{ active: section === 'skills' }" @click="section = 'skills'"><el-icon><MagicStick /></el-icon><span><strong>Skills</strong><small>版本化能力</small></span></button>
+        <button :class="{ active: section === 'skills' }" @click="section = 'skills'"><el-icon><MagicStick /></el-icon><span><strong>Skills</strong><small>可配置能力</small></span></button>
       </aside>
 
       <section class="settings-main knowledge-surface">
@@ -144,7 +144,7 @@
 
         <template v-else>
           <header class="settings-section-head split skills-head">
-            <div><span>能力扩展</span><h2>Skills</h2><p>指令保存在 SQLite 并按版本审计；启用范围严格绑定当前书籍。</p></div>
+            <div><span>能力扩展</span><h2>Skills</h2><p>指令保存在 SQLite；当前开发阶段仅保留最新内容，启用范围严格绑定当前书籍。</p></div>
             <div class="skills-actions">
               <el-select v-model="activeBaseId" class="knowledge-select is-compact is-responsive" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库" @change="loadSkills"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" /></el-select>
               <input ref="skillArchiveInput" class="visually-hidden" type="file" accept=".zip,application/zip" @change="importSkillArchive" />
@@ -187,14 +187,14 @@
           <el-input v-model="skillDraft.description" type="textarea" :rows="2" :maxlength="500" show-word-limit placeholder="说明这个 Skill 解决什么问题" />
           <el-input v-model="skillDraft.instructions" type="textarea" :rows="8" :maxlength="12000" show-word-limit placeholder="写明分析步骤、质量要求与输出格式" />
         </div>
-        <div class="knowledge-modal-actions"><el-button @click="skillEditorVisible = false">取消</el-button><el-button type="primary" :loading="savingSkill" :disabled="!skillDraft.name.trim() || !skillDraft.slug.trim() || !skillDraft.instructions.trim()" @click="saveSkill">保存版本</el-button></div>
+        <div class="knowledge-modal-actions"><el-button @click="skillEditorVisible = false">取消</el-button><el-button type="primary" :loading="savingSkill" :disabled="!skillDraft.name.trim() || !skillDraft.slug.trim() || !skillDraft.instructions.trim()" @click="saveSkill">保存修改</el-button></div>
       </div>
     </MotionModal>
 
-    <MotionModal v-model="skillDetailVisible" aria-label="Skill 内容与版本" size="wide">
+    <MotionModal v-model="skillDetailVisible" aria-label="Skill 内容" size="wide">
       <div class="knowledge-modal-card skill-detail-modal">
         <div class="knowledge-modal-head">
-          <div><h3>Skill 内容与版本</h3><p>这里展示可供运行选用的指令、资源、权限声明和全部历史版本；是否实际注入以运行检查器为准。</p></div>
+          <div><h3>Skill 内容</h3><p>这里展示当前指令、资源与权限声明；是否实际注入以运行检查器为准。</p></div>
           <span v-if="skillDetail" class="knowledge-status" :class="skillDetail.skill.source_type === 'builtin' ? 'is-healthy' : 'is-draft'">{{ skillDetail.skill.source_type === 'builtin' ? '系统内置' : '自定义' }}</span>
         </div>
         <div v-if="skillDetailLoading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
@@ -212,7 +212,7 @@
               <small v-else>没有外部依赖，不能扩大运行工具权限。</small>
             </section>
             <section class="skill-detail-versions">
-              <h4>版本历史</h4>
+              <h4>当前内容</h4>
               <button v-for="version in skillDetail.versions" :key="version.id" type="button" :class="{ active: version.id === activeSkillVersionId }" @click="selectSkillVersion(version.id)">
                 <span>Revision {{ version.revision }}<em :class="`is-${version.release_state}`">{{ skillReleaseLabel(version.release_state) }}</em></span><small>{{ formatSkillDate(version.created_at) }}</small>
               </button>
@@ -273,7 +273,6 @@
           <el-button v-if="activeSkillVersion?.release_state === 'candidate'" :loading="skillVersionAction === 'evaluate'" @click="evaluateActiveSkillVersion">运行固定评测</el-button>
           <el-button v-if="activeSkillVersion?.release_state === 'candidate'" :loading="skillVersionAction === 'benchmark'" :disabled="!activeSkillVersion.latest_evaluation?.passed || ['queued', 'running'].includes(activeSkillVersion.latest_benchmark?.status || '')" @click="benchmarkActiveSkillVersion">运行真实基准</el-button>
           <el-button v-if="activeSkillVersion?.release_state === 'candidate'" type="primary" :loading="skillVersionAction === 'publish'" :disabled="!activeSkillVersion.latest_evaluation?.passed || !activeSkillVersion.latest_benchmark?.passed" @click="publishActiveSkillVersion">发布此版本</el-button>
-          <el-button v-if="activeSkillVersion?.release_state === 'published' && activeSkillVersion.id !== skillDetail?.current_version_id" :loading="skillVersionAction === 'rollback'" @click="rollbackActiveSkillVersion">回滚到此版本</el-button>
           <el-button type="primary" @click="skillDetailVisible = false">完成</el-button>
         </div>
       </div>
@@ -313,7 +312,6 @@ import {
   listKnowledgeBackups,
   listWikiSkills,
   restoreKnowledgeBackup,
-  rollbackWikiSkillVersion,
   saveAgentRuntimeProfile,
   saveBookWikiConfigDocument,
   saveCustomWikiSkill,
@@ -723,23 +721,6 @@ async function publishActiveSkillVersion() {
   }
 }
 
-async function rollbackActiveSkillVersion() {
-  if (!skillDetail.value || !activeSkillVersion.value) return
-  skillVersionAction.value = 'rollback'
-  try {
-    const response = await rollbackWikiSkillVersion(skillDetail.value.skill.id, activeSkillVersion.value.id)
-    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || 'Skill 回滚失败')
-    skillDetail.value = response.result
-    selectSkillVersion(response.result.current_version_id)
-    await loadSkills()
-    ElMessage.success('已回滚到所选版本')
-  } catch (error) {
-    ElMessage.error((error as Error).message)
-  } finally {
-    skillVersionAction.value = ''
-  }
-}
-
 function customSkillSlug(slug: string) {
   const stem = `${slug}-custom`.slice(0, 58).replace(/-+$/g, '')
   let candidate = stem
@@ -797,7 +778,7 @@ async function saveSkill() {
     })
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || 'Skill 保存失败')
     skillEditorVisible.value = false
-    ElMessage.success(skillDraft.id ? 'Skill 新版本已保存' : 'Skill 已创建')
+    ElMessage.success(skillDraft.id ? 'Skill 已更新' : 'Skill 已创建')
     await loadSkills()
   } catch (error) {
     ElMessage.error((error as Error).message)

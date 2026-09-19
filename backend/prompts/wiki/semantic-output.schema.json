@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["entries"],
+  "properties": {
+    "entries": {"type": "array", "maxItems": 5, "items": {"$ref": "#/definitions/entry"}},
+    "no_material_reason": {"type": "string", "minLength": 1, "maxLength": 240, "pattern": "\\S"}
+  },
+  "allOf": [{
+    "if": {"properties": {"entries": {"maxItems": 0}}},
+    "then": {"required": ["no_material_reason"]},
+    "else": {"not": {"required": ["no_material_reason"]}}
+  }],
+  "definitions": {
+    "text": {"type": "string", "minLength": 1, "pattern": "\\S"},
+    "citations": {"type": "array", "minItems": 1, "maxItems": 6, "uniqueItems": true, "items": {"$ref": "#/definitions/text"}},
+    "score": {"type": "number", "minimum": 0, "maximum": 1},
+    "claim": {
+      "type": "object", "additionalProperties": false,
+      "required": ["claim_text", "predicate", "object_text", "confidence", "citations"],
+      "properties": {
+        "claim_text": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "\\S"},
+        "predicate": {"type": "string", "minLength": 1, "maxLength": 60, "pattern": "\\S"},
+        "object_text": {"type": "string", "maxLength": 160},
+        "confidence": {"$ref": "#/definitions/score"},
+        "citations": {"$ref": "#/definitions/citations"}
+      }
+    },
+    "relation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["to_slug", "relation_type", "strength", "evidence"],
+      "properties": {
+        "to_slug": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S"},
+        "relation_type": {"enum": ["解释", "依赖", "对比", "支持", "冲突", "属于"]},
+        "strength": {"$ref": "#/definitions/score"},
+        "evidence": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S"}
+      }
+    },
+    "entry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["_classification", "entry_type", "slug", "title", "summary", "aliases", "confidence", "citations", "claims", "relations"],
+      "properties": {
+        "_classification": {"enum": ["new", "update", "disputed"]},
+        "entry_type": {"enum": ["concept", "entity", "method", "event", "comparison", "synthesis", "question", "overview"]},
+        "slug": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S"},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "\\S"},
+        "aliases": {"type": "array", "maxItems": 3, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 100, "pattern": "\\S"}},
+        "confidence": {"$ref": "#/definitions/score"},
+        "citations": {"$ref": "#/definitions/citations"},
+        "claims": {"type": "array", "maxItems": 3, "items": {"$ref": "#/definitions/claim"}},
+        "relations": {"type": "array", "maxItems": 2, "items": {"$ref": "#/definitions/relation"}}
+      }
+    }
+  }
+}

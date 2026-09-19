@@ -102,7 +102,7 @@ test('wiki settings expose token usage filters and estimated usage disclosure', 
   assert.match(api, /usage_source/)
 })
 
-test('wiki settings manage versioned skills per book and keep execution instruction-only', async () => {
+test('wiki settings manage latest skills per book and keep execution instruction-only', async () => {
   const [settings, api] = await Promise.all([
     source('src/views/knowledge/WikiSettings.vue'),
     source('src/api/knowledge.ts'),
@@ -122,14 +122,15 @@ test('wiki settings manage versioned skills per book and keep execution instruct
   assert.match(api, /knowledge\/skills\/import/)
 })
 
-test('wiki skills expose inspectable resources, history, permissions, and a safe clone flow', async () => {
+test('wiki skills expose current resources, permissions, and a safe clone flow', async () => {
   const [settings, api] = await Promise.all([
     source('src/views/knowledge/WikiSettings.vue'),
     source('src/api/knowledge.ts'),
   ])
 
   assert.match(settings, /查看内容/)
-  assert.match(settings, /Skill 内容与版本/)
+  assert.match(settings, /Skill 内容/)
+  assert.match(settings, /当前内容/)
   assert.match(settings, /skillDetail\.versions/)
   assert.match(settings, /权限与依赖/)
   assert.match(settings, /复制为自定义/)
@@ -138,7 +139,6 @@ test('wiki skills expose inspectable resources, history, permissions, and a safe
   assert.match(settings, /benchmarkActiveSkillVersion/)
   assert.match(settings, /license_spdx/)
   assert.match(settings, /publishActiveSkillVersion/)
-  assert.match(settings, /rollbackActiveSkillVersion/)
   assert.match(api, /get_wiki_skill_detail/)
   assert.match(api, /WikiSkillDetail/)
   assert.match(api, /evaluate_wiki_skill_version/)
@@ -146,7 +146,6 @@ test('wiki skills expose inspectable resources, history, permissions, and a safe
   assert.match(api, /get_wiki_skill_benchmark/)
   assert.match(api, /WikiSkillBenchmarkRun/)
   assert.match(api, /publish_wiki_skill_version/)
-  assert.match(api, /rollback_wiki_skill_version/)
 })
 
 test('wiki settings expose consistent database snapshots and guarded restore flows', async () => {

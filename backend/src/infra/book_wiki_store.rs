@@ -4898,6 +4898,10 @@ impl BookWikiStore {
                 "UPDATE skills SET current_version_id = ?2, updated_at = ?3 WHERE id = ?1",
                 params![skill_id, version_id, now],
             )?;
+            conn.execute(
+                "DELETE FROM skill_versions WHERE skill_id = ?1 AND id <> ?2",
+                params![skill_id, version_id],
+            )?;
             Ok(())
         })?;
         self.get_wiki_skill_detail(skill_id, None)
@@ -4933,6 +4937,10 @@ impl BookWikiStore {
             conn.execute(
                 "UPDATE skills SET current_version_id = ?2, updated_at = ?3 WHERE id = ?1",
                 params![skill_id, version_id, now],
+            )?;
+            conn.execute(
+                "DELETE FROM skill_versions WHERE skill_id = ?1 AND id <> ?2",
+                params![skill_id, version_id],
             )?;
             Ok(())
         })?;
@@ -5104,6 +5112,10 @@ impl BookWikiStore {
                      current_version_id = ?5, updated_at = ?6
                  WHERE id = ?1",
                 params![id, slug, name, description, version_id, now],
+            )?;
+            conn.execute(
+                "DELETE FROM skill_versions WHERE skill_id = ?1 AND id <> ?2",
+                params![id, version_id],
             )?;
             Ok(())
         })?;
@@ -6209,6 +6221,7 @@ impl BookWikiStore {
                  FROM agent_runs
                  WHERE status = 'completed'
                    AND task_type LIKE 'knowledge_task_%'
+                   AND task_type != 'knowledge_task_presentation_plan'
                    AND json_extract(input_json, '$.knowledge_task_id') = ?1
                  ORDER BY finished_at DESC, created_at DESC
                  LIMIT 1",
@@ -7953,6 +7966,60 @@ mod tests {
         })
     }
 
+    fn insert_builtin_skill_candidate(store: &BookWikiStore, skill_id: &str) -> String {
+        store
+            .db
+            .with_connection(|conn| {
+                let (current_version_id, revision, content): (String, i64, String) = conn
+                    .query_row(
+                        "SELECT s.current_version_id, v.revision, f.content_text
+                         FROM skills s
+                         JOIN skill_versions v ON v.id = s.current_version_id
+                         JOIN skill_files f ON f.skill_version_id = v.id
+                                           AND f.relative_path = 'SKILL.md'
+                         WHERE s.id = ?1",
+                        params![skill_id],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    )?;
+                let candidate_content = format!(
+                    "{content}\n\n候选测试补充：新增、更新、争议、无实质变化；引用、来源与论断；冲突不得强行消解；证据不足时先拆解再综合；研究计划区分书内、外部与待验证内容。\n"
+                );
+                let content_hash = stable_id("test-skill-candidate", &candidate_content);
+                let version_id = stable_id(
+                    "test-skill-version",
+                    &format!("{skill_id}:{}:{content_hash}", revision + 1),
+                );
+                conn.execute(
+                    "INSERT INTO skill_versions
+                        (id, skill_id, revision, content_hash, release_state,
+                         parent_version_id, changelog, created_at)
+                     VALUES (?1, ?2, ?3, ?4, 'candidate', ?5,
+                             '测试候选版本', CURRENT_TIMESTAMP)",
+                    params![
+                        version_id,
+                        skill_id,
+                        revision + 1,
+                        content_hash,
+                        current_version_id
+                    ],
+                )?;
+                conn.execute(
+                    "INSERT INTO skill_files
+                        (skill_version_id, relative_path, media_type, content_text,
+                         content_hash, size_bytes)
+                     VALUES (?1, 'SKILL.md', 'text/markdown', ?2, ?3, ?4)",
+                    params![
+                        version_id,
+                        candidate_content,
+                        content_hash,
+                        candidate_content.len() as i64
+                    ],
+                )?;
+                Ok(version_id)
+            })
+            .unwrap()
+    }
+
     #[test]
     fn test_reader_books_round_trip_uses_normalized_table() {
         let (store, _dir) = test_store();
@@ -8580,7 +8647,7 @@ mod tests {
     }
 
     #[test]
-    fn test_custom_wiki_skill_is_versioned_and_bound_to_one_book_scope() {
+    fn test_custom_wiki_skill_keeps_latest_revision_and_book_scope_binding() {
         let (store, _dir) = test_store();
         store
             .save_reader_books(&[sample_book("book-skills", "/tmp/book-skills")])
@@ -8649,6 +8716,14 @@ mod tests {
             .unwrap();
         assert_eq!(updated.revision, 2);
         assert!(updated.instructions.contains("证据缺口"));
+        assert_eq!(
+            store
+                .get_wiki_skill_detail(&updated.id, None)
+                .unwrap()
+                .versions
+                .len(),
+            1
+        );
         let unchanged = store
             .save_custom_wiki_skill(
                 Some(&updated.id),
@@ -8730,7 +8805,7 @@ mod tests {
     }
 
     #[test]
-    fn test_wiki_skill_detail_exposes_versions_and_text_resources() {
+    fn test_wiki_skill_detail_keeps_only_latest_custom_version() {
         let (store, _dir) = test_store();
         let files = vec![
             (
@@ -8759,13 +8834,12 @@ mod tests {
 
         let detail = store.get_wiki_skill_detail(&imported.id, None).unwrap();
         assert_eq!(detail.skill.id, imported.id);
-        assert_eq!(detail.versions.len(), 2);
+        assert_eq!(detail.versions.len(), 1);
         assert_eq!(detail.versions[0].revision, 2);
-        assert_eq!(detail.versions[1].files.len(), 2);
-        assert!(detail.versions[1]
-            .files
-            .iter()
-            .any(|file| file.relative_path == "references/checklist.md"));
+        assert_eq!(detail.versions[0].files.len(), 1);
+        assert!(detail.versions[0].files[0]
+            .content_text
+            .contains("检查反例"));
     }
 
     #[test]
@@ -8780,11 +8854,9 @@ mod tests {
             .iter()
             .find(|version| version.revision == 3)
             .unwrap();
+        assert_eq!(detail.versions.len(), 1);
         assert_eq!(published.release_state, "published");
-        assert_eq!(
-            published.parent_version_id.as_deref(),
-            Some("skill-version-book-ingest-v2")
-        );
+        assert!(published.parent_version_id.is_none());
         let skill_file = published
             .files
             .iter()
@@ -8797,20 +8869,10 @@ mod tests {
     }
 
     #[test]
-    fn test_builtin_skill_candidate_requires_evaluation_then_can_publish_and_rollback() {
+    fn test_builtin_skill_candidate_requires_evaluation_then_keeps_only_published_version() {
         let (store, _dir) = test_store();
-        // Exercise the legacy v1 → v2 release gate independently of the v3 rollout.
-        store
-            .db
-            .with_connection(|conn| {
-                conn.execute(
-                    "UPDATE skills SET current_version_id = 'skill-version-book-ingest-v1'
-                     WHERE id = 'skill-book-ingest'",
-                    [],
-                )?;
-                Ok(())
-            })
-            .unwrap();
+        let baseline_version_id = "skill-version-book-ingest-v3";
+        let candidate_id = insert_builtin_skill_candidate(&store, "skill-book-ingest");
         store
             .save_reader_books(&[sample_book(
                 "book-skill-benchmark",
@@ -8824,10 +8886,13 @@ mod tests {
         let candidate = detail
             .versions
             .iter()
-            .find(|version| version.revision == 2)
+            .find(|version| version.id == candidate_id)
             .unwrap();
-        assert_eq!(candidate.revision, 2);
-        assert_eq!(candidate.origin.as_ref().unwrap().license_spdx, "MIT");
+        assert_eq!(candidate.revision, 4);
+        assert_eq!(
+            candidate.parent_version_id.as_deref(),
+            Some(baseline_version_id)
+        );
         assert!(store
             .publish_wiki_skill_version("skill-book-ingest", &candidate.id)
             .unwrap_err()
@@ -8989,7 +9054,7 @@ mod tests {
             .db
             .with_connection(|conn| {
                 conn.execute(
-                    "UPDATE skills SET current_version_id = 'skill-version-book-ingest-v1'
+                    "UPDATE skills SET current_version_id = 'skill-version-book-ingest-v3'
                      WHERE id = 'skill-book-ingest'",
                     [],
                 )?;
@@ -9001,7 +9066,8 @@ mod tests {
             .publish_wiki_skill_version("skill-book-ingest", &candidate.id)
             .unwrap();
         assert_eq!(published.current_version_id, candidate.id);
-        assert_eq!(published.skill.revision, 2);
+        assert_eq!(published.skill.revision, 4);
+        assert_eq!(published.versions.len(), 1);
         assert!(published
             .versions
             .iter()
@@ -9010,14 +9076,10 @@ mod tests {
             .latest_evaluation
             .is_some());
 
-        let rolled_back = store
-            .rollback_wiki_skill_version("skill-book-ingest", "skill-version-book-ingest-v1")
-            .unwrap();
-        assert_eq!(
-            rolled_back.current_version_id,
-            "skill-version-book-ingest-v1"
-        );
-        assert_eq!(rolled_back.skill.revision, 1);
+        assert!(matches!(
+            store.rollback_wiki_skill_version("skill-book-ingest", baseline_version_id),
+            Err(BrainError::KnowledgeNotFound(_))
+        ));
     }
 
     #[test]
@@ -9030,12 +9092,13 @@ mod tests {
             )])
             .unwrap();
         let base = store.initialize_base("book-benchmark-restart").unwrap();
+        let candidate_id = insert_builtin_skill_candidate(&store, "skill-book-ingest");
         let candidate = store
             .get_wiki_skill_detail("skill-book-ingest", None)
             .unwrap()
             .versions
             .into_iter()
-            .find(|version| version.revision == 2)
+            .find(|version| version.id == candidate_id)
             .unwrap();
         store
             .evaluate_wiki_skill_version("skill-book-ingest", &candidate.id, "semantic-ingest")

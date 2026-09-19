@@ -200,6 +200,21 @@ const MIGRATIONS: &[Migration] = &[
         description: "publish detailed built-in knowledge skills",
         sql: include_str!("../../migrations/030_publish_detailed_builtin_skills.sql"),
     },
+    Migration {
+        version: 31,
+        description: "strengthen wiki output contracts and evidence quality skills",
+        sql: include_str!("../../migrations/031_wiki_prompt_contract_skills.sql"),
+    },
+    Migration {
+        version: 32,
+        description: "retain only the active version of each wiki skill",
+        sql: include_str!("../../migrations/032_compact_wiki_skill_versions.sql"),
+    },
+    Migration {
+        version: 33,
+        description: "structured presentation planning skill and provenance",
+        sql: include_str!("../../migrations/033_structured_presentation_skill.sql"),
+    },
 ];
 
 fn seed_detailed_ingest_skill(conn: &Connection) -> Result<(), BrainError> {
@@ -273,6 +288,229 @@ fn seed_builtin_skill_file(
             (skill_version_id, relative_path, media_type, content_text, content_hash, size_bytes)
          VALUES (?1, 'SKILL.md', 'text/markdown', ?2, ?3, ?4)",
         params![version_id, content, content_hash, size_bytes],
+    )?;
+    Ok(())
+}
+
+fn overwrite_wiki_prompt_contract_skills(conn: &Connection) -> Result<(), BrainError> {
+    // The v3 identities are deliberately reused. Any score that evaluated the
+    // previous body (or compared a candidate against it) is therefore stale.
+    // Remove those gates before replacing the body so candidates must be
+    // evaluated again against the new baseline. Benchmark case results cascade;
+    // audited agent runs remain intact.
+    conn.execute(
+        "DELETE FROM skill_evaluation_runs
+         WHERE skill_version_id IN (
+             'skill-version-book-ingest-v3',
+             'skill-version-book-query-v3',
+             'skill-version-book-research-v3'
+         ) OR baseline_version_id IN (
+             'skill-version-book-ingest-v3',
+             'skill-version-book-query-v3',
+             'skill-version-book-research-v3'
+         )",
+        [],
+    )?;
+    conn.execute(
+        "DELETE FROM skill_benchmark_runs
+         WHERE skill_version_id IN (
+             'skill-version-book-ingest-v3',
+             'skill-version-book-query-v3',
+             'skill-version-book-research-v3'
+         ) OR baseline_version_id IN (
+             'skill-version-book-ingest-v3',
+             'skill-version-book-query-v3',
+             'skill-version-book-research-v3'
+         )",
+        [],
+    )?;
+    for (skill_id, version_id, changelog, content) in [
+        (
+            "skill-book-ingest",
+            "skill-version-book-ingest-v3",
+            "完善语义编译输出契约、JSON 合法性、空结果原因、证据边界与逐项自检规则。",
+            include_str!("../../skills/book-ingest/SKILL.md"),
+        ),
+        (
+            "skill-book-query",
+            "skill-version-book-query-v3",
+            "完善问题分流、证据覆盖、条件与版本保留、冲突核验和可追溯回答规则。",
+            include_str!("../../skills/book-query/SKILL.md"),
+        ),
+        (
+            "skill-book-research",
+            "skill-version-book-research-v3",
+            "完善研究证据矩阵、反例与竞争解释、任务类型分流和可核验结论规则。",
+            include_str!("../../skills/book-research/SKILL.md"),
+        ),
+    ] {
+        let content_hash = hex::encode(Sha256::digest(content.as_bytes()));
+        let size_bytes = i64::try_from(content.len())
+            .map_err(|_| BrainError::Internal("内置 Skill 大小超出限制".to_string()))?;
+        let updated = conn.execute(
+            "UPDATE skill_versions
+             SET content_hash = ?1, release_state = 'published', changelog = ?2
+             WHERE id = ?3 AND skill_id = ?4",
+            params![&content_hash, changelog, version_id, skill_id],
+        )?;
+        if updated != 1 {
+            return Err(BrainError::Internal(format!(
+                "内置 Skill 版本 {version_id} 缺失或重复"
+            )));
+        }
+        let updated = conn.execute(
+            "UPDATE skill_files
+             SET media_type = 'text/markdown', content_text = ?1,
+                 content_hash = ?2, size_bytes = ?3
+             WHERE skill_version_id = ?4 AND relative_path = 'SKILL.md'",
+            params![content, &content_hash, size_bytes, version_id],
+        )?;
+        if updated != 1 {
+            return Err(BrainError::Internal(format!(
+                "内置 Skill 文件 {version_id}/SKILL.md 缺失或重复"
+            )));
+        }
+        let updated = conn.execute(
+            "UPDATE skills
+             SET current_version_id = ?1, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?2 AND source_type = 'builtin'",
+            params![version_id, skill_id],
+        )?;
+        if updated != 1 {
+            return Err(BrainError::Internal(format!(
+                "内置 Skill {skill_id} 缺失或类型错误"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn compact_wiki_skill_versions(conn: &Connection) -> Result<(), BrainError> {
+    let invalid_active_versions: i64 = conn.query_row(
+        "SELECT COUNT(*)
+         FROM skills s
+         LEFT JOIN skill_versions v
+                ON v.id = s.current_version_id AND v.skill_id = s.id
+         WHERE s.current_version_id IS NULL OR v.id IS NULL",
+        [],
+        |row| row.get(0),
+    )?;
+    if invalid_active_versions != 0 {
+        return Err(BrainError::Internal(format!(
+            "有 {invalid_active_versions} 个 Skill 缺少有效的当前版本，无法清理历史正文"
+        )));
+    }
+
+    // Scores for a discarded candidate or an obsolete baseline cannot be
+    // reused after compaction. Case results cascade with benchmark runs.
+    conn.execute(
+        "DELETE FROM skill_evaluation_runs
+         WHERE NOT EXISTS (
+             SELECT 1 FROM skills s
+             WHERE s.current_version_id = skill_evaluation_runs.skill_version_id
+         ) OR (
+             baseline_version_id IS NOT NULL AND NOT EXISTS (
+                 SELECT 1 FROM skills s
+                 WHERE s.current_version_id = skill_evaluation_runs.baseline_version_id
+             )
+         )",
+        [],
+    )?;
+    conn.execute(
+        "DELETE FROM skill_benchmark_runs
+         WHERE NOT EXISTS (
+             SELECT 1 FROM skills s
+             WHERE s.current_version_id = skill_benchmark_runs.skill_version_id
+         ) OR NOT EXISTS (
+             SELECT 1 FROM skills s
+             WHERE s.current_version_id = skill_benchmark_runs.baseline_version_id
+         )",
+        [],
+    )?;
+    conn.execute(
+        "DELETE FROM skill_versions
+         WHERE NOT EXISTS (
+             SELECT 1 FROM skills s WHERE s.current_version_id = skill_versions.id
+         )",
+        [],
+    )?;
+
+    let remaining_versions: i64 =
+        conn.query_row("SELECT COUNT(*) FROM skill_versions", [], |row| row.get(0))?;
+    let skills: i64 = conn.query_row("SELECT COUNT(*) FROM skills", [], |row| row.get(0))?;
+    if remaining_versions != skills {
+        return Err(BrainError::Internal(format!(
+            "Skill 版本清理结果异常：{skills} 个 Skill，{remaining_versions} 个当前版本"
+        )));
+    }
+    Ok(())
+}
+
+fn overwrite_structured_presentation_skill(conn: &Connection) -> Result<(), BrainError> {
+    let skill_id = "skill-book-presentation";
+    let version_id = "skill-version-book-presentation-v3";
+    let content = include_str!("../../skills/book-presentation/SKILL.md");
+    let content_hash = hex::encode(Sha256::digest(content.as_bytes()));
+    let size_bytes = i64::try_from(content.len())
+        .map_err(|_| BrainError::Internal("内置演示 Skill 大小超出限制".to_string()))?;
+
+    conn.execute(
+        "DELETE FROM skill_evaluation_runs
+         WHERE skill_version_id = ?1 OR baseline_version_id = ?1",
+        params![version_id],
+    )?;
+    conn.execute(
+        "DELETE FROM skill_benchmark_runs
+         WHERE skill_version_id = ?1 OR baseline_version_id = ?1",
+        params![version_id],
+    )?;
+    let updated = conn.execute(
+        "UPDATE skill_versions
+         SET content_hash = ?1, release_state = 'published',
+             changelog = '重构为受众导向的结构化演示策划，增加叙事、版式、证据和交付自检。'
+         WHERE id = ?2 AND skill_id = ?3",
+        params![&content_hash, version_id, skill_id],
+    )?;
+    if updated != 1 {
+        return Err(BrainError::Internal(
+            "当前演示 Skill 版本缺失或重复".to_string(),
+        ));
+    }
+    let updated = conn.execute(
+        "UPDATE skill_files
+         SET media_type = 'text/markdown', content_text = ?1,
+             content_hash = ?2, size_bytes = ?3
+         WHERE skill_version_id = ?4 AND relative_path = 'SKILL.md'",
+        params![content, &content_hash, size_bytes, version_id],
+    )?;
+    if updated != 1 {
+        return Err(BrainError::Internal(
+            "当前演示 Skill 正文缺失或重复".to_string(),
+        ));
+    }
+    conn.execute(
+        "UPDATE skills SET current_version_id = ?1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?2 AND source_type = 'builtin'",
+        params![version_id, skill_id],
+    )?;
+    conn.execute(
+        "INSERT INTO skill_version_origins
+            (skill_version_id, repository_url, source_path, source_ref, license_spdx,
+             attribution, adaptation_notes, reviewed_at)
+         VALUES (?1, 'https://github.com/hugohe3/ppt-master',
+                 'skills/ppt-master/SKILL.md', 'main', 'MIT',
+                 'hugohe3/ppt-master',
+                 '独立改写；借鉴策略、中间规格、质量门禁和可编辑产物思路，改造为数据库证据与受控 Rust 渲染流程，不复制其脚本或引入 Shell 执行。',
+                 CURRENT_TIMESTAMP)
+         ON CONFLICT(skill_version_id) DO UPDATE SET
+             repository_url = excluded.repository_url,
+             source_path = excluded.source_path,
+             source_ref = excluded.source_ref,
+             license_spdx = excluded.license_spdx,
+             attribution = excluded.attribution,
+             adaptation_notes = excluded.adaptation_notes,
+             reviewed_at = excluded.reviewed_at",
+        params![version_id],
     )?;
     Ok(())
 }
@@ -364,6 +602,9 @@ impl SqliteStore {
             let seed_result = match migration.version {
                 29 => seed_detailed_ingest_skill(&conn),
                 30 => seed_detailed_builtin_skills(&conn),
+                31 => overwrite_wiki_prompt_contract_skills(&conn),
+                32 => compact_wiki_skill_versions(&conn),
+                33 => overwrite_structured_presentation_skill(&conn),
                 _ => Ok(()),
             };
             if let Err(error) = seed_result {
@@ -1328,6 +1569,204 @@ mod tests {
     }
 
     #[test]
+    fn test_migrations_031_and_032_overwrite_then_discard_old_skill_versions() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("upgrade-from-030.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             CREATE TABLE _migrations (
+                 version INTEGER PRIMARY KEY, description TEXT NOT NULL,
+                 applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+             );",
+        )
+        .unwrap();
+        for migration in MIGRATIONS
+            .iter()
+            .filter(|migration| migration.version <= 30)
+        {
+            conn.execute_batch(migration.sql).unwrap();
+            match migration.version {
+                29 => seed_detailed_ingest_skill(&conn).unwrap(),
+                30 => seed_detailed_builtin_skills(&conn).unwrap(),
+                _ => {}
+            }
+            conn.execute(
+                "INSERT INTO _migrations (version, description) VALUES (?1, ?2)",
+                params![migration.version, migration.description],
+            )
+            .unwrap();
+        }
+        for (version_id, legacy_hash) in [
+            ("skill-version-book-ingest-v3", "legacy-ingest-v3"),
+            ("skill-version-book-query-v3", "legacy-query-v3"),
+            ("skill-version-book-research-v3", "legacy-research-v3"),
+        ] {
+            conn.execute(
+                "UPDATE skill_versions SET content_hash = ?1 WHERE id = ?2",
+                params![legacy_hash, version_id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE skill_files
+                 SET content_text = 'legacy placeholder', content_hash = ?1, size_bytes = 18
+                 WHERE skill_version_id = ?2 AND relative_path = 'SKILL.md'",
+                params![legacy_hash, version_id],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO reader_books (id, path, kind, name, added_at)
+             VALUES ('migration-031-book', '/migration-031-book', 'folder', '迁移测试', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO knowledge_bases
+                (id, book_id, created_at, updated_at)
+             VALUES ('migration-031-base', 'migration-031-book', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO skill_evaluation_runs
+                (id, skill_version_id, suite_id, baseline_version_id, score,
+                 baseline_score, passed, findings_json, created_at)
+             VALUES ('stale-evaluation', 'skill-version-book-query-v2',
+                     'skill-suite-query', 'skill-version-book-query-v3',
+                     1, 1, 1, '[]', CURRENT_TIMESTAMP)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO skill_benchmark_runs
+                (id, skill_id, skill_version_id, baseline_version_id, suite_id,
+                 knowledge_base_id, runtime_profile_id, status, total_cases,
+                 completed_cases, candidate_score, baseline_score, score_delta,
+                 passed, created_at)
+             VALUES ('stale-benchmark', 'skill-book-query',
+                     'skill-version-book-query-v2', 'skill-version-book-query-v3',
+                     'skill-suite-query', 'migration-031-base',
+                     'runtime-deepseek-harness', 'completed', 1, 1, 1, 0, 1, 1,
+                     CURRENT_TIMESTAMP)",
+            [],
+        )
+        .unwrap();
+        let counts: (i64, i64) = conn
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM skill_versions),
+                    (SELECT COUNT(*) FROM skill_files)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(counts, (18, 18));
+        drop(conn);
+
+        // Opening twice verifies both the upgrade and its idempotency.
+        for _ in 0..2 {
+            let store = SqliteStore::new(&db_path).unwrap();
+            store
+                .with_connection(|conn| {
+                    let latest: u32 =
+                        conn.query_row("SELECT MAX(version) FROM _migrations", [], |row| {
+                            row.get(0)
+                        })?;
+                    assert_eq!(latest, 33);
+                    for (skill_id, version_id, expected_content) in [
+                        (
+                            "skill-book-ingest",
+                            "skill-version-book-ingest-v3",
+                            include_str!("../../skills/book-ingest/SKILL.md"),
+                        ),
+                        (
+                            "skill-book-query",
+                            "skill-version-book-query-v3",
+                            include_str!("../../skills/book-query/SKILL.md"),
+                        ),
+                        (
+                            "skill-book-research",
+                            "skill-version-book-research-v3",
+                            include_str!("../../skills/book-research/SKILL.md"),
+                        ),
+                        (
+                            "skill-book-presentation",
+                            "skill-version-book-presentation-v3",
+                            include_str!("../../skills/book-presentation/SKILL.md"),
+                        ),
+                    ] {
+                        let (
+                            current,
+                            revision,
+                            release_state,
+                            version_hash,
+                            file_hash,
+                            content,
+                            size,
+                        ): (
+                            String,
+                            i64,
+                            String,
+                            String,
+                            String,
+                            String,
+                            i64,
+                        ) = conn.query_row(
+                            "SELECT s.current_version_id, v.revision, v.release_state,
+                                    v.content_hash, f.content_hash, f.content_text, f.size_bytes
+                             FROM skills s
+                             JOIN skill_versions v ON v.id = ?2 AND v.skill_id = s.id
+                             JOIN skill_files f ON f.skill_version_id = v.id
+                             WHERE s.id = ?1 AND f.relative_path = 'SKILL.md'",
+                            params![skill_id, version_id],
+                            |row| {
+                                Ok((
+                                    row.get(0)?,
+                                    row.get(1)?,
+                                    row.get(2)?,
+                                    row.get(3)?,
+                                    row.get(4)?,
+                                    row.get(5)?,
+                                    row.get(6)?,
+                                ))
+                            },
+                        )?;
+                        let expected_hash =
+                            hex::encode(Sha256::digest(expected_content.as_bytes()));
+                        assert_eq!(current, version_id);
+                        assert_eq!(revision, 3);
+                        assert_eq!(release_state, "published");
+                        assert_eq!(version_hash, expected_hash);
+                        assert_eq!(file_hash, expected_hash);
+                        assert_eq!(content, expected_content);
+                        assert_eq!(size, expected_content.len() as i64);
+                    }
+                    let counts: (i64, i64) = conn.query_row(
+                        "SELECT
+                            (SELECT COUNT(*) FROM skill_versions),
+                            (SELECT COUNT(*) FROM skill_files)",
+                        [],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?;
+                    assert_eq!(counts, (7, 7));
+                    let stale_quality_runs: i64 = conn.query_row(
+                        "SELECT
+                            (SELECT COUNT(*) FROM skill_evaluation_runs
+                             WHERE id = 'stale-evaluation') +
+                            (SELECT COUNT(*) FROM skill_benchmark_runs
+                             WHERE id = 'stale-benchmark')",
+                        [],
+                        |row| row.get(0),
+                    )?;
+                    assert_eq!(stale_quality_runs, 0);
+                    Ok(())
+                })
+                .unwrap();
+        }
+    }
+
+    #[test]
     fn test_migrations_seed_versioned_safe_instruction_and_artifact_skills() {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("skills.db");
@@ -1343,13 +1782,13 @@ mod tests {
                     [],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )?;
-                assert_eq!(counts, (7, 18, 18));
+                assert_eq!(counts, (7, 7, 7));
                 let candidates: i64 = conn.query_row(
                     "SELECT COUNT(*) FROM skill_versions WHERE release_state = 'candidate'",
                     [],
                     |row| row.get(0),
                 )?;
-                assert_eq!(candidates, 4);
+                assert_eq!(candidates, 0);
                 let benchmark_counts: (i64, i64, i64, i64) = conn.query_row(
                     "SELECT
                         (SELECT COUNT(*) FROM skill_benchmark_cases WHERE suite_id = 'skill-suite-ingest'),
@@ -1409,11 +1848,11 @@ mod tests {
                 assert_eq!(size_bytes, content.len() as i64);
                 assert!(content.chars().count() > 1_500);
                 for section in [
-                    "## 适用范围与边界",
-                    "## 执行步骤",
-                    "## 分流规则",
-                    "## 输出契约",
-                    "## 自检清单",
+                    "## 运行边界",
+                    "## 一、提取证据，再确定主题",
+                    "## 二、确定身份与变化",
+                    "## 四、输出协议与长度控制",
+                    "## 提交前逐项检查",
                 ] {
                     assert!(content.contains(section), "missing section: {section}");
                 }

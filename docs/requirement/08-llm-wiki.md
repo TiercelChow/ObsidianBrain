@@ -425,7 +425,7 @@ draft → queued → running → waiting_review → completed
 - 内置 Skill 可查看但不可原地修改，可复制为自定义 Skill 后编辑
 - 运行快照必须标明 Skill 是实际注入 Prompt，还是仅作为声明/归因记录
 
-当前已内置：`book-ingest`、`book-query`、`book-lint`、`book-research`、`book-presentation`、`book-synthesis` 与 `markdown-collection`。前六类为受控指令型能力，`book-presentation`/`markdown-collection` 只定义成果格式；实际二进制 PPTX 仍由 Rust 生成器产生。脚本型 Skill 在独立沙箱、审批和资源配额落地前保持不可执行。
+当前已内置：`book-ingest`、`book-query`、`book-lint`、`book-research`、`book-presentation`、`book-synthesis` 与 `markdown-collection`。它们都是受控指令型能力；`book-presentation` 只负责从完整研究报告生成有受众、主线、多版式和逐页证据的结构化演示规格，实际二进制 PPTX 由 Rust 生成器产生。演示策划不获得工具、Shell 或任意文件权限，严格 JSON 合同与证据编号由服务端复核。脚本型 Skill 在独立沙箱、审批和资源配额落地前保持不可执行。
 
 #### 处理策略
 
