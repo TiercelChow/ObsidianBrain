@@ -220,6 +220,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "editable chart and relationship presentation layouts",
         sql: include_str!("../../migrations/034_rich_presentation_layouts.sql"),
     },
+    Migration {
+        version: 35,
+        description: "structured artifact validation details",
+        sql: include_str!("../../migrations/035_artifact_validation_details.sql"),
+    },
 ];
 
 fn seed_detailed_ingest_skill(conn: &Connection) -> Result<(), BrainError> {
@@ -1575,7 +1580,7 @@ mod tests {
     }
 
     #[test]
-    fn test_migrations_031_through_034_keep_only_current_skill_bodies() {
+    fn test_migrations_031_through_035_keep_only_current_skill_bodies() {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("upgrade-from-030.db");
         let conn = Connection::open(&db_path).unwrap();
@@ -1679,7 +1684,7 @@ mod tests {
                         conn.query_row("SELECT MAX(version) FROM _migrations", [], |row| {
                             row.get(0)
                         })?;
-                    assert_eq!(latest, 34);
+                    assert_eq!(latest, 35);
                     for (skill_id, version_id, expected_content) in [
                         (
                             "skill-book-ingest",

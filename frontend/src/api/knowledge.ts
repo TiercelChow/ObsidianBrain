@@ -267,7 +267,30 @@ export interface KnowledgeArtifact {
   size_bytes: number
   validation_state: 'pending' | 'valid' | 'warning' | 'invalid'
   validation_message: string
+  validation_details: Partial<PresentationQualityReport>
   created_at: string
+}
+
+export interface PresentationQualityCheck {
+  code: string
+  label: string
+  passed: boolean
+  detail: string
+}
+
+export interface PresentationQualityReport {
+  schema_version: string
+  slide_count: number
+  content_slide_count: number
+  theme: 'editorial' | 'midnight' | 'sage'
+  layout_count: number
+  layout_distribution: Record<string, number>
+  cited_slide_count: number
+  citation_coverage_percent: number
+  package_part_count: number
+  editable_text_and_shapes: boolean
+  checks: PresentationQualityCheck[]
+  summary: string
 }
 
 export interface AgentUsageTotals {

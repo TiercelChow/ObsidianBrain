@@ -20,7 +20,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::core::agent_tool_gateway::{AGENT_EXTERNAL_RESEARCH_TOOL, AGENT_KNOWLEDGE_TOOLS};
-use crate::core::presentation::{parse_presentation_spec, render_pptx, validate_pptx};
+use crate::core::presentation::{
+    build_presentation_quality_report, parse_presentation_spec, render_pptx, validate_pptx,
+    validate_presentation_spec,
+};
 use crate::error::BrainError;
 use crate::infra::book_wiki_store::{
     stable_id, BookWikiStore, MarkdownSourceDraft, SourceSectionDraft, WikiSkillBenchmarkCompletion,
@@ -734,10 +737,8 @@ impl BookWikiService {
                         .await
                     {
                         let _ = self.store.set_task_artifact_state(&task_id, "failed");
-                        let _ = self.store.fail_task_execution(
-                            &task_id,
-                            &format!("报告已生成，但演示文稿生成失败：{error}"),
-                        );
+                        let failure_summary = build_presentation_failure_summary(&answer, &error);
+                        let _ = self.store.fail_task_execution(&task_id, &failure_summary);
                         return Err(error);
                     }
                 }
@@ -897,8 +898,14 @@ impl BookWikiService {
             task.knowledge_base_id, task.id, artifact_id
         );
         let output = self.artifact_root.join(&relative_path);
+        let plan_validation = validate_presentation_spec(&spec, evidence.len())?;
         render_pptx(&spec, &output)?;
         let validation = validate_pptx(&output)?;
+        let quality_report =
+            build_presentation_quality_report(&spec, &plan_validation, &validation);
+        let validation_details = serde_json::to_value(&quality_report).map_err(|error| {
+            BrainError::Internal(format!("演示文稿质量报告序列化失败: {error}"))
+        })?;
         let hash = hash_file(&output)?;
         let size = std::fs::metadata(&output)?.len() as i64;
         self.store.save_artifact(
@@ -911,7 +918,8 @@ impl BookWikiService {
             &hash,
             size,
             "valid",
-            &validation.message,
+            &quality_report.summary,
+            &validation_details,
             evidence,
         )?;
         self.store.append_agent_run_event(
@@ -921,7 +929,7 @@ impl BookWikiService {
             "可编辑 PPTX 已生成并通过包结构校验",
             &serde_json::json!({
                 "relative_path": relative_path,
-                "validation": validation.message,
+                "validation": quality_report,
             }),
         )?;
         Ok(())
@@ -3075,6 +3083,13 @@ fn build_presentation_repair_prompt(
     )
 }
 
+fn build_presentation_failure_summary(report: &str, error: &BrainError) -> String {
+    let reason = error.to_string().chars().take(1_000).collect::<String>();
+    format!(
+        "> [!warning] PPTX 生成失败\n> 研究报告已经完成并保留。你可以阅读报告、查看运行检查器，修正问题后重新运行任务。\n> 原因：{reason}\n\n{report}"
+    )
+}
+
 fn append_configuration(prompt: &mut String, documents: &[ConfigDocument]) {
     prompt.push_str("<book_configuration>\n");
     let per_document = 4_000 / documents.len().max(1);
@@ -4449,6 +4464,17 @@ mod tests {
             .join(&presentation.artifacts[0].relative_path)
             .is_file());
         assert_eq!(presentation.artifacts[0].validation_state, "valid");
+        assert_eq!(
+            presentation.artifacts[0].validation_details["slide_count"],
+            serde_json::json!(5)
+        );
+        assert_eq!(
+            presentation.artifacts[0].validation_details["editable_text_and_shapes"],
+            serde_json::json!(true)
+        );
+        assert!(presentation.artifacts[0].validation_details["checks"]
+            .as_array()
+            .is_some_and(|checks| checks.len() >= 5));
         let artifact_run_id = presentation.artifacts[0]
             .agent_run_id
             .as_deref()

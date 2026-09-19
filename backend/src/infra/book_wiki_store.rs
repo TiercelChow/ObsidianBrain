@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use chrono::{NaiveDate, Utc};
 use rusqlite::{params, OptionalExtension};
+use serde_json::Value;
 
 use crate::error::BrainError;
 use crate::infra::sqlite_store::SqliteStore;
@@ -4136,6 +4137,7 @@ impl BookWikiStore {
         size_bytes: i64,
         validation_state: &str,
         validation_message: &str,
+        validation_details: &Value,
         evidence: &[KnowledgeEntrySummary],
     ) -> Result<KnowledgeArtifact, BrainError> {
         if relative_path.starts_with('/')
@@ -4155,15 +4157,17 @@ impl BookWikiStore {
         }
         let id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
+        let validation_details_json = serde_json::to_string(validation_details)
+            .map_err(|error| BrainError::Internal(format!("成果校验详情序列化失败: {error}")))?;
         self.db.transaction(|conn| {
             conn.execute(
                 "INSERT INTO knowledge_artifacts
                  (id, knowledge_base_id, knowledge_task_id, agent_run_id, skill_id,
                   artifact_type, title, relative_path, mime_type, content_hash, size_bytes,
-                  validation_state, validation_message, created_at)
+                  validation_state, validation_message, validation_details_json, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, 'pptx', ?6, ?7,
                          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-                         ?8, ?9, ?10, ?11, ?12)",
+                         ?8, ?9, ?10, ?11, ?12, ?13)",
                 params![
                     id,
                     base_id,
@@ -4176,6 +4180,7 @@ impl BookWikiStore {
                     size_bytes,
                     validation_state,
                     validation_message,
+                    validation_details_json,
                     now,
                 ],
             )?;
@@ -4206,7 +4211,7 @@ impl BookWikiStore {
             let mut stmt = conn.prepare(
                 "SELECT id, knowledge_base_id, knowledge_task_id, agent_run_id, skill_id,
                         artifact_type, title, relative_path, mime_type, content_hash, size_bytes,
-                        validation_state, validation_message, created_at
+                        validation_state, validation_message, validation_details_json, created_at
                  FROM knowledge_artifacts WHERE knowledge_task_id = ?1 ORDER BY created_at DESC",
             )?;
             let rows = stmt.query_map(params![task_id], map_artifact)?;
@@ -4219,7 +4224,7 @@ impl BookWikiStore {
             conn.query_row(
                 "SELECT id, knowledge_base_id, knowledge_task_id, agent_run_id, skill_id,
                         artifact_type, title, relative_path, mime_type, content_hash, size_bytes,
-                        validation_state, validation_message, created_at
+                        validation_state, validation_message, validation_details_json, created_at
                  FROM knowledge_artifacts WHERE id = ?1",
                 params![artifact_id],
                 map_artifact,
@@ -6527,6 +6532,10 @@ fn map_base_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<KnowledgeBaseSu
 }
 
 fn map_artifact(row: &rusqlite::Row<'_>) -> rusqlite::Result<KnowledgeArtifact> {
+    let validation_details_raw = row.get::<_, String>(13)?;
+    let validation_details = serde_json::from_str(&validation_details_raw).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(13, rusqlite::types::Type::Text, Box::new(error))
+    })?;
     Ok(KnowledgeArtifact {
         id: row.get(0)?,
         knowledge_base_id: row.get(1)?,
@@ -6541,7 +6550,8 @@ fn map_artifact(row: &rusqlite::Row<'_>) -> rusqlite::Result<KnowledgeArtifact> 
         size_bytes: row.get(10)?,
         validation_state: row.get(11)?,
         validation_message: row.get(12)?,
-        created_at: row.get(13)?,
+        validation_details,
+        created_at: row.get(14)?,
     })
 }
 

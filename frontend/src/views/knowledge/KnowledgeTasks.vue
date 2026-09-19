@@ -96,15 +96,29 @@
           <button type="button" :aria-pressed="resultTab === 'inspector'" :class="{ 'is-active': resultTab === 'inspector' }" @click="resultTab = 'inspector'"><el-icon><View /></el-icon>运行检查器</button>
         </div>
         <div v-if="resultTab === 'report'" class="task-result-scroll" role="region" aria-label="研究报告">
+          <div v-if="activeTask.artifact_state === 'failed'" class="artifact-failure" role="status"><strong>PPTX 生成失败，研究报告已保留</strong><span>可在下方阅读完整报告，或打开运行检查器定位原因后重新运行。</span></div>
           <div class="task-result-content">
             <KnowledgeAnswerMarkdown :content="activeTask.result_summary" :evidence-count="activeEvidence.length" @citation="openEvidence" />
           </div>
           <div v-if="activeArtifacts.length" class="task-artifacts">
-            <a v-for="artifact in activeArtifacts" :key="artifact.id" :href="knowledgeArtifactDownloadUrl(artifact.id)" download>
-              <span class="artifact-icon"><el-icon><Download /></el-icon></span>
-              <span><b>{{ artifact.title }}</b><small>{{ formatBytes(artifact.size_bytes) }} · {{ artifact.validation_message }}</small></span>
-              <em>下载</em>
-            </a>
+            <article v-for="artifact in activeArtifacts" :key="artifact.id" class="artifact-card">
+              <div class="artifact-main-row">
+                <span class="artifact-icon"><el-icon><Download /></el-icon></span>
+                <span class="artifact-copy"><b>{{ artifact.title }}</b><small>{{ formatBytes(artifact.size_bytes) }} · {{ artifact.validation_message }}</small></span>
+                <button v-if="artifact.agent_run_id" type="button" @click="inspectArtifact(artifact)"><el-icon><View /></el-icon>策划过程</button>
+                <a :href="knowledgeArtifactDownloadUrl(artifact.id)" download>下载</a>
+              </div>
+              <div v-if="artifactQuality(artifact)" class="artifact-quality" aria-label="演示文稿质量摘要">
+                <span><b>{{ artifactQuality(artifact)?.slide_count }}</b><small>总页数</small></span>
+                <span><b>{{ artifactQuality(artifact)?.layout_count }}</b><small>构图</small></span>
+                <span><b>{{ artifactQuality(artifact)?.citation_coverage_percent }}%</b><small>引用覆盖</small></span>
+                <span><b>{{ themeLabel(artifactQuality(artifact)?.theme) }}</b><small>视觉主题</small></span>
+              </div>
+              <details v-if="artifactQuality(artifact)?.checks?.length" class="artifact-checks">
+                <summary>查看质量检查</summary>
+                <ul><li v-for="check in artifactQuality(artifact)?.checks" :key="check.code"><i :class="{ 'is-pass': check.passed }"></i><span><b>{{ check.label }}</b><small>{{ check.detail }}</small></span></li></ul>
+              </details>
+            </article>
           </div>
           <button v-if="activeTask.knowledge_change_state === 'proposed'" class="review-result-link" type="button" @click="openTaskReview(activeTask)">研究结论已作为候选保存，前往 Wiki 工作台审核</button>
           <div v-if="activeEvidence.length" class="task-result-evidence">
@@ -184,6 +198,7 @@ import {
   knowledgeArtifactDownloadUrl,
   type KnowledgeArtifact,
   type AgentRunInspection,
+  type PresentationQualityReport,
   type KnowledgeTaskExecution,
   type KnowledgeBaseSummary,
   type KnowledgeEntrySummary,
@@ -293,7 +308,7 @@ function runOrOpen(task: KnowledgeTask) {
     void cancelTask(task)
     return
   }
-  if (task.status === 'completed') openResult(task)
+  if (task.status === 'completed' || (task.status === 'failed' && task.artifact_state === 'failed')) openResult(task)
   else if (task.status === 'failed') openFailedInspection(task)
   else runTask(task)
 }
@@ -390,6 +405,24 @@ function showResult(result: KnowledgeTaskExecution) {
   void loadRunInspection(result.run_id)
 }
 
+function inspectArtifact(artifact: KnowledgeArtifact) {
+  if (!artifact.agent_run_id) return
+  activeRunId.value = artifact.agent_run_id
+  resultTab.value = 'inspector'
+  void loadRunInspection(artifact.agent_run_id)
+}
+
+function artifactQuality(artifact: KnowledgeArtifact) {
+  const details = artifact.validation_details
+  return typeof details?.slide_count === 'number'
+    ? details as PresentationQualityReport
+    : null
+}
+
+function themeLabel(theme?: PresentationQualityReport['theme']) {
+  return ({ editorial: '编辑', midnight: '深夜', sage: '鼠尾草' })[theme || 'editorial']
+}
+
 async function openFailedInspection(task: KnowledgeTask) {
   loadingResultId.value = task.id
   try {
@@ -449,6 +482,7 @@ function taskActionLabel(task: KnowledgeTask) {
   if (loadingResultId.value === task.id) return '加载中'
   if (task.status === 'cancelled') return '重试'
   if (task.status === 'completed') return '查看'
+  if (task.status === 'failed' && task.artifact_state === 'failed') return '查看报告'
   if (task.status === 'failed') return '检查'
   return '运行'
 }
@@ -505,14 +539,33 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId })
 .task-inspection-state.is-error { color: var(--danger, #d9342b); }
 .task-result-content { min-width: 0; }
 .task-result-content :deep(.knowledge-answer-markdown) { border-radius: 14px; }
-.task-artifacts { display: grid; gap: 7px; }
-.task-artifacts a { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--accent-border); border-radius: 13px; background: var(--accent-light); color: var(--text-primary); text-decoration: none; }
+.artifact-failure { display: grid; gap: 3px; padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--danger, #d9342b) 24%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--danger, #d9342b) 8%, transparent); }
+.artifact-failure strong { color: var(--danger, #d9342b); font-size: 11px; }
+.artifact-failure span { color: var(--text-muted); font-size: 9px; line-height: 1.5; }
+.task-artifacts { display: grid; gap: 8px; }
+.artifact-card { overflow: hidden; border: 1px solid var(--accent-border); border-radius: 14px; background: var(--accent-light); }
+.artifact-main-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 10px 12px; }
 .artifact-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; background: var(--accent); color: white; font-size: 18px; }
-.task-artifacts a > span:nth-child(2) { min-width: 0; display: grid; gap: 3px; }
-.task-artifacts b, .task-artifacts small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-artifacts b { font-size: 12px; }
-.task-artifacts small { color: var(--text-faint); font-size: 9px; }
-.task-artifacts em { color: var(--accent); font-size: 11px; font-style: normal; font-weight: 700; }
+.artifact-copy { min-width: 0; display: grid; gap: 3px; }
+.artifact-copy b, .artifact-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-copy b { font-size: 12px; }
+.artifact-copy small { color: var(--text-faint); font-size: 9px; }
+.artifact-main-row > button, .artifact-main-row > a { min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 9px; border: 0; border-radius: 9px; background: color-mix(in srgb, var(--bg-base) 48%, transparent); color: var(--accent); font: inherit; font-size: 10px; font-weight: 700; text-decoration: none; cursor: pointer; }
+.artifact-main-row > a { background: var(--accent); color: white; }
+.artifact-quality { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; border-top: 1px solid var(--accent-border); background: var(--accent-border); }
+.artifact-quality span { min-width: 0; display: grid; gap: 2px; padding: 9px 11px; background: color-mix(in srgb, var(--bg-base) 74%, transparent); }
+.artifact-quality b { overflow: hidden; color: var(--text-primary); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-quality small { color: var(--text-faint); font-size: 8px; }
+.artifact-checks { border-top: 1px solid var(--accent-border); }
+.artifact-checks summary { padding: 8px 12px; color: var(--accent); font-size: 9px; font-weight: 700; cursor: pointer; list-style: none; }
+.artifact-checks summary::-webkit-details-marker { display: none; }
+.artifact-checks ul { display: grid; gap: 7px; margin: 0; padding: 2px 12px 11px; list-style: none; }
+.artifact-checks li { display: grid; grid-template-columns: 7px minmax(0, 1fr); gap: 7px; align-items: start; }
+.artifact-checks i { width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: var(--danger, #d9342b); }
+.artifact-checks i.is-pass { background: var(--success, #34c759); }
+.artifact-checks li span { min-width: 0; display: grid; gap: 1px; }
+.artifact-checks li b { color: var(--text-secondary); font-size: 9px; }
+.artifact-checks li small { overflow-wrap: anywhere; color: var(--text-faint); font-size: 8px; line-height: 1.45; }
 .review-result-link { width: 100%; padding: 10px 12px; border: 0; border-radius: 11px; background: var(--accent-light); color: var(--accent); font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
 .task-result-evidence { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .task-result-evidence button { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; align-items: center; padding: 10px; border: 1px solid var(--border-faint); border-radius: 11px; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
@@ -578,6 +631,10 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId })
   .task-result-modal { height: calc(min(88dvh, 760px) - env(safe-area-inset-bottom)); }
   .task-result-tabs { margin: 0 16px 12px; }
   .task-result-scroll { padding: 0 16px max(24px, env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; }
+  .artifact-main-row { grid-template-columns: 38px minmax(0, 1fr) auto; }
+  .artifact-main-row > button { grid-column: 2; justify-self: start; }
+  .artifact-main-row > a { grid-column: 3; grid-row: 1 / 3; min-height: 38px; }
+  .artifact-quality { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .run-inspector-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .run-skill-list { grid-template-columns: 1fr; }
 }

@@ -217,3 +217,15 @@ fn test_presentation_repair_is_single_object_and_bounded() {
     assert!(prompt.contains("\"excerpt_truncated\":true"));
     assert!(prompt.chars().count() < 10_000);
 }
+
+#[test]
+fn test_presentation_failure_summary_preserves_completed_research_report() {
+    let report = "## 研究结论\n完整报告正文。[S1]";
+    let error = BrainError::KnowledgeValidation("演示规格未通过校验".into());
+
+    let summary = build_presentation_failure_summary(report, &error);
+
+    assert!(summary.starts_with("> [!warning] PPTX 生成失败"));
+    assert!(summary.contains("演示规格未通过校验"));
+    assert!(summary.ends_with(report));
+}

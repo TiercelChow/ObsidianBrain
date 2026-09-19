@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -133,18 +133,43 @@ pub struct PresentationRelatedNode {
     pub detail: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct PresentationPlanValidation {
     pub content_slide_count: usize,
     pub layout_count: usize,
     pub cited_slide_count: usize,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct PresentationValidation {
     pub slide_count: usize,
     pub layout_count: usize,
+    pub package_part_count: usize,
     pub message: String,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct PresentationQualityCheck {
+    pub code: String,
+    pub label: String,
+    pub passed: bool,
+    pub detail: String,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct PresentationQualityReport {
+    pub schema_version: String,
+    pub slide_count: usize,
+    pub content_slide_count: usize,
+    pub theme: String,
+    pub layout_count: usize,
+    pub layout_distribution: BTreeMap<String, usize>,
+    pub cited_slide_count: usize,
+    pub citation_coverage_percent: usize,
+    pub package_part_count: usize,
+    pub editable_text_and_shapes: bool,
+    pub checks: Vec<PresentationQualityCheck>,
+    pub summary: String,
 }
 
 pub fn parse_presentation_spec(
@@ -635,14 +660,84 @@ pub fn validate_pptx(path: &Path) -> Result<PresentationValidation, BrainError> 
             "PPTX 可显示页面不足：{slide_count} 页"
         )));
     }
+    let package_part_count = archive.len();
     Ok(PresentationValidation {
         slide_count,
         layout_count: layouts.len(),
+        package_part_count,
         message: format!(
             "PPTX 文件结构完整，共 {slide_count} 页，使用 {} 种构图，文本与信息图可编辑",
             layouts.len()
         ),
     })
+}
+
+pub fn build_presentation_quality_report(
+    spec: &PresentationSpec,
+    plan: &PresentationPlanValidation,
+    package: &PresentationValidation,
+) -> PresentationQualityReport {
+    let mut layout_distribution = BTreeMap::new();
+    for slide in &spec.slides {
+        *layout_distribution
+            .entry(layout_name(slide.layout).to_string())
+            .or_insert(0) += 1;
+    }
+    let citation_coverage_percent = (plan.cited_slide_count * 100)
+        .checked_div(plan.content_slide_count)
+        .unwrap_or(0);
+    let summary = format!(
+        "结构校验通过 · {} 页 · {} 种构图 · 引用覆盖 {citation_coverage_percent}%",
+        package.slide_count, plan.layout_count
+    );
+    PresentationQualityReport {
+        schema_version: "1.0".to_string(),
+        slide_count: package.slide_count,
+        content_slide_count: plan.content_slide_count,
+        theme: theme_name(spec.theme).to_string(),
+        layout_count: plan.layout_count,
+        layout_distribution,
+        cited_slide_count: plan.cited_slide_count,
+        citation_coverage_percent,
+        package_part_count: package.package_part_count,
+        editable_text_and_shapes: true,
+        checks: vec![
+            PresentationQualityCheck {
+                code: "spec_contract".to_string(),
+                label: "演示规格".to_string(),
+                passed: true,
+                detail: format!("{} 页内容通过字段与密度校验", plan.content_slide_count),
+            },
+            PresentationQualityCheck {
+                code: "citation_coverage".to_string(),
+                label: "证据覆盖".to_string(),
+                passed: true,
+                detail: format!(
+                    "{} / {} 页绑定数据库证据",
+                    plan.cited_slide_count, plan.content_slide_count
+                ),
+            },
+            PresentationQualityCheck {
+                code: "layout_variety".to_string(),
+                label: "构图多样性".to_string(),
+                passed: true,
+                detail: format!("使用 {} 种内容构图", plan.layout_count),
+            },
+            PresentationQualityCheck {
+                code: "pptx_package".to_string(),
+                label: "PPTX 包结构".to_string(),
+                passed: true,
+                detail: format!("已读取并检查 {} 个 OOXML 部件", package.package_part_count),
+            },
+            PresentationQualityCheck {
+                code: "editable_objects".to_string(),
+                label: "可编辑对象".to_string(),
+                passed: true,
+                detail: "正文、数据图和关系图均由文本框与基础形状组成".to_string(),
+            },
+        ],
+        summary,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1464,6 +1559,14 @@ fn layout_name(layout: PresentationLayout) -> &'static str {
     }
 }
 
+fn theme_name(theme: PresentationTheme) -> &'static str {
+    match theme {
+        PresentationTheme::Editorial => "editorial",
+        PresentationTheme::Midnight => "midnight",
+        PresentationTheme::Sage => "sage",
+    }
+}
+
 fn slide_document(background: &str, shapes: &str, index: usize, total: usize) -> String {
     let page = text_box(
         99,
@@ -1737,5 +1840,27 @@ mod tests {
         if let Ok(keep_path) = std::env::var("OBRAIN_KEEP_TEST_PPTX") {
             std::fs::copy(output, keep_path).unwrap();
         }
+    }
+
+    #[test]
+    fn test_presentation_quality_report_exposes_auditable_checks() {
+        let spec = sample_spec();
+        let plan = validate_presentation_spec(&spec, 1).expect("plan validation");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = dir.path().join("quality-report.pptx");
+        render_pptx(&spec, &output).expect("render");
+        let package = validate_pptx(&output).expect("package validation");
+
+        let report = build_presentation_quality_report(&spec, &plan, &package);
+
+        assert_eq!(report.slide_count, 5);
+        assert_eq!(report.content_slide_count, 4);
+        assert_eq!(report.cited_slide_count, 3);
+        assert_eq!(report.citation_coverage_percent, 75);
+        assert_eq!(report.layout_distribution.get("statement"), Some(&1));
+        assert!(report.package_part_count >= 10);
+        assert!(report.checks.iter().all(|check| check.passed));
+        assert!(report.summary.contains("引用覆盖 75%"));
+        serde_json::to_value(&report).expect("serializable report");
     }
 }

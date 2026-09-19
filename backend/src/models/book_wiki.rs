@@ -661,6 +661,7 @@ pub struct KnowledgeArtifact {
     pub size_bytes: i64,
     pub validation_state: String,
     pub validation_message: String,
+    pub validation_details: Value,
     pub created_at: String,
 }
 
