@@ -215,6 +215,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "structured presentation planning skill and provenance",
         sql: include_str!("../../migrations/033_structured_presentation_skill.sql"),
     },
+    Migration {
+        version: 34,
+        description: "editable chart and relationship presentation layouts",
+        sql: include_str!("../../migrations/034_rich_presentation_layouts.sql"),
+    },
 ];
 
 fn seed_detailed_ingest_skill(conn: &Connection) -> Result<(), BrainError> {
@@ -467,7 +472,7 @@ fn overwrite_structured_presentation_skill(conn: &Connection) -> Result<(), Brai
     let updated = conn.execute(
         "UPDATE skill_versions
          SET content_hash = ?1, release_state = 'published',
-             changelog = '重构为受众导向的结构化演示策划，增加叙事、版式、证据和交付自检。'
+             changelog = '重构为受众导向的结构化演示策划，增加叙事、证据、受限数据图、关系图和交付自检。'
          WHERE id = ?2 AND skill_id = ?3",
         params![&content_hash, version_id, skill_id],
     )?;
@@ -605,6 +610,7 @@ impl SqliteStore {
                 31 => overwrite_wiki_prompt_contract_skills(&conn),
                 32 => compact_wiki_skill_versions(&conn),
                 33 => overwrite_structured_presentation_skill(&conn),
+                34 => overwrite_structured_presentation_skill(&conn),
                 _ => Ok(()),
             };
             if let Err(error) = seed_result {
@@ -1569,7 +1575,7 @@ mod tests {
     }
 
     #[test]
-    fn test_migrations_031_and_032_overwrite_then_discard_old_skill_versions() {
+    fn test_migrations_031_through_034_keep_only_current_skill_bodies() {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("upgrade-from-030.db");
         let conn = Connection::open(&db_path).unwrap();
@@ -1673,7 +1679,7 @@ mod tests {
                         conn.query_row("SELECT MAX(version) FROM _migrations", [], |row| {
                             row.get(0)
                         })?;
-                    assert_eq!(latest, 33);
+                    assert_eq!(latest, 34);
                     for (skill_id, version_id, expected_content) in [
                         (
                             "skill-book-ingest",

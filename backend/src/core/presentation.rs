@@ -42,6 +42,8 @@ pub enum PresentationLayout {
     Split,
     Process,
     Metric,
+    Chart,
+    Relationship,
     Quote,
     Evidence,
     Summary,
@@ -65,6 +67,10 @@ pub struct PresentationSlide {
     pub steps: Vec<PresentationStep>,
     #[serde(default)]
     pub metric: Option<PresentationMetric>,
+    #[serde(default)]
+    pub chart: Option<PresentationChart>,
+    #[serde(default)]
+    pub relationship: Option<PresentationRelationship>,
     #[serde(default)]
     pub quote: String,
     #[serde(default)]
@@ -93,6 +99,38 @@ pub struct PresentationMetric {
     pub value: String,
     pub label: String,
     pub context: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PresentationChart {
+    pub unit: String,
+    pub categories: Vec<String>,
+    pub values: Vec<f64>,
+    #[serde(default)]
+    pub highlight_index: Option<usize>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PresentationRelationship {
+    pub center: PresentationRelationshipNode,
+    pub related: Vec<PresentationRelatedNode>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PresentationRelationshipNode {
+    pub title: String,
+    pub detail: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PresentationRelatedNode {
+    pub relation: String,
+    pub title: String,
+    pub detail: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -259,6 +297,99 @@ fn validate_layout_payload(field: &str, slide: &PresentationSlide) -> Result<(),
                 false,
             )?;
         }
+        PresentationLayout::Chart => {
+            let chart = slide
+                .chart
+                .as_ref()
+                .ok_or_else(|| validation_error(&format!("{field}.chart 不能为空")))?;
+            validate_text(&format!("{field}.chart.unit"), &chart.unit, 16, true)?;
+            if !(2..=6).contains(&chart.categories.len()) {
+                return Err(validation_error(&format!(
+                    "{field}.chart.categories 必须包含 2 到 6 项"
+                )));
+            }
+            if chart.values.len() != chart.categories.len() {
+                return Err(validation_error(&format!(
+                    "{field}.chart.values 必须与 categories 一一对应"
+                )));
+            }
+            for (index, category) in chart.categories.iter().enumerate() {
+                validate_text(
+                    &format!("{field}.chart.categories[{index}]"),
+                    category,
+                    24,
+                    false,
+                )?;
+            }
+            for (index, value) in chart.values.iter().enumerate() {
+                if !value.is_finite() {
+                    return Err(validation_error(&format!(
+                        "{field}.chart.values[{index}] 必须是有限数值"
+                    )));
+                }
+                if *value < 0.0 {
+                    return Err(validation_error(&format!(
+                        "{field}.chart.values[{index}] 不能为负数"
+                    )));
+                }
+            }
+            if chart.values.iter().all(|value| *value == 0.0) {
+                return Err(validation_error(&format!(
+                    "{field}.chart.values 不能全部为零"
+                )));
+            }
+            if chart
+                .highlight_index
+                .is_some_and(|index| index >= chart.values.len())
+            {
+                return Err(validation_error(&format!(
+                    "{field}.chart.highlight_index 超出数据范围"
+                )));
+            }
+        }
+        PresentationLayout::Relationship => {
+            let relationship = slide
+                .relationship
+                .as_ref()
+                .ok_or_else(|| validation_error(&format!("{field}.relationship 不能为空")))?;
+            validate_text(
+                &format!("{field}.relationship.center.title"),
+                &relationship.center.title,
+                32,
+                false,
+            )?;
+            validate_text(
+                &format!("{field}.relationship.center.detail"),
+                &relationship.center.detail,
+                72,
+                false,
+            )?;
+            if !(2..=4).contains(&relationship.related.len()) {
+                return Err(validation_error(&format!(
+                    "{field}.relationship.related 必须包含 2 到 4 项"
+                )));
+            }
+            for (index, related) in relationship.related.iter().enumerate() {
+                validate_text(
+                    &format!("{field}.relationship.related[{index}].relation"),
+                    &related.relation,
+                    16,
+                    false,
+                )?;
+                validate_text(
+                    &format!("{field}.relationship.related[{index}].title"),
+                    &related.title,
+                    32,
+                    false,
+                )?;
+                validate_text(
+                    &format!("{field}.relationship.related[{index}].detail"),
+                    &related.detail,
+                    72,
+                    false,
+                )?;
+            }
+        }
         PresentationLayout::Quote => {
             validate_text(&format!("{field}.quote"), &slide.quote, 240, false)?;
         }
@@ -346,6 +477,23 @@ fn slide_character_count(slide: &PresentationSlide) -> usize {
             metric.label.as_str(),
             metric.context.as_str(),
         ]);
+    }
+    if let Some(chart) = &slide.chart {
+        values.push(chart.unit.as_str());
+        values.extend(chart.categories.iter().map(String::as_str));
+    }
+    if let Some(relationship) = &slide.relationship {
+        values.extend([
+            relationship.center.title.as_str(),
+            relationship.center.detail.as_str(),
+        ]);
+        for related in &relationship.related {
+            values.extend([
+                related.relation.as_str(),
+                related.title.as_str(),
+                related.detail.as_str(),
+            ]);
+        }
     }
     values.into_iter().map(|value| value.chars().count()).sum()
 }
@@ -470,6 +618,8 @@ pub fn validate_pptx(path: &Path) -> Result<PresentationValidation, BrainError> 
                 "split",
                 "process",
                 "metric",
+                "chart",
+                "relationship",
                 "quote",
                 "evidence",
                 "summary",
@@ -665,6 +815,8 @@ fn content_slide_xml(
         PresentationLayout::Split => render_split(&mut shapes, slide, palette),
         PresentationLayout::Process => render_process(&mut shapes, slide, palette),
         PresentationLayout::Metric => render_metric(&mut shapes, slide, palette),
+        PresentationLayout::Chart => render_chart(&mut shapes, slide, palette),
+        PresentationLayout::Relationship => render_relationship(&mut shapes, slide, palette),
         PresentationLayout::Quote => render_quote(&mut shapes, slide, palette),
         PresentationLayout::Evidence => render_evidence(&mut shapes, slide, palette),
         PresentationLayout::Summary => render_summary(&mut shapes, slide, palette),
@@ -931,6 +1083,190 @@ fn render_metric(out: &mut String, slide: &PresentationSlide, p: &Palette) {
     ));
 }
 
+fn render_chart(out: &mut String, slide: &PresentationSlide, p: &Palette) {
+    let Some(chart) = &slide.chart else { return };
+    out.push_str(&text_box(
+        4,
+        "图表结论",
+        760_000,
+        1_480_000,
+        10_500_000,
+        500_000,
+        &slide.takeaway,
+        1_600,
+        p.muted,
+        false,
+        "l",
+    ));
+    let maximum = chart.values.iter().copied().fold(0.0_f64, f64::max);
+    let row_height = 3_200_000 / chart.values.len().max(1);
+    for (index, (category, value)) in chart.categories.iter().zip(chart.values.iter()).enumerate() {
+        let y = 2_100_000 + index * row_height;
+        let bar_width = ((value / maximum) * 6_250_000.0).round() as usize;
+        let color = if chart.highlight_index == Some(index) {
+            p.accent_two
+        } else {
+            p.accent
+        };
+        let id = 10 + index * 5;
+        out.push_str(&text_box(
+            id,
+            "图表类别",
+            780_000,
+            y,
+            1_850_000,
+            row_height.saturating_sub(90_000),
+            category,
+            1_250,
+            p.text,
+            true,
+            "l",
+        ));
+        out.push_str(&shape(
+            id + 1,
+            "图表刻度轨",
+            "roundRect",
+            2_750_000,
+            y + 70_000,
+            6_250_000,
+            row_height.saturating_sub(230_000),
+            p.accent_soft,
+            p.accent_soft,
+        ));
+        out.push_str(&shape(
+            id + 2,
+            "图表数据条",
+            "roundRect",
+            2_750_000,
+            y + 70_000,
+            bar_width.max(24_000),
+            row_height.saturating_sub(230_000),
+            color,
+            color,
+        ));
+        out.push_str(&text_box(
+            id + 3,
+            "图表数值",
+            9_250_000,
+            y,
+            1_650_000,
+            row_height.saturating_sub(90_000),
+            &format!("{}{}", format_chart_value(*value), chart.unit),
+            1_350,
+            color,
+            true,
+            "r",
+        ));
+    }
+}
+
+fn render_relationship(out: &mut String, slide: &PresentationSlide, p: &Palette) {
+    let Some(relationship) = &slide.relationship else {
+        return;
+    };
+    out.push_str(&text_box(
+        4,
+        "关系结论",
+        760_000,
+        1_480_000,
+        10_500_000,
+        500_000,
+        &slide.takeaway,
+        1_600,
+        p.muted,
+        false,
+        "l",
+    ));
+    let row_height = 3_250_000 / relationship.related.len().max(1);
+    for (index, related) in relationship.related.iter().enumerate() {
+        let y = 2_090_000 + index * row_height;
+        let id = 20 + index * 5;
+        out.push_str(&shape(
+            id,
+            "关系连接线",
+            "rect",
+            3_830_000,
+            y + row_height / 2,
+            1_720_000,
+            18_000,
+            p.accent_soft,
+            p.accent_soft,
+        ));
+        out.push_str(&text_box(
+            id + 1,
+            "关系标签",
+            4_020_000,
+            y + row_height / 2 - 310_000,
+            1_350_000,
+            260_000,
+            &related.relation,
+            900,
+            p.accent_two,
+            true,
+            "ctr",
+        ));
+        out.push_str(&shape(
+            id + 2,
+            "相关概念",
+            "roundRect",
+            5_520_000,
+            y,
+            5_500_000,
+            row_height.saturating_sub(150_000),
+            p.accent_soft,
+            p.accent_soft,
+        ));
+        out.push_str(&text_box(
+            id + 3,
+            "相关概念文字",
+            5_850_000,
+            y + 80_000,
+            4_900_000,
+            row_height.saturating_sub(300_000),
+            &format!("{}\n{}", related.title, related.detail),
+            1_250,
+            p.text,
+            true,
+            "l",
+        ));
+    }
+    out.push_str(&shape(
+        10,
+        "中心概念",
+        "roundRect",
+        760_000,
+        2_550_000,
+        3_080_000,
+        1_650_000,
+        p.accent,
+        p.accent,
+    ));
+    out.push_str(&text_box(
+        11,
+        "中心概念文字",
+        1_060_000,
+        2_760_000,
+        2_480_000,
+        1_180_000,
+        &format!(
+            "{}\n{}",
+            relationship.center.title, relationship.center.detail
+        ),
+        1_450,
+        p.inverse,
+        true,
+        "l",
+    ));
+}
+
+fn format_chart_value(value: f64) -> String {
+    if value.fract().abs() < f64::EPSILON {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.1}")
+    }
+}
+
 fn render_quote(out: &mut String, slide: &PresentationSlide, p: &Palette) {
     out.push_str(&text_box(
         4,
@@ -1120,6 +1456,8 @@ fn layout_name(layout: PresentationLayout) -> &'static str {
         PresentationLayout::Split => "split",
         PresentationLayout::Process => "process",
         PresentationLayout::Metric => "metric",
+        PresentationLayout::Chart => "chart",
+        PresentationLayout::Relationship => "relationship",
         PresentationLayout::Quote => "quote",
         PresentationLayout::Evidence => "evidence",
         PresentationLayout::Summary => "summary",
@@ -1331,6 +1669,59 @@ mod tests {
         }
         let error = validate_presentation_spec(&spec, 1).unwrap_err();
         assert!(error.to_string().contains("至少需要 3 种布局"));
+    }
+
+    #[test]
+    fn test_parse_presentation_spec_accepts_bounded_chart_and_relationship() {
+        let value = serde_json::json!({
+            "schema_version": "1.0",
+            "title": "反馈为什么影响学习速度",
+            "subtitle": "《设计心理学》专题研究",
+            "audience": "产品设计团队",
+            "core_message": "反馈越接近动作，用户越容易建立正确预期。",
+            "theme": "editorial",
+            "slides": [
+                {"layout":"statement","eyebrow":"判断","title":"即时反馈降低操作的不确定性","takeaway":"用户需要在动作之后立刻确认系统状态。","body":["延迟会让用户重复操作。"],"citations":["S1"]},
+                {"layout":"chart","eyebrow":"数据","title":"等待时间增加会降低完成率","takeaway":"报告中的对照数据呈现出一致下降趋势。","chart":{"unit":"%","categories":["即时","短暂等待","明显等待"],"values":[92,78,51],"highlight_index":2},"citations":["S1"]},
+                {"layout":"relationship","eyebrow":"关系","title":"反馈同时连接动作、状态与下一步","takeaway":"反馈把一次操作转化为可理解的状态变化。","relationship":{"center":{"title":"反馈","detail":"动作后的系统回应"},"related":[{"relation":"确认","title":"用户动作","detail":"系统已收到操作"},{"relation":"解释","title":"当前状态","detail":"说明结果或等待原因"},{"relation":"引导","title":"下一步","detail":"给出继续操作的依据"}]},"citations":["S1"]},
+                {"layout":"summary","eyebrow":"收束","title":"反馈规则需要进入交互验收","takeaway":"每个关键动作都应有及时、明确且可行动的回应。","body":["检查反馈时机。","说明当前状态。"],"citations":[]}
+            ]
+        });
+
+        let spec = parse_presentation_spec(&value.to_string(), 1).expect("rich presentation");
+        assert_eq!(spec.slides.len(), 4);
+        assert_eq!(layout_name(spec.slides[1].layout), "chart");
+        assert_eq!(layout_name(spec.slides[2].layout), "relationship");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = dir.path().join("rich-layouts.pptx");
+        render_pptx(&spec, &output).expect("render rich layouts");
+        let validation = validate_pptx(&output).expect("validate rich layouts");
+        assert_eq!(validation.slide_count, 5);
+        assert_eq!(validation.layout_count, 5);
+        if let Ok(keep_path) = std::env::var("OBRAIN_KEEP_RICH_TEST_PPTX") {
+            std::fs::copy(output, keep_path).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_presentation_chart_rejects_unbounded_or_fabricated_shape() {
+        let mut value = serde_json::to_value(sample_spec()).unwrap();
+        value["slides"][0] = serde_json::json!({
+            "layout": "chart",
+            "eyebrow": "数据",
+            "title": "错误的数据页",
+            "takeaway": "数据必须保持受限。",
+            "chart": {
+                "unit": "%",
+                "categories": ["A", "B"],
+                "values": [10, -3],
+                "highlight_index": 1
+            },
+            "citations": ["S1"]
+        });
+
+        let error = parse_presentation_spec(&value.to_string(), 1).unwrap_err();
+        assert!(error.to_string().contains("不能为负数"));
     }
 
     #[test]

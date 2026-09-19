@@ -19,6 +19,8 @@
    - `split`：两个角度、方案或条件的对照，必须填 `left` 和 `right`；
    - `process`：3–5 个有先后关系的步骤，必须填 `steps`；
    - `metric`：报告中确实存在的关键数字，必须填 `metric`；没有数字就不能使用；
+   - `chart`：报告中存在 2–6 个同口径、非负且可比较的数字时使用，必须填 `chart`；类别、数值和单位不得推测，`highlight_index` 从 0 开始；
+   - `relationship`：一个中心概念与 2–4 个相关概念之间的关系，必须填 `relationship`；不要把有先后顺序的步骤伪装成关系图；
    - `quote`：报告中确实存在且值得单独呈现的引语，必须填 `quote`；
    - `evidence`：展开证据、限定或竞争解释；
    - `summary`：最后的收束与行动页。
@@ -71,6 +73,28 @@
       "body": ["数字的限定条件"],
       "metric": {"value": "42%", "label": "指标名", "context": "口径、范围与条件"},
       "citations": ["S2"]
+    },
+    {
+      "layout": "chart",
+      "eyebrow": "对照数据",
+      "title": "同口径数值之间的结论",
+      "takeaway": "数据真正支持的判断",
+      "chart": {"unit": "%", "categories": ["类别 A", "类别 B"], "values": [42, 31], "highlight_index": 0},
+      "citations": ["S2"]
+    },
+    {
+      "layout": "relationship",
+      "eyebrow": "概念关系",
+      "title": "中心概念如何连接其他概念",
+      "takeaway": "这些关系共同说明什么",
+      "relationship": {
+        "center": {"title": "中心概念", "detail": "简短定义"},
+        "related": [
+          {"relation": "解释", "title": "相关概念 A", "detail": "关系含义"},
+          {"relation": "约束", "title": "相关概念 B", "detail": "关系含义"}
+        ]
+      },
+      "citations": ["S1", "S2"]
     }
   ]
 }
