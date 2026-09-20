@@ -352,7 +352,7 @@ test('runtime settings keep save and paid connection verification as separate ac
   assert.doesNotMatch(settings, /保存并检测/)
 })
 
-test('runtime settings support an OpenAI-compatible provider without storing its key', async () => {
+test('runtime settings select a model provider and manage API keys on the page', async () => {
   const [settings, api] = await Promise.all([
     source('src/views/knowledge/WikiSettings.vue'),
     source('src/api/knowledge.ts'),
@@ -363,6 +363,12 @@ test('runtime settings support an OpenAI-compatible provider without storing its
   assert.match(settings, /API Key 环境变量/)
   assert.match(settings, /CUSTOM_LLM_API_KEY/)
   assert.doesNotMatch(settings, /DEEPSEEK_API_KEY/)
-  assert.match(api, /provider_config: profile\.provider_config \?\? null/)
-  assert.doesNotMatch(api, /api_key:/)
+  // the runtime profile references a provider by id instead of an inline provider_config object
+  assert.match(api, /provider_id: profile\.provider_id \?\? ''/)
+  assert.doesNotMatch(api, /provider_config: profile\.provider_config/)
+  // providers are managed through dedicated tools; keychain keys are written to the system credential store
+  assert.match(api, /save_model_provider/)
+  assert.match(api, /delete_model_provider/)
+  assert.match(api, /list_model_providers/)
+  assert.match(api, /model_providers/)
 })

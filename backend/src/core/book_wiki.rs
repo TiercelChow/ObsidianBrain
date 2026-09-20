@@ -28,13 +28,14 @@ use crate::error::BrainError;
 use crate::infra::book_wiki_store::{
     stable_id, BookWikiStore, MarkdownSourceDraft, SourceSectionDraft, WikiSkillBenchmarkCompletion,
 };
+use crate::infra::credential_store::{ProviderCredentialStore, SystemProviderCredentialStore};
 use crate::infra::deepseek_harness::{AgentPromptRequest, AgentRuntime, AgentRuntimeEvent};
 use crate::models::book_wiki::{
     AgentTokenUsage, ConfigDocument, KnowledgeAnswer, KnowledgeBaseSummary, KnowledgeChangeSet,
     KnowledgeEntryDetail, KnowledgeEntrySummary, KnowledgeMessage, KnowledgeTask,
-    KnowledgeTaskExecution, RuntimeProfile, RuntimeVerification, SemanticCompileResult,
-    SourceSpanSnapshot, WikiSkill, WikiSkillBenchmarkCase, WikiSkillBenchmarkCaseResult,
-    WikiSkillBenchmarkRun,
+    KnowledgeTaskExecution, ModelProviderProfile, RuntimeProfile, RuntimeVerification,
+    SaveModelProviderRequest, SemanticCompileResult, SourceSpanSnapshot, WikiSkill,
+    WikiSkillBenchmarkCase, WikiSkillBenchmarkCaseResult, WikiSkillBenchmarkRun,
 };
 
 const MAX_MARKDOWN_BYTES: u64 = 10 * 1024 * 1024;
@@ -60,6 +61,7 @@ const AGENT_CAPABILITY_MIN_TTL_SECONDS: i64 = 300;
 const AGENT_CAPABILITY_TTL_BUFFER_SECONDS: i64 = 60;
 const NO_SEMANTIC_SOURCE_CHANGES: &str = "Markdown 来源没有变化，无需重复编译";
 const DEFAULT_AGENT_TOOL_GATEWAY: &str = "http://127.0.0.1:9876/v1/knowledge/agent-mcp";
+const KEYCHAIN_CREDENTIAL_ENV: &str = "OBSIDIANBRAIN_LLM_API_KEY";
 const KNOWLEDGE_QA_HARNESS_PATCH: &str =
     include_str!("../../config/deepseek-harness-knowledge-qa.patch.yml");
 const SKIP_DIRECTORIES: &[&str] = &[
@@ -76,6 +78,7 @@ const SKIP_DIRECTORIES: &[&str] = &[
 pub struct BookWikiService {
     store: BookWikiStore,
     runtime: Arc<dyn AgentRuntime>,
+    credential_store: Arc<dyn ProviderCredentialStore>,
     artifact_root: PathBuf,
     agent_tool_gateway_url: String,
     task_notify: Arc<tokio::sync::Notify>,
@@ -164,6 +167,7 @@ impl BookWikiService {
         Self {
             store,
             runtime,
+            credential_store: Arc::new(SystemProviderCredentialStore),
             artifact_root: crate::paths::artifacts_dir(),
             agent_tool_gateway_url: DEFAULT_AGENT_TOOL_GATEWAY.to_string(),
             task_notify: Arc::new(tokio::sync::Notify::new()),
@@ -177,6 +181,12 @@ impl BookWikiService {
     }
 
     #[cfg(test)]
+    fn with_credential_store(mut self, credential_store: Arc<dyn ProviderCredentialStore>) -> Self {
+        self.credential_store = credential_store;
+        self
+    }
+
+    #[cfg(test)]
     fn with_artifact_root(mut self, artifact_root: PathBuf) -> Self {
         self.artifact_root = artifact_root;
         self
@@ -184,6 +194,113 @@ impl BookWikiService {
 
     pub fn store(&self) -> &BookWikiStore {
         &self.store
+    }
+
+    pub async fn save_model_provider(
+        &self,
+        request: SaveModelProviderRequest,
+    ) -> Result<ModelProviderProfile, BrainError> {
+        let provider_id = request
+            .provider_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("provider-{}", uuid::Uuid::new_v4()));
+        let current = if request.expected_revision > 0 {
+            Some(self.store.get_model_provider_profile(&provider_id)?)
+        } else {
+            None
+        };
+        let api_key = request
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let mut api_key_configured = current
+            .as_ref()
+            .is_some_and(|provider| provider.api_key_configured);
+
+        if request.credential_source == "keychain" {
+            if request.clear_api_key {
+                let credentials = self.credential_store.clone();
+                let credential_id = provider_id.clone();
+                tokio::task::spawn_blocking(move || credentials.delete(&credential_id))
+                    .await
+                    .map_err(|error| {
+                        BrainError::Internal(format!("系统凭据删除任务失败: {error}"))
+                    })??;
+                api_key_configured = false;
+            } else if let Some(api_key) = api_key {
+                let credentials = self.credential_store.clone();
+                let credential_id = provider_id.clone();
+                tokio::task::spawn_blocking(move || credentials.set(&credential_id, &api_key))
+                    .await
+                    .map_err(|error| {
+                        BrainError::Internal(format!("系统凭据保存任务失败: {error}"))
+                    })??;
+                api_key_configured = true;
+            } else if current.is_none() {
+                return Err(BrainError::KnowledgeValidation(
+                    "使用系统凭据库时，首次保存必须填写 API Key".to_string(),
+                ));
+            }
+        } else {
+            if api_key.is_some() {
+                return Err(BrainError::KnowledgeValidation(
+                    "环境变量模式不会保存页面输入的 API Key".to_string(),
+                ));
+            }
+            if current
+                .as_ref()
+                .is_some_and(|provider| provider.credential_source == "keychain")
+            {
+                let credentials = self.credential_store.clone();
+                let credential_id = provider_id.clone();
+                if let Err(error) =
+                    tokio::task::spawn_blocking(move || credentials.delete(&credential_id))
+                        .await
+                        .map_err(|error| {
+                            BrainError::Internal(format!("系统凭据删除任务失败: {error}"))
+                        })?
+                {
+                    tracing::warn!(provider_id = %provider_id, error = %error, "切换凭据来源时清理旧密钥失败");
+                }
+            }
+            api_key_configured = false;
+        }
+
+        self.store.save_model_provider_profile(
+            &provider_id,
+            &request.display_name,
+            &request.api_protocol,
+            &request.base_url,
+            &request.model,
+            &request.credential_source,
+            &request.api_key_env,
+            api_key_configured,
+            request.enabled,
+            request.expected_revision,
+        )
+    }
+
+    pub async fn delete_model_provider(
+        &self,
+        provider_id: &str,
+        expected_revision: i64,
+    ) -> Result<(), BrainError> {
+        self.store
+            .delete_model_provider_profile(provider_id, expected_revision)?;
+        let credentials = self.credential_store.clone();
+        let credential_id = provider_id.to_string();
+        if let Err(error) = tokio::task::spawn_blocking(move || credentials.delete(&credential_id))
+            .await
+            .map_err(|error| BrainError::Internal(format!("系统凭据清理任务失败: {error}")))?
+        {
+            tracing::warn!(provider_id, error = %error, "供应商已删除，但系统凭据清理失败");
+        }
+        Ok(())
     }
 
     pub async fn ask(
@@ -1399,6 +1516,7 @@ impl BookWikiService {
         profile: &RuntimeProfile,
         invocation: RuntimeInvocation<'_>,
     ) -> Result<String, BrainError> {
+        let (credential_env, credential_value) = self.runtime_credential(profile).await?;
         let workspace = tempfile::Builder::new()
             .prefix("obsidianbrain-harness-")
             .tempdir()
@@ -1432,16 +1550,62 @@ impl BookWikiService {
                     cwd: workspace.path().to_path_buf(),
                     prompt: invocation.prompt,
                     patch_paths,
-                    credential_env: profile
-                        .provider_config
-                        .as_ref()
-                        .map(|provider| provider.api_key_env.clone()),
+                    credential_env,
+                    credential_value,
                     timeout: invocation.timeout,
                 },
                 invocation.events,
                 invocation.cancel,
             )
             .await
+    }
+
+    async fn runtime_credential(
+        &self,
+        profile: &RuntimeProfile,
+    ) -> Result<(Option<String>, Option<String>), BrainError> {
+        let Some(provider) = &profile.provider_config else {
+            return Ok((None, None));
+        };
+        if !provider.enabled {
+            return Err(BrainError::KnowledgeValidation(format!(
+                "模型供应商「{}」已停用",
+                provider.display_name
+            )));
+        }
+        if provider.credential_source == "environment" {
+            let environment = provider.api_key_env.trim();
+            if std::env::var(environment)
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .is_none()
+            {
+                return Err(BrainError::KnowledgeValidation(format!(
+                    "模型供应商「{}」需要环境变量 {environment}，但当前进程未读取到该变量",
+                    provider.display_name
+                )));
+            }
+            return Ok((Some(environment.to_string()), None));
+        }
+        if !provider.api_key_configured {
+            return Err(BrainError::KnowledgeValidation(format!(
+                "模型供应商「{}」尚未配置 API Key，请在 Wiki 配置页补充",
+                provider.display_name
+            )));
+        }
+        let credentials = self.credential_store.clone();
+        let provider_id = provider.provider_id.clone();
+        let secret = tokio::task::spawn_blocking(move || credentials.get(&provider_id))
+            .await
+            .map_err(|error| BrainError::Internal(format!("系统凭据读取任务失败: {error}")))??
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                BrainError::KnowledgeValidation(format!(
+                    "模型供应商「{}」的系统凭据已不存在，请重新填写 API Key",
+                    provider.display_name
+                ))
+            })?;
+        Ok((Some(KEYCHAIN_CREDENTIAL_ENV.to_string()), Some(secret)))
     }
 
     pub fn initialize_and_sync(
@@ -2180,7 +2344,7 @@ fn build_provider_patch(
     });
     let mut provider_profile = serde_json::json!({
         "displayName": provider.display_name,
-        "apiKeyEnv": provider.api_key_env,
+        "apiKeyEnv": provider_credential_env(provider),
         "api": provider.api_protocol,
         "baseURL": provider.base_url,
     });
@@ -2221,6 +2385,14 @@ fn build_provider_patch(
     ]))
     .map(Some)
     .map_err(|error| BrainError::Internal(format!("Harness 供应商 Patch 生成失败: {error}")))
+}
+
+fn provider_credential_env(provider: &ModelProviderProfile) -> &str {
+    if provider.credential_source == "keychain" {
+        KEYCHAIN_CREDENTIAL_ENV
+    } else {
+        provider.api_key_env.as_str()
+    }
 }
 
 fn agent_tools_for_task_type(task_type: &str) -> Vec<&'static str> {
@@ -2335,6 +2507,7 @@ fn semantic_compile_fingerprint(
                 "provider_id": provider.provider_id,
                 "api_protocol": provider.api_protocol,
                 "base_url": provider.base_url,
+                "credential_source": provider.credential_source,
                 "api_key_env": provider.api_key_env,
             })),
         },
@@ -3428,8 +3601,13 @@ fn system_time_to_rfc3339(value: std::time::SystemTime) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infra::credential_store::{
+        tests::MemoryProviderCredentialStore, ProviderCredentialStore,
+    };
     use crate::infra::sqlite_store::SqliteStore;
-    use crate::models::book_wiki::{BookKind, ReaderBook, RuntimeProviderConfig};
+    use crate::models::book_wiki::{
+        BookKind, ModelProviderProfile, ReaderBook, SaveModelProviderRequest,
+    };
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -3491,6 +3669,114 @@ mod tests {
         assert_eq!(estimate_token_count(""), 0);
     }
 
+    fn service_with_memory_credentials(
+        db_path: &std::path::Path,
+    ) -> (BookWikiService, Arc<MemoryProviderCredentialStore>) {
+        let db = Arc::new(SqliteStore::new(db_path).expect("SQLite creation"));
+        let credentials = Arc::new(MemoryProviderCredentialStore::default());
+        let service = BookWikiService::new(BookWikiStore::new(db.clone()), Arc::new(FakeRuntime))
+            .with_credential_store(credentials.clone());
+        (service, credentials)
+    }
+
+    #[tokio::test]
+    async fn test_save_model_provider_persists_keychain_secret_and_reports_configured() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (service, credentials) =
+            service_with_memory_credentials(&dir.path().join("provider-keychain.db"));
+
+        let created = service
+            .save_model_provider(SaveModelProviderRequest {
+                provider_id: None,
+                display_name: "阿里云百炼".to_string(),
+                api_protocol: "openai-completions".to_string(),
+                base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
+                model: "glm-5.2".to_string(),
+                credential_source: "keychain".to_string(),
+                api_key_env: String::new(),
+                api_key: Some("sk-test-123".to_string()),
+                clear_api_key: false,
+                enabled: true,
+                expected_revision: 0,
+            })
+            .await
+            .expect("save provider");
+        assert!(created.api_key_configured);
+        assert_eq!(
+            credentials.get(&created.provider_id).unwrap(),
+            Some("sk-test-123".to_string())
+        );
+
+        // editing without api_key or clear must keep the existing secret intact
+        let updated = service
+            .save_model_provider(SaveModelProviderRequest {
+                provider_id: Some(created.provider_id.clone()),
+                display_name: "阿里云百炼 改名".to_string(),
+                api_protocol: created.api_protocol.clone(),
+                base_url: created.base_url.clone(),
+                model: created.model.clone(),
+                credential_source: "keychain".to_string(),
+                api_key_env: String::new(),
+                api_key: None,
+                clear_api_key: false,
+                enabled: true,
+                expected_revision: created.revision,
+            })
+            .await
+            .expect("update provider");
+        assert!(updated.api_key_configured);
+        assert_eq!(updated.display_name, "阿里云百炼 改名");
+        assert_eq!(
+            credentials.get(&updated.provider_id).unwrap(),
+            Some("sk-test-123".to_string())
+        );
+
+        // clearing removes the secret and flips the configured flag
+        let cleared = service
+            .save_model_provider(SaveModelProviderRequest {
+                provider_id: Some(updated.provider_id.clone()),
+                display_name: updated.display_name.clone(),
+                api_protocol: updated.api_protocol.clone(),
+                base_url: updated.base_url.clone(),
+                model: updated.model.clone(),
+                credential_source: "keychain".to_string(),
+                api_key_env: String::new(),
+                api_key: None,
+                clear_api_key: true,
+                enabled: true,
+                expected_revision: updated.revision,
+            })
+            .await
+            .expect("clear provider key");
+        assert!(!cleared.api_key_configured);
+        assert_eq!(credentials.get(&cleared.provider_id).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn test_save_model_provider_environment_mode_rejects_inline_api_key() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (service, _credentials) =
+            service_with_memory_credentials(&dir.path().join("provider-env.db"));
+
+        let error = service
+            .save_model_provider(SaveModelProviderRequest {
+                provider_id: None,
+                display_name: "OpenRouter".to_string(),
+                api_protocol: "openai-completions".to_string(),
+                base_url: "https://openrouter.ai/api/v1".to_string(),
+                model: "openai/gpt-5-mini".to_string(),
+                credential_source: "environment".to_string(),
+                api_key_env: "OPENROUTER_API_KEY".to_string(),
+                api_key: Some("sk-leak".to_string()),
+                clear_api_key: false,
+                enabled: true,
+                expected_revision: 0,
+            })
+            .await
+            .expect_err("environment mode must reject inline api_key");
+        assert!(error.to_string().contains("环境变量"));
+    }
+
     #[test]
     fn test_build_provider_patch_configures_openai_compatible_route_without_secret() {
         let profile = RuntimeProfile {
@@ -3499,12 +3785,19 @@ mod tests {
             runtime: "deepseek_harness".to_string(),
             executable: "dsh --profile acp".to_string(),
             model: "glm-5.2".to_string(),
-            provider_config: Some(RuntimeProviderConfig {
+            provider_id: Some("aliyun-bailian".to_string()),
+            provider_config: Some(ModelProviderProfile {
                 provider_id: "aliyun-bailian".to_string(),
                 display_name: "阿里云百炼".to_string(),
                 api_protocol: "openai-completions".to_string(),
                 base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
-                api_key_env: "CUSTOM_LLM_API_KEY".to_string(),
+                model: "glm-5.2".to_string(),
+                credential_source: "keychain".to_string(),
+                api_key_env: String::new(),
+                api_key_configured: true,
+                enabled: true,
+                revision: 1,
+                updated_at: String::new(),
             }),
             enabled: true,
             revision: 1,
@@ -3522,7 +3815,7 @@ mod tests {
         );
         assert_eq!(
             value[0]["config"]["providers"]["aliyun-bailian"]["apiKeyEnv"],
-            "CUSTOM_LLM_API_KEY"
+            KEYCHAIN_CREDENTIAL_ENV
         );
         assert_eq!(value[1]["config"]["provider"], "aliyun-bailian");
         assert_eq!(value[1]["config"]["model"], "glm-5.2");

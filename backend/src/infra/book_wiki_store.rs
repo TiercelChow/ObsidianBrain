@@ -17,7 +17,7 @@ use crate::models::book_wiki::{
     KnowledgeEntryDetail, KnowledgeEntryPage, KnowledgeEntrySummary, KnowledgeEntryVersionSummary,
     KnowledgeGraphOverview, KnowledgeGraphPath, KnowledgeGraphRelation, KnowledgeGraphSnapshot,
     KnowledgeHealthIssue, KnowledgeHealthReport, KnowledgeMessage, KnowledgeRelationSummary,
-    KnowledgeTask, ReaderBook, RuntimeProfile, RuntimeProviderConfig, SourceDocumentSummary,
+    KnowledgeTask, ModelProviderProfile, ReaderBook, RuntimeProfile, SourceDocumentSummary,
     SourceSpanSnapshot, WikiSkill, WikiSkillBenchmarkCase, WikiSkillBenchmarkCaseResult,
     WikiSkillBenchmarkRun, WikiSkillDetail, WikiSkillEvaluationFinding, WikiSkillEvaluationRun,
     WikiSkillFile, WikiSkillOrigin, WikiSkillVersion,
@@ -5362,41 +5362,191 @@ impl BookWikiStore {
     pub fn list_runtime_profiles(&self) -> Result<Vec<RuntimeProfile>, BrainError> {
         self.db.with_connection(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, name, runtime, executable, model, enabled, config_json, revision, updated_at
-                 FROM agent_runtime_profiles
-                 WHERE runtime = 'deepseek_harness'
-                 ORDER BY name",
+                "SELECT r.id, r.name, r.runtime, r.executable,
+                        COALESCE(p.model, r.model), r.provider_id, r.enabled, r.revision, r.updated_at,
+                        p.display_name, p.api_protocol, p.base_url, p.model,
+                        p.credential_source, p.api_key_env, p.api_key_configured,
+                        p.enabled, p.revision, p.updated_at
+                 FROM agent_runtime_profiles r
+                 LEFT JOIN llm_provider_profiles p ON p.id = r.provider_id
+                 WHERE r.runtime = 'deepseek_harness'
+                 ORDER BY r.name",
             )?;
             let rows = stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, i64>(7)?,
-                    row.get::<_, String>(8)?,
-                ))
-            })?;
-            rows.map(|row| {
-                let (id, name, runtime, executable, model, enabled, config_json, revision, updated_at) =
-                    row?;
+                let provider_id = row.get::<_, Option<String>>(5)?;
+                let provider_config = match (
+                    provider_id.as_ref(),
+                    row.get::<_, Option<String>>(9)?,
+                ) {
+                    (Some(provider_id), Some(display_name)) => Some(ModelProviderProfile {
+                        provider_id: provider_id.clone(),
+                        display_name,
+                        api_protocol: row.get(10)?,
+                        base_url: row.get(11)?,
+                        model: row.get(12)?,
+                        credential_source: row.get(13)?,
+                        api_key_env: row.get(14)?,
+                        api_key_configured: row.get::<_, i64>(15)? != 0,
+                        enabled: row.get::<_, i64>(16)? != 0,
+                        revision: row.get(17)?,
+                        updated_at: row.get(18)?,
+                    }),
+                    _ => None,
+                };
                 Ok(RuntimeProfile {
-                    id,
-                    name,
-                    runtime,
-                    executable,
-                    model,
-                    provider_config: parse_runtime_provider_config(&config_json)?,
-                    enabled: enabled != 0,
-                    revision,
-                    updated_at,
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    runtime: row.get(2)?,
+                    executable: row.get(3)?,
+                    model: row.get(4)?,
+                    provider_id,
+                    enabled: row.get::<_, i64>(6)? != 0,
+                    revision: row.get(7)?,
+                    updated_at: row.get(8)?,
+                    provider_config,
                 })
-            })
-            .collect()
+            })?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
         })
+    }
+
+    pub fn list_model_provider_profiles(&self) -> Result<Vec<ModelProviderProfile>, BrainError> {
+        self.db.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, display_name, api_protocol, base_url, model, credential_source,
+                        api_key_env, api_key_configured, enabled, revision, updated_at
+                 FROM llm_provider_profiles
+                 ORDER BY enabled DESC, updated_at DESC, display_name COLLATE NOCASE",
+            )?;
+            let rows = stmt.query_map([], map_model_provider_profile)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        })
+    }
+
+    pub fn get_model_provider_profile(
+        &self,
+        provider_id: &str,
+    ) -> Result<ModelProviderProfile, BrainError> {
+        self.db.with_connection(|conn| {
+            conn.query_row(
+                "SELECT id, display_name, api_protocol, base_url, model, credential_source,
+                        api_key_env, api_key_configured, enabled, revision, updated_at
+                 FROM llm_provider_profiles WHERE id = ?1",
+                params![provider_id],
+                map_model_provider_profile,
+            )
+            .optional()?
+            .ok_or_else(|| BrainError::KnowledgeNotFound(provider_id.to_string()))
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn save_model_provider_profile(
+        &self,
+        provider_id: &str,
+        display_name: &str,
+        api_protocol: &str,
+        base_url: &str,
+        model: &str,
+        credential_source: &str,
+        api_key_env: &str,
+        api_key_configured: bool,
+        enabled: bool,
+        expected_revision: i64,
+    ) -> Result<ModelProviderProfile, BrainError> {
+        let provider = validate_model_provider_profile(
+            provider_id,
+            display_name,
+            api_protocol,
+            base_url,
+            model,
+            credential_source,
+            api_key_env,
+        )?;
+        let now = Utc::now().to_rfc3339();
+        if expected_revision == 0 {
+            self.db.with_connection(|conn| {
+                conn.execute(
+                    "INSERT INTO llm_provider_profiles
+                     (id, display_name, api_protocol, base_url, model, credential_source,
+                      api_key_env, api_key_configured, enabled, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+                    params![
+                        provider.provider_id,
+                        provider.display_name,
+                        provider.api_protocol,
+                        provider.base_url,
+                        provider.model,
+                        provider.credential_source,
+                        provider.api_key_env,
+                        i64::from(api_key_configured),
+                        i64::from(enabled),
+                        now,
+                    ],
+                )?;
+                Ok(())
+            })?;
+        } else {
+            let updated = self.db.with_connection(|conn| {
+                Ok(conn.execute(
+                    "UPDATE llm_provider_profiles
+                     SET display_name = ?2, api_protocol = ?3, base_url = ?4, model = ?5,
+                         credential_source = ?6, api_key_env = ?7, api_key_configured = ?8,
+                         enabled = ?9, revision = revision + 1, updated_at = ?10
+                     WHERE id = ?1 AND revision = ?11",
+                    params![
+                        provider.provider_id,
+                        provider.display_name,
+                        provider.api_protocol,
+                        provider.base_url,
+                        provider.model,
+                        provider.credential_source,
+                        provider.api_key_env,
+                        i64::from(api_key_configured),
+                        i64::from(enabled),
+                        now,
+                        expected_revision,
+                    ],
+                )?)
+            })?;
+            if updated == 0 {
+                return Err(BrainError::KnowledgeValidation(
+                    "模型供应商配置已变化，请刷新后重试".to_string(),
+                ));
+            }
+        }
+        self.get_model_provider_profile(provider_id)
+    }
+
+    pub fn delete_model_provider_profile(
+        &self,
+        provider_id: &str,
+        expected_revision: i64,
+    ) -> Result<(), BrainError> {
+        let deleted = self.db.with_connection(|conn| {
+            let active_runtime: Option<String> = conn
+                .query_row(
+                    "SELECT name FROM agent_runtime_profiles WHERE provider_id = ?1 LIMIT 1",
+                    params![provider_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if let Some(runtime_name) = active_runtime {
+                return Err(BrainError::KnowledgeValidation(format!(
+                    "模型供应商正在被 {runtime_name} 使用，请先切换 Runtime 配置"
+                )));
+            }
+            Ok(conn.execute(
+                "DELETE FROM llm_provider_profiles WHERE id = ?1 AND revision = ?2",
+                params![provider_id, expected_revision],
+            )?)
+        })?;
+        if deleted == 0 {
+            return Err(BrainError::KnowledgeValidation(
+                "模型供应商正在被 Runtime 使用、已被删除或版本已变化".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     pub fn save_runtime_profile(
@@ -5404,7 +5554,7 @@ impl BookWikiStore {
         profile_id: &str,
         executable: &str,
         model: &str,
-        provider_config: Option<&RuntimeProviderConfig>,
+        provider_id: Option<&str>,
         enabled: bool,
         expected_revision: i64,
     ) -> Result<RuntimeProfile, BrainError> {
@@ -5418,25 +5568,27 @@ impl BookWikiStore {
                 "运行时可执行文件不能为空".to_string(),
             ));
         }
-        let provider_config = provider_config
-            .map(|provider| validate_runtime_provider_config(provider, model))
-            .transpose()?;
-        let config_json = serde_json::to_string(&serde_json::json!({
-            "provider": provider_config,
-        }))
-        .map_err(|error| BrainError::Internal(format!("运行时供应商配置序列化失败: {error}")))?;
+        let provider_id = provider_id.map(str::trim).filter(|value| !value.is_empty());
+        if let Some(provider_id) = provider_id {
+            let provider = self.get_model_provider_profile(provider_id)?;
+            if !provider.enabled {
+                return Err(BrainError::KnowledgeValidation(
+                    "不能选择已停用的模型供应商".to_string(),
+                ));
+            }
+        }
         let now = Utc::now().to_rfc3339();
         let updated = self.db.with_connection(|conn| {
             Ok(conn.execute(
                 "UPDATE agent_runtime_profiles
-                 SET executable = ?2, model = ?3, config_json = ?4, enabled = ?5,
+                 SET executable = ?2, model = ?3, provider_id = ?4, config_json = '{}', enabled = ?5,
                      revision = revision + 1, updated_at = ?6
                  WHERE id = ?1 AND revision = ?7",
                 params![
                     profile_id,
                     executable.trim(),
                     model.trim(),
-                    config_json,
+                    provider_id,
                     i64::from(enabled),
                     now,
                     expected_revision,
@@ -6410,24 +6562,32 @@ fn conversation_title(question: &str) -> String {
     }
 }
 
-fn parse_runtime_provider_config(
-    config_json: &str,
-) -> Result<Option<RuntimeProviderConfig>, BrainError> {
-    let value: serde_json::Value = serde_json::from_str(config_json)
-        .map_err(|error| BrainError::Internal(format!("运行时供应商配置解析失败: {error}")))?;
-    let Some(provider) = value.get("provider").filter(|provider| !provider.is_null()) else {
-        return Ok(None);
-    };
-    serde_json::from_value(provider.clone())
-        .map(Some)
-        .map_err(|error| BrainError::Internal(format!("运行时供应商配置解析失败: {error}")))
+fn map_model_provider_profile(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProviderProfile> {
+    Ok(ModelProviderProfile {
+        provider_id: row.get(0)?,
+        display_name: row.get(1)?,
+        api_protocol: row.get(2)?,
+        base_url: row.get(3)?,
+        model: row.get(4)?,
+        credential_source: row.get(5)?,
+        api_key_env: row.get(6)?,
+        api_key_configured: row.get::<_, i64>(7)? != 0,
+        enabled: row.get::<_, i64>(8)? != 0,
+        revision: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
 }
 
-fn validate_runtime_provider_config(
-    provider: &RuntimeProviderConfig,
+fn validate_model_provider_profile(
+    provider_id: &str,
+    display_name: &str,
+    api_protocol: &str,
+    base_url: &str,
     model: &str,
-) -> Result<RuntimeProviderConfig, BrainError> {
-    let provider_id = provider.provider_id.trim();
+    credential_source: &str,
+    api_key_env: &str,
+) -> Result<ModelProviderProfile, BrainError> {
+    let provider_id = provider_id.trim();
     if provider_id.is_empty()
         || provider_id.len() > 64
         || !provider_id.chars().all(|character| {
@@ -6438,7 +6598,7 @@ fn validate_runtime_provider_config(
             "供应商 ID 只能包含字母、数字、点、短横线和下划线".to_string(),
         ));
     }
-    let display_name = provider.display_name.trim();
+    let display_name = display_name.trim();
     if display_name.is_empty() || display_name.chars().count() > 100 {
         return Err(BrainError::KnowledgeValidation(
             "供应商名称不能为空且不能超过 100 个字符".to_string(),
@@ -6449,7 +6609,7 @@ fn validate_runtime_provider_config(
             "自定义供应商必须填写有效的模型 ID".to_string(),
         ));
     }
-    let api_protocol = provider.api_protocol.trim();
+    let api_protocol = api_protocol.trim();
     if !matches!(
         api_protocol,
         "openai-completions" | "openai-responses" | "anthropic-messages"
@@ -6458,7 +6618,7 @@ fn validate_runtime_provider_config(
             "不支持的模型 API 协议".to_string(),
         ));
     }
-    let base_url = provider.base_url.trim().trim_end_matches('/');
+    let base_url = base_url.trim().trim_end_matches('/');
     let parsed_url = reqwest::Url::parse(base_url)
         .map_err(|_| BrainError::KnowledgeValidation("模型 API Base URL 格式不正确".to_string()))?;
     if !matches!(parsed_url.scheme(), "http" | "https")
@@ -6470,24 +6630,39 @@ fn validate_runtime_provider_config(
             "模型 API Base URL 必须是无内嵌凭据的 HTTP(S) 地址".to_string(),
         ));
     }
-    let api_key_env = provider.api_key_env.trim();
-    let mut env_characters = api_key_env.chars();
-    let valid_env = env_characters
-        .next()
-        .is_some_and(|character| character.is_ascii_alphabetic() || character == '_')
-        && env_characters.all(|character| character.is_ascii_alphanumeric() || character == '_');
-    if !valid_env || api_key_env.len() > 128 {
+    let credential_source = credential_source.trim();
+    if !matches!(credential_source, "keychain" | "environment") {
         return Err(BrainError::KnowledgeValidation(
-            "API Key 环境变量名只能包含字母、数字和下划线，且不能以数字开头".to_string(),
+            "凭据来源必须是系统凭据库或环境变量".to_string(),
         ));
     }
+    let api_key_env = api_key_env.trim();
+    if credential_source == "environment" {
+        let mut env_characters = api_key_env.chars();
+        let valid_env = env_characters
+            .next()
+            .is_some_and(|character| character.is_ascii_alphabetic() || character == '_')
+            && env_characters
+                .all(|character| character.is_ascii_alphanumeric() || character == '_');
+        if !valid_env || api_key_env.len() > 128 {
+            return Err(BrainError::KnowledgeValidation(
+                "API Key 环境变量名只能包含字母、数字和下划线，且不能以数字开头".to_string(),
+            ));
+        }
+    }
 
-    Ok(RuntimeProviderConfig {
+    Ok(ModelProviderProfile {
         provider_id: provider_id.to_string(),
         display_name: display_name.to_string(),
         api_protocol: api_protocol.to_string(),
         base_url: base_url.to_string(),
+        model: model.trim().to_string(),
+        credential_source: credential_source.to_string(),
         api_key_env: api_key_env.to_string(),
+        api_key_configured: false,
+        enabled: true,
+        revision: 0,
+        updated_at: String::new(),
     })
 }
 
@@ -7904,7 +8079,7 @@ fn normalize_reader_selection(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::book_wiki::{BookProgress, RuntimeProviderConfig};
+    use crate::models::book_wiki::BookProgress;
 
     fn test_store() -> (BookWikiStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -9850,7 +10025,7 @@ mod tests {
     }
 
     #[test]
-    fn test_runtime_provider_config_round_trips_without_storing_secret() {
+    fn test_model_provider_profiles_support_multiple_configs_and_runtime_selection() {
         let (store, _dir) = test_store();
         let profile = store
             .list_runtime_profiles()
@@ -9858,27 +10033,50 @@ mod tests {
             .into_iter()
             .find(|profile| profile.id == "runtime-deepseek-harness")
             .unwrap();
-        let provider = RuntimeProviderConfig {
-            provider_id: "aliyun-bailian".to_string(),
-            display_name: "阿里云百炼".to_string(),
-            api_protocol: "openai-completions".to_string(),
-            base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
-            api_key_env: "CUSTOM_LLM_API_KEY".to_string(),
-        };
+        let aliyun = store
+            .save_model_provider_profile(
+                "aliyun-bailian",
+                "阿里云百炼",
+                "openai-completions",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "glm-5.2",
+                "keychain",
+                "",
+                true,
+                true,
+                0,
+            )
+            .unwrap();
+        let second = store
+            .save_model_provider_profile(
+                "openrouter",
+                "OpenRouter",
+                "openai-completions",
+                "https://openrouter.ai/api/v1",
+                "openai/gpt-5-mini",
+                "environment",
+                "OPENROUTER_API_KEY",
+                false,
+                true,
+                0,
+            )
+            .unwrap();
 
         let saved = store
             .save_runtime_profile(
                 &profile.id,
                 &profile.executable,
-                "glm-5.2",
-                Some(&provider),
+                "",
+                Some(&aliyun.provider_id),
                 true,
                 profile.revision,
             )
             .unwrap();
 
-        assert_eq!(saved.provider_config.as_ref(), Some(&provider));
+        assert_eq!(saved.provider_config.as_ref(), Some(&aliyun));
         assert_eq!(saved.model, "glm-5.2");
+        assert_eq!(store.list_model_provider_profiles().unwrap().len(), 2);
+        assert_eq!(second.api_key_env, "OPENROUTER_API_KEY");
         let raw_config = store
             .db
             .with_connection(|conn| {
@@ -9890,30 +10088,37 @@ mod tests {
                 .map_err(Into::into)
             })
             .unwrap();
-        assert!(raw_config.contains("CUSTOM_LLM_API_KEY"));
-        assert!(!raw_config.contains("sk-"));
+        assert_eq!(raw_config, "{}");
+        let raw_provider: String = store
+            .db
+            .with_connection(|conn| {
+                conn.query_row(
+                    "SELECT base_url || '|' || model || '|' || api_key_env
+                     FROM llm_provider_profiles WHERE id = 'aliyun-bailian'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(Into::into)
+            })
+            .unwrap();
+        assert!(!raw_provider.contains("sk-"));
     }
 
     #[test]
-    fn test_runtime_provider_config_rejects_invalid_environment_variable() {
+    fn test_model_provider_profile_rejects_invalid_environment_variable() {
         let (store, _dir) = test_store();
-        let profile = store.list_runtime_profiles().unwrap().remove(0);
-        let provider = RuntimeProviderConfig {
-            provider_id: "aliyun-bailian".to_string(),
-            display_name: "阿里云百炼".to_string(),
-            api_protocol: "openai-completions".to_string(),
-            base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
-            api_key_env: "CUSTOM-LLM-KEY".to_string(),
-        };
-
         let error = store
-            .save_runtime_profile(
-                &profile.id,
-                &profile.executable,
+            .save_model_provider_profile(
+                "aliyun-bailian",
+                "阿里云百炼",
+                "openai-completions",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 "glm-5.2",
-                Some(&provider),
+                "environment",
+                "CUSTOM-LLM-KEY",
+                false,
                 true,
-                profile.revision,
+                0,
             )
             .unwrap_err();
 

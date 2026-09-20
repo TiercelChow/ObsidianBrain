@@ -10,7 +10,7 @@ use crate::infra::book_wiki_store::{
     KnowledgeEntrySplitPart, KnowledgeEntrySplitProposal,
 };
 use crate::infra::deepseek_harness::inspect_runtime_profiles;
-use crate::models::book_wiki::RuntimeProviderConfig;
+use crate::models::book_wiki::SaveModelProviderRequest;
 use crate::tools::traits::ToolHandler;
 use crate::AppContext;
 
@@ -1768,13 +1768,17 @@ impl ToolHandler for GetBookWikiSettingsHandler {
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
         let base_id = args.get("knowledge_base_id").and_then(Value::as_str);
-        let profiles = ctx.book_wiki_service.store().list_runtime_profiles()?;
+        let store = ctx.book_wiki_service.store();
+        let profiles = store.list_runtime_profiles()?;
+        let model_providers = store.list_model_provider_profiles()?;
+        let documents = store.list_config_documents(base_id)?;
         let health = tokio::task::spawn_blocking(move || inspect_runtime_profiles(profiles))
             .await
             .map_err(|error| BrainError::Internal(format!("运行时检测任务失败: {error}")))?;
         Ok(json!({
             "runtime_profiles": health,
-            "documents": ctx.book_wiki_service.store().list_config_documents(base_id)?
+            "model_providers": model_providers,
+            "documents": documents
         }))
     }
 }
@@ -1885,7 +1889,7 @@ impl ToolHandler for SaveAgentRuntimeProfileHandler {
     }
 
     fn description(&self) -> &str {
-        "保存 DeepSeek Harness 或 Claude Code 的本地运行配置"
+        "保存 DeepSeek Harness 或 Claude Code 的本地运行配置，通过 provider_id 关联已配置的模型供应商"
     }
 
     fn input_schema(&self) -> Value {
@@ -1895,20 +1899,9 @@ impl ToolHandler for SaveAgentRuntimeProfileHandler {
                 "profile_id": { "type": "string" },
                 "executable": { "type": "string", "minLength": 1 },
                 "model": { "type": "string" },
-                "provider_config": {
-                    "type": ["object", "null"],
-                    "properties": {
-                        "provider_id": { "type": "string", "minLength": 1 },
-                        "display_name": { "type": "string", "minLength": 1 },
-                        "api_protocol": {
-                            "type": "string",
-                            "enum": ["openai-completions", "openai-responses", "anthropic-messages"]
-                        },
-                        "base_url": { "type": "string", "minLength": 1 },
-                        "api_key_env": { "type": "string", "minLength": 1 }
-                    },
-                    "required": ["provider_id", "display_name", "api_protocol", "base_url", "api_key_env"],
-                    "additionalProperties": false
+                "provider_id": {
+                    "type": "string",
+                    "description": "关联的模型供应商 ID；留空则使用 Harness 默认 Profile"
                 },
                 "enabled": { "type": "boolean" },
                 "expected_revision": { "type": "integer", "minimum": 1 }
@@ -1923,20 +1916,17 @@ impl ToolHandler for SaveAgentRuntimeProfileHandler {
     }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
-        let provider_config = args
-            .get("provider_config")
-            .filter(|value| !value.is_null())
-            .cloned()
-            .map(serde_json::from_value::<RuntimeProviderConfig>)
-            .transpose()
-            .map_err(|error| {
-                BrainError::KnowledgeValidation(format!("供应商配置格式不正确: {error}"))
-            })?;
+        let provider_id = args
+            .get("provider_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
         let profile = ctx.book_wiki_service.store().save_runtime_profile(
             required_string(&args, "profile_id")?,
             required_string(&args, "executable")?,
             args.get("model").and_then(Value::as_str).unwrap_or(""),
-            provider_config.as_ref(),
+            provider_id.as_deref(),
             args.get("enabled")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
@@ -1948,6 +1938,163 @@ impl ToolHandler for SaveAgentRuntimeProfileHandler {
         )?;
         serde_json::to_value(profile)
             .map_err(|error| BrainError::Internal(format!("结果序列化失败: {error}")))
+    }
+}
+
+pub struct ListModelProvidersHandler;
+
+#[async_trait]
+impl ToolHandler for ListModelProvidersHandler {
+    fn name(&self) -> &str {
+        "list_model_providers"
+    }
+
+    fn description(&self) -> &str {
+        "列出所有已配置的第三方模型供应商及其凭据状态"
+    }
+
+    fn input_schema(&self) -> Value {
+        empty_schema()
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, _args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let providers = ctx
+            .book_wiki_service
+            .store()
+            .list_model_provider_profiles()?;
+        serde_json::to_value(providers)
+            .map(|value| json!({ "model_providers": value }))
+            .map_err(|error| BrainError::Internal(format!("模型供应商列表序列化失败: {error}")))
+    }
+}
+
+pub struct SaveModelProviderHandler;
+
+#[async_trait]
+impl ToolHandler for SaveModelProviderHandler {
+    fn name(&self) -> &str {
+        "save_model_provider"
+    }
+
+    fn description(&self) -> &str {
+        "新增或更新模型供应商配置；keychain 模式下 API Key 写入系统凭据库，不落盘"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "provider_id": { "type": "string", "description": "留空则自动生成" },
+                "display_name": { "type": "string", "minLength": 1 },
+                "api_protocol": {
+                    "type": "string",
+                    "enum": ["openai-completions", "openai-responses", "anthropic-messages"]
+                },
+                "base_url": { "type": "string", "minLength": 1 },
+                "model": { "type": "string", "minLength": 1 },
+                "credential_source": {
+                    "type": "string",
+                    "enum": ["keychain", "environment"]
+                },
+                "api_key_env": { "type": "string", "description": "environment 模式必填；keychain 模式忽略" },
+                "api_key": { "type": "string", "description": "keychain 模式下写入系统凭据库；编辑时留空保留现有密钥" },
+                "clear_api_key": { "type": "boolean", "description": "keychain 模式下清除已保存的密钥" },
+                "enabled": { "type": "boolean" },
+                "expected_revision": { "type": "integer", "minimum": 0 }
+            },
+            "required": ["display_name", "api_protocol", "base_url", "model", "credential_source"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let request = SaveModelProviderRequest {
+            provider_id: args
+                .get("provider_id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            display_name: required_string(&args, "display_name")?.to_string(),
+            api_protocol: required_string(&args, "api_protocol")?.to_string(),
+            base_url: required_string(&args, "base_url")?.to_string(),
+            model: required_string(&args, "model")?.to_string(),
+            credential_source: required_string(&args, "credential_source")?.to_string(),
+            api_key_env: args
+                .get("api_key_env")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            api_key: args
+                .get("api_key")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            clear_api_key: args
+                .get("clear_api_key")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            enabled: args.get("enabled").and_then(Value::as_bool).unwrap_or(true),
+            expected_revision: args
+                .get("expected_revision")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+        };
+        let provider = ctx.book_wiki_service.save_model_provider(request).await?;
+        serde_json::to_value(provider)
+            .map_err(|error| BrainError::Internal(format!("模型供应商序列化失败: {error}")))
+    }
+}
+
+pub struct DeleteModelProviderHandler;
+
+#[async_trait]
+impl ToolHandler for DeleteModelProviderHandler {
+    fn name(&self) -> &str {
+        "delete_model_provider"
+    }
+
+    fn description(&self) -> &str {
+        "删除模型供应商配置并清理系统凭据库中的 API Key"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "provider_id": { "type": "string", "minLength": 1 },
+                "expected_revision": { "type": "integer", "minimum": 1 }
+            },
+            "required": ["provider_id", "expected_revision"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        ctx.book_wiki_service
+            .delete_model_provider(
+                required_string(&args, "provider_id")?,
+                args.get("expected_revision")
+                    .and_then(Value::as_i64)
+                    .ok_or_else(|| {
+                        BrainError::KnowledgeValidation("缺少 expected_revision".to_string())
+                    })?,
+            )
+            .await?;
+        Ok(json!({ "deleted": true }))
     }
 }
 
@@ -2026,4 +2173,64 @@ fn required_id_schema(key: &str) -> Value {
         "required": [key],
         "additionalProperties": false
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_model_provider_handlers_expose_schemas_and_module() {
+        let handlers: Vec<Box<dyn ToolHandler>> = vec![
+            Box::new(ListModelProvidersHandler),
+            Box::new(SaveModelProviderHandler),
+            Box::new(DeleteModelProviderHandler),
+        ];
+        assert_eq!(handlers.len(), 3);
+        assert!(handlers
+            .iter()
+            .all(|handler| handler.module() == "book_wiki" && handler.input_schema().is_object()));
+    }
+
+    #[test]
+    fn test_save_agent_runtime_profile_schema_references_provider_id_not_inline_config() {
+        let schema = SaveAgentRuntimeProfileHandler.input_schema();
+        assert_eq!(schema["properties"]["provider_id"]["type"], "string");
+        assert!(schema["properties"].get("provider_config").is_none());
+    }
+
+    #[test]
+    fn test_save_model_provider_schema_requires_identity_fields_and_optional_api_key() {
+        let schema = SaveModelProviderHandler.input_schema();
+        let required = schema["required"]
+            .as_array()
+            .expect("save_model_provider requires a required array");
+        assert!(required.iter().any(|value| value == "display_name"));
+        assert!(required.iter().any(|value| value == "api_protocol"));
+        assert!(required.iter().any(|value| value == "base_url"));
+        assert!(required.iter().any(|value| value == "model"));
+        assert!(required.iter().any(|value| value == "credential_source"));
+        assert!(
+            required.iter().all(|value| value != "api_key"),
+            "api_key must stay optional so edits can keep the existing secret"
+        );
+        assert_eq!(
+            schema["properties"]["credential_source"]["enum"][0],
+            "keychain"
+        );
+        assert_eq!(
+            schema["properties"]["credential_source"]["enum"][1],
+            "environment"
+        );
+    }
+
+    #[test]
+    fn test_delete_model_provider_schema_requires_provider_id_and_revision() {
+        let schema = DeleteModelProviderHandler.input_schema();
+        let required = schema["required"]
+            .as_array()
+            .expect("delete_model_provider requires a required array");
+        assert!(required.iter().any(|value| value == "provider_id"));
+        assert!(required.iter().any(|value| value == "expected_revision"));
+    }
 }

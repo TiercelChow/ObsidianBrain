@@ -249,12 +249,42 @@ pub struct ConfigDocument {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct RuntimeProviderConfig {
+pub struct ModelProviderProfile {
     pub provider_id: String,
     pub display_name: String,
     pub api_protocol: String,
     pub base_url: String,
+    pub model: String,
+    pub credential_source: String,
     pub api_key_env: String,
+    pub api_key_configured: bool,
+    pub enabled: bool,
+    pub revision: i64,
+    pub updated_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SaveModelProviderRequest {
+    pub provider_id: Option<String>,
+    pub display_name: String,
+    pub api_protocol: String,
+    pub base_url: String,
+    pub model: String,
+    pub credential_source: String,
+    #[serde(default)]
+    pub api_key_env: String,
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub clear_api_key: bool,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub expected_revision: i64,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -264,7 +294,8 @@ pub struct RuntimeProfile {
     pub runtime: String,
     pub executable: String,
     pub model: String,
-    pub provider_config: Option<RuntimeProviderConfig>,
+    pub provider_id: Option<String>,
+    pub provider_config: Option<ModelProviderProfile>,
     pub enabled: bool,
     pub revision: i64,
     pub updated_at: String,

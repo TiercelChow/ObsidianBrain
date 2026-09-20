@@ -188,18 +188,39 @@ export interface RuntimeProfile {
   runtime: 'deepseek_harness'
   executable: string
   model: string
-  provider_config?: RuntimeProviderConfig | null
+  provider_id?: string | null
+  provider_config?: ModelProviderProfile | null
   enabled: boolean
   revision: number
   updated_at: string
 }
 
-export interface RuntimeProviderConfig {
+export interface ModelProviderProfile {
   provider_id: string
   display_name: string
   api_protocol: 'openai-completions' | 'openai-responses' | 'anthropic-messages'
   base_url: string
+  model: string
+  credential_source: 'keychain' | 'environment'
   api_key_env: string
+  api_key_configured: boolean
+  enabled: boolean
+  revision: number
+  updated_at: string
+}
+
+export interface SaveModelProviderRequest {
+  provider_id?: string
+  display_name: string
+  api_protocol: ModelProviderProfile['api_protocol']
+  base_url: string
+  model: string
+  credential_source: ModelProviderProfile['credential_source']
+  api_key_env?: string
+  api_key?: string
+  clear_api_key?: boolean
+  enabled?: boolean
+  expected_revision?: number
 }
 
 export interface RuntimeHealth {
@@ -932,7 +953,7 @@ export function getBookWikiSettings(knowledgeBaseId?: string) {
   return callTool('get_book_wiki_settings', {
     ...(knowledgeBaseId ? { knowledge_base_id: knowledgeBaseId } : {}),
   }) as unknown as Promise<
-    ToolEnvelope<{ runtime_profiles: RuntimeHealth[]; documents: ConfigDocument[] }>
+    ToolEnvelope<{ runtime_profiles: RuntimeHealth[]; model_providers: ModelProviderProfile[]; documents: ConfigDocument[] }>
   >
 }
 
@@ -1114,10 +1135,42 @@ export function saveAgentRuntimeProfile(profile: RuntimeProfile) {
     profile_id: profile.id,
     executable: profile.executable,
     model: profile.model,
-    provider_config: profile.provider_config ?? null,
+    provider_id: profile.provider_id ?? '',
     enabled: profile.enabled,
     expected_revision: profile.revision,
   }) as unknown as Promise<ToolEnvelope<RuntimeProfile>>
+}
+
+export function listModelProviders() {
+  return callTool('list_model_providers', {}) as unknown as Promise<
+    ToolEnvelope<{ model_providers: ModelProviderProfile[] }>
+  >
+}
+
+export function saveModelProvider(provider: SaveModelProviderRequest) {
+  const payload: Record<string, unknown> = {
+    display_name: provider.display_name,
+    api_protocol: provider.api_protocol,
+    base_url: provider.base_url,
+    model: provider.model,
+    credential_source: provider.credential_source,
+    enabled: provider.enabled ?? true,
+    expected_revision: provider.expected_revision ?? 0,
+  }
+  if (provider.provider_id) payload.provider_id = provider.provider_id
+  if (provider.api_key_env) payload.api_key_env = provider.api_key_env
+  if (provider.api_key) payload.api_key = provider.api_key
+  if (provider.clear_api_key) payload.clear_api_key = provider.clear_api_key
+  return callTool('save_model_provider', payload) as unknown as Promise<
+    ToolEnvelope<ModelProviderProfile>
+  >
+}
+
+export function deleteModelProvider(providerId: string, expectedRevision: number) {
+  return callTool('delete_model_provider', {
+    provider_id: providerId,
+    expected_revision: expectedRevision,
+  }) as unknown as Promise<ToolEnvelope<{ deleted: boolean }>>
 }
 
 

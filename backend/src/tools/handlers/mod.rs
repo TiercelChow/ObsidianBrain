@@ -224,6 +224,11 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(SaveAgentRuntimeProfileHandler))
         .await;
     registry.register(Arc::new(VerifyAgentRuntimeHandler)).await;
+    registry.register(Arc::new(ListModelProvidersHandler)).await;
+    registry.register(Arc::new(SaveModelProviderHandler)).await;
+    registry
+        .register(Arc::new(DeleteModelProviderHandler))
+        .await;
 
     // Reader (filesystem-scoped, powers the Markdown Reader UI)
     registry.register(Arc::new(ListLocalDirHandler)).await;

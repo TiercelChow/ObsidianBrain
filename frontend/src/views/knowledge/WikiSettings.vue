@@ -3,6 +3,7 @@
     <div class="settings-layout">
       <aside class="settings-nav knowledge-surface">
         <button :class="{ active: section === 'runtime' }" @click="section = 'runtime'"><el-icon><Cpu /></el-icon><span><strong>Agent Runtime</strong><small>执行器与模型</small></span></button>
+        <button :class="{ active: section === 'providers' }" @click="section = 'providers'"><el-icon><Connection /></el-icon><span><strong>模型供应商</strong><small>路由与 API Key</small></span></button>
         <button :class="{ active: section === 'usage' }" @click="section = 'usage'"><el-icon><DataAnalysis /></el-icon><span><strong>Token 用量</strong><small>调用趋势与来源</small></span></button>
         <button :class="{ active: section === 'protection' }" @click="section = 'protection'"><el-icon><Lock /></el-icon><span><strong>数据保护</strong><small>备份、下载与恢复</small></span></button>
         <button :class="{ active: section === 'documents' }" @click="section = 'documents'"><el-icon><Document /></el-icon><span><strong>配置文档</strong><small>数据库中的 Markdown</small></span></button>
@@ -23,18 +24,22 @@
             <label><span>ACP 启动命令</span><el-input v-model="item.profile.executable" placeholder="npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp" /></label>
             <div class="provider-mode">
               <div><strong>第三方模型供应商</strong><span>为当前 Runtime 注入独立的模型路由</span></div>
-              <el-switch :model-value="Boolean(item.profile.provider_config)" @change="toggleProviderConfig(item.profile, Boolean($event))" />
+              <el-select
+                v-model="item.profile.provider_id"
+                class="knowledge-select is-fluid"
+                popper-class="system-select-popper"
+                placement="bottom-start"
+                :offset="0"
+                :fit-input-width="true"
+                placeholder="不使用，走 Harness 默认"
+                clearable
+                @change="delete runtimeVerification[item.profile.id]"
+              >
+                <el-option v-for="provider in enabledProviders" :key="provider.provider_id" :label="`${provider.display_name} · ${provider.model}`" :value="provider.provider_id" />
+              </el-select>
             </div>
-            <div v-if="item.profile.provider_config" class="provider-fields">
-              <label><span>供应商名称</span><el-input v-model="item.profile.provider_config.display_name" placeholder="例如：阿里云百炼" /></label>
-              <label><span>供应商 ID</span><el-input v-model="item.profile.provider_config.provider_id" placeholder="例如：aliyun-bailian" /></label>
-              <label><span>API 协议</span><el-select v-model="item.profile.provider_config.api_protocol" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="OpenAI Chat Completions" value="openai-completions" /><el-option label="OpenAI Responses" value="openai-responses" /><el-option label="Anthropic Messages" value="anthropic-messages" /></el-select></label>
-              <label class="is-wide"><span>API Base URL</span><el-input v-model="item.profile.provider_config.base_url" placeholder="https://example.com/v1" /></label>
-              <label><span>模型 ID</span><el-input v-model="item.profile.model" placeholder="例如：glm-5.2" /></label>
-              <label><span>API Key 环境变量</span><el-input v-model="item.profile.provider_config.api_key_env" placeholder="CUSTOM_LLM_API_KEY" /></label>
-            </div>
-            <label v-else><span>模型覆盖（可选）</span><el-input v-model="item.profile.model" placeholder="留空则使用 Harness 默认模型" /></label>
-            <p class="credential-hint">这里只保存环境变量名，不保存密钥。<template v-if="item.profile.provider_config">启动 ObsidianBrain 前请设置 <code>{{ item.profile.provider_config.api_key_env || 'CUSTOM_LLM_API_KEY' }}</code>。</template><template v-else>凭据由 Harness 默认 Profile 或 Harness Web 的 Models 页面管理。</template></p>
+            <label><span>模型覆盖（可选）</span><el-input v-model="item.profile.model" :placeholder="item.profile.provider_id ? '留空则使用所选供应商的模型' : '留空则使用 Harness 默认模型'" /></label>
+            <p class="credential-hint">供应商与 API Key 在「模型供应商」分区集中管理。<template v-if="selectedProvider(item.profile)">{{ selectedProvider(item.profile)!.display_name }}：<code>{{ selectedProvider(item.profile)!.api_key_configured ? '已配置密钥' : '未配置密钥' }}</code></template><template v-else>未选择供应商时，凭据由 Harness 默认 Profile 管理。</template></p>
             <div class="runtime-actions">
               <el-switch v-model="item.profile.enabled" active-text="启用" />
               <div>
@@ -43,6 +48,33 @@
               </div>
             </div>
           </article>
+        </template>
+
+        <template v-else-if="section === 'providers'">
+          <header class="settings-section-head split">
+            <div><span>模型路由</span><h2>模型供应商</h2><p>集中管理第三方模型供应商；keychain 模式的 API Key 写入系统凭据库，不落盘。environment 模式仍由启动进程的环境变量提供。</p></div>
+            <el-button type="primary" :icon="Plus" @click="openNewProvider">新增供应商</el-button>
+          </header>
+          <div v-if="loading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
+          <article v-else v-for="provider in modelProviders" :key="provider.provider_id" class="provider-card">
+            <div class="provider-head">
+              <div><h3>{{ provider.display_name }}</h3><p>{{ provider.provider_id }} · {{ provider.model }}</p></div>
+              <span class="knowledge-status" :class="provider.api_key_configured ? 'is-healthy' : 'is-warning'">{{ credentialStatusLabel(provider) }}</span>
+            </div>
+            <div class="provider-meta">
+              <span>协议：{{ protocolLabel(provider.api_protocol) }}</span>
+              <span>Base URL：{{ provider.base_url }}</span>
+              <span>凭据来源：{{ provider.credential_source === 'keychain' ? '系统凭据库' : `环境变量 ${provider.api_key_env || '—'}` }}</span>
+            </div>
+            <div class="runtime-actions">
+              <el-switch v-model="provider.enabled" active-text="启用" @change="toggleProviderEnabled(provider)" />
+              <div>
+                <el-button :loading="editingProviderId === provider.provider_id" @click="openEditProvider(provider)">编辑</el-button>
+                <el-button type="danger" :loading="deletingProviderId === provider.provider_id" @click="removeProvider(provider)">删除</el-button>
+              </div>
+            </div>
+          </article>
+          <p v-if="!loading && !modelProviders.length" class="settings-empty">尚未配置任何模型供应商，点击右上角「新增供应商」开始。</p>
         </template>
 
         <template v-else-if="section === 'usage'">
@@ -191,6 +223,37 @@
       </div>
     </MotionModal>
 
+    <MotionModal v-model="providerEditorVisible" aria-label="编辑模型供应商">
+      <div class="knowledge-modal-card">
+        <div class="knowledge-modal-head">
+          <div><h3>{{ providerDraft.provider_id ? '编辑供应商' : '新增供应商' }}</h3><p>keychain 模式：API Key 写入系统凭据库，数据库只存配置元数据。environment 模式：启动 ObsidianBrain 前设置好对应环境变量。</p></div>
+          <span v-if="providerDraft.api_key_configured" class="knowledge-status is-healthy">已配置密钥</span>
+        </div>
+        <div class="knowledge-modal-body provider-editor-form">
+          <el-input v-model="providerDraft.display_name" :maxlength="100" placeholder="供应商名称，例如：阿里云百炼" />
+          <el-input v-model="providerDraft.provider_id" :disabled="Boolean(providerDraft.provider_id)" :maxlength="64" placeholder="供应商 ID，留空自动生成，例如：aliyun-bailian" />
+          <el-select v-model="providerDraft.api_protocol" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true">
+            <el-option label="OpenAI Chat Completions" value="openai-completions" />
+            <el-option label="OpenAI Responses" value="openai-responses" />
+            <el-option label="Anthropic Messages" value="anthropic-messages" />
+          </el-select>
+          <el-input v-model="providerDraft.base_url" placeholder="API Base URL，例如：https://dashscope.aliyuncs.com/compatible-mode/v1" />
+          <el-input v-model="providerDraft.model" placeholder="模型 ID，例如：glm-5.2" />
+          <el-select v-model="providerDraft.credential_source" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true">
+            <el-option label="系统凭据库（页面填写 API Key）" value="keychain" />
+            <el-option label="环境变量（启动进程注入）" value="environment" />
+          </el-select>
+          <el-input v-if="providerDraft.credential_source === 'environment'" v-model="providerDraft.api_key_env" placeholder="API Key 环境变量，例如：CUSTOM_LLM_API_KEY" />
+          <template v-else>
+            <el-input v-model="providerDraft.api_key" type="password" show-password :placeholder="providerDraft.api_key_configured ? '留空保留现有密钥' : '粘贴 API Key，保存后写入系统凭据库'" />
+            <el-checkbox v-if="providerDraft.api_key_configured" v-model="providerDraft.clear_api_key">保存时清除已配置的密钥</el-checkbox>
+          </template>
+          <el-switch v-model="providerDraft.enabled" active-text="启用" />
+        </div>
+        <div class="knowledge-modal-actions"><el-button @click="providerEditorVisible = false">取消</el-button><el-button type="primary" :loading="savingProvider" :disabled="!providerDraft.display_name.trim() || !providerDraft.base_url.trim() || !providerDraft.model.trim()" @click="saveProviderDraft">保存供应商</el-button></div>
+      </div>
+    </MotionModal>
+
     <MotionModal v-model="skillDetailVisible" aria-label="Skill 内容" size="wide">
       <div class="knowledge-modal-card skill-detail-modal">
         <div class="knowledge-modal-head">
@@ -295,7 +358,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Cpu, DataAnalysis, Document, Download, InfoFilled, Loading, Lock, MagicStick, Plus, UploadFilled } from '@element-plus/icons-vue'
+import { Connection, Cpu, DataAnalysis, Document, Download, InfoFilled, Loading, Lock, MagicStick, Plus, UploadFilled } from '@element-plus/icons-vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import {
@@ -304,6 +367,7 @@ import {
   getWikiSkillBenchmark,
   bookWikiExportDownloadUrl,
   createKnowledgeBackup,
+  deleteModelProvider,
   evaluateWikiSkillVersion,
   getWikiSkillDetail,
   importWikiSkillArchive,
@@ -315,6 +379,7 @@ import {
   saveAgentRuntimeProfile,
   saveBookWikiConfigDocument,
   saveCustomWikiSkill,
+  saveModelProvider,
   startWikiSkillBenchmark,
   publishWikiSkillVersion,
   setWikiSkillBinding,
@@ -324,19 +389,40 @@ import {
   type DatabaseBackup,
   type AgentUsageStats,
   type KnowledgeBaseSummary,
+  type ModelProviderProfile,
   type RuntimeHealth,
   type RuntimeProfile,
+  type SaveModelProviderRequest,
   type WikiSkill,
   type WikiSkillDetail,
   type WikiSkillBenchmarkRun,
 } from '@/api/knowledge'
 
-const section = ref<'runtime' | 'usage' | 'protection' | 'documents' | 'skills'>('runtime')
+const section = ref<'runtime' | 'providers' | 'usage' | 'protection' | 'documents' | 'skills'>('runtime')
 const bases = ref<KnowledgeBaseSummary[]>([])
 const activeBaseId = ref('')
 const documents = ref<ConfigDocument[]>([])
 const activeDocumentId = ref('')
 const runtimeHealth = ref<RuntimeHealth[]>([])
+const modelProviders = ref<ModelProviderProfile[]>([])
+const providerEditorVisible = ref(false)
+const editingProviderId = ref('')
+const savingProvider = ref(false)
+const deletingProviderId = ref('')
+const providerDraft = reactive<SaveModelProviderRequest & { api_key_configured: boolean }>({
+  provider_id: '',
+  display_name: '',
+  api_protocol: 'openai-completions',
+  base_url: '',
+  model: '',
+  credential_source: 'keychain',
+  api_key_env: '',
+  api_key: '',
+  clear_api_key: false,
+  enabled: true,
+  expected_revision: 0,
+  api_key_configured: false,
+})
 const loading = ref(false)
 const savingRuntime = ref(false)
 const verifyingRuntimeId = ref('')
@@ -372,6 +458,25 @@ const skillVersionAction = ref('')
 const skillBenchmarkPollingRunId = ref('')
 const skillDraft = reactive({ id: '', slug: '', name: '', description: '', instructions: '', revision: 0 })
 const activeDocument = computed(() => documents.value.find(document => document.id === activeDocumentId.value))
+const enabledProviders = computed(() => modelProviders.value.filter(provider => provider.enabled))
+function selectedProvider(profile: RuntimeProfile): ModelProviderProfile | null {
+  const id = profile.provider_id
+  if (!id) return null
+  return modelProviders.value.find(provider => provider.provider_id === id) || null
+}
+function credentialStatusLabel(provider: ModelProviderProfile): string {
+  if (provider.credential_source === 'environment') {
+    return provider.api_key_env ? '环境变量' : '未配置变量'
+  }
+  return provider.api_key_configured ? '已配置密钥' : '未配置密钥'
+}
+function protocolLabel(protocol: ModelProviderProfile['api_protocol']): string {
+  return protocol === 'openai-completions'
+    ? 'OpenAI Completions'
+    : protocol === 'openai-responses'
+      ? 'OpenAI Responses'
+      : 'Anthropic Messages'
+}
 const activeSkillVersion = computed(() => skillDetail.value?.versions.find(version => version.id === activeSkillVersionId.value) || null)
 const activeSkillFile = computed(() => activeSkillVersion.value?.files.find(file => file.relative_path === activeSkillFilePath.value) || activeSkillVersion.value?.files[0] || null)
 const usageDailyBars = computed(() => {
@@ -537,17 +642,112 @@ function callerShare(tokens: number) {
   return total ? Math.max(3, Math.round((tokens / total) * 100)) : 0
 }
 
-function toggleProviderConfig(profile: RuntimeProfile, enabled: boolean) {
-  profile.provider_config = enabled
-    ? {
-        provider_id: 'custom-provider',
-        display_name: '自定义供应商',
-        api_protocol: 'openai-completions',
-        base_url: '',
-        api_key_env: 'CUSTOM_LLM_API_KEY',
-      }
-    : null
-  delete runtimeVerification.value[profile.id]
+function resetProviderDraft() {
+  Object.assign(providerDraft, {
+    provider_id: '',
+    display_name: '',
+    api_protocol: 'openai-completions',
+    base_url: '',
+    model: '',
+    credential_source: 'keychain',
+    api_key_env: '',
+    api_key: '',
+    clear_api_key: false,
+    enabled: true,
+    expected_revision: 0,
+    api_key_configured: false,
+  })
+}
+
+function openNewProvider() {
+  resetProviderDraft()
+  editingProviderId.value = ''
+  providerEditorVisible.value = true
+}
+
+function openEditProvider(provider: ModelProviderProfile) {
+  editingProviderId.value = provider.provider_id
+  Object.assign(providerDraft, {
+    provider_id: provider.provider_id,
+    display_name: provider.display_name,
+    api_protocol: provider.api_protocol,
+    base_url: provider.base_url,
+    model: provider.model,
+    credential_source: provider.credential_source,
+    api_key_env: provider.api_key_env,
+    api_key: '',
+    clear_api_key: false,
+    enabled: provider.enabled,
+    expected_revision: provider.revision,
+    api_key_configured: provider.api_key_configured,
+  })
+  providerEditorVisible.value = true
+}
+
+async function saveProviderDraft() {
+  savingProvider.value = true
+  try {
+    const response = await saveModelProvider({
+      provider_id: providerDraft.provider_id || undefined,
+      display_name: providerDraft.display_name.trim(),
+      api_protocol: providerDraft.api_protocol,
+      base_url: providerDraft.base_url.trim(),
+      model: providerDraft.model.trim(),
+      credential_source: providerDraft.credential_source,
+      api_key_env: providerDraft.api_key_env?.trim() ?? '',
+      api_key: providerDraft.api_key || undefined,
+      clear_api_key: providerDraft.clear_api_key,
+      enabled: providerDraft.enabled,
+      expected_revision: providerDraft.expected_revision ?? 0,
+    })
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '供应商保存失败')
+    providerEditorVisible.value = false
+    ElMessage.success('供应商已保存')
+    await loadSettings()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    savingProvider.value = false
+  }
+}
+
+async function removeProvider(provider: ModelProviderProfile) {
+  deletingProviderId.value = provider.provider_id
+  try {
+    const response = await deleteModelProvider(provider.provider_id, provider.revision)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '供应商删除失败')
+    ElMessage.success('供应商已删除')
+    await loadSettings()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    deletingProviderId.value = ''
+  }
+}
+
+async function toggleProviderEnabled(provider: ModelProviderProfile) {
+  // optimistic inline toggle persisted immediately so disabled providers cannot stay selected by a runtime
+  editingProviderId.value = provider.provider_id
+  try {
+    const response = await saveModelProvider({
+      provider_id: provider.provider_id,
+      display_name: provider.display_name,
+      api_protocol: provider.api_protocol,
+      base_url: provider.base_url,
+      model: provider.model,
+      credential_source: provider.credential_source,
+      api_key_env: provider.api_key_env,
+      enabled: provider.enabled,
+      expected_revision: provider.revision,
+    })
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '供应商状态更新失败')
+    await loadSettings()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+    await loadSettings()
+  } finally {
+    editingProviderId.value = ''
+  }
 }
 
 async function initialize() {
@@ -839,6 +1039,7 @@ async function loadSettings() {
     const response = await getBookWikiSettings(activeBaseId.value || undefined)
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '配置加载失败')
     runtimeHealth.value = response.result.runtime_profiles
+    modelProviders.value = response.result.model_providers
     documents.value = response.result.documents
     activeDocumentId.value = documents.value.some(document => document.id === activeDocumentId.value)
       ? activeDocumentId.value
@@ -958,6 +1159,14 @@ onMounted(initialize)
 .provider-fields .is-wide { grid-column: 1 / -1; }
 .credential-hint { color: var(--text-faint); font-size: 10px; line-height: 1.55; }
 .credential-hint code { color: var(--text-muted); font-family: var(--font-mono); }
+.provider-card { min-width: 0; display: grid; gap: 13px; padding: 18px; border: 1px solid var(--border-faint); border-radius: 17px; background: var(--bg-glass-subtle); }
+.provider-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.provider-head h3 { margin: 0; font-size: 15px; font-weight: 660; }
+.provider-head p { margin: 3px 0 0; color: var(--text-muted); font-size: 11px; font-family: var(--font-mono); }
+.provider-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--text-faint); font-size: 11px; }
+.settings-empty { color: var(--text-faint); font-size: 12px; padding: 28px 4px; }
+.provider-editor-form { display: grid; gap: 11px; }
+.provider-editor-form .el-select { width: 100%; }
 .runtime-actions { display: flex; align-items: center; justify-content: space-between; }
 .runtime-actions > div { display: flex; gap: 8px; }
 .usage-head { align-items: flex-start !important; }

@@ -17,7 +17,7 @@ use crate::models::book_wiki::{RuntimeHealth, RuntimeProfile};
 
 pub const AGENT_RUNTIME_CANCELLED: &str = "OBSIDIANBRAIN_AGENT_RUNTIME_CANCELLED";
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AgentPromptRequest {
     pub command: String,
     pub model: String,
@@ -25,6 +25,7 @@ pub struct AgentPromptRequest {
     pub prompt: String,
     pub patch_paths: Vec<PathBuf>,
     pub credential_env: Option<String>,
+    pub credential_value: Option<String>,
     pub timeout: Option<Duration>,
 }
 
@@ -131,7 +132,14 @@ impl DeepSeekHarnessRuntime {
                 message: "正在启动 DeepSeek Harness 进程".to_string(),
             },
         );
-        let agent = AcpAgent::new(AcpAgentConfig::new(command).args(command_parts));
+        let mut agent_config = AcpAgentConfig::new(command).args(command_parts);
+        if let (Some(environment), Some(secret)) = (
+            request.credential_env.as_ref(),
+            request.credential_value.as_ref(),
+        ) {
+            agent_config = agent_config.env(environment, secret);
+        }
+        let agent = AcpAgent::new(agent_config);
         let cwd = request.cwd;
         let model = request.model;
         let prompt = request.prompt;
@@ -488,9 +496,9 @@ fn acp_error_message(detail: &str, credential_env: Option<&str>) -> String {
     {
         return match credential_env {
             Some(environment) => format!(
-                "DeepSeek Harness 未找到模型凭据 {environment}。请在启动 ObsidianBrain 前设置该环境变量；密钥不会保存到知识库数据库"
+                "DeepSeek Harness 未找到模型凭据 {environment}。请在 Wiki 配置页补充 API Key，或检查所选环境变量"
             ),
-            None => "DeepSeek Harness 未找到当前模型供应商的 API Key。请在 Harness Web 的 Models 页面保存凭据，或为 Runtime 配置凭据环境变量"
+            None => "DeepSeek Harness 未找到当前模型供应商的 API Key。请在 Wiki 配置页选择供应商并保存凭据"
                 .to_string(),
         };
     }
@@ -514,6 +522,7 @@ mod tests {
             runtime: "deepseek_harness".to_string(),
             executable: executable.to_string(),
             model: String::new(),
+            provider_id: None,
             provider_config: None,
             enabled,
             revision: 1,
@@ -623,6 +632,7 @@ mod tests {
                 prompt: "test".to_string(),
                 patch_paths: Vec::new(),
                 credential_env: None,
+                credential_value: None,
                 timeout: None,
             })
             .await
@@ -643,6 +653,7 @@ mod tests {
                 prompt: "只回答：连接成功".to_string(),
                 patch_paths: Vec::new(),
                 credential_env: None,
+                credential_value: None,
                 timeout: None,
             })
             .await

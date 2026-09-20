@@ -225,6 +225,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "structured artifact validation details",
         sql: include_str!("../../migrations/035_artifact_validation_details.sql"),
     },
+    Migration {
+        version: 36,
+        description: "multiple model providers and secure credential references",
+        sql: include_str!("../../migrations/036_multiple_llm_providers.sql"),
+    },
 ];
 
 fn seed_detailed_ingest_skill(conn: &Connection) -> Result<(), BrainError> {
@@ -1580,7 +1585,7 @@ mod tests {
     }
 
     #[test]
-    fn test_migrations_031_through_035_keep_only_current_skill_bodies() {
+    fn test_migrations_031_through_036_keep_only_current_skill_bodies() {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("upgrade-from-030.db");
         let conn = Connection::open(&db_path).unwrap();
@@ -1663,6 +1668,22 @@ mod tests {
             [],
         )
         .unwrap();
+        conn.execute(
+            "UPDATE agent_runtime_profiles
+             SET model = 'glm-5.2',
+                 config_json = json_object(
+                     'provider', json_object(
+                         'provider_id', 'aliyun-bailian',
+                         'display_name', '阿里云百炼',
+                         'api_protocol', 'openai-completions',
+                         'base_url', 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+                         'api_key_env', 'CUSTOM_LLM_API_KEY'
+                     )
+                 )
+             WHERE id = 'runtime-deepseek-harness'",
+            [],
+        )
+        .unwrap();
         let counts: (i64, i64) = conn
             .query_row(
                 "SELECT
@@ -1684,7 +1705,7 @@ mod tests {
                         conn.query_row("SELECT MAX(version) FROM _migrations", [], |row| {
                             row.get(0)
                         })?;
-                    assert_eq!(latest, 35);
+                    assert_eq!(latest, 36);
                     for (skill_id, version_id, expected_content) in [
                         (
                             "skill-book-ingest",
@@ -1771,6 +1792,36 @@ mod tests {
                         |row| row.get(0),
                     )?;
                     assert_eq!(stale_quality_runs, 0);
+                    let migrated_provider: (String, String, String, String, String, String) = conn
+                        .query_row(
+                            "SELECT p.id, p.display_name, p.model, p.credential_source,
+                                    p.api_key_env, r.provider_id
+                             FROM llm_provider_profiles p
+                             JOIN agent_runtime_profiles r ON r.provider_id = p.id
+                             WHERE r.id = 'runtime-deepseek-harness'",
+                            [],
+                            |row| {
+                                Ok((
+                                    row.get(0)?,
+                                    row.get(1)?,
+                                    row.get(2)?,
+                                    row.get(3)?,
+                                    row.get(4)?,
+                                    row.get(5)?,
+                                ))
+                            },
+                        )?;
+                    assert_eq!(
+                        migrated_provider,
+                        (
+                            "aliyun-bailian".to_string(),
+                            "阿里云百炼".to_string(),
+                            "glm-5.2".to_string(),
+                            "environment".to_string(),
+                            "CUSTOM_LLM_API_KEY".to_string(),
+                            "aliyun-bailian".to_string(),
+                        )
+                    );
                     Ok(())
                 })
                 .unwrap();

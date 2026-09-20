@@ -1,4 +1,5 @@
 pub mod book_wiki_store;
+pub mod credential_store;
 pub mod deepseek_harness;
 #[allow(dead_code)]
 pub mod file_watcher;
