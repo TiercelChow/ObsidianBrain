@@ -146,6 +146,14 @@ fn main() {
                     );
                     std::process::exit(1);
                 }
+                // 端口预检：避免 daemonize 后才发现端口被占，留下孤儿 PID 文件
+                let bind_port = port
+                    .or_else(|| AppConfig::load().ok().map(|config| config.server.port))
+                    .unwrap_or_else(|| AppConfig::default().server.port);
+                if let Some(message) = daemon::port_conflict_message(bind_port) {
+                    eprintln!("{message}");
+                    std::process::exit(1);
+                }
                 match daemon::daemonize() {
                     Ok(0) => {
                         // We're the child — init logging and run.
@@ -202,6 +210,7 @@ fn run_server(host_override: Option<String>, port_override: Option<u16>) {
     rt.block_on(async {
         if let Err(e) = run_server_async(host_override, port_override).await {
             tracing::error!("Fatal error: {e}");
+            daemon::remove_own_pid();
             std::process::exit(1);
         }
     });
@@ -464,6 +473,8 @@ async fn run_server_async(
         Ok(l) => l,
         Err(e) => {
             tracing::error!("绑定地址失败: {e}");
+            // 清理自己留下的孤儿 PID 文件，避免 stop 之后误判「已在运行」
+            daemon::remove_own_pid();
             std::process::exit(1);
         }
     };
@@ -478,6 +489,7 @@ async fn run_server_async(
         .await
     {
         tracing::error!("服务运行失败: {e}");
+        daemon::remove_own_pid();
         std::process::exit(1);
     }
 
