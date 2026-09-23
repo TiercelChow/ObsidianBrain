@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="zh-CN" class="manual-document">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#f0f0f3" />
+    <meta name="description" content="ObsidianBrain LLM Wiki 架构剖析：书籍知识库、Wiki 工作台、知识问答与研究任务如何由同一条可审核管线咬合成完整闭环——来源同步、语义编译、变更集审核、带引用问答、租约队列与本地 PPTX 渲染。" />
+    <meta name="keywords" content="Book Wiki, LLM, 知识图谱, RAG, ACP, DeepSeek Harness, SQLite FTS5, 变更集审核, 研究任务, PPTX, 架构设计" />
+    <link rel="canonical" href="https://tiercelchow.github.io/ObsidianBrain/llm-wiki/" />
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+    <title>LLM Wiki · 架构剖析 · ObsidianBrain</title>
+    <script>document.documentElement.classList.add('js')</script>
+  </head>
+  <body class="manual-page llmwiki-page">
+    <a class="skip-link" href="#main-content">跳到正文</a>
+    <svg class="svg-defs" aria-hidden="true">
+      <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5" /></symbol>
+      <symbol id="icon-github" viewBox="0 0 24 24"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3.3-.4 6.8-1.6 6.8-7A5.4 5.4 0 0 0 19.4 4 5 5 0 0 0 19.3.5S18.2.1 15 1.8a13.4 13.4 0 0 0-6 0C5.8.1 4.7.5 4.7.5A5 5 0 0 0 4.6 4a5.4 5.4 0 0 0-1.4 3.7c0 5.3 3.5 6.5 6.8 6.9A4.8 4.8 0 0 0 9 18v4M9 19c-3 .9-3-1.5-4.2-2" /></symbol>
+      <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" /></symbol>
+      <symbol id="icon-theme" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></symbol>
+      <symbol id="icon-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4H6.5A2.5 2.5 0 0 0 4 6.5v13Z" /><path d="M8 7h8M8 10h6" /></symbol>
+      <symbol id="icon-wiki" viewBox="0 0 24 24"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H12v18H7.5A3.5 3.5 0 0 0 4 23V5.5ZM20 5.5A3.5 3.5 0 0 0 16.5 2H12v18h4.5A3.5 3.5 0 0 1 20 23V5.5Z" /></symbol>
+      <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></symbol>
+      <symbol id="icon-code" viewBox="0 0 24 24"><path d="m8 9-4 3 4 3m8-6 4 3-4 3m-3-9-2 12" /></symbol>
+      <symbol id="icon-spark" viewBox="0 0 24 24"><path d="m12 3 1.3 4.2L17 9l-3.7 1.8L12 15l-1.3-4.2L7 9l3.7-1.8L12 3ZM19 15l.7 2.3L22 18l-2.3.7L19 21l-.7-2.3L16 18l2.3-.7L19 15ZM5 13l.8 2.2L8 16l-2.2.8L5 19l-.8-2.2L2 16l2.2-.8L5 13Z" /></symbol>
+      <symbol id="icon-shield" viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.8 3.2 8.2 7.5 9.5 4.3-1.3 7.5-4.7 7.5-9.5V6L12 3Z" /><path d="m9 12 2 2 4-5" /></symbol>
+      <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></symbol>
+      <symbol id="icon-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m7 9 3 3-3 3m5 0h5" /></symbol>
+      <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4" /></symbol>
+    </svg>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="../" aria-label="ObsidianBrain 首页">
+          <img class="brand-mark" src="../favicon.svg" alt="" width="32" height="32" />
+          <span>ObsidianBrain</span>
+        </a>
+
+        <nav class="site-nav" id="site-navigation" aria-label="主要导航" data-navigation>
+          <a href="../#tour">产品体验</a>
+          <a href="../#features">功能</a>
+          <a href="../#quick-start">开始使用</a>
+          <a href="../manual/">使用手册</a>
+          <a href="./" aria-current="page">LLM Wiki</a>
+          <a href="../#privacy">本地与隐私</a>
+        </nav>
+
+        <div class="header-actions">
+          <button class="theme-toggle" type="button" data-theme-toggle>
+            <svg aria-hidden="true"><use href="#icon-theme" /></svg>
+            <span data-theme-label>浅色</span>
+          </button>
+          <a class="github-button" href="https://github.com/TiercelChow/ObsidianBrain" target="_blank" rel="noreferrer">
+            <svg aria-hidden="true"><use href="#icon-github" /></svg>
+            <span>GitHub</span>
+          </a>
+          <button class="menu-toggle" type="button" aria-label="打开导航" aria-controls="site-navigation" aria-expanded="false" data-menu-toggle>
+            <svg aria-hidden="true"><use href="#icon-menu" /></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+    <main id="main-content" class="section-shell docs-shell">
+      <header class="docs-intro" id="top">
+        <a class="docs-back" href="../">← 产品首页</a>
+        <div class="docs-title-row"><div><span class="section-label">OBSIDIANBRAIN / LLM WIKI ARCHITECTURE</span><h1>LLM Wiki 架构剖析</h1></div><img src="../favicon.svg" width="72" height="72" alt="" /></div>
+        <p class="docs-lead">书籍知识库、Wiki 工作台、知识问答和研究任务不是四个孤立页面，而是同一条管线的四个工位：来源同步产出不可变证据，语义编译把证据炼成候选知识，人工审核放行入库，问答与研究再消费这些知识——研究结论又能回流为新的候选。本页按数据流动的顺序，逐层剖析这条闭环的实现。</p>
+        <div class="version-notice"><span class="version-badge">面向读者</span><p><strong>技术架构深度剖析</strong> · 面向想理解实现细节的开发者。所有表名、工具名、状态枚举与参数上限均对照当前代码核实；操作步骤类内容请阅读<a href="../manual/#wiki">使用手册的书籍 Wiki 章节</a>。</p></div>
+      </header>
+      <details class="mobile-chapters">
+        <summary>浏览章节 <span data-current-chapter>总览</span><svg aria-hidden="true"><use href="#icon-chevron" /></svg></summary>
+        <nav aria-label="手机章节目录"><a href="#overview" data-chapter-link><span>00</span>总览与边界</a>
+<a href="#sources" data-chapter-link><span>01</span>来源层</a>
+<a href="#compile" data-chapter-link><span>02</span>语义编译</a>
+<a href="#review" data-chapter-link><span>03</span>审核入库</a>
+<a href="#workspace" data-chapter-link><span>04</span>Wiki 工作台</a>
+<a href="#qa" data-chapter-link><span>05</span>知识问答</a>
+<a href="#tasks" data-chapter-link><span>06</span>研究任务</a>
+<a href="#config" data-chapter-link><span>07</span>配置与 Skill</a>
+<a href="#security" data-chapter-link><span>08</span>安全边界</a></nav>
+      </details>
+      <div class="docs-layout">
+        <aside class="docs-sidebar">
+          <span class="docs-nav-label">阅读目录</span>
+          <nav aria-label="章节目录"><a href="#overview" data-chapter-link><span>00</span>总览与边界</a>
+<a href="#sources" data-chapter-link><span>01</span>来源层</a>
+<a href="#compile" data-chapter-link><span>02</span>语义编译</a>
+<a href="#review" data-chapter-link><span>03</span>审核入库</a>
+<a href="#workspace" data-chapter-link><span>04</span>Wiki 工作台</a>
+<a href="#qa" data-chapter-link><span>05</span>知识问答</a>
+<a href="#tasks" data-chapter-link><span>06</span>研究任务</a>
+<a href="#config" data-chapter-link><span>07</span>配置与 Skill</a>
+<a href="#security" data-chapter-link><span>08</span>安全边界</a></nav>
+          <a class="docs-top-link" href="#top">返回顶部 ↑</a>
+        </aside>
+        <div class="manual-content">
+
+        <section id="overview" class="manual-section">
+          <span class="chapter-kicker">00 / OVERVIEW</span>
+          <h2>总览 — 一条管线，四个工位，一套边界</h2>
+          <p>Book Wiki 的架构目标可以压缩成一句话：<strong>数据库原生、每书隔离、由 DeepSeek Harness 驱动、被审核门禁保护的 Markdown 书籍知识系统</strong>。它建立在四条不可妥协的边界之上：</p>
+          <ol class="manual-steps">
+            <li><span>1</span><div><strong>原书是只读来源，不是 Agent 工作区</strong><p>整条管线从头到尾不会写回或改写任何 Markdown 原文件；Agent 也不直接读文件，而是通过受控工具读取数据库里的来源片段。</p></div></li>
+            <li><span>2</span><div><strong>SQLite 是生成知识的唯一事实来源</strong><p>实体、论断、关系、引用、版本、审核记录、运行审计全部落在本机 <code>brain.db</code>，不与任何 Markdown Wiki 双写。</p></div></li>
+            <li><span>3</span><div><strong>Rust 后端拥有全部业务状态与权力</strong><p>检索、提示词组装、JSON 契约校验、审核门禁、配额、事务和 PPTX 渲染都在 Rust 侧；后端是唯一能写数据库的角色。</p></div></li>
+            <li><span>4</span><div><strong>Harness 只负责 Agent 执行，不拥有知识数据</strong><p>DeepSeek Harness 是文本进出的一次性 ACP 子进程，从不接触数据库路径；它的一切产出都只是 proposal（候选提案）。</p></div></li>
+          </ol>
+
+          <h3>管线全景</h3>
+          <div class="flow-diagram" aria-label="Book Wiki 管线全景">
+            <div class="flow-step"><span class="flow-icon">01</span><strong class="flow-label">来源同步</strong><small class="flow-desc">Markdown → 不可变 version / span + FTS5 索引</small></div>
+            <div class="flow-step"><span class="flow-icon">02</span><strong class="flow-label">语义编译</strong><small class="flow-desc">受审计 ACP Run，增量、分批、严格 JSON 契约</small></div>
+            <div class="flow-step"><span class="flow-icon">03</span><strong class="flow-label">变更集候选</strong><small class="flow-desc">knowledge_change_sets，状态 proposed</small></div>
+            <div class="flow-step"><span class="flow-icon">04</span><strong class="flow-label">人工审核</strong><small class="flow-desc">服务端复验 + 单事务原子写入正式知识</small></div>
+            <div class="flow-step"><span class="flow-icon">05</span><strong class="flow-label">消费与回流</strong><small class="flow-desc">带引用问答 / 研究任务，产出再成候选</small></div>
+          </div>
+          <p>四个页面对应管线上的不同工位，彼此通过深链咬合：<strong>书籍知识库</strong>（<code>/knowledge</code>）是入口与编译编排台，编译完成后「查看并审核」直接跳转 <code>/knowledge/wiki?review=&lt;变更集&gt;</code>；<strong>Wiki 工作台</strong>（<code>/knowledge/wiki</code>）承载知识资产浏览与全部审核动作；<strong>知识问答</strong>（<code>/knowledge/chat</code>）消费正式知识并支持把回答保存为候选、跳回工作台审核；<strong>研究任务</strong>（<code>/knowledge/tasks</code>）做深度加工，研究结论同样以候选身份进入审核队列。第五个页面 <strong>Wiki 配置</strong>（<code>/knowledge/settings</code>）为整条管线供应 Runtime、模型供应商、配置文档与 Skill。</p>
+
+          <h3>「一切皆 proposal」的写入模型</h3>
+          <p>Agent 对知识的唯一写入通道是 <code>knowledge_propose_changes</code> 类工具——它只创建 <code>proposed</code> 状态的变更集；只有用户在审核界面触发 <code>resolve_knowledge_change_set</code>（approve）才把变更写进正式表。人工编辑（工作台改实体、合并、拆分）与阅境轩划线入库也走同一变更集通道，被标记为 <code>human_protected</code> 高风险候选，同样要经过审核。<strong>系统里不存在任何绕过审核直接写正式知识的路径。</strong></p>
+
+          <h3>技术栈与通信形态</h3>
+          <table class="info-table">
+            <thead><tr><th>层</th><th>实现</th><th>要点</th></tr></thead>
+            <tbody>
+              <tr><td>前端</td><td>Vue 3 · 五个知识页面共享 <code>KnowledgePageShell</code> 页签骨架</td><td>可分享状态放 URL query（<code>base</code> / <code>entry</code> / <code>review</code> / <code>conversation</code>），瞬时 UI 态放组件</td></tr>
+              <tr><td>API</td><td>工具优先：业务动作统一走 <code>tools/call</code> 信封（<code>{tool, arguments}</code> → <code>{status, result | error}</code>）</td><td>只有字节流与流式场景有专用端点：问答 SSE（<code>knowledge/chat/stream</code>）、PPTX / 快照下载、ZIP / 恢复上传</td></tr>
+              <tr><td>核心</td><td><code>BookWikiService</code>（backend/src/core/book_wiki.rs）</td><td>拥有生命周期、编译编排、变更集校验与应用、检索、任务队列、Run 审计</td></tr>
+              <tr><td>基础设施</td><td>单连接 <code>Mutex&lt;Connection&gt;</code> 的 SqliteStore + FTS5；DeepSeek Harness ACP 适配器</td><td>写路径 <code>transaction()</code>（<code>BEGIN IMMEDIATE</code>），正式写入全部单事务</td></tr>
+              <tr><td>Agent 运行时</td><td><code>npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp</code>（固定版本）</td><td>每次 Run 独立 ACP stdio 子进程 + 隔离临时目录 + 短时能力令牌，无常驻池</td></tr>
+            </tbody>
+          </table>
+          <div class="callout subtle"><span class="callout-icon">ⓘ</span><span>「DeepSeek Harness」指 Agent 运行时，不绑定 DeepSeek 模型：通过 Runtime Profile 可注入 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 兼容的任意供应商（见<a href="#config">第 07 章</a>）。</span></div>
+        </section>
+
+        <section id="sources" class="manual-section">
+          <span class="chapter-kicker">01 / SOURCES</span>
+          <h2>来源层 — 书籍知识库与不可变证据</h2>
+          <p>管线的第一站是把一个 Markdown 文件夹变成<strong>可检索、可追溯、可重复同步</strong>的证据库。这一层完全由 Rust 完成，不涉及任何模型调用。</p>
+
+          <h3>每书一库，硬隔离</h3>
+          <p><code>knowledge_bases</code> 与书架表 <code>reader_books</code> 一对一（<code>book_id UNIQUE</code>），且只允许 <code>kind = folder</code> 的 Markdown 书籍建库——前端书选择器与后端初始化都执行同一过滤，PDF 停留在阅读器不进 Wiki 工作流。所有知识表都携带 <code>knowledge_base_id</code>，唯一约束与查询索引必须带该字段，跨书访问在数据模型层就被拒绝。生命周期由 <code>lifecycle</code> 枚举控制（<code>uninitialized / active / paused / archived</code>），读写边界在 Store 层而非页面层执行：只有 <code>active</code> 才能创建任务、启动 Run、生成或处理变更集，暂停/归档保留只读查询。</p>
+
+          <h3>三层来源模型：document → version → span</h3>
+          <table class="info-table">
+            <thead><tr><th>表</th><th>职责</th><th>关键约束</th></tr></thead>
+            <tbody>
+              <tr><td><code>source_documents</code></td><td>一个 Markdown 文件的登记项：路径、标题、序号、当前版本指针、<code>sync_status</code>（current / changed / missing / failed）</td><td><code>(knowledge_base_id, original_path)</code> 唯一</td></tr>
+              <tr><td><code>source_versions</code></td><td>文件的一次内容快照：<code>content_hash</code>、字节数、抽取状态</td><td>相同来源相同哈希不得重复建版本——重复同步天然幂等</td></tr>
+              <tr><td><code>source_spans</code></td><td>版本切出的不可变片段：标题、锚点、<code>line_start / line_end</code>、正文、<code>content_hash</code>、token 估计</td><td><code>(knowledge_base_id, source_version_id, ordinal)</code> 索引，顺序稳定</td></tr>
+            </tbody>
+          </table>
+          <p>同步（<code>sync_book_knowledge_base</code>）递归扫描 <code>.md / .markdown</code> 文件（忽略 <code>.git</code>、<code>.obsidian</code>、<code>node_modules</code> 等隐藏与构建目录，单文件超过 10MB 跳过，目录深度上限 24 层），按内容哈希对比建立 added / changed / missing 集合，只抽取新增和变化的文档；编译进行中会拒绝同步。三层 ID 全部由稳定哈希派生（如 <code>version_id = SHA-256(source_id + content_hash)</code>），内容不变则 ID 不变——这是重复同步幂等的根源。整个落库在<strong>单事务</strong>内完成：来源三表、两张 FTS 索引、章节镜像条目与引用一起写入，索引与核心表不会失配。</p>
+          <p>两个细节决定了后续检索的形状：<strong>文件更新不会级联删除旧证据</strong>——旧 version 与 span 保留，历史引用始终能落回当时的原文；文件删除只标记来源 missing，相关知识进入影响评估，原书永不改写。<strong>每个 span 会同步生成一条 <code>entry_type = source_section</code> 的章节镜像条目</strong>（status verified、confidence 1.0）进入同一实体索引——它就是问答检索里「章节兜底」层的载体（见<a href="#qa">第 05 章</a>）；来源更新后不再指向当前版本的镜像条目被置为 stale，退出检索。</p>
+
+          <h3>FTS5 全文索引与中文二元组</h3>
+          <p>检索不用向量库，而是两张 SQLite FTS5 虚表：<code>knowledge_entries_fts</code>（title / aliases / summary / content_md / tags / cjk_terms）与 <code>source_spans_fts</code>（source_title / heading / content / cjk_terms），tokenizer 为 <code>unicode61</code>。<code>unicode61</code> 无法切分连续中文，因此写入时扫描 CJK 码点段（基本区、扩展 A、兼容区），把每段连续中文切成相邻字符二元组存入 <code>cjk_terms</code> 列；查询侧用同一规范化函数生成二元组并保留完整中文词，与 ASCII 词一起取前 32 个词做 OR 查询，再与标题/别名精确命中和前缀结果合并加权——只改查询不索引二元组是明确禁止的错误实现。FTS 写入与来源/实体事务绑定，保证索引与核心表一致；升级库在首次检索时一次性重建旧索引。规模上做过十万 span 的显式验证：实体分页下推为 SQLite <code>LIMIT/OFFSET</code>，FTS 命中不足时不再做正文 <code>LIKE</code> 全表扫描补位。</p>
+
+          <h3>页面如何呈现这一层</h3>
+          <p>「书籍知识库」页是纯卡片列表：每书一卡，展示 <code>sync_state</code>（clean / outdated / scanning / extracting / ingesting / failed）、编译状态与生命周期徽章、来源/实体/论断/任务计数。「同步」按钮只在 <code>active</code> 且原书路径可用且非编译中时可用；书架目录被移动或删除时卡片显示「原书目录已失效」并禁用同步与编译——同步与编译在后端也会实时复查书架路径。</p>
+        </section>
+
+        <section id="compile" class="manual-section">
+          <span class="chapter-kicker">02 / COMPILE</span>
+          <h2>语义编译 — 受审计的增量炼化</h2>
+          <p>智能编译是整条管线里唯一「无中生有」的环节：把跨章节的来源片段炼成主题实体、论断与关系。它的设计围绕三个词：<strong>增量、受审计、契约严格</strong>。</p>
+
+          <h3>后台化：请求只入队，运行与 HTTP 解耦</h3>
+          <p><code>compile_book_knowledge_base</code> 前置要求 <code>sync_state = clean</code>，以 <code>WHERE compile_state != 'compiling'</code> 原子抢占后立即返回（重复触发会得到「已经在后台执行」的明确报错），实际编译由独立 Tokio 任务执行；后台 Supervisor 捕获异常退出并落库为失败。知识库摘要上持久化了完整的运行投影：<code>compile_phase</code>（准备 → 连接 Runtime → 思考 → 工具 → 生成 → 校验 → 重试 → 收尾 → 待审核等阶段）、来源与批次进度（<code>compile_processed_sources / compile_total_sources</code>、<code>compile_current_batch / compile_total_batches</code>）、每 15 秒一次的心跳和取消标记。前端每 2.5 秒轮询摘要（带 <code>canFocusDocument</code> 守卫，后台标签页不轮询），因此<strong>离开页面不会中断编译</strong>；取消写入持久化请求并通知活跃 ACP Run。服务重启时仍处于 <code>compiling</code> 且不在待审核态的历史记录被转为明确失败，允许重新编译而不是永远转圈；<code>waiting_review</code> 的记录则被保留——它的变更集还在等人处理，重启不应把它误判为中断。</p>
+
+          <h3>增量：检查点 + 编译指纹</h3>
+          <p><code>knowledge_compile_checkpoints</code> 记录每个来源文档已编译到的版本；编译只读取检查点缺失或版本不同的来源，变更集创建成功后推进检查点。检查点之上还有一层 <code>compile_fingerprint</code>，由四部分构成：</p>
+          <ul class="manual-points">
+            <li><strong>编译协议 revision</strong> 与强制规则 / JSON Schema 的内容哈希（<code>compile.md</code> + <code>semantic-output.schema.json</code>）；</li>
+            <li><strong>Runtime Profile 与模型</strong>（换了模型等于换了「编译器」）；</li>
+            <li><strong>生效配置文档</strong>的内容哈希（书籍规则变了，旧候选不再等价）；</li>
+            <li><strong>实际启用 Skill</strong> 的 revision 与内容哈希。</li>
+          </ul>
+          <p>准备和执行阶段都按当前指纹查询待编译来源：任一输入变化会让全书来源重新进入编译；指纹相同则只处理内容版本变化的来源。与之配套的关键补偿是：<strong>驳回候选会删除对应来源的编译检查点</strong>——否则被驳回的来源将带着检查点被永久跳过，再也得不到重新分析的机会。</p>
+
+          <h3>分批与预算：把上下文花在刀刃上</h3>
+          <table class="info-table">
+            <thead><tr><th>参数</th><th>值</th><th>动机</th></tr></thead>
+            <tbody>
+              <tr><td>单批来源正文预算</td><td>动态计算：32,000 字符 Prompt 总预算扣除协议、Skill 与配置固定开销后，clamp 到 [1,000, 20,000]；单个片段切块上限 8,000 字符</td><td>超长章节继续切块而不是静默截断；所有分块正文完整发送</td></tr>
+              <tr><td>单批候选上限</td><td>5 个跨片段归并后的高价值条目</td><td>强制模型做归并取舍，避免碎片化候选</td></tr>
+              <tr><td>输出上限</td><td>首次 8,192 token，恢复调用 12,288 token</td><td>通过 Harness 供应商 Patch 设置</td></tr>
+              <tr><td>重试策略</td><td>每批合计最多两次模型调用（空正文恢复与 JSON 修复共享一次额度）；拒绝回答与用户取消不重试</td><td>成本可控、失败可解释</td></tr>
+              <tr><td>单批截止</td><td>180 秒</td><td>防止悬挂 Run 占用队列</td></tr>
+              <tr><td>供应商自动重试</td><td>编译路由从默认最多 5 次压缩为最多 1 次，并显式关闭推理等级</td><td>只作用于编译，不影响问答与研究</td></tr>
+            </tbody>
+          </table>
+          <p>每批还会读取已有语义 Wiki 和前批候选注入 Prompt，让模型能跨批次归并概念、别名、论断与关系，而不是每批各说各话。</p>
+
+          <h3>契约：semantic-contract-v4</h3>
+          <p>编译输出协议由 <code>backend/prompts/wiki/compile.md</code>（强制规则）与 <code>semantic-output.schema.json</code>（同时用于提示词展示与 Rust 侧 JSON Schema draft-07 校验）双端锁定，协议 revision 常量与两份文件的内容哈希都计入编译指纹，硬协议优先级高于书籍配置和 Skill。核心约束：</p>
+          <ul class="manual-points">
+            <li>顶层单一 JSON 对象，<code>entries</code> 最多五项，必填类型、枚举、文本长度、数值范围全由 Schema 检查，<strong>额外字段拒绝</strong>；</li>
+            <li>每条目和每条论断必须显式引用<strong>本批</strong> span ID，论断引用必须包含在条目引用中；关系只能指向已提供的主题或本批候选，禁止自连、重复 slug 和猜测目标；</li>
+            <li><code>entries: []</code> 必须附具体 <code>no_material_reason</code>——「本批无实质新增」写入运行事件并走 no-material 审计流程（创建状态为 <code>applied</code> 的 <code>no_material</code> 变更记录，照常推进检查点），不凭空制造知识；</li>
+            <li>模型只返回短摘要、别名、原子论断、关系和引用，<strong>不撰写 <code>content_md</code></strong>：可检索正文由服务端根据摘要和论断生成，并再次执行字段限长；</li>
+            <li>解析器只接受一个完整 JSON 对象；截断、非法转义、字段/引用错误进入带具体字段路径和校验原因的修复重试，不允许「取第一个对象就算成功」或字符串替换猜测；最终失败不写检查点。</li>
+          </ul>
+          <div class="callout"><span class="callout-icon">🔍</span><span><strong>为什么编译 Run 零工具：</strong>来源批次已完整内联进 Prompt，变更集由 <code>BookWikiService</code> 直接校验和持久化，挂载 MCP 工具目录只会带来无用的工具发现、Schema token 和额外 Agent 回合。这是「按任务类型裁剪工具目录」原则的极端案例（另两个零工具 Run：演示策划见<a href="#tasks">第 06 章</a>，Skill 基准见<a href="#config">第 07 章</a>）。</span></div>
+
+          <h3>审计：每一次模型调用都可回放</h3>
+          <p>编译以受审计 Run 执行（<code>run_audited</code>）：启动 Runtime 前把最终有效 Prompt、稳定哈希、字符数、Skill 与配置内容快照、工具白名单和证据引用写入 <code>agent_run_inspections</code>，与 Run 一对一且运行后不随当前配置变化；执行过程的事件（阶段、重试、停止原因）落入 <code>agent_run_events</code>。校验通过的候选写入 <code>knowledge_change_sets</code>，等待第 03 章的审核门禁。</p>
+        </section>
+
+        <section id="review" class="manual-section">
+          <span class="chapter-kicker">03 / REVIEW</span>
+          <h2>审核入库 — 变更集状态机与原子应用</h2>
+          <p>候选与正式知识之间隔着一道双向门禁：模型不能直接写入，人也不能绕过审计直接改库。这道门由变更集（change set）实现。</p>
+
+          <h3>数据模型与状态机</h3>
+          <table class="info-table">
+            <thead><tr><th>表 / 字段</th><th>取值</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td><code>knowledge_change_sets.status</code></td><td><code>proposed → applied</code>（批准即原子应用）<code>/ rejected</code>（驳回），revision 冲突时 <code>conflicted</code></td><td>集合级状态；附 <code>risk_level</code>（low / medium / high）、创建它的 <code>agent_run_id</code>、全局唯一 <code>idempotency_key</code>、解决时间与解决者，以及分类汇总 / 引用审计 / 级联影响三份 JSON 快照</td></tr>
+              <tr><td><code>knowledge_changes.operation</code></td><td><code>create / update / merge / split / archive / restore</code></td><td>逐项变更（对象类型 entry / claim / relation）；带 <code>expected_revision</code> 乐观并发和 <code>before_json / after_json</code> 差异，按 ordinal 有序</td></tr>
+              <tr><td>变更分类</td><td><code>new / update / disputed</code></td><td>服务端根据正式实体是否存在复核 new/update，只有模型显式声明才允许 disputed；争议变更应用后其论断以 disputed 验证状态保存</td></tr>
+              <tr><td><code>knowledge_reviews</code></td><td><code>pending → approved / rejected</code></td><td>与变更集一对一的人工审核单，保存审核说明与裁决时间</td></tr>
+            </tbody>
+          </table>
+
+          <h3>批准时发生什么</h3>
+          <p><code>resolve_knowledge_change_set</code>（approve）不是简单翻状态：服务端<strong>再次</strong>校验来源与 <code>expected_revision</code>，复核引用审计，然后在<strong>一个 <code>BEGIN IMMEDIATE</code> 事务</strong>中写入条目、论断、关系、引用和版本快照——变更应用器必须先验证整个集合再全部提交，<strong>禁止部分成功</strong>；任何 revision 冲突让整组变更失败并标记 conflicted。实体、引用与 FTS 索引在同一事务内保持一致。迁移、知识库删除和达到五十项的大变更集应用前还会自动创建数据库快照（默认保留 7 份）。</p>
+
+          <h3>合并与拆分的精确语义</h3>
+          <ul class="manual-points">
+            <li><strong>合并</strong>：候选携带目标与全部来源实体的期望 revision；事务内先保存版本，合并引用、论断与出向关系，归档来源实体，并把未参与合并实体的入向关系重定向到目标。</li>
+            <li><strong>拆分</strong>：同一事务归档原实体并创建 2–12 个新实体，新实体继承原始引用，但<strong>不自动复制</strong>未经核验的旧论断和关系。</li>
+            <li><strong>人工编辑</strong>：工作台的编辑/合并/拆分与阅境轩划线入库都创建 <code>human_protected</code> 高风险变更集；摘录必须重新定位到当前 source span，无法定位时拒绝伪造引用。</li>
+          </ul>
+
+          <h3>审核界面呈现的证据</h3>
+          <p>工作台审核弹窗一次展示一个变更集，除了标题、理由与风险徽章，还有三格审计摘要：<strong>变更分类</strong>计数（new/update/disputed）、<strong>引用审计</strong>（条目引用、显式论断引用与继承引用的统计，未通过时「批准并应用」按钮被禁用）、<strong>级联影响</strong>（生成候选时冻结的现有论断/关系/引用数量，让你知道批准会波及多大范围）。逐条变更卡片提供 before/after JSON 差异。批准后可选填审核说明，全程写入审计。</p>
+          <div class="callout subtle"><span class="callout-icon">⚖️</span><span><strong>诚实的边界：</strong>结构校验只能保证契约与引用范围合法，不能证明自然语言事实正确——事实核验始终靠人。这也是为什么模型返回空候选时系统宁可记 no_material，也不伪造待审核内容。</span></div>
+        </section>
+
+        <section id="workspace" class="manual-section">
+          <span class="chapter-kicker">04 / WORKSPACE</span>
+          <h2>Wiki 工作台 — 知识资产的读侧与体检</h2>
+          <p>审核放行的知识落入四张正式表，Wiki 工作台是它们的读侧门面与人工维护入口。</p>
+
+          <h3>正式知识的数据模型</h3>
+          <table class="info-table">
+            <thead><tr><th>表</th><th>内容</th><th>关键约束</th></tr></thead>
+            <tbody>
+              <tr><td><code>knowledge_entries</code></td><td>主题实体：<code>entry_type</code>（无 DB 级 CHECK，服务端枚举九种语义类型 entity / concept / method / event / comparison / synthesis / question / answer / overview，另有系统生成的 source_section 章节镜像）、<code>slug</code>、标题、摘要、服务端生成的 <code>content_md</code>、<code>status</code>（draft / verified / stale / archived）、<code>edit_policy</code>（agent_managed / human_protected）、置信度、revision</td><td><code>(knowledge_base_id, entry_type, slug)</code> 唯一；别名在 <code>knowledge_entry_aliases</code>，历史版本在 <code>knowledge_entry_versions</code></td></tr>
+              <tr><td><code>knowledge_claims</code></td><td>原子论断：主语实体 + 谓词 + 宾语（实体或文本）、论断文本、置信度、有效期</td><td><code>verification_status</code>：unverified / supported / disputed / rejected / stale</td></tr>
+              <tr><td><code>knowledge_relations</code></td><td>实体间关系：类型、强度、证据</td><td><code>(from, to, relation_type)</code> 库内唯一；禁止跨库关系</td></tr>
+              <tr><td><code>knowledge_citations</code></td><td>实体/论断 → source span 的引用：原文摘录、相关度</td><td><code>citation_role</code>：supports / contradicts / context——引用可以支持也可以反驳</td></tr>
+            </tbody>
+          </table>
+
+          <h3>读侧实现要点</h3>
+          <ul class="manual-points">
+            <li><strong>列表</strong>：<code>list_knowledge_entries</code> 分页下推为 SQLite <code>LIMIT/OFFSET</code>（每页 60，响应带 <code>offset / limit / total / has_more</code>），搜索走 FTS5 加权（标题 &gt; 别名 &gt; 摘要 &gt; 正文），输入 220ms 防抖。</li>
+            <li><strong>详情一次拿全</strong>：<code>get_knowledge_entry</code> 单个调用返回正文、论断、关系、引用（含来源路径与行号区间）和版本历史——没有为每个子资源单设工具，减少往返。</li>
+            <li><strong>正文渲染</strong>：复用阅境轩的共享 Markdown 管线（公式、表格、Mermaid、代码高亮），实体正文与问答预览走同一条渲染链。</li>
+            <li><strong>关系图谱</strong>：洞察接口返回连接枢纽（按度数）、孤立实体与关系总数；路径查找是限定单库的有界 BFS（服务端最多八层，工作台默认查五层）；桌面画布快照只取连接度最高的至多 120 个节点，前端做纯 SVG 静态布局（度数最高者居中、环形分布、滚轮缩放、拖拽平移），关闭弹窗即卸载快照；手机端不请求画布，只用洞察与路径接口。</li>
+          </ul>
+
+          <h3>知识体检：零模型的确定性 lint</h3>
+          <p><code>lint_book_knowledge_base</code> 是纯确定性检查：来源完整性、语义层覆盖、实体引用有效性、论断直接证据、重复标题。它<strong>不调用模型、不修改任何知识</strong>，输出 healthy / warning 状态、语义实体与来源片段计数、待审核数量和逐条 issue（severity + 说明）。把「质量检查」做成确定性规则而非又一次 LLM 调用，是这套系统一以贯之的取舍：能用代码验证的绝不花 token。</p>
+        </section>
+
+        <section id="qa" class="manual-section">
+          <span class="chapter-kicker">05 / QA</span>
+          <h2>知识问答 — 证据在手的流式回答</h2>
+          <p>问答是管线的主要消费端。它的核心承诺：<strong>回答带着可点开核验的引用，且一次问答严格限定在一本书内。</strong></p>
+
+          <h3>单次问答的完整链路</h3>
+          <pre class="command-block compact"><code>保存用户消息（单事务：用户消息 + 助手消息占位 + 会话范围）
+  → 确定显式知识库范围（conversation_scopes 记录参与查询的库）
+  → Rust 预召回：正式语义条目排在 source_section 之前，章节证据兜底
+  → 建立上下文预算（证据按剩余预算公平分配，不由第一条长文独占）
+  → 启动 Harness Run（能力令牌授权同书检索工具）
+  → Agent 按需继续调用检索工具补查
+  → SSE 流式生成，增量事件同步落库
+  → completed：保存最终回答与有序来源引用</code></pre>
+          <p>检索是「Rust 预召回 + Agent 按需补查」的混合模式：后端把上一轮与本轮问题拼接成检索词（消解「它」「这个」式指代），经 FTS5 预召回至多 8 条证据——SQL 排序让语义条目恒在前、<code>source_section</code> 章节镜像恒在后，「语义 Wiki 优先、章节证据兜底」由排序天然实现；每条证据以路径、行号、entry_id 和按类型区分的证据提示注入 Prompt，预算按剩余空间公平分配（单条上限 6,000 字符），不由第一条长文独占。召回为空时明确报「没有可用于回答的证据」，绝不无证据硬答。之后 Harness 凭能力令牌在<strong>同一本书范围内</strong>按需补查——任何检索工具都从 Run Capability 读取范围，不接受 Agent 自由传入其他知识库 ID。</p>
+
+          <h3>[S#] 引用契约</h3>
+          <p>预载条目按 <code>[S1] [S2] …</code> 编号并保存来源卡片快照。Prompt 明确限定模型只能使用本轮真实编号；工具补查但未预分配编号的资料必须列出真实 entry/span ID、标题和路径，<strong>不得伪造新编号</strong>。前端渲染答案后遍历文本节点，把 <code>[S#]</code> 替换为可点按钮（跳过代码块、公式和 Mermaid），点击打开来源预览弹窗——渲染实体正文与原文引用（路径 + 行号），只有用户点击弹窗中的明确操作才跳转 Wiki 工作台或阅境轩，核对证据不丢问答上下文。</p>
+
+          <h3>SSE 实现细节</h3>
+          <ul class="manual-points">
+            <li>问答流不是 EventSource，而是 <code>fetch</code> POST <code>knowledge/chat/stream</code> + <code>response.body.getReader()</code>，自研解析器按空行切块、聚合多行 data、处理跨 chunk 换行。</li>
+            <li>事件序列：<code>evidence</code>（证据列表先行）→ <code>run_started</code> → <code>text_delta</code> / <code>phase</code> / <code>tool_started</code> / <code>tool_finished</code> / <code>usage</code> → <code>completed</code>（最终答案 + run_id + 证据）或 <code>error</code>。</li>
+            <li>增量文本经 rAF 分帧缓冲吐字（尊重 reduced-motion），完成后以最终答案校正正文与来源；思考类 chunk 只映射为「正在分析」阶段，不保存不展示模型内部推理。</li>
+            <li><strong>SSE 连接断开会触发问答 Run 取消</strong>——流式问答是前台活动；持久化的 <code>agent_run_events</code> 仍是审计与恢复的事实来源。</li>
+            <li>会话历史：继续会话最多取最近八条消息（每条截断至 480 字符）辅助理解指代，但历史不能替代本轮召回的数据库证据；会话与消息保存在 SQLite（Harness Session ID 仅作诊断关联），页面加载即恢复最近会话。</li>
+            <li><strong>引用快照防漂移</strong>：<code>knowledge_message_citations</code> 不只存条目 ID，还冻结当时的 <code>entry_revision</code> 与标题、类型、摘要、状态、来源路径等九个快照列——实体日后被修订，历史回答里的来源卡片仍显示提问当时的模样。</li>
+          </ul>
+
+          <h3>回流与降级</h3>
+          <p>「保存到 Wiki」调用 <code>save_knowledge_answer</code>，把完成的回答存为待审核 <code>synthesis</code> 候选变更集（带幂等键，Run 必须属于本书且已完成）并直接跳转审核弹窗；保存前回答引用的条目会被重新映射到<strong>当前版本</strong>的 span，来源已过期时拒绝保存并提示重新提问——问答的好答案由此回流进知识资产，但仍要过第 03 章的门禁。Runtime 不可用或流式失败时，页面降级为「证据检索模式」：只用 <code>list_knowledge_entries</code> 返回书内证据卡片，明确告知没有生成回答，不假装智能。</p>
+        </section>
+
+        <section id="tasks" class="manual-section">
+          <span class="chapter-kicker">06 / TASKS</span>
+          <h2>研究任务 — 租约队列、能力令牌与本地 PPTX</h2>
+          <p>研究任务是管线的深度加工工位：长时间运行、可离开页面、可取消重试、可授权有限外网、可产出可编辑 PPTX。</p>
+
+          <h3>耐久队列与租约</h3>
+          <ul class="manual-points">
+            <li><code>knowledge_tasks</code> 是 SQLite 耐久队列：创建后 <code>execute_knowledge_task</code> 只入队，HTTP 立即返回；进程内单 Worker 按下次尝试时间、更新时间和创建时间领取，默认全局并发 1。</li>
+            <li>领取时原子建立 <strong>45 秒租约</strong>（<code>lease_expires_at</code>），执行期每 <strong>15 秒心跳</strong>续期；租约过期任务重新排队，避免进程崩溃后任务丢失或双领。</li>
+            <li>失败按 5 秒起始的指数退避重试（<code>attempt_count / max_attempts / next_attempt_at</code>），耗尽三次进入 failed；部分唯一索引保证<strong>每个知识库最多一个 running 任务</strong>。</li>
+            <li>服务启动时把中断的 running 恢复为 queued（已请求取消的恢复为 cancelled）；取消经 watch 通道即时发送 ACP <code>session/cancel</code>，子进程组随连接回收。</li>
+            <li>幂等：每次尝试生成独立 run_id，业务动作使用 <code>task_id + attempt + phase</code> 幂等键，Harness 重试只能重复提交同一候选，不能重复应用。</li>
+            <li>结果回写：任务完成前，研究结论自动提交为 <code>synthesis</code> 候选变更集（confidence 0.68，带幂等键），状态投影在任务行的 <code>knowledge_change_state</code> 列——研究的产出回流知识库，同样必须经人工审核。</li>
+          </ul>
+          <p>任务状态机为 <code>draft → queued → running → completed / failed / cancelled</code>，类型有三种——<code>research</code>（专题研究）、<code>refresh</code>（知识刷新）、<code>review</code>（事实审核），提示词各有侧重：refresh 区分「有旧版依据的变化」与「当前观察」，review 按支持/反对/条件成立/证据不足逐项核验。交付物可选 <code>report</code> 或 <code>presentation</code>，任务行上另有 <code>artifact_state</code>（not_requested / pending / ready / failed）与 <code>knowledge_change_state</code>（none / proposed / applied / rejected）两个投影列。前端每 1.2 秒轮询任务列表（同样受 <code>canFocusDocument</code> 守卫），运行中展示最近一条真实运行事件作为活动行。</p>
+
+          <h3>Run Capability：令牌即权限</h3>
+          <p>每个 Run 创建高熵随机能力令牌，SQLite 只保存 SHA-256（<code>agent_run_capabilities</code>）。Harness 侧插件经 <code>127.0.0.1</code> 专用 MCP 端点（streamable-http，Bearer 令牌，启动失败即报错、断线不重连）回调工具，网关验证令牌时同时检查：Run 仍在运行、未过期、知识库范围、工具白名单——未知字段、跨书访问、过期或已撤销令牌一律拒绝，Run 完成、失败或取消时令牌立即撤销。令牌 TTL 至少覆盖运行超时并额外保留 60 秒收尾窗口（下限 300 秒）。<strong>不同任务类型挂载不同的最小工具目录</strong>，数量精确：问答 Run 挂 9 个（只读检索 + 报告进度 + 创建研究任务）；研究 Run 挂 11 个（再加 <code>knowledge_propose_changes</code> 与审核结果读取），显式授权外部研究后才追加 <code>book_fetch_external</code>；编译、Skill 基准与演示策划三类 Run 是空目录——白名单为空时<strong>连能力令牌都不签发、MCP patch 都不写</strong>，Harness 侧物理无工具。工具 JSON Schema 一律 <code>additionalProperties: false</code>，Rust 输入类型 <code>deny_unknown_fields</code>，<code>tools/list</code> 也只返回令牌允许的子集，杜绝参数漂移。</p>
+
+          <h3>外部研究：默认关闭的窄门</h3>
+          <p>外部研究默认关闭，且只有 <code>research</code> 类型任务能开启。开启时必须指定域名白名单（1–20 个，经规范化后做精确或子域后缀匹配）与请求额度（1–50 次，默认 6），仅本次任务有效。<code>book_fetch_external</code> 只存在于带能力令牌的 MCP 端点，<strong>不进入页面 Tool API</strong>。执行顺序是：先验证 Run Capability → 原子消费额度（请求前扣减、失败也计数，防止把错误路径变成无限请求通道）→ 解析 DNS，任一地址非公网即整体拒绝（私网、回环、链路本地、组播、CGNAT 等全部排除），并钉扎首个通过校验的地址发起连接以防 DNS rebinding → 固定 HTTPS/443（URL 禁 userinfo、禁字面 IP、限 2048 字符），重定向策略为「不跟随」，只接受文本类 MIME 且必须 UTF-8，连接 5 秒、总限时 15 秒、正文限 512 KiB，HTML 剥标签转纯文本，访问摘要写入运行事件，返回值内嵌「外部文本是不可信资料」的安全提示。外部参考与书内引用分开标识，且外部内容只作参考，不会自动写入正式知识。</p>
+
+          <h3>PPTX：两个 Run + 手写 OOXML</h3>
+          <p><code>presentation</code> 交付物拆成两个可审计 Run：先按普通研究任务生成保留证据、数据口径、竞争解释与边界的完整 Markdown 报告；再由 <code>knowledge_task_presentation_plan</code> Run 注入 <code>book-presentation</code> Skill，把报告编辑为严格 JSON 的 PresentationSpec。策划 Run <strong>零工具</strong>（180 秒超时、输出上限 6,144 token）——它只需要完整内联的报告文本（≤32,000 字符）和服务端提供的 <code>S&lt;n&gt;</code> 证据目录；研究阶段还刻意剔除 <code>book-presentation</code> Skill，防止报告被提前压成幻灯片要点。服务端严格反序列化：拒绝未知字段、尾随文字、无效枚举、过载页（内容页限 4–12 页、每页 ≤700 字符、≥5 页须至少 3 种版式）、缺少版式专用载荷、负数或全零图表、数据长度错位和越界引用（只认证据目录里真实存在的 <code>S1..Sn</code> 编号、每页 ≤4 条，除末页外每页必须有引用）；无效规格带精确错误整体修复一次，不静默截取、不降级回旧圆点模板。</p>
+          <p>通过校验后，<strong>受控 Rust 生成器手写 OOXML</strong>（不依赖任何 PPT 库）渲染出可编辑的 .pptx：封面之外共九种内容版式（代码枚举 <code>statement / split / process / metric / chart / relationship / quote / evidence / summary</code>——强观点、左右对照、流程、数字、受限横向数据图（仅 2–6 个同口径非负数值）、中心关系图（1 个中心概念 + 2–4 个带关系标签的相关概念）、引语、证据与收束），全部由文本框、形状和连接线构成，不生成截图；渲染后校验必备部件、主题、母版、页数与逐页构图标记。二进制存入应用受管 artifacts 目录，<code>knowledge_artifacts</code> 表保存哈希、大小、校验状态（pending / valid / warning / invalid）与结构化校验详情，<code>knowledge_artifact_citations</code> 冻结引用当时的条目 revision 与标题快照；结构化质量报告——总页数、版式分布、引用覆盖率、主题（editorial / midnight / sage）与五项固定检查（演示规格、证据覆盖、构图多样性、PPTX 包结构、可编辑对象）——由前端直接展示，并可直接进入策划 Run 的检查器。</p>
+          <div class="callout subtle"><span class="callout-icon">🛟</span><span><strong>失败不吞成果：</strong>演示策划、修复或渲染失败时任务标记为 failed 并允许重跑，但 <code>result_summary</code> 保留已完成的 Markdown 研究报告并在顶部附加失败原因；前端对这类任务优先开放「查看报告」，不因二进制交付失败而隐藏已完成的研究内容。</span></div>
+
+          <h3>运行检查器：每次 Run 的飞行记录仪</h3>
+          <p><code>run_audited</code> 在启动 Runtime 前写入 <code>agent_run_inspections</code> 不可变快照：实际发送的最终 Prompt、稳定哈希与字符数、当前生效配置文档（ID/作用域/revision/正文）、选中 Skill（slug/revision/指令/应用方式 declared_only 或 prompt_injected）、工具白名单与显式证据 ID。任务详情的「运行检查器」把快照与 <code>agent_run_events</code> 时间线组合展示——任务为什么得出某个结果，可以逐字追查。历史运行允许没有快照，界面如实显示而不是推测当时的 Prompt。</p>
+        </section>
+
+        <section id="config" class="manual-section">
+          <span class="chapter-kicker">07 / CONFIG &amp; SKILLS</span>
+          <h2>配置与 Skill — 指纹的另一半</h2>
+          <p>第 02 章说过，配置文档与 Skill 的内容哈希是编译指纹的组成部分——这一章解释它们如何被管理和注入。</p>
+
+          <h3>Runtime Profile 与多模型供应商</h3>
+          <p>Runtime Profile 保存 ACP 启动命令（固定版本，如 <code>npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp</code>）、可选的供应商绑定与模型覆盖；「验证已保存配置」会真实启动 Runtime 完成一次请求（190 秒超时）后才显示连接已验证。模型供应商支持三种明确协议：<code>openai-completions</code>（OpenAI Chat Completions）、<code>openai-responses</code>（OpenAI Responses）、<code>anthropic-messages</code>（Anthropic Messages），经 Harness 的通用适配器注入。供应商独立存于 <code>llm_provider_profiles</code> 表，Runtime Profile 通过 <code>provider_id</code> 外键绑定（RESTRICT，防止删除仍被引用的供应商）。凭据来源二选一（<code>credential_source</code>）：系统凭据库（<code>keychain</code>，密钥以固定环境变量名注入 ACP 子进程环境，不落盘），或<strong>环境变量名</strong>（<code>environment</code>）——数据库只保存变量名 <code>api_key_env</code> 与「已配置」标记，密钥值只存在于启动后端进程的环境中，此模式下页面内联输入密钥会被服务端直接拒绝。写进 Harness 的 Provider Patch 永远只有元数据和变量名，API Key 值永不物化到任何临时文件；有界任务（编译、基准、策划）的 Patch 还会注入输出上限并关闭推理与多余重试。被禁用的供应商立即持久化，防止仍被 Runtime 选中。</p>
+
+          <h3>配置文档</h3>
+          <p><code>purpose / schema / instructions / AGENTS / CLAUDE</code> 等配置文档以稳定 <code>document_type</code> 标识（不以文件名为键），分全局与书籍级作用域，保存在 SQLite 版本表并带 revision 乐观锁；运行时才物化为隔离临时目录里的文件。配置解析按「系统默认 → 场景模板 → 知识库覆盖 → 单次运行覆盖」合并为不可变 <code>EffectiveWikiConfig</code>，运行开始后不受配置页面修改影响。</p>
+
+          <h3>Skill 体系：只注入指令，不放大权限</h3>
+          <ul class="manual-points">
+            <li><strong>七个内置 Skill</strong>：<code>book-ingest</code>（智能编译）、<code>book-query</code>（问答）、<code>book-research</code>（研究）、<code>book-lint</code>（质量检查）、<code>book-presentation</code>（演示交付）、<code>book-synthesis</code>（跨章节综合）、<code>markdown-collection</code>（非传统章节式文集）。内置正文只读，「复制为自定义」生成独立 slug 再编辑。</li>
+            <li><strong>绑定与范围</strong>：Skill 按书绑定（启用状态不跨知识库共享），范围枚举 <code>qa / research / both / ingest / all</code>；问答与研究 Skill 只对当前书启用且范围匹配才注入，<code>book-ingest</code> 是编译的内置兜底，PPTX 任务有内置演示 Skill 兜底。</li>
+            <li><strong>预算与截断</strong>：Skill 区块总预算 8,000 字符、单个 6,000、配置 4,000，裁剪处标注「内容已截断」；最终运行 Prompt 才是实际生效内容的权威记录（并已被检查快照保存）。</li>
+            <li><strong>安全</strong>：Skill 只是 Markdown 指令，不能扩大工具权限、不可执行脚本；ZIP 导入限制文件数与大小，拒绝路径穿越、符号链接、二进制与脚本。</li>
+            <li><strong>发布流水线</strong>：候选版本须先通过固定评测套件的确定性文本契约检查（建库套件通过线 0.80，问答/研究/演示 0.75），再通过真实模型基准——当前版本与候选各一次聚合 Harness 调用、零工具、32 个固定样例（建库 12、问答 8、研究 6、演示 6），逐样例按指令遵循、安全、引用得分、引用有效性、非空输出五维评分，单样例总分 ≥0.75 且安全与引用维度全对才算通过；发布门槛还要求至少 80% 样例通过且相对基线回退不超过 0.03。回滚只接受历史 published 版本；基准 Run 的输出只进结果表，永不进知识变更集。</li>
+          </ul>
+
+          <h3>Token 用量统计</h3>
+          <p><code>agent_runs</code> 记录输入、输出、推理、缓存读写 token 与 <code>usage_source</code>。ACP 桥当前不转发供应商精确用量，问答与研究任务使用与 LLM 客户端一致的中英文启发式估算并如实标记 <code>estimated</code>；ACP <code>UsageUpdate</code> 只作为真实上下文占用展示。统计页按日期与归一化调用方（<code>knowledge_qa</code> / <code>knowledge_task_*</code>）聚合，只读已完成运行，并单列「未上报」——估算值不当作供应商账单。</p>
+        </section>
+
+        <section id="security" class="manual-section">
+          <span class="chapter-kicker">08 / SECURITY</span>
+          <h2>安全边界 — Agent 为什么越不了权</h2>
+          <p>把前面各章的防线集中起来看，这套系统对「让 LLM 干活但不让它闯祸」的回答是一张纵深防御网：</p>
+          <table class="info-table">
+            <thead><tr><th>防线</th><th>机制</th></tr></thead>
+            <tbody>
+              <tr><td>身份与范围</td><td>能力令牌是 <code>obw_</code> 前缀的 64 位十六进制高熵随机值，SQLite 只存 SHA-256，绑定 run_id + 知识库范围 + 工具白名单 + 过期时间（下限 300 秒，覆盖运行超时再加 60 秒收尾）；工具端从令牌读权限，忽略 Agent 试图扩大范围的参数</td></tr>
+              <tr><td>进程隔离</td><td>每次 Run 独立 ACP 子进程 + 隔离临时工作区（原书不复制进可写区）；会话结束、取消或超时后连接与子进程组立即回收，无常驻池</td></tr>
+              <tr><td>权限升级</td><td>Harness 的一切权限请求一律自动应答 <code>Cancelled</code>；每次 Run 恒叠加一份只读安全 patch，一次性禁用 Bash、PowerShell、文件系统、全盘搜索、Web、子代理、工作流、待办等 16 项 Harness 内建能力</td></tr>
+              <tr><td>密钥</td><td>数据库只保存环境变量名或凭据库引用；密钥值只在后端进程环境中并以进程环境变量注入子进程，Provider Patch 落盘内容不含密钥；含能力令牌的 patch 文件权限收敛为 0600</td></tr>
+              <tr><td>网络出口</td><td>唯一对外出口 <code>book_fetch_external</code>：仅显式授权的专题研究 Run 可见，HTTPS/443、域名精确边界、DNS 公网校验、禁重定向、原子预扣额度、文本 MIME、15 秒、512 KiB</td></tr>
+              <tr><td>写入</td><td>Agent 只能提案；正式写入必须经人工审核 + 服务端复验 + 单事务；结构校验之上始终保留「事实正确性靠人」的诚实边界</td></tr>
+              <tr><td>参数</td><td>所有工具 Schema <code>additionalProperties: false</code>，Rust 侧 <code>deny_unknown_fields</code></td></tr>
+              <tr><td>数据边界</td><td>每表携带 <code>knowledge_base_id</code>，复合唯一约束 + 跨库拒绝；检索工具范围来自令牌而非入参；MCP 网关 URL 由进程实际绑定端口推导并强制回环地址（非 <code>127.0.0.1</code> / <code>localhost</code> / <code>[::1]</code> 直接拒绝），不硬编码</td></tr>
+              <tr><td>可追溯</td><td><code>agent_runs</code> + <code>agent_run_events</code> + <code>agent_run_inspections</code> 三件套：每次运行的 Prompt、Skill/配置快照、工具白名单、事件时间线与用量都不可变留痕</td></tr>
+              <tr><td>数据安全网</td><td>Online Backup API 一致快照；迁移、删库、大变更集前自动备份；恢复要求输入 <code>RESTORE</code>、先验证完整性并自动生成 pre-restore 快照，失败自动回退</td></tr>
+            </tbody>
+          </table>
+
+          <h3>闭环的完整形状</h3>
+          <pre class="command-block compact"><code>Markdown 原书（只读）
+  → 同步：source_documents / source_versions / source_spans + FTS5
+  → 编译：检查点 + 指纹增量，ACP Run 分批炼化，严格 JSON 契约
+  → 候选：knowledge_change_sets（proposed，附引用审计与级联影响）
+  → 审核：人工批准 → 服务端复验 → 单事务写入 entries / claims / relations / citations
+  → 消费：工作台浏览与体检 · 问答带 [S#] 引用 · 研究任务产报告与 PPTX
+  → 回流：好回答与研究结论再次成为 proposed 候选，回到审核
+  ↺ 原书更新 → 重新同步 → 指纹不变则只编译变化的来源</code></pre>
+          <p>每一个箭头都有明确的表、工具与事务边界；每一次模型调用都有不可变快照；每一份进入正式库的知识都经过人的批准。这就是四个页面「形成一套完整流程」的全部含义——不是页面之间互相跳转，而是<strong>数据沿着一条可审计的单向管线流动，在每个关口被验证，在终点被人确认</strong>。</p>
+
+          <div class="callout"><span class="callout-icon">📚</span><span><strong>延伸阅读（仓库内）：</strong>权威实施记录 <code>docs/development/08-llm-wiki.md</code>（按迁移编号记录每个机制的落地状态）；核心实现 <code>backend/src/core/book_wiki.rs</code>；Harness 适配器 <code>backend/src/infra/deepseek_harness.rs</code>；编译契约 <code>backend/prompts/wiki/</code>；前端五页 <code>frontend/src/views/knowledge/</code>。</span></div>
+        </section>
+
+          <div class="docs-end"><span>你已读完全部章节</span><p>本篇剖析对照当前实现核实；机制若随版本演进，以仓库内 docs/development/08-llm-wiki.md 为准。</p><a class="button button-secondary" href="../manual/#wiki">阅读使用手册的书籍 Wiki 章节 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div>
+        </div>
+      </div>
+    </main>
+    <footer class="site-footer"><div class="section-shell docs-footer"><a class="brand" href="../"><img class="brand-mark small" src="../favicon.svg" alt="" width="24" height="24" />ObsidianBrain</a><span>你的知识，你的工作空间。</span><a href="https://github.com/TiercelChow/ObsidianBrain" target="_blank" rel="noreferrer">GitHub ↗</a></div></footer>
+    <script type="module" src="../src/main.js"></script>
+    <script type="module" src="../src/manual.js"></script>
+  </body>
+</html>
