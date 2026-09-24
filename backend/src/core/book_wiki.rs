@@ -36,19 +36,22 @@ use crate::models::book_wiki::{
     KnowledgeTaskExecution, ModelProviderProfile, RuntimeProfile, RuntimeVerification,
     SaveModelProviderRequest, SemanticCompileResult, SourceSpanSnapshot, WikiSkill,
     WikiSkillBenchmarkCase, WikiSkillBenchmarkCaseResult, WikiSkillBenchmarkRun,
+    MARKDOWN_EXTRACTION_VERSION,
 };
 
 const MAX_MARKDOWN_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_SCAN_DEPTH: usize = 24;
-const SEMANTIC_SOURCE_BATCH_CHARACTERS: usize = 20_000;
-const SEMANTIC_MAX_OUTPUT_TOKENS: u32 = 8_192;
-const SEMANTIC_RETRY_MAX_OUTPUT_TOKENS: u32 = 12_288;
-const SEMANTIC_MAX_SUMMARY_CHARACTERS: usize = 160;
-const SEMANTIC_MAX_CONTENT_CHARACTERS: usize = 500;
-const SEMANTIC_MAX_ALIASES: usize = 3;
-const SEMANTIC_MAX_CLAIMS: usize = 3;
-const SEMANTIC_MAX_RELATIONS: usize = 2;
-const SEMANTIC_MAX_CITATIONS: usize = 6;
+const SEMANTIC_SOURCE_BATCH_CHARACTERS: usize = 64_000;
+/// 来源段超过该字符数时才下沉到更深层标题切分；更小的顶层章节保持整段成 span。
+const SEMANTIC_SPAN_MAX_CHARACTERS: usize = 32_000;
+const SEMANTIC_MAX_OUTPUT_TOKENS: u32 = 32_768;
+const SEMANTIC_RETRY_MAX_OUTPUT_TOKENS: u32 = 40_960;
+const SEMANTIC_MAX_SUMMARY_CHARACTERS: usize = 400;
+const SEMANTIC_MAX_CONTENT_CHARACTERS: usize = 2_000;
+const SEMANTIC_MAX_ALIASES: usize = 6;
+const SEMANTIC_MAX_CLAIMS: usize = 6;
+const SEMANTIC_MAX_RELATIONS: usize = 4;
+const SEMANTIC_MAX_CITATIONS: usize = 8;
 const SEMANTIC_MAX_CLAIM_CHARACTERS: usize = 160;
 const SEMANTIC_MAX_RELATION_EVIDENCE_CHARACTERS: usize = 120;
 const SEMANTIC_COMPILE_TIMEOUT: Duration = Duration::from_secs(180);
@@ -2181,7 +2184,12 @@ impl BookWikiService {
             let title = document_title(path, &content);
             let content_hash = hash_text(&content);
             let source_id = stable_id("source", &format!("{}:{}", base.id, path.display()));
-            let version_id = stable_id("version", &format!("{source_id}:{content_hash}"));
+            // 抽取算法版本参与派生：切分规则变更时旧版本与其 span 原样保留，
+            // 历史引用继续可回放，新同步建立新版本（检查点随之全量失配一次）。
+            let version_id = stable_id(
+                "version",
+                &format!("{source_id}:{content_hash}:{MARKDOWN_EXTRACTION_VERSION}"),
+            );
             let sections =
                 split_markdown_sections(&content, &relative_path, &source_id, &version_id);
             indexed_entries += sections.len();
@@ -2220,8 +2228,8 @@ impl BookWikiService {
     }
 }
 
-const MAX_PROMPT_CHARS: usize = 32_000;
-const MAX_EVIDENCE_CHARS: usize = 6_000;
+const MAX_PROMPT_CHARS: usize = 64_000;
+const MAX_EVIDENCE_CHARS: usize = 12_000;
 
 fn persist_runtime_event(
     store: &BookWikiStore,
@@ -2644,7 +2652,7 @@ fn semantic_source_batches(
         let metadata_characters = semantic_span_metadata(span).chars().count() + 30;
         let chunk_size = character_budget
             .saturating_sub(metadata_characters)
-            .clamp(1, 8_000);
+            .clamp(1, SEMANTIC_SPAN_MAX_CHARACTERS);
         let source_characters = span.content.chars().collect::<Vec<_>>();
         for chunk in source_characters.chunks(chunk_size) {
             let mut chunked_span = span.clone();
@@ -3205,7 +3213,7 @@ fn merge_semantic_candidate(
         "relations",
         &["to_slug", "relation_type"],
     );
-    merge_json_text(existing, &candidate, "summary", 1_000);
+    merge_json_text(existing, &candidate, "summary", 2_000);
     merge_json_text(existing, &candidate, "content_md", 30_000);
     if let Some(confidence) = candidate
         .get("confidence")
@@ -3627,7 +3635,7 @@ fn split_markdown_sections(
         .and_then(|value| value.to_str())
         .unwrap_or("未命名文档")
         .to_string();
-    let mut boundaries: Vec<(usize, String)> = Vec::new();
+    let mut headings: Vec<(usize, usize, String)> = Vec::new();
     let mut in_fence = false;
     for (index, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
@@ -3636,32 +3644,56 @@ fn split_markdown_sections(
             continue;
         }
         if !in_fence {
-            if let Some(title) = heading_title(trimmed) {
-                boundaries.push((index, title));
+            if let Some((level, title)) = heading_level_title(trimmed) {
+                headings.push((index, level, title));
             }
         }
     }
 
-    if boundaries.first().is_none_or(|(line, _)| *line > 0) {
-        boundaries.insert(0, (0, fallback_title.clone()));
-    }
-    if lines.is_empty() {
-        boundaries.clear();
-        boundaries.push((0, fallback_title));
+    // 只按文档中最浅的标题层级切分；更深层标题保留在父段正文里。
+    let mut sections: Vec<(usize, usize, String)> = Vec::new();
+    let top_level = headings.iter().map(|heading| heading.1).min();
+    match top_level {
+        None => sections.push((0, lines.len(), fallback_title.clone())),
+        Some(level) => {
+            let top: Vec<&(usize, usize, String)> = headings
+                .iter()
+                .filter(|heading| heading.1 == level)
+                .collect();
+            if top[0].0 > 0 {
+                sections.push((0, top[0].0, fallback_title.clone()));
+            }
+            for (position, heading) in top.iter().enumerate() {
+                let end = top
+                    .get(position + 1)
+                    .map(|next| next.0)
+                    .unwrap_or(lines.len());
+                sections.push((heading.0, end, heading.2.clone()));
+            }
+        }
     }
 
-    boundaries
+    let mut bounded: Vec<(usize, usize, String)> = Vec::new();
+    for (start, end, title) in sections {
+        bound_section(
+            &lines,
+            &headings,
+            start,
+            end,
+            title,
+            top_level.unwrap_or(6),
+            &mut bounded,
+        );
+    }
+
+    bounded
         .iter()
         .enumerate()
-        .filter_map(|(ordinal, (start, title))| {
-            let end = boundaries
-                .get(ordinal + 1)
-                .map(|(next, _)| *next)
-                .unwrap_or(lines.len());
+        .filter_map(|(ordinal, (start, end, title))| {
             let content_md = if lines.is_empty() {
                 String::new()
             } else {
-                lines[*start..end].join("\n")
+                lines[*start..*end].join("\n")
             };
             if content_md.trim().is_empty() && !lines.is_empty() {
                 return None;
@@ -3684,20 +3716,74 @@ fn split_markdown_sections(
                 summary: summarize_markdown(&content_md),
                 content_md,
                 line_start: *start as i64 + 1,
-                line_end: end.max(*start + 1) as i64,
+                line_end: (*end).max(*start + 1) as i64,
                 content_hash,
             })
         })
         .collect()
 }
 
-fn heading_title(line: &str) -> Option<String> {
+/// 未超上限的段整体保留；超上限的段下沉到段内实际存在的下一层标题继续切。
+/// 没有更深层标题的超上限段保持整段——编译期的字符切块是最后兜底。
+fn bound_section(
+    lines: &[&str],
+    headings: &[(usize, usize, String)],
+    start: usize,
+    end: usize,
+    title: String,
+    level: usize,
+    out: &mut Vec<(usize, usize, String)>,
+) {
+    let characters = lines[start..end]
+        .iter()
+        .map(|line| line.chars().count() + 1)
+        .sum::<usize>();
+    if characters <= SEMANTIC_SPAN_MAX_CHARACTERS || level >= 6 {
+        out.push((start, end, title));
+        return;
+    }
+    let Some(deeper_level) = headings
+        .iter()
+        .filter(|heading| heading.0 > start && heading.0 < end)
+        .map(|heading| heading.1)
+        .find(|candidate| *candidate > level)
+    else {
+        out.push((start, end, title));
+        return;
+    };
+    let subs: Vec<&(usize, usize, String)> = headings
+        .iter()
+        .filter(|heading| heading.0 > start && heading.0 < end && heading.1 == deeper_level)
+        .collect();
+    let mut cursor = start;
+    let mut piece_title = title;
+    for sub in &subs {
+        bound_section(
+            lines,
+            headings,
+            cursor,
+            sub.0,
+            piece_title,
+            deeper_level,
+            out,
+        );
+        cursor = sub.0;
+        piece_title = sub.2.clone();
+    }
+    bound_section(lines, headings, cursor, end, piece_title, deeper_level, out);
+}
+
+fn heading_level_title(line: &str) -> Option<(usize, String)> {
     let hashes = line.bytes().take_while(|byte| *byte == b'#').count();
     if hashes == 0 || hashes > 6 || line.as_bytes().get(hashes) != Some(&b' ') {
         return None;
     }
     let title = line[hashes + 1..].trim().trim_end_matches('#').trim();
-    (!title.is_empty()).then(|| title.to_string())
+    (!title.is_empty()).then(|| (hashes, title.to_string()))
+}
+
+fn heading_title(line: &str) -> Option<String> {
+    heading_level_title(line).map(|(_, title)| title)
 }
 
 fn is_fence(line: &str) -> bool {
@@ -4105,13 +4191,57 @@ mod tests {
 
     #[test]
     fn test_split_markdown_sections_ignores_headings_inside_fences() {
-        let content = "# 第一章\n正文\n```md\n# 不是标题\n```\n## 第二节\n内容";
+        let content = "# 第一章\n正文\n```md\n# 不是标题\n```\n# 第二章\n内容";
         let sections = split_markdown_sections(content, "demo.md", "source-1", "version-1");
 
         assert_eq!(sections.len(), 2);
         assert_eq!(sections[0].title, "第一章");
-        assert_eq!(sections[1].title, "第二节");
+        assert_eq!(sections[1].title, "第二章");
         assert!(sections[0].content_md.contains("# 不是标题"));
+    }
+
+    #[test]
+    fn test_split_markdown_sections_only_splits_at_top_level_headings() {
+        let content =
+            "引言\n\n## 甲章\n甲正文\n### 甲.1\n细节\n#### 甲.1.a\n更深\n\n## 乙章\n乙正文";
+        let sections = split_markdown_sections(content, "demo.md", "source-1", "version-1");
+
+        // 顶层是 ##：只按 ## 切，### / #### 保留在父段正文里
+        assert_eq!(sections.len(), 3);
+        assert_eq!(sections[0].title, "demo");
+        assert_eq!(sections[0].content_md.trim(), "引言");
+        assert_eq!(sections[1].title, "甲章");
+        assert!(sections[1].content_md.contains("### 甲.1"));
+        assert!(sections[1].content_md.contains("#### 甲.1.a"));
+        assert_eq!(sections[2].title, "乙章");
+        assert_eq!(sections[1].line_start, 3);
+        assert_eq!(sections[1].line_end, 9);
+        assert_eq!(sections[2].line_start, 10);
+    }
+
+    #[test]
+    fn test_split_markdown_sections_descends_only_when_section_exceeds_span_cap() {
+        let big = "词 ".repeat(20_000); // 40,000 字符 > 32,000 上限
+        let content = format!("## 大章\n{big}\n### 子一\n{big}\n### 子二\n小内容\n## 小章\n微小");
+        let sections = split_markdown_sections(&content, "demo.md", "source-1", "version-1");
+
+        // 大章超限 → 下沉到 ### ；子段仍超限但无更深层标题 → 保持整段
+        assert_eq!(sections.len(), 4);
+        assert_eq!(sections[0].title, "大章");
+        assert_eq!(sections[1].title, "子一");
+        assert_eq!(sections[2].title, "子二");
+        assert_eq!(sections[3].title, "小章");
+        assert!(sections[0].content_md.chars().count() > SEMANTIC_SPAN_MAX_CHARACTERS);
+        assert!(sections[3].content_md.chars().count() < 100);
+    }
+
+    #[test]
+    fn test_split_markdown_sections_keeps_oversize_section_without_deeper_headings() {
+        let content = format!("## 巨章\n{}\n## 尾章\nx", "词 ".repeat(20_000));
+        let sections = split_markdown_sections(&content, "demo.md", "source-1", "version-1");
+
+        assert_eq!(sections.len(), 2);
+        assert!(sections[0].content_md.chars().count() > SEMANTIC_SPAN_MAX_CHARACTERS);
     }
 
     #[test]
@@ -4127,7 +4257,7 @@ mod tests {
 
     #[test]
     fn test_semantic_source_batches_preserve_all_long_section_text() {
-        let content = "长章节".repeat(7_000);
+        let content = "长章节".repeat(30_000);
         let span = SourceSpanSnapshot {
             id: "span-long".to_string(),
             source_document_id: "source-long".to_string(),
@@ -4157,15 +4287,28 @@ mod tests {
         assert!(chunks.iter().all(|chunk| chunk.id == "span-long"));
         assert!(chunks
             .iter()
-            .all(|chunk| chunk.content.chars().count() <= 8_000));
+            .all(|chunk| chunk.content.chars().count() <= SEMANTIC_SPAN_MAX_CHARACTERS));
         assert_eq!(restored, content);
     }
 
     #[test]
     fn test_semantic_compile_bounds_runtime_without_changing_qa_deadline() {
-        assert_eq!(SEMANTIC_SOURCE_BATCH_CHARACTERS, 20_000);
-        assert_eq!(SEMANTIC_MAX_OUTPUT_TOKENS, 8_192);
-        assert_eq!(SEMANTIC_RETRY_MAX_OUTPUT_TOKENS, 12_288);
+        assert_eq!(SEMANTIC_SOURCE_BATCH_CHARACTERS, 64_000);
+        assert_eq!(SEMANTIC_SPAN_MAX_CHARACTERS, 32_000);
+        assert_eq!(SEMANTIC_MAX_OUTPUT_TOKENS, 32_768);
+        assert_eq!(SEMANTIC_RETRY_MAX_OUTPUT_TOKENS, 40_960);
+        // 丰富度上限（与 Schema 信封对齐或更严）
+        assert_eq!(SEMANTIC_MAX_SUMMARY_CHARACTERS, 400);
+        assert_eq!(SEMANTIC_MAX_CONTENT_CHARACTERS, 2_000);
+        assert_eq!(SEMANTIC_MAX_ALIASES, 6);
+        assert_eq!(SEMANTIC_MAX_CLAIMS, 6);
+        assert_eq!(SEMANTIC_MAX_RELATIONS, 4);
+        assert_eq!(SEMANTIC_MAX_CITATIONS, 8);
+        // 原子性上限不随丰富度放松
+        assert_eq!(SEMANTIC_MAX_CLAIM_CHARACTERS, 160);
+        assert_eq!(SEMANTIC_MAX_RELATION_EVIDENCE_CHARACTERS, 120);
+        assert_eq!(MAX_PROMPT_CHARS, 64_000);
+        assert_eq!(MAX_EVIDENCE_CHARS, 12_000);
         assert_eq!(
             runtime_timeout_for_task("knowledge_ingest"),
             Some(SEMANTIC_COMPILE_TIMEOUT)
@@ -4351,7 +4494,7 @@ mod tests {
             batch_count: 1,
         });
 
-        assert!(prompt.contains("每批最多输出 5 个高价值主题"));
+        assert!(prompt.contains("每批最多输出 12 个高价值主题"));
         assert!(prompt.contains("不要输出 content_md"));
         assert!(!prompt.contains("\"content_md\":"));
         assert!(prompt.contains("不要调用任何工具"));
@@ -4388,7 +4531,8 @@ mod tests {
         let result = service.initialize_and_sync("book-1").expect("sync");
 
         assert_eq!(result.scanned_sources, 1);
-        assert_eq!(result.indexed_entries, 2);
+        // 顶层切分：`# 入门` 一个 span，`## 细节` 保留在父段正文里
+        assert_eq!(result.indexed_entries, 1);
         assert_eq!(result.knowledge_base.sync_state, "clean");
         assert_eq!(result.knowledge_base.compile_mode, "chapter");
         assert_eq!(result.knowledge_base.compile_state, "not_started");

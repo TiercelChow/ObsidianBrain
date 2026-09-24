@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Markdown 抽取算法版本。切分规则变更时递增并纳入 source version 派生：
+/// 旧版本与其 span 原样保留（历史引用可回放），新同步建立新版本。
+pub const MARKDOWN_EXTRACTION_VERSION: &str = "markdown-v2";
+
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum BookKind {

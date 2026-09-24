@@ -243,6 +243,7 @@ fn check_citations(
 
 #[cfg(test)]
 mod tests {
+    use super::super::SEMANTIC_MAX_CLAIMS;
     use super::*;
     use serde_json::json;
 
@@ -402,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn test_semantic_output_repairs_claim_overflow_by_keeping_first_three() {
+    fn test_semantic_output_repairs_claim_overflow_by_keeping_first_six() {
         let mut entry = candidate();
         entry["claims"] = json!([
             {"claim_text": "论断一。", "predicate": "states", "object_text": "一",
@@ -414,11 +415,17 @@ mod tests {
             {"claim_text": "论断四。", "predicate": "states", "object_text": "四",
              "confidence": 0.8, "citations": ["s1"]},
             {"claim_text": "论断五。", "predicate": "states", "object_text": "五",
+             "confidence": 0.8, "citations": ["s1"]},
+            {"claim_text": "论断六。", "predicate": "states", "object_text": "六",
+             "confidence": 0.8, "citations": ["s1"]},
+            {"claim_text": "论断七。", "predicate": "states", "object_text": "七",
+             "confidence": 0.8, "citations": ["s1"]},
+            {"claim_text": "论断八。", "predicate": "states", "object_text": "八",
              "confidence": 0.8, "citations": ["s1"]}
         ]);
         let parsed = parse(&json!({"entries":[entry]}).to_string()).unwrap();
         let claims = parsed.entries[0]["claims"].as_array().unwrap();
-        assert_eq!(claims.len(), 3);
+        assert_eq!(claims.len(), SEMANTIC_MAX_CLAIMS);
         assert_eq!(claims[0]["claim_text"].as_str().unwrap(), "论断一。");
         assert!(parsed
             .repairs
@@ -432,11 +439,22 @@ mod tests {
         overlong["claims"][0]["claim_text"] = json!("超长内容".repeat(600));
         assert!(parse(&json!({"entries":[overlong]}).to_string()).is_err());
 
-        let mut too_many_claims = candidate();
         let single_claim = json!({"claim_text": "论断。", "predicate": "states", "object_text": "",
             "confidence": 0.8, "citations": ["s1"]});
-        too_many_claims["claims"] = json!((0..7).map(|_| single_claim.clone()).collect::<Vec<_>>());
+        // 超出 Schema 信封硬上限（8）：拒绝
+        let mut too_many_claims = candidate();
+        too_many_claims["claims"] = json!((0..9).map(|_| single_claim.clone()).collect::<Vec<_>>());
         assert!(parse(&json!({"entries":[too_many_claims]}).to_string()).is_err());
+
+        // 信封内、指令层（6）外：机械收敛保留前六条，记 repair 而非拒绝
+        let mut clamp_claims = candidate();
+        clamp_claims["claims"] = json!((0..7).map(|_| single_claim.clone()).collect::<Vec<_>>());
+        let clamped = parse(&json!({"entries":[clamp_claims]}).to_string()).unwrap();
+        assert_eq!(clamped.entries[0]["claims"].as_array().unwrap().len(), 6);
+        assert!(clamped
+            .repairs
+            .iter()
+            .any(|repair| repair.contains("claims")));
 
         let spans = HashSet::from(["s1".to_string(), "s2".to_string()]);
         let mut foreign = candidate();

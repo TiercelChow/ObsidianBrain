@@ -12,7 +12,7 @@
 
 ## 数量、字段与空结果
 
-- 每批最多输出 5 个高价值主题，允许少于五个。summary 最多160字符；aliases最多3项；claims最多3项，每条claim_text最多160字符；relations最多2项，evidence最多120字符；每组citations最多6项且去重。
+- 每批最多输出 12 个高价值主题，允许少于十二个。summary 最多400字符；aliases最多6项；claims最多6项，每条claim_text最多160字符；relations最多4项，evidence最多120字符；每组citations最多8项且去重。
 - claim_text 写成一句原子论断：一个主语、一个谓语、一个对象，最多两个分句（160字符约80个汉字）。多步流程、并列条件或多个结论不要压进一条论断：只断言核心结论，其余拆成独立论断或写进 object_text。服务端对超长文本只做兜底截断，截断会丢失后半内容，务必自行控制长度。
 - 不要输出 content_md；服务端根据摘要和原子论断生成正文。不输出状态、操作、SQL、路径写入或额外字段。confidence/strength是0到1的数值，不是百分比字符串，不用NaN或Infinity。
 - 数组无内容用 []；object_text 无对象用空字符串。其他必填文本不能空白，枚举从 Schema 的 enum 中只选择一个值，不能输出用竖线连接的选项。

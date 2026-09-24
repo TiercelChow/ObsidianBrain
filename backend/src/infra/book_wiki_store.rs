@@ -20,7 +20,7 @@ use crate::models::book_wiki::{
     KnowledgeTask, ModelProviderProfile, ReaderBook, RuntimeProfile, SourceDocumentSummary,
     SourceSpanSnapshot, WikiSkill, WikiSkillBenchmarkCase, WikiSkillBenchmarkCaseResult,
     WikiSkillBenchmarkRun, WikiSkillDetail, WikiSkillEvaluationFinding, WikiSkillEvaluationRun,
-    WikiSkillFile, WikiSkillOrigin, WikiSkillVersion,
+    WikiSkillFile, WikiSkillOrigin, WikiSkillVersion, MARKDOWN_EXTRACTION_VERSION,
 };
 
 const LEGACY_BOOKS_KEY: &str = "reader_books";
@@ -792,13 +792,14 @@ impl BookWikiStore {
                     "INSERT OR IGNORE INTO source_versions
                      (id, source_document_id, content_hash, size_bytes, modified_at,
                       extraction_version, extraction_status, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, 'markdown-v1', 'ready', ?6)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'ready', ?7)",
                     params![
                         source.version_id,
                         source.id,
                         source.content_hash,
                         source.size_bytes,
                         source.modified_at,
+                        MARKDOWN_EXTRACTION_VERSION,
                         now,
                     ],
                 )?;

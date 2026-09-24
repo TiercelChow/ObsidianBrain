@@ -4,7 +4,7 @@
   "additionalProperties": false,
   "required": ["entries"],
   "properties": {
-    "entries": {"type": "array", "maxItems": 5, "items": {"$ref": "#/definitions/entry"}},
+    "entries": {"type": "array", "maxItems": 12, "items": {"$ref": "#/definitions/entry"}},
     "no_material_reason": {"type": "string", "minLength": 1, "maxLength": 240, "pattern": "\\S"}
   },
   "allOf": [{
@@ -46,11 +46,11 @@
         "slug": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S"},
         "title": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S"},
         "summary": {"type": "string", "minLength": 1, "maxLength": 2048, "pattern": "\\S"},
-        "aliases": {"type": "array", "maxItems": 6, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 100, "pattern": "\\S"}},
+        "aliases": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 100, "pattern": "\\S"}},
         "confidence": {"$ref": "#/definitions/score"},
         "citations": {"$ref": "#/definitions/citations"},
-        "claims": {"type": "array", "maxItems": 6, "items": {"$ref": "#/definitions/claim"}},
-        "relations": {"type": "array", "maxItems": 4, "items": {"$ref": "#/definitions/relation"}}
+        "claims": {"type": "array", "maxItems": 8, "items": {"$ref": "#/definitions/claim"}},
+        "relations": {"type": "array", "maxItems": 6, "items": {"$ref": "#/definitions/relation"}}
       }
     }
   }
