@@ -2,7 +2,7 @@
   <div
     ref="rootRef"
     class="knowledge-answer-markdown markdown-body"
-    :class="{ 'is-streaming': streaming }"
+    :class="{ 'is-streaming': streaming, 'is-entering': enterWithStream }"
     v-html="html"
     @click="handleClick"
   ></div>
@@ -25,6 +25,7 @@ const emit = defineEmits<{
 
 const rootRef = ref<HTMLElement | null>(null)
 const html = ref('')
+const enterWithStream = Boolean(props.streaming)
 let renderTimer: number | undefined
 
 function render() {
@@ -108,6 +109,7 @@ onBeforeUnmount(() => window.clearTimeout(renderTimer))
   line-height: 1.72;
   overflow-wrap: anywhere;
 }
+.knowledge-answer-markdown.is-entering { animation: answer-arrive 280ms cubic-bezier(.2, .8, .2, 1) both; }
 .knowledge-answer-markdown.is-streaming::after {
   width: 2px;
   height: 1em;
@@ -117,7 +119,7 @@ onBeforeUnmount(() => window.clearTimeout(renderTimer))
   background: var(--accent);
   content: '';
   vertical-align: -.12em;
-  animation: answer-caret 760ms step-end infinite;
+  animation: answer-caret 1.1s ease-in-out infinite;
 }
 .knowledge-answer-markdown :deep(> :first-child) { margin-top: 0; }
 .knowledge-answer-markdown :deep(> :last-child) { margin-bottom: 0; }
@@ -147,8 +149,10 @@ onBeforeUnmount(() => window.clearTimeout(renderTimer))
 .knowledge-answer-markdown :deep(a) { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
 .knowledge-answer-markdown :deep(.answer-citation) { display: inline-flex; align-items: center; margin: 0 2px; padding: 1px 5px; border: 0; border-radius: 6px; background: var(--accent-light); color: var(--accent); font: inherit; font-size: 11px; font-weight: 720; line-height: 1.5; vertical-align: .08em; cursor: pointer; }
 .knowledge-answer-markdown :deep(.answer-citation:hover) { box-shadow: inset 0 0 0 1px var(--accent-border); }
-@keyframes answer-caret { 50% { opacity: 0; } }
+@keyframes answer-arrive { from { opacity: .62; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes answer-caret { 50% { opacity: .28; } }
 @media (prefers-reduced-motion: reduce) {
+  .knowledge-answer-markdown.is-entering { animation: none; }
   .knowledge-answer-markdown.is-streaming::after { animation: none; }
 }
 </style>

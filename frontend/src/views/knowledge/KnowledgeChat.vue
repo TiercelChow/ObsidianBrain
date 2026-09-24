@@ -73,15 +73,9 @@
               <span class="message-role">{{ message.role === 'user' ? '你' : '知识库' }}</span>
               <p v-if="message.role === 'user'">{{ message.content }}</p>
               <template v-else>
-                <div v-if="streamingMessageId === message.id && !message.content" class="chat-run-status" role="status" aria-live="polite" :aria-label="streamPhase || '正在处理你的问题'">
-                  <span class="chat-run-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-                  <div class="chat-run-copy">
-                    <strong>正在处理你的问题</strong>
-                    <span aria-hidden="true">{{ thinkingText || streamPhase }}</span>
-                    <div v-if="activitySteps.length > 1" class="chat-run-steps" aria-hidden="true">
-                      <span v-for="(step, index) in activitySteps.slice(0, -1)" :key="`${index}-${step}`">{{ step }}</span>
-                    </div>
-                  </div>
+                <div v-if="streamingMessageId === message.id && !message.content" class="chat-run-status" role="status" aria-live="polite" aria-atomic="true">
+                  <span class="chat-run-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <span class="chat-run-label">{{ streamPhase || '正在处理你的问题' }}</span>
                 </div>
                 <KnowledgeAnswerMarkdown
                   v-if="message.content"
@@ -116,7 +110,7 @@
         </div>
 
         <form class="chat-composer" @submit.prevent="ask(draft)">
-          <textarea v-model="draft" :disabled="!activeBaseId" rows="1" placeholder="询问本书中的概念、章节或观点…" @keydown.enter.exact.prevent="ask(draft)"></textarea>
+          <textarea v-model="draft" :disabled="!activeBaseId" rows="1" placeholder="询问本书中的概念、章节或观点…" @compositionstart="composerIsComposing = true" @compositionend="finishComposerComposition" @keydown="handleComposerKeydown"></textarea>
           <button v-if="searching && runtimeReady" type="button" class="is-stop" aria-label="停止生成" @click="stopAnswer"><span class="stop-square"></span></button>
           <button v-else type="submit" :disabled="!activeBaseId || !draft.trim() || searching" aria-label="发送问题">
             <el-icon><Top /></el-icon>
@@ -171,7 +165,7 @@ import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import KnowledgeAnswerMarkdown from '@/components/knowledge/KnowledgeAnswerMarkdown.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
-import { useTypewriterLoop } from '@/composables/useTypewriterLoop'
+import { shouldSendComposerOnEnter } from '@/utils/chatComposer'
 import { createStreamedTextBuffer, type StreamedTextBuffer } from '@/utils/streamedText'
 import {
   getBookWikiSettings,
@@ -203,11 +197,11 @@ const activeBaseId = ref('')
 const conversations = ref<KnowledgeConversationSummary[]>([])
 const activeConversationId = ref('')
 const draft = ref('')
+const composerIsComposing = ref(false)
 const messages = ref<ChatMessage[]>([])
 const searching = ref(false)
 const streamingMessageId = ref('')
 const streamPhase = ref('')
-const activitySteps = ref<string[]>([])
 const followOutput = ref(true)
 const historyLoading = ref(false)
 const runtimeReady = ref(false)
@@ -222,27 +216,39 @@ const savingRunId = ref('')
 let localMessageId = 0
 let historyRequestId = 0
 let sourceRequestId = 0
+let lastCompositionEndAt = 0
 let askController: AbortController | null = null
 let activeTextBuffer: StreamedTextBuffer | null = null
 
 const activeBase = computed(() => bases.value.find(base => base.id === activeBaseId.value))
 const starterQuestions = ['这本书的核心主题是什么？', '找出与架构相关的章节', '有哪些内容提到了性能优化？']
-const awaitingFirstToken = computed(() => searching.value && Boolean(streamingMessageId.value)
-  && !messages.value.find(message => message.id === streamingMessageId.value)?.content)
-const { text: thinkingText } = useTypewriterLoop(awaitingFirstToken, () => [streamPhase.value || '正在检索书内证据'])
 const { renderMarkdown, enhance, cleanup } = useMarkdownRender(() => {})
 
 function setActivity(phase: string) {
-  const label = phase.trim()
-  if (!label || streamPhase.value === label) return
-  streamPhase.value = label
-  activitySteps.value = [...activitySteps.value.slice(-3), label]
-  followAnswer()
+  if (streamPhase.value !== phase) streamPhase.value = phase
+}
+
+function labelForRuntimePhase(message: string): string | null {
+  if (/结束|校验/.test(message)) return '正在整理回答'
+  if (/启动|连接|会话/.test(message)) return '正在连接模型'
+  if (/请求|等待|分析|思考/.test(message)) return '正在分析书内证据'
+  return null
 }
 
 function stopAnswer() {
   askController?.abort()
   activeTextBuffer?.cancel()
+}
+
+function finishComposerComposition() {
+  composerIsComposing.value = false
+  lastCompositionEndAt = Date.now()
+}
+
+function handleComposerKeydown(event: KeyboardEvent) {
+  if (!shouldSendComposerOnEnter(event, composerIsComposing.value, Date.now() - lastCompositionEndAt)) return
+  event.preventDefault()
+  void ask(draft.value)
 }
 
 async function loadContext() {
@@ -384,20 +390,19 @@ async function ask(question: string) {
         (event) => {
           if (event.type === 'evidence') {
             assistantMessage.evidence = event.evidence
-            setActivity(`已检索到 ${event.evidence.length} 条书内证据`)
           } else if (event.type === 'run_started') {
             assistantMessage.runId = event.run_id
-            setActivity('正在连接书籍知识工具')
+            setActivity('正在连接模型')
           } else if (event.type === 'text_delta') {
             receivedText += event.delta
             textBuffer.push(event.delta)
-            if (streamPhase.value !== '正在生成可追溯回答') setActivity('正在生成可追溯回答')
           } else if (event.type === 'phase') {
-            setActivity(event.message)
+            const label = labelForRuntimePhase(event.message)
+            if (label) setActivity(label)
           } else if (event.type === 'tool_started') {
-            setActivity(`正在调用：${event.title}`)
+            setActivity('正在查阅相关知识')
           } else if (event.type === 'tool_finished') {
-            setActivity(event.status === 'failed' ? '知识工具调用失败，正在调整' : '知识证据已返回，继续分析')
+            setActivity(event.status === 'failed' ? '正在调整检索方式' : '正在分析书内证据')
           }
         },
         askController.signal,
@@ -448,7 +453,6 @@ async function ask(question: string) {
     activeTextBuffer?.cancel()
     activeTextBuffer = null
     streamPhase.value = ''
-    activitySteps.value = []
     streamingMessageId.value = ''
     searching.value = false
     followAnswer()
@@ -600,16 +604,12 @@ onBeforeUnmount(() => {
 .save-answer { width: fit-content; display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; border: 0; border-radius: 9px; background: transparent; color: var(--accent); font: inherit; font-size: 10px; font-weight: 650; cursor: pointer; }
 .save-answer:hover { background: var(--accent-light); }
 .save-answer:disabled { opacity: .55; cursor: default; }
-.chat-run-status { width: min(100%, 520px); min-height: 82px; display: flex; align-items: flex-start; gap: 12px; padding: 14px; border: 1px solid var(--border-faint); border-radius: 16px; background: var(--bg-glass-subtle); }
-.chat-run-mark { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; gap: 3px; flex: none; border-radius: 10px; background: var(--accent-light); }
-.chat-run-mark i { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); animation: chat-run-pulse 900ms ease-in-out infinite alternate; }
-.chat-run-mark i:nth-child(2) { animation-delay: 130ms; }
-.chat-run-mark i:nth-child(3) { animation-delay: 260ms; }
-.chat-run-copy { min-width: 0; display: grid; gap: 4px; }
-.chat-run-copy strong { color: var(--text-primary); font-size: 12px; font-weight: 690; }
-.chat-run-copy > span { min-height: 1.5em; overflow-wrap: anywhere; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
-.chat-run-steps { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
-.chat-run-steps span { max-width: 100%; overflow-wrap: anywhere; padding: 3px 7px; border-radius: 7px; background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--text-faint); font-size: 10px; line-height: 1.35; }
+.chat-run-status { min-height: 32px; display: flex; align-items: center; gap: 9px; padding: 4px 2px; }
+.chat-run-dots { display: inline-flex; align-items: center; gap: 3px; flex: none; }
+.chat-run-dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--text-secondary); opacity: .95; animation: chat-dot-wave 900ms ease-in-out infinite alternate; }
+.chat-run-dots i:nth-child(2) { animation-delay: 130ms; }
+.chat-run-dots i:nth-child(3) { animation-delay: 260ms; }
+.chat-run-label { color: var(--text-muted); font-size: 13px; font-weight: 600; line-height: 1.6; background-image: linear-gradient(90deg, var(--text-muted) 0%, var(--text-muted) 42%, var(--text-secondary) 50%, var(--text-muted) 58%, var(--text-muted) 100%); background-size: 250% 100%; background-position: 100% 0; background-repeat: no-repeat; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: chat-status-shimmer 2.4s linear infinite; }
 .evidence-section { max-width: min(100%, 900px); margin: 2px 0 22px; }
 .evidence-section > header { display: flex; align-items: baseline; gap: 8px; margin: 0 0 9px; color: var(--text-muted); }
 .evidence-section > header strong { color: var(--text-secondary); font-size: 11px; font-weight: 700; }
@@ -648,7 +648,8 @@ onBeforeUnmount(() => {
 .source-citations strong { overflow-wrap: anywhere; font-size: 11px; }
 .source-citations span { color: var(--text-faint); font-size: 9px; }
 .source-citations p { color: var(--text-muted); font-size: 11px; line-height: 1.6; }
-@keyframes chat-run-pulse { to { transform: translateY(-2px); opacity: .45; } }
+@keyframes chat-dot-wave { to { transform: translateY(-2px); opacity: .45; } }
+@keyframes chat-status-shimmer { to { background-position: 0% 0; } }
 @media (min-width: 1151px) {
   .chat-layout, .chat-panel { min-height: 0; }
   .message-list { min-height: 0; max-height: none; padding: 20px clamp(16px, 3vw, 40px); }
@@ -686,6 +687,15 @@ onBeforeUnmount(() => {
   .source-preview-modal .knowledge-modal-actions { padding: 10px 16px 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chat-run-mark i { animation: none; }
+  .chat-run-dots i { animation: none; opacity: .6; }
+  .chat-run-label { animation: none; background: none; -webkit-text-fill-color: currentColor; }
+}
+@media (prefers-contrast: more) {
+  .chat-run-dots i { animation: none; opacity: 1; }
+  .chat-run-label { animation: none; background: none; color: var(--text-secondary); -webkit-text-fill-color: currentColor; }
+}
+@media (forced-colors: active) {
+  .chat-run-dots i { animation: none; background: CanvasText; opacity: 1; }
+  .chat-run-label { animation: none; background: none; -webkit-text-fill-color: currentColor; }
 }
 </style>

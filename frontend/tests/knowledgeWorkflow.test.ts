@@ -59,16 +59,26 @@ test('knowledge chat previews numbered sources before an explicit workspace navi
   assert.match(api, /save_knowledge_answer/)
 })
 
-test('knowledge thinking label loops as a reduced-motion aware typewriter', async () => {
-  const [chat, typewriter] = await Promise.all([
+test('knowledge chat uses an uninterrupted text shimmer and an independent three-dot wave', async () => {
+  const [chat, answer] = await Promise.all([
     source('src/views/knowledge/KnowledgeChat.vue'),
-    source('src/composables/useTypewriterLoop.ts'),
+    source('src/components/knowledge/KnowledgeAnswerMarkdown.vue'),
   ])
 
-  assert.match(chat, /useTypewriterLoop/)
-  assert.match(chat, /streamPhase\.value/)
-  assert.match(typewriter, /prefers-reduced-motion: reduce/)
-  assert.match(typewriter, /phrase\.slice\(0, characterIndex\)/)
+  assert.match(chat, /chat-run-label/)
+  assert.match(chat, /chat-run-dots/)
+  assert.match(chat, /@keyframes chat-dot-wave/)
+  assert.match(chat, /background-clip: text/)
+  assert.match(chat, /background-repeat: no-repeat/)
+  assert.match(chat, /@keyframes chat-status-shimmer/)
+  assert.match(chat, /chat-dot-wave 900ms/)
+  assert.match(chat, /chat-status-shimmer 2\.4s/)
+  assert.match(chat, /translateY\(-2px\)/)
+  assert.doesNotMatch(chat, /0%, 26%|72%, 100%/)
+  assert.match(chat, /prefers-reduced-motion: reduce/)
+  assert.doesNotMatch(chat, /useTypewriterLoop|activitySteps|chat-run-mark|chat-run-pulse/)
+  assert.match(answer, /is-entering/)
+  assert.match(answer, /@keyframes answer-arrive/)
 })
 
 test('knowledge dropdowns use shared system visuals with layout-only utility classes', async () => {
