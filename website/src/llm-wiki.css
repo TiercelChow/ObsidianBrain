@@ -1,0 +1,57 @@
+/* LLM Wiki architecture page: diagram figures, SVG vocabulary, how/why blocks. */
+
+/* Wider canvas so diagrams render at >= 1:1 (vector upscaling stays crisp);
+   at 1440px+ the 960-unit viewBox lands at ~1.15-1.23x instead of shrinking to 0.92x. */
+.llmwiki-page .docs-shell { width: min(1480px, calc(100% - 3rem)); }
+
+.diagram { margin: 1.5rem 0; padding: 1.1rem 1rem .9rem; border: 1px solid var(--border-glass); border-radius: 1rem; background: var(--bg-glass-subtle); overflow-x: auto; }
+/* Render diagrams at exactly 1:1 (960px = viewBox width). Any fractional scale
+   rasterizes 12px CJK stems onto partial pixels, which reads as bold/blurry.
+   The widened docs-shell fits 960px without scrolling on >=1260px viewports;
+   narrower viewports scroll horizontally inside .diagram instead of shrinking. */
+.diagram svg { display: block; width: 960px; max-width: none; height: auto; margin-inline: auto; }
+.diagram figcaption { margin-top: .7rem; font-size: .8rem; line-height: 1.7; color: var(--text-tertiary); text-align: center; }
+.manual-content .info-table code { white-space: nowrap; }
+
+/* SVG vocabulary — all colors come from theme variables so diagrams follow light/dark/eye-care. */
+/* The site-wide icon rule `svg { stroke: currentColor; stroke-width: 1.8 }` inherits
+   into diagram svgs and outlines every glyph, reading as faux-bold mush. Kill the
+   inherited stroke at the root; shapes that need strokes set their own. */
+.dg { stroke: none; }
+/* Regular weight on purpose: Medium/Semibold on small CJK glyphs blooms on dark
+   backgrounds and reads as blurry. Titles use the real Semibold cut at 600. */
+.dg text { font-size: 13px; font-weight: 400; stroke: none; fill: var(--text-secondary); }
+.dg text.t { font-size: 14px; font-weight: 600; fill: var(--text-primary); }
+.dg text.s { font-size: 12px; fill: var(--text-tertiary); }
+.dg text.mono { font-family: var(--font-mono); font-size: 11px; fill: var(--text-tertiary); }
+.dg text.acc { fill: var(--accent-strong); font-weight: 600; }
+.dg rect.box { fill: var(--bg-glass); stroke: var(--border-glass); stroke-width: 1; }
+.dg rect.accent { fill: var(--accent-light); stroke: var(--accent-border); stroke-width: 1; }
+.dg rect.plain { fill: var(--bg-glass-subtle); stroke: var(--border-faint); stroke-width: 1; }
+.dg rect.zone { fill: none; stroke: var(--text-muted); stroke-width: 1.2; stroke-dasharray: 6 4; opacity: .55; }
+.dg path.flow, .dg line.flow { stroke: var(--text-muted); stroke-width: 1.4; fill: none; marker-end: url(#dg-arrow); }
+.dg path.back { stroke: var(--accent); stroke-width: 1.4; stroke-dasharray: 5 4; fill: none; marker-end: url(#dg-arrow-accent); }
+.dg path.thin, .dg line.thin { stroke: var(--border-glass); stroke-width: 1.2; fill: none; }
+.dg path.gate { stroke: var(--accent-strong); stroke-width: 1.6; fill: none; marker-end: url(#dg-arrow-accent); }
+.dg circle.dot { fill: var(--accent-strong); }
+.dg polygon.dec { fill: var(--bg-glass); stroke: var(--accent-border); stroke-width: 1; }
+
+/* how / why structure inside chapters */
+.manual-section h3.how { display: flex; align-items: center; gap: .5rem; }
+.manual-section h3.how::before { content: '⚙'; font-size: .95rem; }
+.callout.why { background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid var(--accent-border); }
+.callout.why .callout-icon { color: var(--accent-strong); }
+.stage-lead { font-size: 1rem !important; color: var(--text-secondary) !important; }
+
+/* Numbered how-steps: block layout with an absolutely positioned badge — no grid,
+   so inline content can never collapse into a single narrow column. */
+.manual-section ol.how-steps { counter-reset: howstep; display: block; padding: 0; margin: 1rem 0 1.25rem; list-style: none; }
+.manual-section .how-steps li { counter-increment: howstep; position: relative; display: block; padding: .7rem .95rem .7rem 3.4rem; margin-bottom: .45rem; border: 1px solid var(--border-faint); border-radius: .7rem; background: var(--bg-glass-subtle); font-size: .9rem; line-height: 1.8; color: var(--text-tertiary); }
+.how-steps li::before { content: counter(howstep, decimal-leading-zero); position: absolute; left: .85rem; top: .75rem; display: grid; place-items: center; width: 1.9rem; height: 1.9rem; border-radius: .55rem; background: var(--accent-light); color: var(--accent-strong); font: 700 .7rem var(--font-mono); }
+.how-steps strong { color: var(--text-secondary); }
+.how-steps code { background: var(--accent-light); color: var(--accent-strong); padding: .1rem .3rem; border-radius: .3rem; font-size: .82em; }
+
+@media print {
+  .diagram { break-inside: avoid; border-color: var(--text-muted); }
+  .diagram svg { min-width: 0; }
+}

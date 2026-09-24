@@ -43,6 +43,32 @@ test('llm wiki page cites verified backend mechanisms and storage contracts', as
   assert.doesNotMatch(html, /Claude Code/)
 })
 
+test('llm wiki page renders flows and state machines as accessible diagrams', async () => {
+  const html = await read('llm-wiki/index.html')
+  const figures = html.match(/<figure class="diagram"/g) ?? []
+  assert.ok(figures.length >= 8, `expected >= 8 diagrams, got ${figures.length}`)
+  const captions = html.match(/<figcaption>/g) ?? []
+  assert.ok(captions.length >= figures.length, 'every diagram needs a figcaption')
+  const roles = html.match(/role="img"/g) ?? []
+  assert.ok(roles.length >= figures.length, 'every diagram svg needs role="img" with aria-label')
+  assert.match(html, /<marker id="dg-arrow"/)
+})
+
+test('llm wiki page explains how each stage works with real data shapes', async () => {
+  const html = await read('llm-wiki/index.html')
+  const hows = html.match(/<h3 class="how">/g) ?? []
+  assert.ok(hows.length >= 6, `expected >= 6 how-sections, got ${hows.length}`)
+  const whys = html.match(/class="callout why"/g) ?? []
+  assert.ok(whys.length >= 6, `expected >= 6 why-callouts, got ${whys.length}`)
+  for (const shape of [
+    '&lt;output_schema&gt;', '&lt;source_spans&gt;', '&lt;existing_wiki&gt;', '&lt;evidence&gt;',
+    'no_material_reason', '_classification', 'claim_text', 'to_slug', 'relation_type',
+    'run_started', 'text_delta', 'bm25', 'repair_context', 'schema_version', 'core_message',
+  ]) {
+    assert.match(html, new RegExp(shape.replace(/[&<>]/g, (c) => `\\${c}`)), `missing real data shape: ${shape}`)
+  }
+})
+
 test('llm wiki page is a standalone Pages entry reachable from every page nav', async () => {
   const [home, manual, page, config] = await Promise.all([
     read('index.html'), read('manual/index.html'), read('llm-wiki/index.html'), read('vite.config.js'),
@@ -74,6 +100,7 @@ test('llm wiki page has valid same-page anchors and unique ids', async () => {
 test('llm wiki page reuses the shared docs shell scripts and styles', async () => {
   const html = await read('llm-wiki/index.html')
   assert.match(html, /src="\.\.\/src\/main\.js"/)
+  assert.match(html, /src="\.\.\/src\/llm-wiki\.js"/)
   assert.match(html, /class="manual-page/)
   assert.match(html, /data-chapter-link/)
   assert.match(html, /data-theme-toggle/)
