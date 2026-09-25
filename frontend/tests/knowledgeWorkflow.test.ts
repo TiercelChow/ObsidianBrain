@@ -20,6 +20,9 @@ test('knowledge chat persists conversations and restores their cited messages', 
   assert.match(answer, /data-source-index/)
   assert.match(chat, /streamBookKnowledge/)
   assert.match(chat, /event\.type === 'text_delta'/)
+  assert.match(chat, /let answerEvidenceDelivered = false/)
+  assert.match(chat, /if \(answerEvidenceDelivered\) \{\s*assistantMessage\.runId = event\.run_id/)
+  assert.match(chat, /正在理解问题与选择知识/)
   assert.match(chat, /const assistantMessage = messages\.value\[assistantIndex\]/)
   assert.match(chat, /createStreamedTextBuffer/)
   assert.match(chat, /await textBuffer\.drain\(\)/)
@@ -39,6 +42,18 @@ test('knowledge chat persists conversations and restores their cited messages', 
   assert.match(api, /text\/event-stream/)
   assert.match(api, /createSseDataParser/)
   assert.match(api, /parser\.push\(decoder\.decode\(value, \{ stream: !done \}\)\)/)
+})
+
+test('research inspector distinguishes native skills and lists evidence actually read', async () => {
+  const [tasks, api] = await Promise.all([
+    source('src/views/knowledge/KnowledgeTasks.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+  assert.match(tasks, /harness_native_available/)
+  assert.match(tasks, /Harness 可按需读取/)
+  assert.match(tasks, /实际读取的证据/)
+  assert.match(tasks, /activeInspection\.evidence/)
+  assert.match(api, /evidence: Array<\{/)
 })
 
 test('knowledge chat previews numbered sources before an explicit workspace navigation', async () => {

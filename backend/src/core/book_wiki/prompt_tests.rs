@@ -1,6 +1,218 @@
 use super::*;
 
 #[test]
+fn test_answer_reference_validation_rejects_unseen_source_numbers_and_ids() {
+    let input = serde_json::json!({ "evidence_entry_ids": ["entry-a"] });
+    let ledger = vec![AgentEvidenceRef {
+        kind: "entry".to_string(),
+        object_id: "entry-a".to_string(),
+        version_id: "1".to_string(),
+        snapshot: serde_json::json!({}),
+    }];
+    assert!(
+        validate_agent_answer_references("结论。[S1] entry_id: entry-a", &input, &ledger).is_ok()
+    );
+    assert!(validate_agent_answer_references("结论。[S2]", &input, &ledger).is_err());
+    assert!(validate_agent_answer_references("entry_id: entry-b", &input, &ledger).is_err());
+    assert!(validate_agent_answer_references("span_id: span-b", &input, &ledger).is_err());
+}
+
+#[test]
+fn test_qa_selection_prompt_keeps_full_catalog_and_multi_turn_context() {
+    let catalog = (0..1_000)
+        .map(|index| QaCatalogEntry {
+            id: format!("entry-{index}"),
+            title: format!("知识主题 {index}"),
+            aliases: vec![format!("别名 {index}")],
+            summary: format!("主题 {index} 的跨章节概述"),
+            status: "draft".into(),
+            entry_type: "concept".into(),
+        })
+        .collect::<Vec<_>>();
+    let history = vec![
+        KnowledgeMessage {
+            id: "u1".into(),
+            role: "user".into(),
+            content: "先比较甲方案和乙方案的适用条件".into(),
+            run_id: None,
+            evidence: vec![],
+            created_at: String::new(),
+        },
+        KnowledgeMessage {
+            id: "a1".into(),
+            role: "assistant".into(),
+            content: "甲方案适合小规模，乙方案适合大规模。".into(),
+            run_id: None,
+            evidence: vec![],
+            created_at: String::new(),
+        },
+    ];
+    let prompt = build_qa_selection_prompt("示例书", "第二个方案有什么限制？", &history, &catalog);
+    assert!(prompt.contains("先比较甲方案和乙方案的适用条件"));
+    assert!(prompt.contains("乙方案适合大规模"));
+    assert!(prompt.contains("第二个方案有什么限制？"));
+    assert!(prompt.contains("entry-0"));
+    assert!(prompt.contains("entry-999"));
+}
+
+#[test]
+fn test_qa_selection_rejects_unknown_ids_and_keeps_standalone_question() {
+    let catalog = vec![QaCatalogEntry {
+        id: "entry-known".into(),
+        title: "乙方案".into(),
+        aliases: vec![],
+        summary: "适用条件".into(),
+        status: "verified".into(),
+        entry_type: "concept".into(),
+    }];
+    let selection = parse_qa_selection(
+        r#"{"standalone_question":"乙方案有什么限制？","candidate_ids":["entry-unknown","entry-known","entry-known"]}"#,
+        &catalog,
+        "第二个方案有什么限制？",
+    );
+    assert_eq!(selection.standalone_question, "乙方案有什么限制？");
+    assert_eq!(selection.candidate_ids, vec!["entry-known"]);
+    assert_eq!(selection.answer_mode, QaAnswerMode::BookLookup);
+}
+
+#[test]
+fn test_qa_selection_accepts_previous_answer_rewrite_mode() {
+    let selection = parse_qa_selection(
+        r#"{"standalone_question":"把上一条回答改成简短列表","candidate_ids":[],"answer_mode":"rewrite_previous_answer"}"#,
+        &[],
+        "说得简短点",
+    );
+    assert_eq!(selection.answer_mode, QaAnswerMode::RewritePreviousAnswer);
+}
+
+#[test]
+fn test_qa_selection_direct_reply_requires_no_book_candidates() {
+    let catalog = vec![QaCatalogEntry {
+        id: "entry-known".into(),
+        title: "书籍主题".into(),
+        aliases: vec![],
+        summary: "概述".into(),
+        status: "verified".into(),
+        entry_type: "concept".into(),
+    }];
+    let direct = parse_qa_selection(
+        r#"{"standalone_question":"你好","candidate_ids":[],"answer_mode":"direct_reply"}"#,
+        &catalog,
+        "你好",
+    );
+    assert_eq!(direct.answer_mode, QaAnswerMode::DirectReply);
+    let factual = parse_qa_selection(
+        r#"{"standalone_question":"书籍主题是什么","candidate_ids":["entry-known"],"answer_mode":"direct_reply"}"#,
+        &catalog,
+        "书籍主题是什么",
+    );
+    assert_eq!(factual.answer_mode, QaAnswerMode::BookLookup);
+    assert!(allowed_agent_tools(
+        "knowledge_qa",
+        &serde_json::json!({ "answer_mode": "direct_reply" })
+    )
+    .is_empty());
+}
+
+#[test]
+fn test_answer_prompt_excludes_catalog_and_unrelated_history() {
+    let selection = QaSelection {
+        standalone_question: "乙方案有哪些限制？".into(),
+        candidate_ids: vec!["entry-selected".into()],
+        answer_mode: QaAnswerMode::BookLookup,
+    };
+    let history = vec![KnowledgeMessage {
+        id: "a1".into(),
+        role: "assistant".into(),
+        content: "上一轮无关的答案，不应进入本轮回答上下文".into(),
+        run_id: None,
+        evidence: vec![],
+        created_at: String::new(),
+    }];
+    let prompt = build_knowledge_prompt(
+        "示例书",
+        "它有哪些限制？",
+        &selection,
+        &history,
+        &[],
+        &[],
+        &[],
+    );
+    assert!(prompt.contains("乙方案有哪些限制？"));
+    assert!(!prompt.contains("上一轮无关的答案"));
+    assert!(!prompt.contains("compiled_knowledge_catalog"));
+    assert!(!prompt.contains("entry-selected"));
+}
+
+#[test]
+fn test_answer_prompt_includes_only_previous_answer_for_rewrite() {
+    let selection = QaSelection {
+        standalone_question: "将上一条回答改写为三点列表".into(),
+        candidate_ids: vec![],
+        answer_mode: QaAnswerMode::RewritePreviousAnswer,
+    };
+    let history = vec![
+        KnowledgeMessage {
+            id: "a1".into(),
+            role: "assistant".into(),
+            content: "更早且无关的回答".into(),
+            run_id: None,
+            evidence: vec![],
+            created_at: String::new(),
+        },
+        KnowledgeMessage {
+            id: "u2".into(),
+            role: "user".into(),
+            content: "上一个问题".into(),
+            run_id: None,
+            evidence: vec![],
+            created_at: String::new(),
+        },
+        KnowledgeMessage {
+            id: "a2".into(),
+            role: "assistant".into(),
+            content: "最近一条回答的原文".into(),
+            run_id: None,
+            evidence: vec![],
+            created_at: String::new(),
+        },
+    ];
+    let prompt = build_knowledge_prompt("示例书", "改成三点", &selection, &history, &[], &[], &[]);
+    assert!(prompt.contains("最近一条回答的原文"));
+    assert!(!prompt.contains("更早且无关的回答"));
+    assert!(!prompt.contains("上一个问题"));
+}
+
+#[test]
+fn test_qa_context_keeps_late_part_of_previous_answer() {
+    let history = vec![KnowledgeMessage {
+        id: "a1".into(),
+        role: "assistant".into(),
+        content: format!("{}第二点的关键限制是版本兼容。", "前文".repeat(1_000)),
+        run_id: None,
+        evidence: vec![],
+        created_at: String::new(),
+    }];
+    let mut prompt = String::new();
+    append_conversation_history(&mut prompt, &history);
+    assert!(prompt.contains("第二点的关键限制是版本兼容"));
+}
+
+#[test]
+fn test_qa_candidates_from_later_catalog_chunks_are_not_starved() {
+    let batches = vec![
+        (0..10).map(|index| format!("first-{index}")).collect(),
+        vec!["second-0".into(), "second-1".into()],
+    ];
+    let candidates = interleave_qa_candidates(&batches);
+    assert_eq!(
+        &candidates[..4],
+        ["first-0", "second-0", "first-1", "second-1"]
+    );
+    assert!(candidates[..8].contains(&"second-1".to_string()));
+}
+
+#[test]
 fn test_question_and_each_evidence_survive_large_optional_context() {
     let documents = (0..12)
         .map(|index| ConfigDocument {
@@ -28,16 +240,6 @@ fn test_question_and_each_evidence_survive_large_optional_context() {
             enabled: true,
             usage_scope: "both".into(),
             updated_at: String::new(),
-        })
-        .collect::<Vec<_>>();
-    let history = (0..8)
-        .map(|index| KnowledgeMessage {
-            id: format!("message-{index}"),
-            role: "user".into(),
-            content: "旧问题".repeat(2_000),
-            run_id: None,
-            evidence: vec![],
-            created_at: String::new(),
         })
         .collect::<Vec<_>>();
     let evidence = (0..8)
@@ -68,7 +270,12 @@ fn test_question_and_each_evidence_survive_large_optional_context() {
     let prompt = build_knowledge_prompt(
         "上下文预算",
         &question,
-        &history,
+        &QaSelection {
+            standalone_question: question.clone(),
+            candidate_ids: vec![],
+            answer_mode: QaAnswerMode::BookLookup,
+        },
+        &[],
         &documents,
         &skills,
         &evidence,

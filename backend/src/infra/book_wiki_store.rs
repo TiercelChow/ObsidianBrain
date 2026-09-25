@@ -68,6 +68,24 @@ pub struct KnowledgeEntrySplitProposal<'a> {
     pub parts: &'a [KnowledgeEntrySplitPart],
 }
 
+#[derive(Clone, Debug)]
+pub struct QaCatalogEntry {
+    pub id: String,
+    pub title: String,
+    pub aliases: Vec<String>,
+    pub summary: String,
+    pub status: String,
+    pub entry_type: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AgentEvidenceRef {
+    pub kind: String,
+    pub object_id: String,
+    pub version_id: String,
+    pub snapshot: serde_json::Value,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IssuedAgentCapability {
     pub token: String,
@@ -1519,6 +1537,94 @@ impl BookWikiStore {
             Ok(())
         })?;
         self.get_base(base_id)
+    }
+
+    pub fn list_qa_catalog(&self, base_id: &str) -> Result<Vec<QaCatalogEntry>, BrainError> {
+        self.get_base(base_id)?;
+        self.db.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, title, aliases_json, summary, status, entry_type
+                 FROM knowledge_entries
+                 WHERE knowledge_base_id = ?1 AND entry_type != 'source_section'
+                   AND status NOT IN ('archived', 'stale')
+                 ORDER BY title COLLATE NOCASE, id",
+            )?;
+            let rows = stmt
+                .query_map(params![base_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows.into_iter()
+                .map(|(id, title, aliases_json, summary, status, entry_type)| {
+                    Ok(QaCatalogEntry {
+                        id,
+                        title,
+                        aliases: parse_string_list(&aliases_json, "知识实体别名")?,
+                        summary,
+                        status,
+                        entry_type,
+                    })
+                })
+                .collect()
+        })
+    }
+
+    pub fn list_qa_catalog_page(
+        &self,
+        base_id: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<(Vec<QaCatalogEntry>, i64), BrainError> {
+        self.get_base(base_id)?;
+        let limit = limit.clamp(1, 200) as i64;
+        let offset = i64::try_from(offset).unwrap_or(i64::MAX);
+        self.db.with_connection(|conn| {
+            let total = conn.query_row(
+                "SELECT COUNT(*) FROM knowledge_entries
+                 WHERE knowledge_base_id = ?1 AND entry_type != 'source_section'
+                   AND status NOT IN ('archived', 'stale')",
+                params![base_id],
+                |row| row.get::<_, i64>(0),
+            )?;
+            let mut stmt = conn.prepare(
+                "SELECT id, title, aliases_json, summary, status, entry_type
+                 FROM knowledge_entries
+                 WHERE knowledge_base_id = ?1 AND entry_type != 'source_section'
+                   AND status NOT IN ('archived', 'stale')
+                 ORDER BY title COLLATE NOCASE, id LIMIT ?2 OFFSET ?3",
+            )?;
+            let rows = stmt.query_map(params![base_id, limit, offset], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })?;
+            let entries = rows
+                .map(|row| {
+                    let (id, title, aliases_json, summary, status, entry_type) = row?;
+                    Ok(QaCatalogEntry {
+                        id,
+                        title,
+                        aliases: parse_string_list(&aliases_json, "知识实体别名")?,
+                        summary,
+                        status,
+                        entry_type,
+                    })
+                })
+                .collect::<Result<Vec<_>, BrainError>>()?;
+            Ok((entries, total))
+        })
     }
 
     pub fn list_entries(
@@ -3496,6 +3602,58 @@ impl BookWikiStore {
                 conversation,
                 messages,
             })
+        })
+    }
+
+    pub fn recent_conversation_messages(
+        &self,
+        base_id: &str,
+        conversation_id: &str,
+        limit: usize,
+    ) -> Result<Vec<KnowledgeMessage>, BrainError> {
+        let limit = limit.clamp(1, 32) as i64;
+        self.db.with_connection(|conn| {
+            let in_scope = conn
+                .query_row(
+                    "SELECT 1 FROM knowledge_conversation_scopes
+                     WHERE conversation_id = ?1 AND knowledge_base_id = ?2",
+                    params![conversation_id, base_id],
+                    |_| Ok(()),
+                )
+                .optional()?;
+            if in_scope.is_none() {
+                return Err(BrainError::KnowledgeValidation(
+                    "会话不存在或不属于当前知识库".to_string(),
+                ));
+            }
+            let mut stmt = conn.prepare(
+                "SELECT id, role, content, run_id, created_at
+                 FROM knowledge_messages
+                 WHERE conversation_id = ?1
+                 ORDER BY ordinal DESC LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![conversation_id, limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })?;
+            let rows = rows.collect::<Result<Vec<_>, _>>()?;
+            let mut messages = Vec::with_capacity(rows.len());
+            for (id, role, content, run_id, created_at) in rows.into_iter().rev() {
+                messages.push(KnowledgeMessage {
+                    evidence: load_message_evidence(conn, &id)?,
+                    id,
+                    role,
+                    content,
+                    run_id,
+                    created_at,
+                });
+            }
+            Ok(messages)
         })
     }
 
@@ -5696,14 +5854,19 @@ impl BookWikiStore {
         let now = Utc::now();
         let expires_at = (now + chrono::Duration::seconds(ttl_seconds.max(0))).to_rfc3339();
         let created_at = now.to_rfc3339();
+        let max_calls = match run.task_type.as_str() {
+            "knowledge_qa" => 20,
+            "knowledge_task_research" => 80,
+            _ => 40,
+        };
         let tools_json = serde_json::to_string(&tools)
             .map_err(|error| BrainError::Internal(format!("Agent 工具权限序列化失败: {error}")))?;
         self.db.transaction(|conn| {
             conn.execute(
                 "INSERT INTO agent_run_capabilities
-                 (id, run_id, token_hash, allowed_tools_json, expires_at, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![id, run_id, token_hash, tools_json, expires_at, created_at],
+                 (id, run_id, token_hash, allowed_tools_json, expires_at, created_at, max_calls)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![id, run_id, token_hash, tools_json, expires_at, created_at, max_calls],
             )?;
             for base_id in &scopes {
                 conn.execute(
@@ -5731,6 +5894,34 @@ impl BookWikiStore {
             return Err(BrainError::KnowledgeValidation(format!(
                 "Agent 能力令牌没有 {tool} 工具权限"
             )));
+        }
+        Ok(grant)
+    }
+
+    pub fn consume_agent_tool_call(
+        &self,
+        token: &str,
+        tool: &str,
+    ) -> Result<AgentCapabilityGrant, BrainError> {
+        let grant = self.validate_agent_run_capability(token, tool)?;
+        use sha2::{Digest, Sha256};
+        let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
+        let updated = self.db.transaction(|conn| {
+            conn.execute(
+                "UPDATE agent_run_capabilities
+                 SET used_calls = used_calls + 1
+                 WHERE token_hash = ?1 AND run_id = ?2 AND revoked_at IS NULL
+                   AND used_calls < max_calls
+                   AND EXISTS (SELECT 1 FROM agent_runs
+                               WHERE id = ?2 AND status = 'running')",
+                params![token_hash, &grant.run_id],
+            )
+            .map_err(Into::into)
+        })?;
+        if updated != 1 {
+            return Err(BrainError::KnowledgeValidation(
+                "Agent 本次运行的工具调用次数已达到上限".to_string(),
+            ));
         }
         Ok(grant)
     }
@@ -5978,6 +6169,133 @@ impl BookWikiStore {
         })
     }
 
+    pub fn record_agent_run_evidence(
+        &self,
+        run_id: &str,
+        kind: &str,
+        object_id: &str,
+        version_id: &str,
+        snapshot: &serde_json::Value,
+    ) -> Result<(), BrainError> {
+        if !matches!(kind, "entry" | "source_span" | "external")
+            || object_id.trim().is_empty()
+            || version_id.trim().is_empty()
+        {
+            return Err(BrainError::KnowledgeValidation(
+                "Agent 证据标识无效".to_string(),
+            ));
+        }
+        let run = self.get_agent_run(run_id)?;
+        if run.status != "running" {
+            return Err(BrainError::KnowledgeValidation(
+                "只能为运行中的 Agent 记录证据".to_string(),
+            ));
+        }
+        let base_id = run.knowledge_base_id.as_deref().ok_or_else(|| {
+            BrainError::KnowledgeValidation("Agent 运行缺少书籍知识库范围".to_string())
+        })?;
+        match kind {
+            "entry" => {
+                let detail = self.get_entry(object_id)?;
+                if detail.entry.knowledge_base_id != base_id
+                    || detail.revision.to_string() != version_id
+                {
+                    return Err(BrainError::KnowledgeValidation(
+                        "Agent 条目证据不属于当前书籍或版本不匹配".to_string(),
+                    ));
+                }
+            }
+            "source_span" => {
+                let span = self.get_current_source_span(base_id, object_id)?;
+                if span.source_version_id != version_id {
+                    return Err(BrainError::KnowledgeValidation(
+                        "Agent 来源证据版本不匹配".to_string(),
+                    ));
+                }
+            }
+            _ => {}
+        }
+        let snapshot_json = serde_json::to_string(snapshot)
+            .map_err(|error| BrainError::Internal(format!("Agent 证据序列化失败: {error}")))?;
+        if snapshot_json.len() > 8_192 {
+            return Err(BrainError::KnowledgeValidation(
+                "Agent 证据快照过大".to_string(),
+            ));
+        }
+        self.db.with_connection(|conn| {
+            conn.execute(
+                "INSERT INTO agent_run_evidence
+                    (run_id, kind, object_id, version_id, snapshot_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    run_id,
+                    kind,
+                    object_id,
+                    version_id,
+                    snapshot_json,
+                    Utc::now().to_rfc3339(),
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn list_agent_run_evidence(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<AgentEvidenceRef>, BrainError> {
+        self.get_agent_run(run_id)?;
+        self.db.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT kind, object_id, version_id, snapshot_json
+                 FROM agent_run_evidence WHERE run_id = ?1 ORDER BY id",
+            )?;
+            let rows = stmt.query_map(params![run_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            rows.map(|row| {
+                let (kind, object_id, version_id, snapshot_json) = row?;
+                Ok(AgentEvidenceRef {
+                    kind,
+                    object_id,
+                    version_id,
+                    snapshot: serde_json::from_str(&snapshot_json).map_err(|error| {
+                        BrainError::Internal(format!("Agent 证据快照解析失败: {error}"))
+                    })?,
+                })
+            })
+            .collect()
+        })
+    }
+
+    pub fn source_section_for_span(
+        &self,
+        base_id: &str,
+        span_id: &str,
+    ) -> Result<Option<KnowledgeEntrySummary>, BrainError> {
+        let entry_id = self.db.with_connection(|conn| {
+            conn.query_row(
+                "SELECT ke.id FROM knowledge_entries ke
+                 JOIN knowledge_citations kc ON kc.entry_id = ke.id
+                 WHERE ke.knowledge_base_id = ?1 AND ke.entry_type = 'source_section'
+                   AND ke.status NOT IN ('stale', 'archived') AND kc.source_span_id = ?2
+                 LIMIT 1",
+                params![base_id, span_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(Into::into)
+        })?;
+        entry_id
+            .map(|id| self.get_entry(&id).map(|detail| detail.entry))
+            .transpose()
+    }
+
     pub fn save_agent_run_inspection(
         &self,
         run_id: &str,
@@ -6022,6 +6340,18 @@ impl BookWikiStore {
     pub fn get_agent_run_inspection(&self, run_id: &str) -> Result<AgentRunInspection, BrainError> {
         let run = self.get_agent_run(run_id)?;
         let events = self.list_agent_run_events(run_id)?;
+        let evidence = self
+            .list_agent_run_evidence(run_id)?
+            .into_iter()
+            .map(|item| {
+                serde_json::json!({
+                    "kind": item.kind,
+                    "object_id": item.object_id,
+                    "version_id": item.version_id,
+                    "snapshot": item.snapshot,
+                })
+            })
+            .collect();
         let snapshot = self.db.with_connection(|conn| {
             conn.query_row(
                 "SELECT run_id, prompt_text, prompt_hash, prompt_characters,
@@ -6071,6 +6401,7 @@ impl BookWikiStore {
             run,
             events,
             snapshot,
+            evidence,
         })
     }
 
@@ -6187,7 +6518,7 @@ impl BookWikiStore {
             let mut stmt = conn.prepare(
                 "SELECT date(finished_at, 'localtime'),
                         CASE
-                            WHEN task_type = 'knowledge_qa' THEN 'knowledge_qa'
+                            WHEN task_type IN ('knowledge_qa', 'knowledge_qa_select') THEN 'knowledge_qa'
                             WHEN task_type LIKE 'knowledge_task_%' THEN 'knowledge_task'
                             ELSE task_type
                         END,
@@ -6198,7 +6529,7 @@ impl BookWikiStore {
                    AND date(finished_at, 'localtime') BETWEEN ?1 AND ?2
                    AND (?3 IS NULL OR
                         CASE
-                            WHEN task_type = 'knowledge_qa' THEN 'knowledge_qa'
+                            WHEN task_type IN ('knowledge_qa', 'knowledge_qa_select') THEN 'knowledge_qa'
                             WHEN task_type LIKE 'knowledge_task_%' THEN 'knowledge_task'
                             ELSE task_type
                         END = ?3)
@@ -8580,6 +8911,15 @@ mod tests {
         assert_eq!(detail.messages[0].role, "user");
         assert_eq!(detail.messages[1].evidence, evidence);
         assert_eq!(detail.messages[3].content, "这是第二轮回答。[S1]");
+        let recent = store
+            .recent_conversation_messages(&base.id, &conversation_id, 2)
+            .unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].content, "再说明一下");
+        assert_eq!(recent[1].evidence, evidence);
+        assert!(store
+            .recent_conversation_messages("another-base", &conversation_id, 2)
+            .is_err());
     }
 
     #[test]
@@ -9375,8 +9715,22 @@ mod tests {
             )
             .is_err());
 
+        store
+            .record_agent_run_evidence(
+                &run.id,
+                "external",
+                "https://example.com/report",
+                "sha256-test",
+                &serde_json::json!({ "content_sha256": "sha256-test" }),
+            )
+            .unwrap();
+
         let inspection = store.get_agent_run_inspection(&run.id).unwrap();
         assert_eq!(inspection.run.id, run.id);
+        assert_eq!(
+            inspection.evidence[0]["object_id"],
+            "https://example.com/report"
+        );
         let snapshot = inspection.snapshot.unwrap();
         assert_eq!(snapshot.prompt_characters, 33);
         assert!(snapshot.prompt_text.contains("证据链"));
@@ -9731,6 +10085,22 @@ mod tests {
             )
             .unwrap();
 
+        let qa_selection_run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa_select",
+                &serde_json::json!({"question": "核心主题"}),
+            )
+            .unwrap();
+        store
+            .complete_agent_run_with_usage(
+                &qa_selection_run.id,
+                &serde_json::json!({"candidate_ids": []}),
+                &AgentTokenUsage::estimated(60, 20),
+            )
+            .unwrap();
+
         let task_run = store
             .start_agent_run(
                 &base.id,
@@ -9749,17 +10119,17 @@ mod tests {
 
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let all = store.get_agent_usage_stats(&today, &today, None).unwrap();
-        assert_eq!(all.totals.runs, 2);
-        assert_eq!(all.totals.input_tokens, 320);
-        assert_eq!(all.totals.output_tokens, 138);
-        assert_eq!(all.totals.total_tokens, 458);
+        assert_eq!(all.totals.runs, 3);
+        assert_eq!(all.totals.input_tokens, 380);
+        assert_eq!(all.totals.output_tokens, 158);
+        assert_eq!(all.totals.total_tokens, 538);
         assert_eq!(all.by_caller.len(), 2);
 
         let qa = store
             .get_agent_usage_stats(&today, &today, Some("knowledge_qa"))
             .unwrap();
-        assert_eq!(qa.totals.runs, 1);
-        assert_eq!(qa.totals.total_tokens, 168);
+        assert_eq!(qa.totals.runs, 2);
+        assert_eq!(qa.totals.total_tokens, 248);
         assert_eq!(qa.by_caller[0].caller, "knowledge_qa");
         assert_eq!(qa.usage_source, "estimated");
     }
@@ -10711,6 +11081,151 @@ mod tests {
         assert_eq!(page.offset, 200);
         assert_eq!(page.total, 250);
         assert!(page.has_more);
+    }
+
+    #[test]
+    fn test_qa_catalog_contains_only_current_compiled_entries() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-catalog", "/tmp/book-catalog")])
+            .unwrap();
+        let base = store.initialize_base("book-catalog").unwrap();
+        store
+            .sync_markdown_sources(
+                &base.id,
+                &[sample_source(
+                    "catalog",
+                    "source-entry-catalog",
+                    "span-catalog",
+                )],
+            )
+            .unwrap();
+        store
+            .db
+            .with_connection(|conn| {
+                for (id, status) in [("current-concept", "draft"), ("old-concept", "stale")] {
+                    conn.execute(
+                        "INSERT INTO knowledge_entries
+                         (id, knowledge_base_id, entry_type, slug, title, summary, content_md,
+                          aliases_json, status, created_at, updated_at)
+                         VALUES (?1, ?2, 'concept', ?1, ?1, '跨章节概述', '', '[\"概念别名\"]', ?3,
+                                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                        params![id, base.id, status],
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+        let catalog = store.list_qa_catalog(&base.id).unwrap();
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog[0].id, "current-concept");
+        assert_eq!(catalog[0].aliases, vec!["概念别名"]);
+        let (page, total) = store.list_qa_catalog_page(&base.id, 0, 1).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].id, "current-concept");
+        let (last_page, total) = store.list_qa_catalog_page(&base.id, 1, 1).unwrap();
+        assert_eq!(total, 1);
+        assert!(last_page.is_empty());
+    }
+
+    #[test]
+    fn test_agent_evidence_ledger_records_read_versions_and_rejects_wrong_revision() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-evidence", "/tmp/book-evidence")])
+            .unwrap();
+        let base = store.initialize_base("book-evidence").unwrap();
+        store
+            .sync_markdown_sources(
+                &base.id,
+                &[sample_source("evidence", "entry-evidence", "span-evidence")],
+            )
+            .unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        let detail = store.get_entry("entry-evidence").unwrap();
+        store
+            .record_agent_run_evidence(
+                &run.id,
+                "entry",
+                &detail.entry.id,
+                &detail.revision.to_string(),
+                &serde_json::json!({ "title": detail.entry.title }),
+            )
+            .unwrap();
+        let span = store
+            .get_current_source_span(&base.id, "span-evidence")
+            .unwrap();
+        assert_eq!(
+            store
+                .source_section_for_span(&base.id, &span.id)
+                .unwrap()
+                .unwrap()
+                .id,
+            detail.entry.id
+        );
+        store
+            .record_agent_run_evidence(
+                &run.id,
+                "source_span",
+                &span.id,
+                &span.source_version_id,
+                &serde_json::json!({ "source_path": span.source_path }),
+            )
+            .unwrap();
+        assert_eq!(store.list_agent_run_evidence(&run.id).unwrap().len(), 2);
+        assert!(store
+            .record_agent_run_evidence(
+                &run.id,
+                "entry",
+                &detail.entry.id,
+                "wrong-revision",
+                &serde_json::json!({}),
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn test_qa_capability_enforces_run_scoped_tool_call_budget() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-budget", "/tmp/book-budget")])
+            .unwrap();
+        let base = store.initialize_base("book-budget").unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        let capability = store
+            .issue_agent_run_capability(
+                &run.id,
+                std::slice::from_ref(&base.id),
+                &["knowledge_search_entries".to_string()],
+                300,
+            )
+            .unwrap();
+        for _ in 0..20 {
+            store
+                .consume_agent_tool_call(&capability.token, "knowledge_search_entries")
+                .unwrap();
+        }
+        assert!(store
+            .consume_agent_tool_call(&capability.token, "knowledge_search_entries")
+            .unwrap_err()
+            .to_string()
+            .contains("上限"));
     }
 
     #[test]

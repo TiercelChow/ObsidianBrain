@@ -480,6 +480,7 @@ pub struct AgentRunInspection {
     pub run: AgentRun,
     pub events: Vec<AgentRunEvent>,
     pub snapshot: Option<AgentRunInspectionSnapshot>,
+    pub evidence: Vec<Value>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]

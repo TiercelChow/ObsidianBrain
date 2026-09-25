@@ -5,6 +5,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use crate::core::agent_tool_gateway::{
     agent_knowledge_tool_schemas, call_agent_knowledge_tool, AGENT_EXTERNAL_RESEARCH_TOOL,
@@ -84,20 +85,18 @@ async fn call_tool(
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    let result = if name == AGENT_EXTERNAL_RESEARCH_TOOL {
-        match ctx
-            .book_wiki_service
-            .store()
-            .validate_agent_run_capability(token, name)
-        {
-            Ok(grant) => {
-                fetch_external_source(ctx.book_wiki_service.store(), &grant, arguments).await
-            }
-            Err(error) => Err(error),
+    let store = ctx.book_wiki_service.store();
+    let result = match store.consume_agent_tool_call(token, name) {
+        Ok(grant) if name == AGENT_EXTERNAL_RESEARCH_TOOL => {
+            fetch_external_source(store, &grant, arguments).await
         }
-    } else {
-        call_agent_knowledge_tool(ctx.book_wiki_service.store(), token, name, arguments)
+        Ok(_) => call_agent_knowledge_tool(store, token, name, arguments),
+        Err(error) => Err(error),
     };
+    let result = result.and_then(|value| {
+        record_tool_evidence(ctx.book_wiki_service.store(), token, name, &value)?;
+        Ok(value)
+    });
     match result {
         Ok(value) => {
             let text = serde_json::to_string(&value)
@@ -113,6 +112,87 @@ async fn call_tool(
             "isError": true
         })),
     }
+}
+
+fn record_tool_evidence(
+    store: &crate::infra::book_wiki_store::BookWikiStore,
+    token: &str,
+    tool: &str,
+    result: &Value,
+) -> Result<(), BrainError> {
+    let (kind, object, version, snapshot) = match tool {
+        "knowledge_get_entry" => {
+            let id = result.get("id").and_then(Value::as_str);
+            let revision = result.get("revision").and_then(Value::as_i64);
+            let (Some(id), Some(revision)) = (id, revision) else {
+                return Err(BrainError::Internal(
+                    "知识条目工具结果缺少证据版本".to_string(),
+                ));
+            };
+            (
+                "entry",
+                id.to_string(),
+                revision.to_string(),
+                json!({
+                    "title": result.get("title"),
+                    "summary": result.get("summary"),
+                    "source_path": result.get("source_path"),
+                }),
+            )
+        }
+        "book_read_source_span" => {
+            let span = result.get("span");
+            let id = span
+                .and_then(|value| value.get("id"))
+                .and_then(Value::as_str);
+            let version = span
+                .and_then(|value| value.get("source_version_id"))
+                .and_then(Value::as_str);
+            let (Some(id), Some(version)) = (id, version) else {
+                return Err(BrainError::Internal(
+                    "来源片段工具结果缺少证据版本".to_string(),
+                ));
+            };
+            (
+                "source_span",
+                id.to_string(),
+                version.to_string(),
+                json!({
+                    "source_path": span.and_then(|value| value.get("source_path")),
+                    "heading": span.and_then(|value| value.get("heading")),
+                    "line_start": span.and_then(|value| value.get("line_start")),
+                    "line_end": span.and_then(|value| value.get("line_end")),
+                    "offset_chars": span.and_then(|value| value.get("offset_chars")),
+                    "returned_chars": span.and_then(|value| value.get("content")).and_then(Value::as_str).map(|value| value.chars().count()),
+                    "total_chars": span.and_then(|value| value.get("total_chars")),
+                }),
+            )
+        }
+        AGENT_EXTERNAL_RESEARCH_TOOL => {
+            let url = result.get("url").and_then(Value::as_str);
+            let text = result.get("text").and_then(Value::as_str);
+            let (Some(url), Some(text)) = (url, text) else {
+                return Err(BrainError::Internal(
+                    "外部资料工具结果缺少地址或正文".to_string(),
+                ));
+            };
+            let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
+            (
+                "external",
+                url.to_string(),
+                hash.clone(),
+                json!({
+                    "url": url,
+                    "content_sha256": hash,
+                    "content_type": result.get("content_type"),
+                    "request_number": result.get("request_number"),
+                }),
+            )
+        }
+        _ => return Ok(()),
+    };
+    let grant = store.validate_agent_run_token(token)?;
+    store.record_agent_run_evidence(&grant.run_id, kind, &object, &version, &snapshot)
 }
 
 fn bearer_token(headers: &HeaderMap) -> Result<&str, BrainError> {
@@ -133,6 +213,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::api::router::create_router;
+    use crate::infra::book_wiki_store::{MarkdownSourceDraft, SourceSectionDraft};
     use crate::models::book_wiki::{BookKind, ReaderBook};
 
     #[tokio::test]
@@ -225,5 +306,124 @@ mod tests {
             .unwrap();
         let response = app.oneshot(revoked).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn test_agent_mcp_records_source_span_actually_read() {
+        let (ctx, _dir, vault) = crate::AppContext::for_test();
+        let store = ctx.book_wiki_service.store();
+        store
+            .save_reader_books(&[ReaderBook {
+                id: "evidence-book".to_string(),
+                path: vault.to_string_lossy().to_string(),
+                kind: BookKind::Folder,
+                name: "证据测试书".to_string(),
+                description: String::new(),
+                category: String::new(),
+                added_at: 1,
+                progress: None,
+            }])
+            .unwrap();
+        let base = store.initialize_base("evidence-book").unwrap();
+        store
+            .sync_markdown_sources(
+                &base.id,
+                &[MarkdownSourceDraft {
+                    id: "source-evidence".to_string(),
+                    version_id: "version-evidence".to_string(),
+                    original_path: vault.join("evidence.md").to_string_lossy().to_string(),
+                    relative_path: "evidence.md".to_string(),
+                    title: "证据".to_string(),
+                    ordinal: 0,
+                    content_hash: "hash-evidence".to_string(),
+                    size_bytes: 10,
+                    modified_at: None,
+                    sections: vec![SourceSectionDraft {
+                        id: "span-evidence".to_string(),
+                        entry_id: "entry-evidence".to_string(),
+                        slug: "evidence".to_string(),
+                        title: "证据".to_string(),
+                        summary: "原文证据".to_string(),
+                        content_md: "原文证据".repeat(1_500),
+                        line_start: 1,
+                        line_end: 1,
+                        content_hash: "section-hash-evidence".to_string(),
+                    }],
+                }],
+            )
+            .unwrap();
+        let run = store
+            .start_agent_run(&base.id, "deepseek_harness", "knowledge_qa", &json!({}))
+            .unwrap();
+        let capability = store
+            .issue_agent_run_capability(
+                &run.id,
+                std::slice::from_ref(&base.id),
+                &["book_read_source_span".to_string()],
+                300,
+            )
+            .unwrap();
+        let app = create_router(ctx.clone());
+        let request = Request::post("/v1/knowledge/agent-mcp")
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {}", capability.token))
+            .body(Body::from(
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "book_read_source_span",
+                        "arguments": {
+                            "knowledge_base_id": base.id,
+                            "source_span_id": "span-evidence"
+                        }
+                    }
+                })
+                .to_string(),
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["result"]["isError"], false);
+        let ledger = store.list_agent_run_evidence(&run.id).unwrap();
+        assert_eq!(ledger.len(), 1);
+        assert_eq!(ledger[0].kind, "source_span");
+        assert_eq!(ledger[0].object_id, "span-evidence");
+        assert_eq!(ledger[0].version_id, "version-evidence");
+        assert_eq!(ledger[0].snapshot["offset_chars"], 0);
+        assert_eq!(ledger[0].snapshot["returned_chars"], 4_000);
+
+        let next_page = Request::post("/v1/knowledge/agent-mcp")
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {}", capability.token))
+            .body(Body::from(
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "book_read_source_span",
+                        "arguments": {
+                            "knowledge_base_id": base.id,
+                            "source_span_id": "span-evidence",
+                            "offset_chars": 4000
+                        }
+                    }
+                })
+                .to_string(),
+            ))
+            .unwrap();
+        let response = app.oneshot(next_page).await.unwrap();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            payload["result"]["structuredContent"]["span"]["has_more"],
+            false
+        );
+        let ledger = store.list_agent_run_evidence(&run.id).unwrap();
+        assert_eq!(ledger.len(), 2);
+        assert_eq!(ledger[1].snapshot["offset_chars"], 4_000);
     }
 }

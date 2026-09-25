@@ -141,7 +141,7 @@
               </div>
               <section v-if="activeInspection.snapshot?.skill_snapshots.length" class="run-inspector-section">
                 <h4>Skill 快照</h4>
-                <div class="run-skill-list"><span v-for="skill in activeInspection.snapshot.skill_snapshots" :key="skill.id"><b>{{ skill.name }}</b><small>{{ skill.slug }} · Revision {{ skill.revision }} · {{ skill.application_mode === 'declared_only' ? '仅声明' : '已注入 Prompt' }}</small></span></div>
+                <div class="run-skill-list"><span v-for="skill in activeInspection.snapshot.skill_snapshots" :key="skill.id"><b>{{ skill.name }}</b><small>{{ skill.slug }} · Revision {{ skill.revision }} · {{ skill.application_mode === 'harness_native_available' ? 'Harness 可按需读取' : skill.application_mode === 'declared_only' ? '仅声明' : '已注入 Prompt' }}</small></span></div>
               </section>
               <section v-if="activeInspection.snapshot?.config_snapshots.length" class="run-inspector-section">
                 <h4>配置快照</h4>
@@ -155,6 +155,15 @@
               <section class="run-inspector-section">
                 <h4>工具白名单</h4>
                 <div class="run-tool-list"><code v-for="tool in activeInspection.snapshot?.tool_names || []" :key="tool">{{ tool }}</code><span v-if="!activeInspection.snapshot?.tool_names.length">本次运行没有挂载工具</span></div>
+              </section>
+              <section v-if="activeInspection.evidence?.length" class="run-inspector-section">
+                <h4>实际读取的证据</h4>
+                <div class="run-evidence-list">
+                  <div v-for="(evidence, index) in activeInspection.evidence" :key="`${evidence.kind}-${evidence.object_id}-${index}`">
+                    <strong>{{ evidence.kind === 'entry' ? '知识实体' : evidence.kind === 'source_span' ? '原文片段' : '外部资料' }} · {{ String(evidence.snapshot.title || evidence.snapshot.heading || evidence.snapshot.url || evidence.object_id) }}</strong>
+                    <small>{{ evidence.object_id }} · 版本 {{ evidence.version_id }}<template v-if="evidence.snapshot.offset_chars != null"> · 字符 {{ evidence.snapshot.offset_chars }} 起</template></small>
+                  </div>
+                </div>
               </section>
               <section v-if="inspectionEvents.length" class="run-inspector-section">
                 <h4>运行时间线</h4>
@@ -599,6 +608,10 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId })
 .run-config-list pre { max-height: 220px; margin: 0; overflow: auto; padding: 11px; border-top: 1px solid var(--border-faint); color: var(--text-secondary); font-family: var(--font-mono); font-size: 9px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 .run-tool-list { display: flex; flex-wrap: wrap; gap: 5px; }
 .run-tool-list code, .run-tool-list span { padding: 4px 7px; border-radius: 7px; background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-muted); font-size: 8px; }
+.run-evidence-list { display: grid; gap: 5px; }
+.run-evidence-list > div { min-width: 0; display: grid; gap: 3px; padding: 8px 10px; border: 1px solid var(--border-faint); border-radius: 9px; background: color-mix(in srgb, var(--bg-base) 38%, transparent); }
+.run-evidence-list strong { overflow-wrap: anywhere; color: var(--text-secondary); font-size: 10px; font-weight: 650; }
+.run-evidence-list small { overflow-wrap: anywhere; color: var(--text-faint); font-family: var(--font-mono); font-size: 9px; }
 .run-event-list { max-height: 210px; display: grid; gap: 0; overflow: auto; margin: 0; padding: 0; list-style: none; }
 .run-event-list li { min-height: 38px; display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 7px; align-items: start; }
 .run-event-list li > i { width: 7px; height: 7px; margin-top: 5px; border: 2px solid var(--accent); border-radius: 50%; background: var(--bg-base); }

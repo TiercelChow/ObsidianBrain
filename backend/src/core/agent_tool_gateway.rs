@@ -10,6 +10,7 @@ pub const AGENT_KNOWLEDGE_TOOLS: &[&str] = &[
     "book_list_sources",
     "book_search_sources",
     "book_read_source_span",
+    "knowledge_list_compiled_catalog",
     "knowledge_search_entries",
     "knowledge_get_entry",
     "knowledge_get_neighbors",
@@ -57,13 +58,27 @@ pub fn agent_knowledge_tool_schemas() -> Vec<Value> {
         ),
         tool_schema(
             "book_read_source_span",
-            "读取当前授权书籍中的一个来源片段",
+            "分页读取当前授权书籍中的一个来源片段；超长片段需按字符偏移继续读取",
             object_schema(
                 json!({
                     "knowledge_base_id": { "type": "string" },
-                    "source_span_id": { "type": "string" }
+                    "source_span_id": { "type": "string" },
+                    "offset_chars": { "type": "integer", "minimum": 0 },
+                    "max_chars": { "type": "integer", "minimum": 1, "maximum": 4000 }
                 }),
                 &["knowledge_base_id", "source_span_id"],
+            ),
+        ),
+        tool_schema(
+            "knowledge_list_compiled_catalog",
+            "分页浏览当前书籍的编译知识标题、别名和简短概述；用于跨主题语义筛选，不返回正文。offset 从 0 开始，结合 total 浏览后续页",
+            object_schema(
+                json!({
+                    "knowledge_base_id": { "type": "string" },
+                    "offset": { "type": "integer", "minimum": 0 },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 200 }
+                }),
+                &["knowledge_base_id"],
             ),
         ),
         tool_schema(
@@ -204,22 +219,50 @@ pub fn call_agent_knowledge_tool(
             let args: SearchSourcesArgs = parse_arguments(arguments)?;
             require_scope(&grant, &args.knowledge_base_id)?;
             validate_query(&args.query)?;
+            let spans = store.search_source_spans(
+                &args.knowledge_base_id,
+                &args.query,
+                args.limit.unwrap_or(12).clamp(1, 50),
+            )?;
             Ok(json!({
-                "spans": store.search_source_spans(
-                    &args.knowledge_base_id,
-                    &args.query,
-                    args.limit.unwrap_or(12).clamp(1, 50),
-                )?
+                "spans": spans.into_iter().map(|span| json!({
+                    "id": span.id,
+                    "source_path": span.source_path,
+                    "heading": span.heading,
+                    "line_start": span.line_start,
+                    "line_end": span.line_end,
+                    "preview": span.content.chars().take(240).collect::<String>(),
+                })).collect::<Vec<_>>()
             }))
         }
         "book_read_source_span" => {
             let args: ReadSourceSpanArgs = parse_arguments(arguments)?;
             require_scope(&grant, &args.knowledge_base_id)?;
+            let span =
+                store.get_current_source_span(&args.knowledge_base_id, &args.source_span_id)?;
+            let total_chars = span.content.chars().count();
+            let offset_chars = args.offset_chars.unwrap_or(0).min(total_chars);
+            let max_chars = args.max_chars.unwrap_or(4_000).clamp(1, 4_000);
+            let content = span
+                .content
+                .chars()
+                .skip(offset_chars)
+                .take(max_chars)
+                .collect::<String>();
             Ok(json!({
-                "span": store.get_current_source_span(
-                    &args.knowledge_base_id,
-                    &args.source_span_id,
-                )?
+                "span": {
+                    "id": span.id,
+                    "source_document_id": span.source_document_id,
+                    "source_version_id": span.source_version_id,
+                    "source_path": span.source_path,
+                    "heading": span.heading,
+                    "line_start": span.line_start,
+                    "line_end": span.line_end,
+                    "content": content,
+                    "offset_chars": offset_chars,
+                    "total_chars": total_chars,
+                    "has_more": offset_chars.saturating_add(max_chars) < total_chars,
+                }
             }))
         }
         "knowledge_search_entries" => {
@@ -235,6 +278,26 @@ pub fn call_agent_knowledge_tool(
                     args.entry_type.as_deref(),
                     args.limit.unwrap_or(12).clamp(1, 50),
                 )?
+            }))
+        }
+        "knowledge_list_compiled_catalog" => {
+            let args: CompiledCatalogArgs = parse_arguments(arguments)?;
+            require_scope(&grant, &args.knowledge_base_id)?;
+            let offset = args.offset.unwrap_or(0);
+            let limit = args.limit.unwrap_or(100).clamp(1, 200);
+            let (entries, total) =
+                store.list_qa_catalog_page(&args.knowledge_base_id, offset, limit)?;
+            Ok(json!({
+                "entries": entries.into_iter().map(|entry| json!({
+                    "id": entry.id,
+                    "title": entry.title,
+                    "aliases": entry.aliases.into_iter().take(4).collect::<Vec<_>>(),
+                    "summary": entry.summary.chars().take(160).collect::<String>(),
+                    "type": entry.entry_type,
+                })).collect::<Vec<_>>(),
+                "offset": offset,
+                "total": total,
+                "has_more": offset.saturating_add(limit) < total.max(0) as usize,
             }))
         }
         "knowledge_get_entry" => {
@@ -377,6 +440,8 @@ struct SearchSourcesArgs {
 struct ReadSourceSpanArgs {
     knowledge_base_id: String,
     source_span_id: String,
+    offset_chars: Option<usize>,
+    max_chars: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -385,6 +450,14 @@ struct SearchEntriesArgs {
     knowledge_base_id: String,
     query: Option<String>,
     entry_type: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CompiledCatalogArgs {
+    knowledge_base_id: String,
+    offset: Option<usize>,
     limit: Option<usize>,
 }
 
@@ -498,7 +571,10 @@ mod tests {
             .issue_agent_run_capability(
                 &run.id,
                 std::slice::from_ref(&base_a.id),
-                &["book_search_sources".to_string()],
+                &[
+                    "book_search_sources".to_string(),
+                    "knowledge_list_compiled_catalog".to_string(),
+                ],
                 300,
             )
             .unwrap();
@@ -524,5 +600,24 @@ mod tests {
         )
         .unwrap_err();
         assert!(unknown.to_string().contains("unknown field"));
+
+        let source_search = call_agent_knowledge_tool(
+            &store,
+            &capability.token,
+            "book_search_sources",
+            json!({ "knowledge_base_id": base_a.id, "query": "内容" }),
+        )
+        .unwrap();
+        assert!(source_search["spans"][0]["preview"].is_string());
+        assert!(source_search["spans"][0].get("content").is_none());
+        let catalog = call_agent_knowledge_tool(
+            &store,
+            &capability.token,
+            "knowledge_list_compiled_catalog",
+            json!({ "knowledge_base_id": base_a.id, "offset": 0, "limit": 20 }),
+        )
+        .unwrap();
+        assert_eq!(catalog["total"], 0);
+        assert_eq!(catalog["entries"].as_array().unwrap().len(), 0);
     }
 }

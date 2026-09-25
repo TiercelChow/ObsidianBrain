@@ -1,0 +1,2 @@
+-- The current built-in query and research Skill bodies are replaced by the
+-- application seed step for this migration. No historical versions are kept.

@@ -62,7 +62,7 @@
           <div v-if="!messages.length && !historyLoading" class="chat-welcome">
             <div class="welcome-symbol"><el-icon><ChatDotRound /></el-icon></div>
             <h2>从这本书开始思考</h2>
-            <p>问题会先在当前书籍的数据库实体中召回证据，再交给 DeepSeek Harness 生成带来源编号的回答。</p>
+            <p>先结合会话理解问题，再从本书编译知识目录选择证据；必要时继续核对原文。</p>
             <button v-for="question in starterQuestions" :key="question" @click="ask(question)">{{ question }}</button>
           </div>
           <div v-else-if="historyLoading && !messages.length" class="history-loading">
@@ -229,6 +229,7 @@ function setActivity(phase: string) {
 }
 
 function labelForRuntimePhase(message: string): string | null {
+  if (/理解追问|编译知识目录/.test(message)) return '正在理解问题与选择知识'
   if (/结束|校验/.test(message)) return '正在整理回答'
   if (/启动|连接|会话/.test(message)) return '正在连接模型'
   if (/请求|等待|分析|思考/.test(message)) return '正在分析书内证据'
@@ -383,16 +384,20 @@ async function ask(question: string) {
       const textBuffer = createStreamedTextBuffer(chunk => { assistantMessage.content += chunk })
       activeTextBuffer = textBuffer
       let receivedText = ''
+      let answerEvidenceDelivered = false
       const result = await streamBookKnowledge(
         activeBaseId.value,
         value,
         activeConversationId.value || undefined,
         (event) => {
           if (event.type === 'evidence') {
+            answerEvidenceDelivered = true
             assistantMessage.evidence = event.evidence
           } else if (event.type === 'run_started') {
-            assistantMessage.runId = event.run_id
-            setActivity('正在连接模型')
+            if (answerEvidenceDelivered) {
+              assistantMessage.runId = event.run_id
+              setActivity('正在连接模型')
+            }
           } else if (event.type === 'text_delta') {
             receivedText += event.delta
             textBuffer.push(event.delta)

@@ -230,6 +230,21 @@ const MIGRATIONS: &[Migration] = &[
         description: "multiple model providers and secure credential references",
         sql: include_str!("../../migrations/036_multiple_llm_providers.sql"),
     },
+    Migration {
+        version: 37,
+        description: "run-scoped evidence actually read by agents",
+        sql: include_str!("../../migrations/037_agent_run_evidence.sql"),
+    },
+    Migration {
+        version: 38,
+        description: "native Harness query and research skill contracts",
+        sql: include_str!("../../migrations/038_harness_wiki_skill_contract.sql"),
+    },
+    Migration {
+        version: 39,
+        description: "bounded agent knowledge tool calls",
+        sql: include_str!("../../migrations/039_agent_tool_call_budget.sql"),
+    },
 ];
 
 fn seed_detailed_ingest_skill(conn: &Connection) -> Result<(), BrainError> {
@@ -396,6 +411,62 @@ fn overwrite_wiki_prompt_contract_skills(conn: &Connection) -> Result<(), BrainE
                 "内置 Skill {skill_id} 缺失或类型错误"
             )));
         }
+    }
+    Ok(())
+}
+
+fn overwrite_harness_wiki_skills(conn: &Connection) -> Result<(), BrainError> {
+    let version_ids = [
+        "skill-version-book-query-v3",
+        "skill-version-book-research-v3",
+    ];
+    for version_id in version_ids {
+        conn.execute(
+            "DELETE FROM skill_evaluation_runs
+             WHERE skill_version_id = ?1 OR baseline_version_id = ?1",
+            params![version_id],
+        )?;
+        conn.execute(
+            "DELETE FROM skill_benchmark_runs
+             WHERE skill_version_id = ?1 OR baseline_version_id = ?1",
+            params![version_id],
+        )?;
+    }
+    for (skill_id, version_id, content) in [
+        (
+            "skill-book-query",
+            "skill-version-book-query-v3",
+            include_str!("../../skills/book-query/SKILL.md"),
+        ),
+        (
+            "skill-book-research",
+            "skill-version-book-research-v3",
+            include_str!("../../skills/book-research/SKILL.md"),
+        ),
+    ] {
+        let content_hash = hex::encode(Sha256::digest(content.as_bytes()));
+        let size_bytes = i64::try_from(content.len())
+            .map_err(|_| BrainError::Internal("内置 Skill 大小超出限制".to_string()))?;
+        let version_count = conn.execute(
+            "UPDATE skill_versions SET content_hash = ?1, release_state = 'published',
+                    changelog = '适配 Harness 原生 Skill 与分层语义检索'
+             WHERE id = ?2 AND skill_id = ?3",
+            params![&content_hash, version_id, skill_id],
+        )?;
+        let file_count = conn.execute(
+            "UPDATE skill_files SET content_text = ?1, content_hash = ?2, size_bytes = ?3
+             WHERE skill_version_id = ?4 AND relative_path = 'SKILL.md'",
+            params![content, &content_hash, size_bytes, version_id],
+        )?;
+        if version_count != 1 || file_count != 1 {
+            return Err(BrainError::Internal(format!(
+                "内置 Skill 当前版本 {version_id} 缺失或重复"
+            )));
+        }
+        conn.execute(
+            "UPDATE skills SET updated_at = ?2 WHERE id = ?1",
+            params![skill_id, Utc::now().to_rfc3339()],
+        )?;
     }
     Ok(())
 }
@@ -621,6 +692,7 @@ impl SqliteStore {
                 32 => compact_wiki_skill_versions(&conn),
                 33 => overwrite_structured_presentation_skill(&conn),
                 34 => overwrite_structured_presentation_skill(&conn),
+                38 => overwrite_harness_wiki_skills(&conn),
                 _ => Ok(()),
             };
             if let Err(error) = seed_result {
@@ -1705,7 +1777,7 @@ mod tests {
                         conn.query_row("SELECT MAX(version) FROM _migrations", [], |row| {
                             row.get(0)
                         })?;
-                    assert_eq!(latest, 36);
+                    assert_eq!(latest, 39);
                     for (skill_id, version_id, expected_content) in [
                         (
                             "skill-book-ingest",

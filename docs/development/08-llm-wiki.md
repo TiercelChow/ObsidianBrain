@@ -27,7 +27,7 @@
 
 迁移 020 增加 `agent_run_capabilities` 与知识库范围表。能力令牌采用高熵随机值，SQLite 只保存 SHA-256，验证同时检查 Run 仍在运行、过期时间、知识库范围和工具白名单。Harness 通过 `@deepseek-ai/dsh-mcp-client` 的 `streamable-http` 配置访问 `127.0.0.1` 专用 MCP 端点；问答、摄入和研究使用不同的最小工具集，未知字段、跨书访问、过期或已撤销令牌均被拒绝。
 
-迁移 017 的 Skill Registry 支持内置 Skill、自定义 Markdown 指令和安全 ZIP 导入。ZIP 限制文件数、单文件/展开大小，拒绝路径穿越、符号链接、二进制与脚本；所有文本资源版本化存入 SQLite。运行时只注入当前书籍、当前用途已启用的指令，不开放 Harness 自带 Skill、文件、Shell、Web 或子 Agent 权限。
+迁移 017 的 Skill Registry 支持内置 Skill、自定义 Markdown 指令和安全 ZIP 导入。ZIP 限制文件数、单文件/展开大小，拒绝路径穿越、符号链接、二进制与脚本；所有文本资源版本化存入 SQLite。问答与研究运行时只把当前书籍、当前用途已启用的指令物化为本次临时目录中的 `SKILL.md`，由固定版本 Harness 的 `skill-filesystem`/`tool-skill` 按需发现和读取；`includeDefaultRoots: false` 防止扫描用户自己的 Skill 目录。业务权限仍由能力令牌决定，不开放 Shell、任意文件、Web 或子 Agent。智能编译和演示策划仍按各自的既有 Prompt 注入合同运行。
 
 研究任务可以选择 `presentation` 交付物。这类任务现在分为两个可审计 Run：首先按普通研究任务生成保留证据、数据口径、竞争解释与边界的完整 Markdown 报告；然后由无工具权限的 `knowledge_task_presentation_plan` Run 注入 `book-presentation` Skill，把报告编辑为严格 JSON `PresentationSpec`。服务端校验受众、中心主张、页数、文本密度、版式多样性、版式专用字段和 `S<n>` 引用；无效规格会带精确错误完整修复一次，不静默截取或降级回旧圆点模板。
 
@@ -49,7 +49,7 @@
 
 迁移 022 为研究任务增加显式外部研究开关、域名白名单、请求额度与已用次数。只有带开关的 `knowledge_task_research` Run 才会获得 `book_fetch_external`；MCP 网关先验证 Run Capability，再原子消费额度，最后解析 DNS 并拒绝非公网地址。读取器固定 HTTPS/443、关闭重定向、只接受文本 MIME、限制 15 秒与 512 KiB，并把访问摘要写入 Run 事件。`book-synthesis` 和 `markdown-collection` 同批进入内置 Skill Registry；它们仍只能改变分析/输出格式，不能扩大工具权限。脚本型 Skill 继续保持不可执行，直到有独立沙箱、审批和资源配额。
 
-迁移 024 增加 `agent_run_inspections`。`BookWikiService::run_audited` 在启动 Runtime 前保存最终有效 Prompt、稳定哈希、字符数、Skill/配置内容快照、工具白名单和证据引用；快照与 Run 一对一且运行后不可随当前配置变化。Skill 详情接口从 `skills/skill_versions/skill_files` 返回完整版本和文本资源；内置 Skill 保持只读，前端通过复制生成新的自定义 Skill。问答、研究与智能编译都把本次实际注入的 Skill 记录为 `prompt_injected`。
+迁移 024 增加 `agent_run_inspections`。`BookWikiService::run_audited` 在启动 Runtime 前保存最终有效 Prompt、稳定哈希、字符数、Skill/配置内容快照、工具白名单和预载证据引用；快照与 Run 一对一且运行后不可随当前配置变化。Skill 详情接口从 `skills/skill_versions/skill_files` 返回当前版本和文本资源；内置 Skill 保持只读，前端通过复制生成新的自定义 Skill。问答、研究选中的 Skill 标记为 `harness_native_available`（可用不代表模型一定读取）；智能编译和演示策划仍标记为 `prompt_injected`。实际工具读取证据另由迁移 037 的 `agent_run_evidence` 按 Run 记录。
 
 迁移 025 给来源编译检查点增加 `compile_fingerprint`，并把 Skill 绑定范围扩展为 `qa/research/both/ingest/all`。指纹由编译协议 revision、Runtime Profile 与模型、有效配置文档内容哈希、实际启用 Skill 的 revision 与内容哈希组成。准备和执行阶段都按当前指纹查询待编译来源；任一输入变化都会让全书来源重新进入编译，但相同指纹仍只处理内容版本变化的来源。没有启用 `ingest` Skill 时回退到内置 `book-ingest`；启用自定义编译 Skill 后只注入这些 Skill，硬编码的安全、引用和 JSON Schema 约束仍位于其上层并由服务端二次校验。
 
@@ -694,13 +694,13 @@ Skill 详情查询必须一次返回当前绑定状态、当前内容及候选�
 - 本 Run 允许使用的工具名和显式证据 ID；
 - 与 `agent_run_events` 组合后的可恢复时间线。
 
-旧运行允许没有快照，查询接口返回 `snapshot: null`，前端显示“历史运行未记录检查快照”，不得推测当时 Prompt。检查快照用于可解释性和问题定位，不替代能力令牌校验，也不能反向授予工具权限。
+旧运行允许没有快照，查询接口返回 `snapshot: null`，前端显示“历史运行未记录检查快照”，不得推测当时 Prompt。研究任务检查器另外展示本次实际读取证据的对象 ID、版本和必要元数据，并区分“已注入 Prompt”与“Harness 可按需读取”的 Skill；后者不等于模型必然调用了该 Skill。检查快照用于可解释性和问题定位，不替代能力令牌校验，也不能反向授予工具权限。
 
 迁移 031 按产品所有者要求，直接覆盖 `book-ingest`、`book-query`、`book-research` 当前内置版本的正文、内容哈希和变更说明，不创建新版本，也不保留本次替换前的 Skill 正文。三个内置身份继续指向原有 v3 版本 ID，因此页面、绑定关系和运行时选择无需迁移。由于版本 ID 被复用，迁移会删除以这三个旧正文为候选或基线的固定评测与真实模型基准结果，避免旧分数误用于新正文；逐项基准结果随父记录级联删除，独立 Agent Run 审计仍保留。候选后续发布时必须基于新基线重新评测。此轮不调用真实模型基准，也不调整页面发布自定义候选的门槛。
 
 迁移 032 实施开发期的单版本策略：验证每个 Skill 的 `current_version_id` 后，删除所有非当前 `skill_versions`，旧 `skill_files`、来源元数据和基准明细按外键级联清理；引用旧候选或旧基线的评测/模型基准一并失效，独立 Agent Run 审计仍保留。新建数据库最终只有 7 个内置 Skill、7 个当前版本和 7 份 `SKILL.md`。后续编辑自定义 Skill、发布候选或执行回滚成功后也会立即清理同一 Skill 的其他版本，因此页面只展示当前生效内容；候选在发布前可与当前基线短暂共存，以完成质量检查。该策略用于当前快速迭代阶段，未来若重新启用历史版本，需要新增迁移与产品交互设计，不能假设旧正文仍可恢复。
 
-Skill 区块总预算 8,000 字符，单 Skill 上限 6,000，多个 Skill 共享预算；配置总预算 4,000。正文裁剪标注 `[内容已截断]`，最终运行 Prompt 是实际生效内容的权威记录。
+问答、研究的最终 Prompt 只列出已启用 Skill 的名称和说明，正文由 Harness 的原生 Skill 工具按需读取；检查快照保存物化前的选中指令版本。其它仍使用 Prompt 注入的运行受 Skill 区块总预算 8,000 字符、单 Skill 6,000 字符、配置总预算 4,000 字符约束；正文裁剪标注 `[内容已截断]`。当前原生接入只物化指令正文，不自动开放 ZIP 中的附加参考文件；如需引用资源，应先增加受控读取工具。
 
 ---
 
@@ -710,30 +710,34 @@ Skill 区块总预算 8,000 字符，单 Skill 上限 6,000，多个 Skill 共�
 
 对话和消息保存在 ObsidianBrain SQLite。Harness Session ID 仅为一次运行的诊断关联，不作为恢复对话的唯一依据。
 
-当前实现使用 `knowledge_conversations`、`knowledge_conversation_scopes`、`knowledge_messages` 和 `knowledge_message_citations`。每次成功问答在同一事务中写入用户消息、助手消息及有序来源；页面加载时按知识库列出会话并恢复最近一项。继续会话时最多取最近八条消息辅助理解指代，但这些历史消息不能替代本轮召回的数据库证据。
+当前实现使用 `knowledge_conversations`、`knowledge_conversation_scopes`、`knowledge_messages` 和 `knowledge_message_citations`。每次成功问答在同一事务中写入用户消息、助手消息及有序来源；页面加载时按知识库列出会话并恢复最近一项。继续会话时，目录规划 Run 最多读取最近十六条消息辅助理解指代，上一条助手回答最多保留六千字符，其余用户/助手消息分别最多保留一千/一千五百字符。完整历史不再进入回答 Run，历史消息不能替代本轮数据库证据。
 
 DeepSeek Harness Adapter 读取 ACP `AgentMessageChunk`，后端在保存同一增量事件的同时通过 `/v1/knowledge/chat/stream` 发送 SSE。前端把 delta 直接追加到 Markdown 消息，完成事件再以最终答案校正正文与来源；不再对完整回答做二次播放动画。`AgentThoughtChunk` 只映射为“正在分析”阶段，不保存或展示模型内部推理文本。
 
 ### 11.2 单次问答
 
-> 当前链路为“Rust 限定范围并预召回 → Capability 授权同书工具 → ACP 按需检索并流式生成 → 保存回答/引用”。
+> 当前链路为“Rust 限定范围 → 模型根据完整编译目录和会话历史改写追问、选择候选 → FTS 补充召回 → Capability 授权同书工具 → ACP 按需检索并流式生成 → 保存回答/引用”。
 
 ```text
-保存用户消息
+读取同书会话历史
   → 确定显式知识库范围
-  → 检索候选实体与来源
+  → 分批浏览当前全部编译条目的标题、别名与短概述
+  → 补全追问指代，选择编译候选条目
+  → 用独立问题执行 FTS 补充召回
   → 建立上下文预算
   → 启动 Harness Run
   → Agent 按需继续调用检索工具
-  → 保存回答和引用
+  → 成功后保存本轮用户消息、回答和引用
   → SSE 结束事件
 ```
 
+目录规划使用独立的只读 Harness Run，不开放知识工具；每批最多一千条编译条目，只接受真实存在且属于该批的 ID。多批候选先交错合并，再用一次全局重排避免前一批挤掉后一批。规划器输出独立问题、候选 ID 和回答模式；只有明确要求改写上一条回答而不增加书籍事实时，才选“改写”模式，简单寒暄可直接回答且不开放知识工具。规划失败或返回无效结构时降级到当前问题的 FTS 搜索，不阻断回答。完整目录、未选中的摘要、规划器原始 JSON 和历史全文都不拼入回答 Prompt，也不作为后续对话消息保存；它们仅保留在规划 Run 的诊断快照中。回答 Run 只得到当前原话、补全指代及有效约束后的独立问题、选中证据，以及必要的配置与 Skill 名录。改写模式额外给最近一条助手回答作待编辑文本，并优先重新载入其来源；普通追问绝不带入旧回答正文。规划输出不作为回答文本流给用户；最终回答仍由另一 Run 流式生成。问答允许初始候选为空，由授权 Agent 按需检索同书资料。服务端不固定 Agent 检索轮数；是否继续检索由 Harness 根据指令和工具结果判断。
+
 ### 11.3 引用校验
 
-当前预载条目按 `[S<n>]` 编号并保存来源卡片。Prompt 限定模型只能使用本轮真实编号；工具补查但未预分配编号的资料须列真实 entry/span ID、标题和路径，不得伪造新编号。当前链路尚不自动把补查工具结果转换为新的可点击来源卡片，也不声称已经对每句回答完成语义引用核验。
+当前预载条目按 `[S<n>]` 编号并保存来源卡片。Prompt 限定模型只能使用本轮真实编号；工具补查但未预分配编号的资料须列真实 entry/span ID、标题和路径，不得伪造新编号。MCP 网关记录实际读取条目的 revision、来源片段版本/页区间与外部资料哈希；完成前拒绝越界 `[S<n>]` 和本轮账本中不存在的 `entry_id`/`span_id`。问答结束后，实际读取的条目及能映射到条目的原文片段会补入来源卡片，并通过 SSE 更新页面。此门禁仅验证引用归属，不作逐句语义蕴含验证；未能映射到条目的原文片段和外部资料仍只在运行审计中可见。
 
-`backend/prompts/wiki/answer.md` 为未绑定 Skill 的问答也提供基础质量规则：按问题类型作答、保留条件与版本、区分直接事实/综合/推断、比较时统一维度、先给部分可回答内容再指出具体缺口，并在关键结论旁引用。当前问题先注入，历史最多八条且每条限 480 字符，证据按剩余预算公平分配；不会由第一条长正文占满所有后续证据的空间。Prompt 还显式传入本次知识库 ID，供同书工具使用。真实流式输出链路不变。
+`backend/prompts/wiki/answer.md` 为未绑定 Skill 的问答也提供基础质量规则：按问题类型作答、保留条件与版本、区分直接事实/综合/推断、比较时统一维度、先给部分可回答内容再指出具体缺口，并在关键结论旁引用。当前问题和追问补全后的独立问题都会注入，后者只用于消解指代，冲突时以前者为准；上一轮引用编号不能继承。证据按剩余预算公平分配，不会由第一条长正文占满所有后续证据的空间。Prompt 还显式传入本次知识库 ID，供同书工具使用。真实流式输出链路不变。
 
 ### 11.4 阅读跳转
 
@@ -745,7 +749,7 @@ DeepSeek Harness Adapter 读取 ACP `AgentMessageChunk`，后端在保存同一�
 
 ### 11.5 Token 用量统计
 
-迁移 015 在 `agent_runs` 增加输入、输出、推理、缓存读写 Token 与 `usage_source`。所有聚合只读取已完成运行，按 `finished_at` 日期和归一化调用方筛选：`knowledge_qa` 对应知识问答，`knowledge_task_*` 聚合为研究任务。
+迁移 015 在 `agent_runs` 增加输入、输出、推理、缓存读写 Token 与 `usage_source`。所有聚合只读取已完成运行，按 `finished_at` 日期和归一化调用方筛选：`knowledge_qa` 与目录规划 Run `knowledge_qa_select` 均计入知识问答，`knowledge_task_*` 聚合为研究任务。
 
 当前 ACP bridge 不转发供应商 Usage，因此问答和研究任务使用与 LLM 客户端一致的中英文启发式估算，并保存为 `estimated`；迁移前运行保持 `unavailable`，统计页单列为未上报。后续 Runtime Adapter 若收到真实 Usage，应写入 `measured`，无需改变统计 API。`total_tokens` 只计算输入加输出，推理和缓存桶作为明细展示，避免重复计数。
 
@@ -754,6 +758,8 @@ DeepSeek Harness Adapter 读取 ACP `AgentMessageChunk`，后端在保存同一�
 ## 12. 研究任务与调度
 
 `backend/prompts/wiki/research.md` 与覆盖后的 `book-research` 内置 Skill 共同定义研究质量规则：以少量决定结论的子问题建立证据矩阵，检查反例、竞争解释、同源重复和版本条件；证据不足时输出有限结论及具体核验方案。`refresh` 区分有旧版依据的变化与当前观察，`review` 按支持/反对/条件成立/不足逐项核验，专题研究按问题综合。presentation 交付物在此阶段也保留完整报告，不再为旧生成器提前压成短要点。外部研究仍需逐任务授权，不能编造已访问 URL。分析、自检只指导内部工作，不要求披露思维链。
+
+研究初始 FTS 可为空，Harness 仍可通过同书的分页编译目录、实体详情、来源搜索和分页原文工具逐步找证据。目录页最多返回 200 条轻量候选，来源搜索只给短预览，原文每次最多返回 4,000 字符；预载证据与实际读取证据写入同一账本。问答能力令牌最多调用 20 次工具，研究最多 80 次，且研究 Run 截止时间为 600 秒；超限或超时明确失败，不把未完成内容伪装为报告。队列、租约、取消和 PPTX 策划仍由应用负责，任务内部多轮判断继续由 Harness 执行。
 
 `backend/prompts/wiki/presentation.md` 定义高于 Skill 的证据、安全、页数、字段和 JSON 合同；`book-presentation` 提供受众、叙事、构图、密度与逐页引用方法。策划 Run 不挂载 MCP 工具，仅使用研究报告和服务端提供的 `S<n>` 证据目录。服务端严格反序列化并拒绝未知字段、尾随文字、无效枚举、过载页、缺少专用载荷、负数/全零图表、数据长度错位或越界引用。
 

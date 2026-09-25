@@ -502,7 +502,7 @@ export interface AgentRunSkillSnapshot {
   instructions: string
   permissions: string[]
   requirements: string[]
-  application_mode?: 'prompt_injected' | 'declared_only'
+  application_mode?: 'prompt_injected' | 'declared_only' | 'harness_native_available' | 'benchmark_prompt_injected'
 }
 
 export interface AgentRunConfigSnapshot {
@@ -529,6 +529,12 @@ export interface AgentRunInspection {
   run: AgentRun
   events: AgentRunEvent[]
   snapshot?: AgentRunInspectionSnapshot | null
+  evidence: Array<{
+    kind: 'entry' | 'source_span' | 'external'
+    object_id: string
+    version_id: string
+    snapshot: Record<string, unknown>
+  }>
 }
 
 export type KnowledgeChatStreamEvent =
