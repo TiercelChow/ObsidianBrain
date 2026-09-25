@@ -2,7 +2,7 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection, DatabaseName, OpenFlags};
+use rusqlite::{params, Connection, DatabaseName, OpenFlags, OptionalExtension};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -416,22 +416,6 @@ fn overwrite_wiki_prompt_contract_skills(conn: &Connection) -> Result<(), BrainE
 }
 
 fn overwrite_harness_wiki_skills(conn: &Connection) -> Result<(), BrainError> {
-    let version_ids = [
-        "skill-version-book-query-v3",
-        "skill-version-book-research-v3",
-    ];
-    for version_id in version_ids {
-        conn.execute(
-            "DELETE FROM skill_evaluation_runs
-             WHERE skill_version_id = ?1 OR baseline_version_id = ?1",
-            params![version_id],
-        )?;
-        conn.execute(
-            "DELETE FROM skill_benchmark_runs
-             WHERE skill_version_id = ?1 OR baseline_version_id = ?1",
-            params![version_id],
-        )?;
-    }
     for (skill_id, version_id, content) in [
         (
             "skill-book-query",
@@ -444,6 +428,49 @@ fn overwrite_harness_wiki_skills(conn: &Connection) -> Result<(), BrainError> {
             include_str!("../../skills/book-research/SKILL.md"),
         ),
     ] {
+        let current: Option<(String, String, String, i64)> = conn
+            .query_row(
+                "SELECT s.current_version_id, s.source_type, v.release_state,
+                        EXISTS (SELECT 1 FROM skill_files f
+                                WHERE f.skill_version_id = v.id
+                                  AND f.relative_path = 'SKILL.md')
+                 FROM skills s
+                 JOIN skill_versions v ON v.id = s.current_version_id AND v.skill_id = s.id
+                 WHERE s.id = ?1",
+                params![skill_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?;
+        let (current_version_id, source_type, release_state, has_skill_file) =
+            current.ok_or_else(|| {
+                BrainError::Internal(format!("内置 Skill {skill_id} 缺少有效的当前版本"))
+            })?;
+        if source_type != "builtin" || release_state != "published" || has_skill_file != 1 {
+            return Err(BrainError::Internal(format!(
+                "内置 Skill {skill_id} 当前版本不完整，不能执行迁移"
+            )));
+        }
+        if current_version_id != version_id {
+            tracing::info!(
+                skill_id,
+                current_version_id,
+                "保留已发布的后续 Skill 版本，不覆盖为仓库默认内容"
+            );
+            continue;
+        }
+        // The stock v3 body is being replaced in place, so quality results
+        // calculated against its former content are no longer valid. A later
+        // published revision belongs to the user and must be left untouched.
+        conn.execute(
+            "DELETE FROM skill_evaluation_runs
+             WHERE skill_version_id = ?1 OR baseline_version_id = ?1",
+            params![version_id],
+        )?;
+        conn.execute(
+            "DELETE FROM skill_benchmark_runs
+             WHERE skill_version_id = ?1 OR baseline_version_id = ?1",
+            params![version_id],
+        )?;
         let content_hash = hex::encode(Sha256::digest(content.as_bytes()));
         let size_bytes = i64::try_from(content.len())
             .map_err(|_| BrainError::Internal("内置 Skill 大小超出限制".to_string()))?;
@@ -1654,6 +1681,119 @@ mod tests {
         let _store1 = SqliteStore::new(&db_path).unwrap();
         let store2 = SqliteStore::new(&db_path).unwrap();
         assert!(store2.health_check());
+    }
+
+    #[test]
+    fn test_migration_038_preserves_published_builtin_v4_after_single_version_cleanup() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("published-skill-v4.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             CREATE TABLE _migrations (
+                 version INTEGER PRIMARY KEY, description TEXT NOT NULL,
+                 applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+             );",
+        )
+        .unwrap();
+        for migration in MIGRATIONS
+            .iter()
+            .filter(|migration| migration.version <= 36)
+        {
+            conn.execute_batch(migration.sql).unwrap();
+            match migration.version {
+                29 => seed_detailed_ingest_skill(&conn).unwrap(),
+                30 => seed_detailed_builtin_skills(&conn).unwrap(),
+                31 => overwrite_wiki_prompt_contract_skills(&conn).unwrap(),
+                32 => compact_wiki_skill_versions(&conn).unwrap(),
+                33 | 34 => overwrite_structured_presentation_skill(&conn).unwrap(),
+                _ => {}
+            }
+            conn.execute(
+                "INSERT INTO _migrations (version, description) VALUES (?1, ?2)",
+                params![migration.version, migration.description],
+            )
+            .unwrap();
+        }
+        for (skill_id, version_id, content) in [
+            (
+                "skill-book-query",
+                "skill-version-book-query-v4",
+                "已发布的问答 v4 规则",
+            ),
+            (
+                "skill-book-research",
+                "skill-version-book-research-v4",
+                "已发布的研究 v4 规则",
+            ),
+        ] {
+            let hash = hex::encode(Sha256::digest(content.as_bytes()));
+            conn.execute(
+                "INSERT INTO skill_versions
+                     (id, skill_id, revision, content_hash, release_state, created_at)
+                 VALUES (?1, ?2, 4, ?3, 'published', CURRENT_TIMESTAMP)",
+                params![version_id, skill_id, hash],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO skill_files
+                     (skill_version_id, relative_path, media_type, content_text,
+                      content_hash, size_bytes)
+                 VALUES (?1, 'SKILL.md', 'text/markdown', ?2, ?3, ?4)",
+                params![version_id, content, hash, content.len() as i64],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE skills SET current_version_id = ?2 WHERE id = ?1",
+                params![skill_id, version_id],
+            )
+            .unwrap();
+        }
+        compact_wiki_skill_versions(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO app_state (key, value) VALUES ('migration-v38-user-state', 'preserved')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let store = SqliteStore::new(&db_path).unwrap();
+        store
+            .with_connection(|conn| {
+                let latest: i64 =
+                    conn.query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))?;
+                assert_eq!(latest, 39);
+                for (skill_id, version_id, content) in [
+                    (
+                        "skill-book-query",
+                        "skill-version-book-query-v4",
+                        "已发布的问答 v4 规则",
+                    ),
+                    (
+                        "skill-book-research",
+                        "skill-version-book-research-v4",
+                        "已发布的研究 v4 规则",
+                    ),
+                ] {
+                    let actual: (String, String) = conn.query_row(
+                        "SELECT s.current_version_id, f.content_text
+                         FROM skills s JOIN skill_files f
+                           ON f.skill_version_id = s.current_version_id
+                         WHERE s.id = ?1 AND f.relative_path = 'SKILL.md'",
+                        params![skill_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?;
+                    assert_eq!(actual, (version_id.to_string(), content.to_string()));
+                }
+                let state: String = conn.query_row(
+                    "SELECT value FROM app_state WHERE key = 'migration-v38-user-state'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(state, "preserved");
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]
