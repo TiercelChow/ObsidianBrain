@@ -1,6 +1,7 @@
 import api, { callTool } from '@/api'
 import type { ReaderBook, ToolEnvelope } from '@/api/reader'
 import { createSseDataParser } from '@/utils/sseDataParser'
+import { buildModelProviderPayload } from '@/utils/modelProviderPayload'
 
 export interface KnowledgeBaseSummary {
   id: string
@@ -201,6 +202,9 @@ export interface ModelProviderProfile {
   api_protocol: 'openai-completions' | 'openai-responses' | 'anthropic-messages'
   base_url: string
   model: string
+  context_window?: number | null
+  max_output_tokens?: number | null
+  reasoning_policy?: 'auto' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   credential_source: 'keychain' | 'environment'
   api_key_env: string
   api_key_configured: boolean
@@ -215,6 +219,9 @@ export interface SaveModelProviderRequest {
   api_protocol: ModelProviderProfile['api_protocol']
   base_url: string
   model: string
+  context_window?: number | null
+  max_output_tokens?: number | null
+  reasoning_policy?: ModelProviderProfile['reasoning_policy']
   credential_source: ModelProviderProfile['credential_source']
   api_key_env?: string
   api_key?: string
@@ -535,6 +542,19 @@ export interface AgentRunInspection {
     version_id: string
     snapshot: Record<string, unknown>
   }>
+}
+
+export interface AgentRunCitationPreview {
+  run_id: string
+  citation_index: number
+  kind: 'entry' | 'source_span' | 'external'
+  object_id: string
+  version_id: string
+  entry: KnowledgeEntrySummary
+  content_md: string
+  citations: KnowledgeCitation[]
+  historical: boolean
+  read_ranges: Array<{ offset_chars: number; returned_chars: number }>
 }
 
 export type KnowledgeChatStreamEvent =
@@ -1122,6 +1142,13 @@ export function getAgentRunInspection(runId: string) {
   >
 }
 
+export function getAgentRunCitation(runId: string, sourceIndex: number) {
+  return callTool('get_agent_run_citation', {
+    run_id: runId,
+    source_index: sourceIndex,
+  }) as unknown as Promise<ToolEnvelope<AgentRunCitationPreview>>
+}
+
 export function getKnowledgeTaskActivity(taskId: string) {
   return callTool('get_knowledge_task_activity', { task_id: taskId }) as unknown as Promise<
     ToolEnvelope<{ run?: AgentRun | null; events: AgentRunEvent[] }>
@@ -1154,20 +1181,7 @@ export function listModelProviders() {
 }
 
 export function saveModelProvider(provider: SaveModelProviderRequest) {
-  const payload: Record<string, unknown> = {
-    display_name: provider.display_name,
-    api_protocol: provider.api_protocol,
-    base_url: provider.base_url,
-    model: provider.model,
-    credential_source: provider.credential_source,
-    enabled: provider.enabled ?? true,
-    expected_revision: provider.expected_revision ?? 0,
-  }
-  if (provider.provider_id) payload.provider_id = provider.provider_id
-  if (provider.api_key_env) payload.api_key_env = provider.api_key_env
-  if (provider.api_key) payload.api_key = provider.api_key
-  if (provider.clear_api_key) payload.clear_api_key = provider.clear_api_key
-  return callTool('save_model_provider', payload) as unknown as Promise<
+  return callTool('save_model_provider', buildModelProviderPayload(provider)) as unknown as Promise<
     ToolEnvelope<ModelProviderProfile>
   >
 }

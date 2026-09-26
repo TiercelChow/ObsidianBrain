@@ -1,6 +1,23 @@
 use super::*;
 
 #[test]
+fn test_qa_planning_does_not_retry_denied_credentials_as_a_search_fallback() {
+    assert!(!qa_planning_allows_fallback(&BrainError::Internal(
+        "系统凭据库操作失败: User canceled the operation".into()
+    )));
+    assert!(!qa_planning_allows_fallback(
+        &BrainError::KnowledgeValidation("模型供应商需要环境变量".into())
+    ));
+    assert!(!qa_planning_allows_fallback(
+        &BrainError::KnowledgeValidation("Agent 运行已取消".into())
+    ));
+    assert!(qa_planning_allows_fallback(&BrainError::LlmApiError {
+        provider: "deepseek_harness".into(),
+        detail: "返回空回答".into()
+    }));
+}
+
+#[test]
 fn test_answer_reference_validation_rejects_unseen_source_numbers_and_ids() {
     let input = serde_json::json!({ "evidence_entry_ids": ["entry-a"] });
     let ledger = vec![AgentEvidenceRef {
@@ -15,6 +32,20 @@ fn test_answer_reference_validation_rejects_unseen_source_numbers_and_ids() {
     assert!(validate_agent_answer_references("结论。[S2]", &input, &ledger).is_err());
     assert!(validate_agent_answer_references("entry_id: entry-b", &input, &ledger).is_err());
     assert!(validate_agent_answer_references("span_id: span-b", &input, &ledger).is_err());
+
+    let allocated = vec![AgentEvidenceRef {
+        kind: "source_span".into(),
+        object_id: "span-b".into(),
+        version_id: "version-b".into(),
+        snapshot: serde_json::json!({"citation_index": 2}),
+    }];
+    assert!(validate_agent_answer_references(
+        "补证。[S2] span_id: span-b",
+        &serde_json::json!({}),
+        &allocated
+    )
+    .is_ok());
+    assert!(validate_agent_answer_references("未读。[S3]", &input, &allocated).is_err());
 }
 
 #[test]

@@ -1650,6 +1650,36 @@ impl ToolHandler for SetWikiSkillBindingHandler {
 pub struct GetAgentRunEventsHandler;
 
 pub struct GetAgentRunInspectionHandler;
+pub struct GetAgentRunCitationHandler;
+
+#[async_trait]
+impl ToolHandler for GetAgentRunCitationHandler {
+    fn name(&self) -> &str {
+        "get_agent_run_citation"
+    }
+    fn description(&self) -> &str {
+        "按本次运行的引用编号读取冻结证据与已读范围，不替换为当前实体版本"
+    }
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"run_id":{"type":"string"},"source_index":{"type":"integer","minimum":0}},"required":["run_id","source_index"],"additionalProperties":false})
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let index = args
+            .get("source_index")
+            .and_then(Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or_else(|| BrainError::KnowledgeValidation("source_index 必须是非负整数".into()))?;
+        serde_json::to_value(
+            ctx.book_wiki_service
+                .store()
+                .get_agent_run_citation(required_string(&args, "run_id")?, index)?,
+        )
+        .map_err(|error| BrainError::Internal(format!("引用快照序列化失败: {error}")))
+    }
+}
 
 pub struct GetKnowledgeTaskActivityHandler;
 
@@ -2004,6 +2034,9 @@ impl ToolHandler for SaveModelProviderHandler {
                 "api_key": { "type": "string", "description": "keychain 模式下写入系统凭据库；编辑时留空保留现有密钥" },
                 "clear_api_key": { "type": "boolean", "description": "keychain 模式下清除已保存的密钥" },
                 "enabled": { "type": "boolean" },
+                "context_window": { "type": ["integer", "null"], "minimum": 1, "maximum": 4294967295_u64 },
+                "max_output_tokens": { "type": ["integer", "null"], "minimum": 1, "maximum": 4294967295_u64 },
+                "reasoning_policy": { "type": "string", "enum": ["auto", "off", "minimal", "low", "medium", "high", "xhigh", "max"] },
                 "expected_revision": { "type": "integer", "minimum": 0 }
             },
             "required": ["display_name", "api_protocol", "base_url", "model", "credential_source"],
@@ -2044,6 +2077,19 @@ impl ToolHandler for SaveModelProviderHandler {
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             enabled: args.get("enabled").and_then(Value::as_bool).unwrap_or(true),
+            context_window: args
+                .get("context_window")
+                .and_then(Value::as_u64)
+                .and_then(|v| u32::try_from(v).ok()),
+            max_output_tokens: args
+                .get("max_output_tokens")
+                .and_then(Value::as_u64)
+                .and_then(|v| u32::try_from(v).ok()),
+            reasoning_policy: args
+                .get("reasoning_policy")
+                .and_then(Value::as_str)
+                .unwrap_or("auto")
+                .to_string(),
             expected_revision: args
                 .get("expected_revision")
                 .and_then(Value::as_i64)

@@ -86,22 +86,26 @@
                   @rendered="followAnswer"
                 />
               </template>
-              <button v-if="message.role === 'assistant' && message.runId && message.id !== streamingMessageId" class="save-answer" type="button" :disabled="savingRunId === message.runId" @click="saveAnswer(message)">
+              <div v-if="message.interruption" class="answer-interruption" role="status">
+                <strong>{{ message.interruption.notice }}</strong>
+                <span v-if="message.interruption.kind !== 'cancelled'">{{ message.interruption.detail }}</span>
+              </div>
+              <button v-if="message.role === 'assistant' && message.runId && !message.interruption && message.id !== streamingMessageId" class="save-answer" type="button" :disabled="savingRunId === message.runId" @click="saveAnswer(message)">
                 <el-icon :class="{ 'is-loading': savingRunId === message.runId }"><Loading v-if="savingRunId === message.runId" /><Checked v-else /></el-icon>{{ savingRunId === message.runId ? '正在生成候选' : '保存到 Wiki' }}
               </button>
             </div>
             <section v-if="message.evidence?.length && message.id !== streamingMessageId" class="evidence-section" aria-label="回答参考来源">
-              <header><strong>参考来源</strong><span>{{ message.evidence.length }} 条书内证据</span></header>
+              <header><strong>参考来源</strong><span>{{ message.evidence.length }} 条{{ message.runId ? '已读证据' : '检索候选' }}</span></header>
               <div class="evidence-grid">
                 <button
                   v-for="(entry, evidenceIndex) in message.evidence"
-                  :key="entry.id"
+                  :key="`${message.id}-${evidenceIndex}-${entry.id}`"
                   type="button"
-                  @click="previewSource(entry)"
+                  @click="previewEvidence(message, evidenceIndex)"
                 >
                   <span><b>S{{ evidenceIndex + 1 }}</b>{{ entry.source_path || '数据库实体' }}</span>
                   <strong>{{ entry.title }}</strong>
-                  <p>{{ entry.summary || '预览完整正文与引用' }}</p>
+                  <p>{{ entry.summary || '预览证据正文与引用' }}</p>
                   <em>预览来源 <el-icon><ArrowRight /></el-icon></em>
                 </button>
               </div>
@@ -123,9 +127,12 @@
       <div class="knowledge-modal-card source-preview-modal">
         <header class="source-preview-head">
           <div>
-            <span>{{ sourceDetail?.entry_type === 'source_section' ? '来源章节' : '知识实体' }}</span>
+            <span>{{ sourceDetail?.entry_type === 'external' ? '外部资料' : sourceDetail?.entry_type === 'source_section' ? '来源章节' : '知识实体' }}</span>
             <h3>{{ sourceDetail?.title || '来源预览' }}</h3>
             <p>{{ sourceDetail?.source_path || '数据库实体' }}</p>
+            <p v-if="sourceHistorical" class="source-snapshot-note">本轮实际读取的历史快照 · {{ sourceVersion }}</p>
+            <p v-else-if="sourceDetail" class="source-snapshot-note">当前实体版本（非本轮历史证据）</p>
+            <p v-if="sourceRanges.length" class="source-snapshot-note">已读范围：{{ sourceRanges.map(range => `${range.offset_chars}–${range.offset_chars + range.returned_chars} 字符`).join('、') }}</p>
           </div>
           <button type="button" aria-label="关闭来源预览" @click="sourceVisible = false">
             <el-icon><Close /></el-icon>
@@ -135,6 +142,7 @@
           <div v-if="sourceLoading" class="source-loading">
             <el-icon class="is-loading"><Loading /></el-icon><span>正在读取来源</span>
           </div>
+          <p v-else-if="sourceError" class="source-preview-error" role="alert">{{ sourceError }}</p>
           <template v-else-if="sourceDetail">
             <div ref="sourceMarkdownRef" class="source-markdown markdown-body" v-html="sourceHtml"></div>
             <section v-if="sourceDetail.citations.length" class="source-citations">
@@ -149,7 +157,8 @@
         </div>
         <footer class="knowledge-modal-actions">
           <el-button @click="sourceVisible = false">关闭</el-button>
-          <el-button v-if="sourceDetail" type="primary" @click="openSourceWorkspace">在 Wiki 工作台打开</el-button>
+          <el-button v-if="sourceDetail && sourceDetail.entry_type !== 'external'" type="primary" @click="openSourceWorkspace">在 Wiki 工作台打开当前版本</el-button>
+          <el-button v-else-if="sourceCurrentEntry && sourceError && sourceCurrentEntry.entry_type !== 'external'" @click="openCurrentSource">查看当前版本（非本轮证据）</el-button>
         </footer>
       </div>
     </MotionModal>
@@ -167,10 +176,13 @@ import MotionModal from '@/components/motion/MotionModal.vue'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { shouldSendComposerOnEnter } from '@/utils/chatComposer'
 import { createStreamedTextBuffer, type StreamedTextBuffer } from '@/utils/streamedText'
+import { interruptedKnowledgeAnswer, knowledgeRuntimeMode } from '@/utils/knowledgeRuntimePolicy'
+import { loadKnowledgeCitationPreview } from '@/utils/knowledgeCitationPreview'
 import {
   getBookWikiSettings,
   getKnowledgeConversation,
   getKnowledgeEntry,
+  getAgentRunCitation,
   listBookKnowledgeBases,
   listKnowledgeConversations,
   listKnowledgeEntries,
@@ -188,6 +200,7 @@ interface ChatMessage {
   content: string
   evidence?: KnowledgeEntrySummary[]
   runId?: string
+  interruption?: ReturnType<typeof interruptedKnowledgeAnswer>
 }
 
 const route = useRoute()
@@ -209,7 +222,12 @@ const runtimeMessage = ref('DeepSeek Harness 尚未连接；当前只返回真�
 const messageListRef = ref<HTMLElement | null>(null)
 const sourceVisible = ref(false)
 const sourceLoading = ref(false)
-const sourceDetail = ref<KnowledgeEntryDetail | null>(null)
+const sourceDetail = ref<Pick<KnowledgeEntryDetail, 'id' | 'title' | 'entry_type' | 'source_path' | 'content_md' | 'citations'> | null>(null)
+const sourceHistorical = ref(false)
+const sourceVersion = ref('')
+const sourceRanges = ref<Array<{ offset_chars: number; returned_chars: number }>>([])
+const sourceError = ref('')
+const sourceCurrentEntry = ref<KnowledgeEntrySummary | null>(null)
 const sourceHtml = ref('')
 const sourceMarkdownRef = ref<HTMLElement | null>(null)
 const savingRunId = ref('')
@@ -378,12 +396,12 @@ async function ask(question: string) {
   searching.value = true
   setActivity('正在检索书内证据')
   await scrollToBottom(false)
+  let receivedText = ''
   try {
-    if (runtimeReady.value) {
+    if (knowledgeRuntimeMode(runtimeReady.value) === 'runtime') {
       askController = new AbortController()
       const textBuffer = createStreamedTextBuffer(chunk => { assistantMessage.content += chunk })
       activeTextBuffer = textBuffer
-      let receivedText = ''
       let answerEvidenceDelivered = false
       const result = await streamBookKnowledge(
         activeBaseId.value,
@@ -419,6 +437,7 @@ async function ask(question: string) {
       assistantMessage.content = result.answer
       assistantMessage.evidence = result.evidence
       assistantMessage.runId = result.run_id
+      runtimeMessage.value = '模型已完成本轮回答；下一轮会继续使用 Harness。'
       streamingMessageId.value = ''
       activeConversationId.value = result.conversation_id
       replaceChatQuery()
@@ -429,30 +448,16 @@ async function ask(question: string) {
       }
       return
     }
-    await appendEvidenceFallback(value, '', assistantMessage)
+    await appendEvidenceFallback(value, assistantMessage)
   } catch (error) {
-    const detail = (error as Error).message
     activeTextBuffer?.cancel()
-    if ((error as Error).name === 'AbortError') {
-      assistantMessage.runId = undefined
-      if (assistantMessage.content) assistantMessage.content += '\n\n_已停止生成，以上内容可能不完整。_'
-      else messages.value.splice(assistantIndex, 1)
-      return
-    }
-    if (runtimeReady.value) {
-      runtimeReady.value = false
-      runtimeMessage.value = 'Harness 本次调用失败，本次会话已切换为书内证据检索模式。'
-      assistantMessage.content = ''
-      assistantMessage.runId = undefined
-      setActivity('正在切换到书内证据检索')
-      try {
-        await appendEvidenceFallback(value, detail, assistantMessage)
-      } catch {
-        assistantMessage.content = `Harness 调用失败：${detail}`
-      }
-    } else {
-      assistantMessage.content = `检索失败：${detail}`
-    }
+    const interruption = interruptedKnowledgeAnswer(assistantMessage.content, receivedText, error)
+    assistantMessage.content = interruption.content
+    assistantMessage.interruption = interruption
+    // A failed request does not change launcher availability or silently replace an answer with search results.
+    if (runtimeReady.value) runtimeMessage.value = interruption.kind === 'cancelled'
+      ? '本轮已停止；下一次提问仍可使用 Harness。'
+      : interruption.notice
   } finally {
     askController = null
     activeTextBuffer?.cancel()
@@ -479,36 +484,43 @@ async function saveAnswer(message: ChatMessage) {
   }
 }
 
-async function appendEvidenceFallback(question: string, harnessError: string, target: ChatMessage) {
+async function appendEvidenceFallback(question: string, target: ChatMessage) {
   const response = await listKnowledgeEntries(activeBaseId.value, { query: question, limit: 6 })
   if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '检索失败')
   const evidence = response.result.entries
-  const prefix = harnessError ? `Harness 暂时不可用：${harnessError}\n\n` : ''
   target.content = evidence.length
-    ? `${prefix}在《${activeBase.value?.book_name || '当前书籍'}》中找到 ${evidence.length} 条相关证据。你可以在下方弹窗中核对原文。`
-    : `${prefix}当前书籍知识库中没有找到足够相关的证据。可以换一个关键词，或先返回知识库页面同步来源。`
+    ? `当前为证据检索模式（未生成模型回答）。在《${activeBase.value?.book_name || '当前书籍'}》中找到 ${evidence.length} 条相关候选，你可以在下方弹窗中核对当前正文。`
+    : '当前为证据检索模式（未生成模型回答）。没有找到足够相关的候选，可以换一个关键词，或先返回知识库页面同步来源。'
   target.evidence = evidence
 }
 
-async function previewSource(entry: KnowledgeEntrySummary) {
+async function previewSource(entry: KnowledgeEntrySummary, runId?: string, sourceIndex = 0) {
   const requestId = ++sourceRequestId
   cleanup()
   sourceVisible.value = true
   sourceLoading.value = true
   sourceDetail.value = null
   sourceHtml.value = ''
+  sourceHistorical.value = false
+  sourceVersion.value = ''
+  sourceRanges.value = []
+  sourceError.value = ''
+  sourceCurrentEntry.value = entry
   try {
-    const response = await getKnowledgeEntry(entry.id)
+    const snapshot = await loadKnowledgeCitationPreview(entry, runId, sourceIndex, { snapshot: getAgentRunCitation, current: getKnowledgeEntry })
     if (requestId !== sourceRequestId) return
-    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '来源读取失败')
-    sourceDetail.value = response.result
-    sourceHtml.value = await renderMarkdown(response.result.content_md, undefined, entry.id)
+    sourceDetail.value = { ...snapshot.entry, content_md: snapshot.content_md, citations: snapshot.citations }
+    sourceHistorical.value = snapshot.historical
+    sourceVersion.value = snapshot.version_id
+    sourceRanges.value = snapshot.read_ranges
+    const rendered = await renderMarkdown(snapshot.content_md, undefined, `${runId || 'current'}-${entry.id}`)
+    if (requestId !== sourceRequestId) return
+    sourceHtml.value = rendered
     await nextTick()
     if (sourceMarkdownRef.value) await enhance(sourceMarkdownRef.value)
   } catch (error) {
     if (requestId === sourceRequestId) {
-      sourceVisible.value = false
-      ElMessage.error((error as Error).message)
+      sourceError.value = (error as Error).message
     }
   } finally {
     if (requestId === sourceRequestId) sourceLoading.value = false
@@ -517,7 +529,11 @@ async function previewSource(entry: KnowledgeEntrySummary) {
 
 function previewEvidence(message: ChatMessage, sourceIndex: number) {
   const entry = message.evidence?.[sourceIndex]
-  if (entry) void previewSource(entry)
+  if (entry) void previewSource(entry, message.runId, sourceIndex)
+}
+
+function openCurrentSource() {
+  if (sourceCurrentEntry.value) void previewSource(sourceCurrentEntry.value)
 }
 
 function openSourceWorkspace() {
@@ -570,6 +586,10 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .chat-layout { min-width: 0; min-height: 590px; display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; }
+.answer-interruption { display: grid; gap: 5px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); color: var(--text-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.answer-interruption strong { font-weight: 600; }
+.answer-interruption span { color: var(--text-faint); }
+.source-preview-error, .source-snapshot-note { color: var(--text-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .chat-context { align-self: start; display: grid; gap: 14px; padding: 18px; }
 .context-label { color: var(--text-faint); font-size: 10px; font-weight: 720; letter-spacing: .08em; }
 .context-book { display: flex; align-items: center; gap: 11px; padding: 12px; border-radius: 14px; background: var(--bg-glass-subtle); }

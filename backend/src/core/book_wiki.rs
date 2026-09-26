@@ -109,6 +109,7 @@ struct RuntimeInvocation<'a> {
     prompt: String,
     timeout: Option<Duration>,
     max_output_tokens: Option<u32>,
+    bounded_extraction: bool,
     capability_token: Option<&'a str>,
     native_skills: Vec<WikiSkill>,
     events: Option<tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
@@ -264,6 +265,26 @@ impl BookWikiService {
         } else {
             None
         };
+        crate::infra::book_wiki_store::validate_model_provider_profile(
+            &provider_id,
+            &request.display_name,
+            &request.api_protocol,
+            &request.base_url,
+            &request.model,
+            &request.credential_source,
+            &request.api_key_env,
+            request.context_window,
+            request.max_output_tokens,
+            &request.reasoning_policy,
+        )?;
+        if current
+            .as_ref()
+            .is_some_and(|value| value.revision != request.expected_revision)
+        {
+            return Err(BrainError::KnowledgeValidation(
+                "模型供应商配置已变化，请刷新后重试".into(),
+            ));
+        }
         let api_key = request
             .api_key
             .as_deref()
@@ -333,6 +354,9 @@ impl BookWikiService {
             &request.api_key_env,
             api_key_configured,
             request.enabled,
+            request.context_window,
+            request.max_output_tokens,
+            &request.reasoning_policy,
             request.expected_revision,
         )
     }
@@ -447,7 +471,9 @@ impl BookWikiService {
                         candidate_batches.push(part.candidate_ids);
                     }
                     Err(error) => {
-                        if stream.is_some_and(|sender| sender.is_closed()) {
+                        if stream.is_some_and(|sender| sender.is_closed())
+                            || !qa_planning_allows_fallback(&error)
+                        {
                             return Err(error);
                         }
                         tracing::warn!(error = %error, "知识目录规划失败，降级为关键词检索");
@@ -643,7 +669,9 @@ impl BookWikiService {
                         }
                     }
                     Err(error) => {
-                        if context.stream.is_some_and(|sender| sender.is_closed()) {
+                        if context.stream.is_some_and(|sender| sender.is_closed())
+                            || !qa_planning_allows_fallback(&error)
+                        {
                             return Err(error);
                         }
                         tracing::warn!(error = %error, "知识候选全局重排失败，沿用原始顺序");
@@ -690,6 +718,7 @@ impl BookWikiService {
                     .to_string(),
                 timeout: None,
                 max_output_tokens: None,
+                bounded_extraction: false,
                 capability_token: None,
                 native_skills: Vec::new(),
                 events: None,
@@ -736,7 +765,11 @@ impl BookWikiService {
             .filter_map(serde_json::Value::as_str)
             .map(str::to_string)
             .collect::<Vec<_>>();
-        let citations = self.store.current_citation_span_ids(base_id, &entry_ids)?;
+        let citations = if self.store.list_agent_run_citations(run_id)?.is_empty() {
+            self.store.current_citation_span_ids(base_id, &entry_ids)?
+        } else {
+            self.store.current_run_citation_span_ids(run_id)?
+        };
         if citations.is_empty() {
             return Err(BrainError::KnowledgeValidation(
                 "回答引用的来源已过期，重新提问后再保存".to_string(),
@@ -1143,6 +1176,15 @@ impl BookWikiService {
             .ok_or_else(|| {
                 BrainError::KnowledgeValidation("该任务还没有可查看的已完成报告".to_string())
             })?;
+        let snapshots = self.store.list_agent_run_citation_entries(&run.id)?;
+        if !snapshots.is_empty() {
+            return Ok(KnowledgeTaskExecution {
+                task,
+                run_id: run.id,
+                evidence: snapshots,
+                artifacts: self.store.list_task_artifacts(task_id)?,
+            });
+        }
         let evidence_ids = run
             .input
             .get("evidence_entry_ids")
@@ -1465,15 +1507,18 @@ impl BookWikiService {
         let prompt = if allowed_tools.is_empty() {
             prompt
         } else {
-            format!("<runtime_context>\nknowledge_base_id: {base_id}\n同书工具调用须使用此知识库 ID；其他对象 ID 从已提供证据或工具结果获取，不猜测 ID。\n</runtime_context>\n\n{prompt}")
+            format!("<runtime_context>\nknowledge_base_id: {base_id}\n同书工具调用须使用此知识库 ID；其他对象 ID 从已提供证据或工具结果获取，不猜测 ID。\n本轮读取工具返回的 citation.label 是由网关实际预分配的引用，不是模型自行编号；即使旧版 Skill 描述补查没有编号，也以本轮工具真实返回的编号和已读正文范围为准。\n</runtime_context>\n\n{prompt}")
         };
         let input_tokens = estimate_token_count(&prompt);
         let run = self
             .store
             .start_agent_run(base_id, "deepseek_harness", task_type, input)?;
-        if matches!(task_type, "knowledge_qa") || task_type.starts_with("knowledge_task_") {
+        if task_type == "knowledge_qa"
+            || (task_type.starts_with("knowledge_task_")
+                && task_type != "knowledge_task_presentation_plan")
+        {
             if let Err(error) =
-                record_preloaded_agent_evidence(&self.store, base_id, &run.id, input)
+                record_preloaded_agent_evidence(&self.store, base_id, &run.id, input, &prompt)
             {
                 let _ = self.store.fail_agent_run(&run.id, &error.to_string());
                 return Err(error);
@@ -1605,6 +1650,15 @@ impl BookWikiService {
             })
             .collect::<Vec<_>>();
         let mut evidence_refs = serde_json::Map::new();
+        evidence_refs.insert("runtime_budget".into(), serde_json::json!({
+            "context_window":profile.provider_config.as_ref().and_then(|p|p.context_window),
+            "max_output_tokens":profile.provider_config.as_ref().and_then(|p|p.max_output_tokens),
+            "reasoning_policy":profile.provider_config.as_ref().map(|p|p.reasoning_policy.as_str()).unwrap_or("auto"),
+            "effective_max_output_tokens":effective_output_cap(profile,runtime_max_output_tokens_for_invocation(task_type,input)),
+            "timeout_seconds":request_timeout.unwrap_or(Duration::from_secs(180)).as_secs(),
+            "tool_call_limit":if allowed_tools.is_empty(){0}else{match task_type {"knowledge_qa"=>20,"knowledge_task_research"=>80,_=>40}},
+            "usage_scope":"estimated_initial_prompt_and_final_output_only; excludes internal request replay, tool history, compaction and reasoning; context occupancy is not billing usage",
+        }));
         for key in [
             "evidence_entry_ids",
             "source_span_ids",
@@ -1695,6 +1749,7 @@ impl BookWikiService {
                 prompt,
                 timeout: request_timeout,
                 max_output_tokens: runtime_max_output_tokens_for_invocation(task_type, input),
+                bounded_extraction: task_type == "knowledge_ingest",
                 capability_token: capability
                     .as_ref()
                     .map(|capability| capability.token.as_str()),
@@ -1840,7 +1895,11 @@ impl BookWikiService {
         let safety_patch_path = workspace.path().join("knowledge-readonly.patch.yml");
         std::fs::write(&safety_patch_path, KNOWLEDGE_QA_HARNESS_PATCH)?;
         let mut patch_paths = Vec::with_capacity(2);
-        if let Some(provider_patch) = build_provider_patch(profile, invocation.max_output_tokens)? {
+        if let Some(provider_patch) = build_provider_patch(
+            profile,
+            invocation.max_output_tokens,
+            invocation.bounded_extraction,
+        )? {
             let provider_patch_path = workspace.path().join("model-provider.patch.json");
             std::fs::write(&provider_patch_path, provider_patch)?;
             patch_paths.push(provider_patch_path);
@@ -2612,6 +2671,21 @@ fn persist_runtime_event(
             "ACP 上下文用量已更新",
             serde_json::json!({ "context_used": used, "context_size": size }),
         ),
+        AgentRuntimeEvent::Completed {
+            stop_reason,
+            complete,
+        } => (
+            "run.runtime_completed",
+            Some("completion"),
+            "ACP 已结束",
+            serde_json::json!({"stop_reason":stop_reason,"complete":complete}),
+        ),
+        AgentRuntimeEvent::UsageCost { amount, currency } => (
+            "run.usage_cost",
+            Some("runtime"),
+            "ACP 会话累计费用（不是 Token）",
+            serde_json::json!({"amount":amount,"currency":currency,"scope":"cumulative_session"}),
+        ),
     };
     store.append_agent_run_event(run_id, event_type, phase, message, &payload)?;
     Ok(())
@@ -2650,7 +2724,28 @@ fn chat_stream_event(run_id: &str, event: &AgentRuntimeEvent) -> Option<Knowledg
             context_used: *used,
             context_size: *size,
         }),
+        AgentRuntimeEvent::Completed { .. } | AgentRuntimeEvent::UsageCost { .. } => None,
     }
+}
+
+fn qa_planning_allows_fallback(error: &BrainError) -> bool {
+    // Search cannot repair missing credentials, denied permission, cancellation
+    // or a broken local runtime. Never prompt for the same credential again by
+    // treating those failures as poor catalog selection.
+    let BrainError::LlmApiError { detail, .. } = error else {
+        return false;
+    };
+    let detail = detail.to_ascii_lowercase();
+    ![
+        "401",
+        "403",
+        "unauthorized",
+        "forbidden",
+        "invalid_api_key",
+        "refusal",
+    ]
+    .iter()
+    .any(|marker| detail.contains(marker))
 }
 
 fn is_cancelled_agent_error(error: &BrainError) -> bool {
@@ -2711,6 +2806,17 @@ fn runtime_max_output_tokens_for_invocation(
     }
 }
 
+fn effective_output_cap(profile: &RuntimeProfile, requested: Option<u32>) -> Option<u32> {
+    let declared = profile
+        .provider_config
+        .as_ref()
+        .and_then(|provider| provider.max_output_tokens);
+    match (requested, declared) {
+        (Some(request), Some(cap)) => Some(request.min(cap)),
+        (request, cap) => request.or(cap),
+    }
+}
+
 fn capability_ttl_seconds(request_timeout: Option<Duration>) -> i64 {
     request_timeout
         .and_then(|timeout| i64::try_from(timeout.as_secs()).ok())
@@ -2753,7 +2859,9 @@ fn project_compile_runtime_event(
                 .map(|title| format!("知识工具已完成：{title}"))
                 .unwrap_or_else(|| "知识工具已完成，模型继续分析".to_string()),
         ),
-        AgentRuntimeEvent::UsageContext { .. } => return Ok(()),
+        AgentRuntimeEvent::UsageContext { .. }
+        | AgentRuntimeEvent::Completed { .. }
+        | AgentRuntimeEvent::UsageCost { .. } => return Ok(()),
     };
     store.update_compile_activity(
         base_id,
@@ -2768,6 +2876,7 @@ fn project_compile_runtime_event(
 fn build_provider_patch(
     profile: &RuntimeProfile,
     request_max_output_tokens: Option<u32>,
+    bounded_extraction: bool,
 ) -> Result<Option<String>, BrainError> {
     let Some(provider) = &profile.provider_config else {
         return Ok(None);
@@ -2782,13 +2891,20 @@ fn build_provider_patch(
         "api": provider.api_protocol,
         "baseURL": provider.base_url,
     });
-    if let Some(max_tokens) = request_max_output_tokens {
+    if let Some(context_window) = provider.context_window {
+        model["contextWindow"] = serde_json::json!(context_window);
+    }
+    if let Some(max_tokens) = effective_output_cap(profile, request_max_output_tokens) {
         model["maxTokens"] = serde_json::json!(max_tokens);
-        // Semantic compilation is a bounded extraction job rather than an
-        // open-ended reasoning conversation. Strip catalog-level thinking and
-        // reduce silent retries only for this task, so a short final JSON does
-        // not conceal a large reasoning or retry bill.
+    }
+    if bounded_extraction || provider.reasoning_policy == "off" {
         model["reasoningEfforts"] = serde_json::json!(false);
+    } else if provider.reasoning_policy != "auto" {
+        let level = &provider.reasoning_policy;
+        model["reasoningEfforts"] = serde_json::json!({level:level});
+        provider_profile["reasoning"] = serde_json::json!(level);
+    }
+    if bounded_extraction {
         provider_profile["retryPolicy"] = serde_json::json!({
             "mode": "normal",
             "maxRetries": 1,
@@ -2891,6 +3007,7 @@ fn record_preloaded_agent_evidence(
     base_id: &str,
     run_id: &str,
     input: &serde_json::Value,
+    prompt: &str,
 ) -> Result<(), BrainError> {
     for id in input
         .get("evidence_entry_ids")
@@ -2905,7 +3022,21 @@ fn record_preloaded_agent_evidence(
                 "预载证据不能跨越当前书籍知识边界".to_string(),
             ));
         }
-        store.record_agent_run_evidence(
+        let marker = format!("entry_id: {id}；");
+        let visible = prompt
+            .split_once(&marker)
+            .and_then(|(_, after)| after.split_once("证据提示："))
+            .and_then(|(_, after)| after.split_once('\n'))
+            .map(|(_, body)| body)
+            .ok_or_else(|| BrainError::Internal("预载证据没有实际进入 Prompt".into()))?;
+        let count = detail
+            .content_md
+            .chars()
+            .zip(visible.chars())
+            .take_while(|(actual, sent)| actual == sent)
+            .count()
+            .min(MAX_EVIDENCE_CHARS);
+        store.record_visible_agent_evidence(
             run_id,
             "entry",
             id,
@@ -2914,6 +3045,8 @@ fn record_preloaded_agent_evidence(
                 "title": detail.entry.title,
                 "summary": detail.entry.summary,
                 "source_path": detail.entry.source_path,
+                "content_md": detail.content_md.chars().take(count).collect::<String>(),
+                "offset_chars": 0,
                 "origin": "preloaded",
             }),
         )?;
@@ -2927,6 +3060,10 @@ fn collect_run_entry_evidence(
     run_id: &str,
     preloaded: &[KnowledgeEntrySummary],
 ) -> Result<Vec<KnowledgeEntrySummary>, BrainError> {
+    let citations = store.list_agent_run_citation_entries(run_id)?;
+    if !citations.is_empty() {
+        return Ok(citations);
+    }
     let mut entries = preloaded.to_vec();
     let mut seen = entries
         .iter()
@@ -2966,6 +3103,9 @@ fn validate_agent_answer_references(
         .and_then(serde_json::Value::as_array)
         .map(Vec::len)
         .unwrap_or(0);
+    let numbered_ledger = ledger
+        .iter()
+        .any(|reference| reference.snapshot.get("citation_index").is_some());
     let bytes = answer.as_bytes();
     let mut index = 0;
     while index + 3 < bytes.len() {
@@ -2976,7 +3116,14 @@ fn validate_agent_answer_references(
             }
             if end > index + 2 && end < bytes.len() && bytes[end] == b']' {
                 let number = answer[index + 2..end].parse::<usize>().unwrap_or(0);
-                if number == 0 || number > preloaded {
+                let allocated = ledger.iter().any(|reference| {
+                    reference
+                        .snapshot
+                        .get("citation_index")
+                        .and_then(serde_json::Value::as_u64)
+                        == Some(number as u64)
+                });
+                if number == 0 || (!allocated && (numbered_ledger || number > preloaded)) {
                     return Err(BrainError::KnowledgeValidation(format!(
                         "Agent 回答使用了未分配的引用 [S{number}]"
                     )));
@@ -4599,6 +4746,9 @@ mod tests {
                 api_key: Some("sk-test-123".to_string()),
                 clear_api_key: false,
                 enabled: true,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning_policy: "auto".to_string(),
                 expected_revision: 0,
             })
             .await
@@ -4622,6 +4772,9 @@ mod tests {
                 api_key: None,
                 clear_api_key: false,
                 enabled: true,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning_policy: "auto".to_string(),
                 expected_revision: created.revision,
             })
             .await
@@ -4646,6 +4799,9 @@ mod tests {
                 api_key: None,
                 clear_api_key: true,
                 enabled: true,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning_policy: "auto".to_string(),
                 expected_revision: updated.revision,
             })
             .await
@@ -4672,6 +4828,9 @@ mod tests {
                 api_key: Some("sk-leak".to_string()),
                 clear_api_key: false,
                 enabled: true,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning_policy: "auto".to_string(),
                 expected_revision: 0,
             })
             .await
@@ -4698,6 +4857,9 @@ mod tests {
                 api_key_env: String::new(),
                 api_key_configured: true,
                 enabled: true,
+                context_window: Some(128_000),
+                max_output_tokens: Some(32_768),
+                reasoning_policy: "auto".to_string(),
                 revision: 1,
                 updated_at: String::new(),
             }),
@@ -4706,7 +4868,7 @@ mod tests {
             updated_at: String::new(),
         };
 
-        let patch = build_provider_patch(&profile, Some(SEMANTIC_MAX_OUTPUT_TOKENS))
+        let patch = build_provider_patch(&profile, Some(SEMANTIC_MAX_OUTPUT_TOKENS), true)
             .unwrap()
             .unwrap();
         let value: serde_json::Value = serde_json::from_str(&patch).unwrap();
@@ -4738,6 +4900,27 @@ mod tests {
             r#"["aliyun-bailian","glm-5.2"]"#
         );
         assert!(!patch.contains("apiKey\""));
+
+        // Output capacity must not silently disable QA reasoning or provider retries.
+        let qa_patch = build_provider_patch(&profile, Some(8_000), false)
+            .unwrap()
+            .unwrap();
+        let qa: serde_json::Value = serde_json::from_str(&qa_patch).unwrap();
+        let qa_provider = &qa[0]["config"]["providers"]["aliyun-bailian"];
+        assert_eq!(qa_provider["models"][0]["maxTokens"], 8_000);
+        assert_eq!(qa_provider["models"][0]["contextWindow"], 128_000);
+        assert!(qa_provider["models"][0].get("reasoningEfforts").is_none());
+        assert!(qa_provider.get("retryPolicy").is_none());
+        let mut explicit = profile.clone();
+        explicit.provider_config.as_mut().unwrap().reasoning_policy = "high".into();
+        let patch = build_provider_patch(&explicit, Some(90_000), false)
+            .unwrap()
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&patch).unwrap();
+        let provider = &value[0]["config"]["providers"]["aliyun-bailian"];
+        assert_eq!(provider["models"][0]["maxTokens"], 32_768);
+        assert_eq!(provider["models"][0]["reasoningEfforts"]["high"], "high");
+        assert_eq!(provider["reasoning"], "high");
     }
 
     #[test]

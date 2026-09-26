@@ -2692,3 +2692,11 @@ http-body-util = "0.1"
 
 > **上游**: [需求设计文档](../requirement/02-tool-protocol.md) 定义了本层需要满足的功能需求和验收标准。  
 > **下游**: 核心服务层（`src/core/`）的各个 Service 是工具 Handler 的实际执行者，Handler 通过 `AppContext` 调用它们。
+
+## 14. Book Wiki 运行证据与模型能力补充（2026-09-26）
+
+- `get_agent_run_citation`：页面读取历史来源，参数 `run_id` 与零起始的 `source_index`；返回一基 `citation_index`、对象类型/版本、冻结实体信息、实际已读 Markdown 和 `read_ranges`。旧运行没有正文快照时明确报错，不隐式替换成当前实体。
+- Agent 的 `knowledge_get_entry` 支持 `offset_chars`、`max_chars`（单次最多 12,000 字符）；`book_read_source_span` 继续以最多 4,000 字符分页。两个读取工具和授权的外部读取工具返回 `citation.label`。相同运行内相同对象/版本分页编号不变；搜索与目录仅提供候选，不登记已读引用。
+- `save_model_provider` / `list_model_providers` 增加可空的 `context_window`、`max_output_tokens` 与默认 `auto` 的 `reasoning_policy`。未知容量留空；显式最大输出必须小于上下文容量。输出限制不隐式关闭问答/研究推理，结构化编译提取仍采用独立的低推理策略。
+- `run.runtime_completed` 记录 ACP `stop_reason` 与 `complete`；`run.usage` 仅表示上下文占用，`run.usage_cost` 为运行时报告的累计会话费用，两者均不是实测 token 账单。当前 token 估算只涵盖初始 Prompt 与最终输出，不含 Harness 内部工具历史、重放、压缩或思考开销。
+- 截断、取消、拒绝和超时不得标记正常完成；已流式输出的正文保存在运行的 `partial_answer`，不能直接保存为正式知识。

@@ -86,6 +86,8 @@ pub struct AgentEvidenceRef {
     pub snapshot: serde_json::Value,
 }
 
+mod evidence;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IssuedAgentCapability {
     pub token: String,
@@ -3734,7 +3736,12 @@ impl BookWikiStore {
                     now
                 ],
             )?;
-            for (ordinal, entry) in evidence.iter().enumerate() {
+            let numbered: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM agent_run_citations WHERE run_id=?1)",
+                [run_id],
+                |row| row.get(0),
+            )?;
+            for (ordinal, entry) in evidence.iter().enumerate().filter(|_| !numbered) {
                 let inserted = conn.execute(
                     "INSERT INTO knowledge_message_citations
                      (message_id, ordinal, entry_id, entry_revision,
@@ -5525,7 +5532,8 @@ impl BookWikiStore {
                         COALESCE(p.model, r.model), r.provider_id, r.enabled, r.revision, r.updated_at,
                         p.display_name, p.api_protocol, p.base_url, p.model,
                         p.credential_source, p.api_key_env, p.api_key_configured,
-                        p.enabled, p.revision, p.updated_at
+                        p.enabled, p.revision, p.updated_at,
+                        p.context_window, p.max_output_tokens, p.reasoning_policy
                  FROM agent_runtime_profiles r
                  LEFT JOIN llm_provider_profiles p ON p.id = r.provider_id
                  WHERE r.runtime = 'deepseek_harness'
@@ -5547,6 +5555,9 @@ impl BookWikiStore {
                         api_key_env: row.get(14)?,
                         api_key_configured: row.get::<_, i64>(15)? != 0,
                         enabled: row.get::<_, i64>(16)? != 0,
+                        context_window: row.get(19)?,
+                        max_output_tokens: row.get(20)?,
+                        reasoning_policy: row.get(21)?,
                         revision: row.get(17)?,
                         updated_at: row.get(18)?,
                     }),
@@ -5573,7 +5584,8 @@ impl BookWikiStore {
         self.db.with_connection(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, display_name, api_protocol, base_url, model, credential_source,
-                        api_key_env, api_key_configured, enabled, revision, updated_at
+                        api_key_env, api_key_configured, enabled, revision, updated_at,
+                        context_window, max_output_tokens, reasoning_policy
                  FROM llm_provider_profiles
                  ORDER BY enabled DESC, updated_at DESC, display_name COLLATE NOCASE",
             )?;
@@ -5589,7 +5601,8 @@ impl BookWikiStore {
         self.db.with_connection(|conn| {
             conn.query_row(
                 "SELECT id, display_name, api_protocol, base_url, model, credential_source,
-                        api_key_env, api_key_configured, enabled, revision, updated_at
+                        api_key_env, api_key_configured, enabled, revision, updated_at,
+                        context_window, max_output_tokens, reasoning_policy
                  FROM llm_provider_profiles WHERE id = ?1",
                 params![provider_id],
                 map_model_provider_profile,
@@ -5611,6 +5624,9 @@ impl BookWikiStore {
         api_key_env: &str,
         api_key_configured: bool,
         enabled: bool,
+        context_window: Option<u32>,
+        max_output_tokens: Option<u32>,
+        reasoning_policy: &str,
         expected_revision: i64,
     ) -> Result<ModelProviderProfile, BrainError> {
         let provider = validate_model_provider_profile(
@@ -5621,6 +5637,9 @@ impl BookWikiStore {
             model,
             credential_source,
             api_key_env,
+            context_window,
+            max_output_tokens,
+            reasoning_policy,
         )?;
         let now = Utc::now().to_rfc3339();
         if expected_revision == 0 {
@@ -5628,8 +5647,9 @@ impl BookWikiStore {
                 conn.execute(
                     "INSERT INTO llm_provider_profiles
                      (id, display_name, api_protocol, base_url, model, credential_source,
-                      api_key_env, api_key_configured, enabled, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+                      api_key_env, api_key_configured, enabled, created_at, updated_at,
+                      context_window, max_output_tokens, reasoning_policy)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, ?11, ?12, ?13)",
                     params![
                         provider.provider_id,
                         provider.display_name,
@@ -5641,6 +5661,9 @@ impl BookWikiStore {
                         i64::from(api_key_configured),
                         i64::from(enabled),
                         now,
+                        provider.context_window,
+                        provider.max_output_tokens,
+                        provider.reasoning_policy,
                     ],
                 )?;
                 Ok(())
@@ -5651,7 +5674,8 @@ impl BookWikiStore {
                     "UPDATE llm_provider_profiles
                      SET display_name = ?2, api_protocol = ?3, base_url = ?4, model = ?5,
                          credential_source = ?6, api_key_env = ?7, api_key_configured = ?8,
-                         enabled = ?9, revision = revision + 1, updated_at = ?10
+                         enabled = ?9, revision = revision + 1, updated_at = ?10,
+                         context_window = ?12, max_output_tokens = ?13, reasoning_policy = ?14
                      WHERE id = ?1 AND revision = ?11",
                     params![
                         provider.provider_id,
@@ -5665,6 +5689,9 @@ impl BookWikiStore {
                         i64::from(enabled),
                         now,
                         expected_revision,
+                        provider.context_window,
+                        provider.max_output_tokens,
+                        provider.reasoning_policy,
                     ],
                 )?)
             })?;
@@ -6561,6 +6588,7 @@ impl BookWikiStore {
             },
         )?;
         let updated = self.db.transaction(|conn| {
+            preserve_incomplete_run_output(conn, run_id, "failed")?;
             let updated = conn.execute(
                 "UPDATE agent_runs
                  SET status = 'failed', error = ?2, finished_at = ?3
@@ -6596,6 +6624,7 @@ impl BookWikiStore {
     pub fn cancel_agent_run(&self, run_id: &str) -> Result<AgentRun, BrainError> {
         let now = Utc::now().to_rfc3339();
         let updated = self.db.transaction(|conn| {
+            preserve_incomplete_run_output(conn, run_id, "cancelled")?;
             let updated = conn.execute(
                 "UPDATE agent_runs
                  SET status = 'cancelled', error = NULL, finished_at = ?2
@@ -6818,6 +6847,20 @@ fn load_message_evidence(
     conn: &rusqlite::Connection,
     message_id: &str,
 ) -> Result<Vec<KnowledgeEntrySummary>, BrainError> {
+    let snapshots = {
+        let mut stmt = conn.prepare("SELECT json_extract(arc.snapshot_json,'$.entry') FROM agent_run_citations arc JOIN knowledge_messages km ON km.run_id=arc.run_id WHERE km.id=?1 ORDER BY arc.citation_index")?;
+        let rows = stmt.query_map([message_id], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    if !snapshots.is_empty() {
+        return snapshots
+            .into_iter()
+            .map(|raw| {
+                serde_json::from_str(&raw)
+                    .map_err(|e| BrainError::Internal(format!("消息来源快照解析失败: {e}")))
+            })
+            .collect();
+    }
     let mut stmt = conn.prepare(
         "SELECT kmc.entry_id,
                 COALESCE(kmc.knowledge_base_id_snapshot, ke.knowledge_base_id),
@@ -6905,12 +6948,16 @@ fn map_model_provider_profile(row: &rusqlite::Row<'_>) -> rusqlite::Result<Model
         api_key_env: row.get(6)?,
         api_key_configured: row.get::<_, i64>(7)? != 0,
         enabled: row.get::<_, i64>(8)? != 0,
+        context_window: row.get(11)?,
+        max_output_tokens: row.get(12)?,
+        reasoning_policy: row.get(13)?,
         revision: row.get(9)?,
         updated_at: row.get(10)?,
     })
 }
 
-fn validate_model_provider_profile(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn validate_model_provider_profile(
     provider_id: &str,
     display_name: &str,
     api_protocol: &str,
@@ -6918,7 +6965,32 @@ fn validate_model_provider_profile(
     model: &str,
     credential_source: &str,
     api_key_env: &str,
+    context_window: Option<u32>,
+    max_output_tokens: Option<u32>,
+    reasoning_policy: &str,
 ) -> Result<ModelProviderProfile, BrainError> {
+    if context_window == Some(0) || max_output_tokens == Some(0) {
+        return Err(BrainError::KnowledgeValidation(
+            "上下文容量和最大输出 Token 必须是正整数，未知时请留空".to_string(),
+        ));
+    }
+    if context_window
+        .zip(max_output_tokens)
+        .is_some_and(|(context, output)| output >= context)
+    {
+        return Err(BrainError::KnowledgeValidation(
+            "最大输出 Token 必须小于上下文容量，以保留输入空间".to_string(),
+        ));
+    }
+    let reasoning_policy = reasoning_policy.trim();
+    if !matches!(
+        reasoning_policy,
+        "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+    ) {
+        return Err(BrainError::KnowledgeValidation(
+            "推理策略必须是 auto/off/minimal/low/medium/high/xhigh/max".to_string(),
+        ));
+    }
     let provider_id = provider_id.trim();
     if provider_id.is_empty()
         || provider_id.len() > 64
@@ -6993,6 +7065,9 @@ fn validate_model_provider_profile(
         api_key_env: api_key_env.to_string(),
         api_key_configured: false,
         enabled: true,
+        context_window,
+        max_output_tokens,
+        reasoning_policy: reasoning_policy.to_string(),
         revision: 0,
         updated_at: String::new(),
     })
@@ -7522,6 +7597,48 @@ fn extract_skill_instructions(content: &str) -> String {
     body.to_string()
 }
 
+fn preserve_incomplete_run_output(
+    conn: &rusqlite::Connection,
+    run_id: &str,
+    fallback_reason: &str,
+) -> Result<(), BrainError> {
+    let mut stmt = conn.prepare(
+        "SELECT event_type, payload_json FROM agent_run_events
+         WHERE run_id=?1 AND event_type IN ('run.text_delta','run.runtime_completed')
+         ORDER BY sequence",
+    )?;
+    let rows = stmt.query_map([run_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut partial_answer = String::new();
+    let mut stop_reason = fallback_reason.to_string();
+    for row in rows {
+        let (event_type, raw) = row?;
+        let payload: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|error| BrainError::Internal(format!("运行事件解析失败: {error}")))?;
+        if event_type == "run.text_delta" {
+            if let Some(delta) = payload.get("delta").and_then(serde_json::Value::as_str) {
+                partial_answer.push_str(delta);
+            }
+        } else if payload.get("complete").and_then(serde_json::Value::as_bool) == Some(false) {
+            if let Some(reason) = payload
+                .get("stop_reason")
+                .and_then(serde_json::Value::as_str)
+            {
+                stop_reason = reason.to_string();
+            }
+        }
+    }
+    if !partial_answer.is_empty() {
+        let output = serde_json::json!({"partial_answer":partial_answer,"complete":false,"stop_reason":stop_reason}).to_string();
+        conn.execute(
+            "UPDATE agent_runs SET output_json=?2 WHERE id=?1 AND status='running'",
+            params![run_id, output],
+        )?;
+    }
+    Ok(())
+}
+
 fn validate_agent_event_type(value: &str) -> Result<(), BrainError> {
     if matches!(
         value,
@@ -7530,6 +7647,8 @@ fn validate_agent_event_type(value: &str) -> Result<(), BrainError> {
             | "run.progress"
             | "run.text_delta"
             | "run.usage"
+            | "run.usage_cost"
+            | "run.runtime_completed"
             | "run.tool_started"
             | "run.tool_finished"
             | "run.external_source_read"
@@ -10169,6 +10288,63 @@ mod tests {
     }
 
     #[test]
+    fn test_incomplete_run_retains_visible_output_without_completing() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-partial", "/tmp/book-partial")])
+            .unwrap();
+        let base = store.initialize_base("book-partial").unwrap();
+        for cancelled in [false, true] {
+            let run = store
+                .start_agent_run(
+                    &base.id,
+                    "deepseek_harness",
+                    "knowledge_qa",
+                    &serde_json::json!({}),
+                )
+                .unwrap();
+            store
+                .append_agent_run_event(
+                    &run.id,
+                    "run.text_delta",
+                    Some("generation"),
+                    "输出",
+                    &serde_json::json!({"delta":"已输出"}),
+                )
+                .unwrap();
+            store
+                .append_agent_run_event(
+                    &run.id,
+                    "run.text_delta",
+                    Some("generation"),
+                    "输出",
+                    &serde_json::json!({"delta":"正文"}),
+                )
+                .unwrap();
+            store
+                .append_agent_run_event(
+                    &run.id,
+                    "run.runtime_completed",
+                    Some("completion"),
+                    "未完成",
+                    &serde_json::json!({"stop_reason":"max_tokens","complete":false}),
+                )
+                .unwrap();
+            let terminal = if cancelled {
+                store.cancel_agent_run(&run.id).unwrap()
+            } else {
+                store.fail_agent_run(&run.id, "达到上限").unwrap()
+            };
+            let output = terminal.output.unwrap();
+            assert_eq!(output["partial_answer"], "已输出正文");
+            assert_eq!(output["complete"], false);
+            assert!(output.get("answer").is_none());
+            assert_eq!(output["stop_reason"], "max_tokens");
+            assert_ne!(terminal.status, "completed");
+        }
+    }
+
+    #[test]
     fn test_cancel_agent_run_marks_terminal_event_and_revokes_capability() {
         let (store, _dir) = test_store();
         store
@@ -10396,6 +10572,75 @@ mod tests {
     }
 
     #[test]
+    fn test_model_provider_request_accepts_declared_model_capabilities() {
+        let request = serde_json::from_value::<crate::models::book_wiki::SaveModelProviderRequest>(
+            serde_json::json!({
+                "display_name": "测试供应商",
+                "api_protocol": "openai-completions",
+                "base_url": "https://example.com/v1",
+                "model": "test-model",
+                "credential_source": "environment",
+                "api_key_env": "TEST_MODEL_KEY",
+                "context_window": 1048576,
+                "max_output_tokens": 65536,
+                "reasoning_policy": "high"
+            }),
+        );
+
+        let request = request.unwrap();
+        assert_eq!(request.context_window, Some(1_048_576));
+        assert_eq!(request.max_output_tokens, Some(65_536));
+        assert_eq!(request.reasoning_policy, "high");
+    }
+
+    #[test]
+    fn test_model_provider_profile_legacy_json_preserves_unknown_capabilities() {
+        let profile: ModelProviderProfile = serde_json::from_value(serde_json::json!({
+            "provider_id": "legacy",
+            "display_name": "旧配置",
+            "api_protocol": "openai-completions",
+            "base_url": "https://example.com/v1",
+            "model": "test-model",
+            "credential_source": "environment",
+            "api_key_env": "TEST_MODEL_KEY",
+            "api_key_configured": false,
+            "enabled": true,
+            "revision": 1,
+            "updated_at": "2026-09-26T00:00:00Z"
+        }))
+        .unwrap();
+        let serialized = serde_json::to_value(profile).unwrap();
+
+        assert!(serialized["context_window"].is_null());
+        assert!(serialized["max_output_tokens"].is_null());
+        assert_eq!(serialized["reasoning_policy"], "auto");
+    }
+
+    #[test]
+    fn test_model_provider_request_rejects_fractional_negative_and_oversized_capacities() {
+        for field in ["context_window", "max_output_tokens"] {
+            for value in [
+                serde_json::json!(-1),
+                serde_json::json!(1.5),
+                serde_json::json!(4_294_967_296_u64),
+            ] {
+                let mut request = serde_json::json!({
+                    "display_name": "测试供应商", "api_protocol": "openai-completions",
+                    "base_url": "https://example.com/v1", "model": "test-model",
+                    "credential_source": "environment", "api_key_env": "TEST_MODEL_KEY"
+                });
+                request[field] = value;
+                assert!(
+                    serde_json::from_value::<crate::models::book_wiki::SaveModelProviderRequest>(
+                        request
+                    )
+                    .is_err()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_model_provider_profiles_support_multiple_configs_and_runtime_selection() {
         let (store, _dir) = test_store();
         let profile = store
@@ -10415,6 +10660,9 @@ mod tests {
                 "",
                 true,
                 true,
+                Some(1_048_576),
+                Some(65_536),
+                "high",
                 0,
             )
             .unwrap();
@@ -10429,6 +10677,9 @@ mod tests {
                 "OPENROUTER_API_KEY",
                 false,
                 true,
+                None,
+                None,
+                "auto",
                 0,
             )
             .unwrap();
@@ -10448,6 +10699,12 @@ mod tests {
         assert_eq!(saved.model, "glm-5.2");
         assert_eq!(store.list_model_provider_profiles().unwrap().len(), 2);
         assert_eq!(second.api_key_env, "OPENROUTER_API_KEY");
+        assert_eq!(aliyun.context_window, Some(1_048_576));
+        assert_eq!(aliyun.max_output_tokens, Some(65_536));
+        assert_eq!(aliyun.reasoning_policy, "high");
+        assert_eq!(second.context_window, None);
+        assert_eq!(second.max_output_tokens, None);
+        assert_eq!(second.reasoning_policy, "auto");
         let raw_config = store
             .db
             .with_connection(|conn| {
@@ -10489,11 +10746,273 @@ mod tests {
                 "CUSTOM-LLM-KEY",
                 false,
                 true,
+                None,
+                None,
+                "auto",
                 0,
             )
             .unwrap_err();
 
         assert!(error.to_string().contains("环境变量"));
+    }
+
+    #[test]
+    fn test_model_provider_capabilities_update_clear_and_conflict() {
+        let (store, _dir) = test_store();
+        let saved = store
+            .save_model_provider_profile(
+                "capabilities",
+                "容量配置",
+                "openai-completions",
+                "https://example.com/v1",
+                "test-model",
+                "environment",
+                "TEST_MODEL_KEY",
+                false,
+                true,
+                Some(131_072),
+                Some(16_384),
+                "medium",
+                0,
+            )
+            .unwrap();
+        let updated = store
+            .save_model_provider_profile(
+                "capabilities",
+                "容量配置",
+                "openai-completions",
+                "https://example.com/v1",
+                "test-model",
+                "environment",
+                "TEST_MODEL_KEY",
+                false,
+                true,
+                None,
+                None,
+                "auto",
+                saved.revision,
+            )
+            .unwrap();
+
+        assert_eq!(updated.revision, saved.revision + 1);
+        assert_eq!(updated.context_window, None);
+        assert_eq!(updated.max_output_tokens, None);
+        assert_eq!(updated.reasoning_policy, "auto");
+        assert!(store
+            .save_model_provider_profile(
+                "capabilities",
+                "容量配置",
+                "openai-completions",
+                "https://example.com/v1",
+                "test-model",
+                "environment",
+                "TEST_MODEL_KEY",
+                false,
+                true,
+                Some(262_144),
+                Some(32_768),
+                "high",
+                saved.revision,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("已变化"));
+        assert_eq!(
+            store.get_model_provider_profile("capabilities").unwrap(),
+            updated
+        );
+    }
+
+    #[test]
+    fn test_model_provider_capabilities_reject_invalid_values_before_writing() {
+        let (store, _dir) = test_store();
+        for (context, output, reasoning) in [
+            (Some(0), None, "auto"),
+            (None, Some(0), "auto"),
+            (Some(4096), Some(4096), "auto"),
+            (Some(4096), Some(8192), "auto"),
+            (None, None, "none"),
+            (None, None, "ultra"),
+        ] {
+            let result = store.save_model_provider_profile(
+                "invalid-capabilities",
+                "无效配置",
+                "openai-completions",
+                "https://example.com/v1",
+                "test-model",
+                "environment",
+                "TEST_MODEL_KEY",
+                false,
+                true,
+                context,
+                output,
+                reasoning,
+                0,
+            );
+            assert!(result.is_err());
+        }
+        assert!(store.list_model_provider_profiles().unwrap().is_empty());
+        for reasoning in [
+            "auto", "off", "minimal", "low", "medium", "high", "xhigh", "max",
+        ] {
+            assert!(validate_model_provider_profile(
+                "valid-capabilities",
+                "有效配置",
+                "openai-completions",
+                "https://example.com/v1",
+                "test-model",
+                "environment",
+                "TEST_MODEL_KEY",
+                Some(u32::MAX),
+                None,
+                reasoning,
+            )
+            .is_ok());
+        }
+    }
+
+    #[test]
+    fn test_model_provider_capabilities_sql_constraints_prevent_invalid_updates() {
+        let (store, _dir) = test_store();
+        store
+            .save_model_provider_profile(
+                "sql-capabilities",
+                "数据库约束",
+                "openai-completions",
+                "https://example.com/v1",
+                "test-model",
+                "environment",
+                "TEST_MODEL_KEY",
+                false,
+                true,
+                Some(8192),
+                Some(4096),
+                "off",
+                0,
+            )
+            .unwrap();
+        for sql in [
+            "UPDATE llm_provider_profiles SET context_window = 4096 WHERE id = 'sql-capabilities'",
+            "UPDATE llm_provider_profiles SET max_output_tokens = 8192 WHERE id = 'sql-capabilities'",
+            "UPDATE llm_provider_profiles SET context_window = 0 WHERE id = 'sql-capabilities'",
+            "UPDATE llm_provider_profiles SET max_output_tokens = 4294967296 WHERE id = 'sql-capabilities'",
+            "UPDATE llm_provider_profiles SET reasoning_policy = 'unsupported' WHERE id = 'sql-capabilities'",
+        ] {
+            assert!(store.db.with_connection(|conn| {
+                conn.execute(sql, []).map_err(Into::into)
+            }).is_err());
+        }
+        assert_eq!(
+            store
+                .get_model_provider_profile("sql-capabilities")
+                .unwrap()
+                .context_window,
+            Some(8192)
+        );
+    }
+
+    #[test]
+    fn test_model_provider_capabilities_migration_preserves_legacy_metadata() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        // Isolate the provider migration from all other application seeds.
+        conn.execute_batch(
+            "CREATE TABLE llm_provider_profiles (
+                 id TEXT PRIMARY KEY, display_name TEXT NOT NULL, base_url TEXT NOT NULL,
+                 model TEXT NOT NULL, api_key_env TEXT NOT NULL, revision INTEGER NOT NULL
+             );
+             INSERT INTO llm_provider_profiles VALUES
+                 ('legacy', '旧配置', 'https://example.com/v1', 'legacy-model', 'LEGACY_KEY', 4);",
+        )
+        .unwrap();
+        conn.execute_batch(include_str!(
+            "../../migrations/041_model_provider_capabilities.sql"
+        ))
+        .unwrap();
+        let values: (String, String, i64, Option<u32>, Option<u32>, String) = conn.query_row(
+            "SELECT model, api_key_env, revision, context_window, max_output_tokens, reasoning_policy
+             FROM llm_provider_profiles WHERE id = 'legacy'", [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))
+        ).unwrap();
+        assert_eq!(
+            values,
+            (
+                "legacy-model".into(),
+                "LEGACY_KEY".into(),
+                4,
+                None,
+                None,
+                "auto".into()
+            )
+        );
+    }
+
+    #[test]
+    fn test_model_provider_capabilities_upgrade_v39_preserves_book_and_provider() {
+        let (store, dir) = test_store();
+        let book = sample_book("provider-upgrade-book", "/tmp/provider-upgrade-book");
+        store
+            .save_reader_books(std::slice::from_ref(&book))
+            .unwrap();
+        let provider = store
+            .save_model_provider_profile(
+                "legacy-provider",
+                "旧供应商",
+                "openai-completions",
+                "https://example.com/v1",
+                "legacy-model",
+                "environment",
+                "LEGACY_MODEL_KEY",
+                false,
+                true,
+                None,
+                None,
+                "auto",
+                0,
+            )
+            .unwrap();
+
+        // Reconstruct the v39 shape only in this isolated test database.
+        store
+            .db
+            .with_connection(|conn| {
+                conn.execute_batch(
+                    "DROP TABLE agent_run_citations;
+                 DROP TRIGGER llm_provider_capabilities_context_insert;
+                 DROP TRIGGER llm_provider_capabilities_context_update;
+                 ALTER TABLE llm_provider_profiles DROP COLUMN max_output_tokens;
+                 ALTER TABLE llm_provider_profiles DROP COLUMN context_window;
+                 ALTER TABLE llm_provider_profiles DROP COLUMN reasoning_policy;
+                 DELETE FROM _migrations WHERE version >= 40;",
+                )
+                .map_err(Into::into)
+            })
+            .unwrap();
+        drop(store);
+
+        let migrated = BookWikiStore::new(Arc::new(
+            SqliteStore::new(&dir.path().join("book-wiki.db")).unwrap(),
+        ));
+        let saved_books = migrated.list_reader_books().unwrap();
+        assert_eq!(saved_books.len(), 1);
+        assert_eq!(saved_books[0].id, book.id);
+        assert_eq!(saved_books[0].path, book.path);
+        assert_eq!(
+            migrated
+                .get_model_provider_profile("legacy-provider")
+                .unwrap(),
+            provider
+        );
+        migrated
+            .db
+            .with_connection(|conn| {
+                let citation_count: i64 =
+                    conn.query_row("SELECT COUNT(*) FROM agent_run_citations", [], |row| {
+                        row.get(0)
+                    })?;
+                assert_eq!(citation_count, 0);
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]

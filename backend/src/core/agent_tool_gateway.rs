@@ -96,10 +96,12 @@ pub fn agent_knowledge_tool_schemas() -> Vec<Value> {
         ),
         tool_schema(
             "knowledge_get_entry",
-            "读取一个授权知识条目的正文、论断、关系、引用和版本",
+            "分页读取授权知识条目的正文、论断、关系与引用；结果 citation 给出本 Run 可引用的稳定 S 编号，has_more 为真可继续读取",
             object_schema(
                 json!({
-                    "entry_id": { "type": "string" }
+                    "entry_id": { "type": "string" },
+                    "offset_chars": { "type": "integer", "minimum": 0 },
+                    "max_chars": { "type": "integer", "minimum": 1, "maximum": 12000 }
                 }),
                 &["entry_id"],
             ),
@@ -301,11 +303,30 @@ pub fn call_agent_knowledge_tool(
             }))
         }
         "knowledge_get_entry" => {
-            let args: EntryArgs = parse_arguments(arguments)?;
-            let entry = store.get_entry(&args.entry_id)?;
+            let args: ReadEntryArgs = parse_arguments(arguments)?;
+            let mut entry = store.get_entry(&args.entry_id)?;
             require_scope(&grant, &entry.entry.knowledge_base_id)?;
-            serde_json::to_value(entry)
-                .map_err(|error| BrainError::Internal(format!("知识条目序列化失败: {error}")))
+            let total_chars = entry.content_md.chars().count();
+            let offset = args.offset_chars.unwrap_or(0).min(total_chars);
+            let max_chars = args.max_chars.unwrap_or(12_000).clamp(1, 12_000);
+            entry.content_md = entry
+                .content_md
+                .chars()
+                .skip(offset)
+                .take(max_chars)
+                .collect();
+            let counts = json!({"claims":entry.claims.len(),"relations":entry.relations.len(),"citations":entry.citations.len()});
+            entry.claims.truncate(50);
+            entry.relations.truncate(50);
+            entry.citations.truncate(50);
+            entry.versions.clear();
+            let mut result = serde_json::to_value(entry)
+                .map_err(|error| BrainError::Internal(format!("知识条目序列化失败: {error}")))?;
+            result["offset_chars"] = json!(offset);
+            result["total_chars"] = json!(total_chars);
+            result["has_more"] = json!(offset.saturating_add(max_chars) < total_chars);
+            result["metadata_counts"] = counts;
+            Ok(result)
         }
         "knowledge_get_neighbors" => {
             let args: EntryArgs = parse_arguments(arguments)?;
@@ -465,6 +486,14 @@ struct CompiledCatalogArgs {
 #[serde(deny_unknown_fields)]
 struct EntryArgs {
     entry_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadEntryArgs {
+    entry_id: String,
+    offset_chars: Option<usize>,
+    max_chars: Option<usize>,
 }
 
 #[derive(Deserialize)]

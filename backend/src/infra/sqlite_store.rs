@@ -245,6 +245,21 @@ const MIGRATIONS: &[Migration] = &[
         description: "bounded agent knowledge tool calls",
         sql: include_str!("../../migrations/039_agent_tool_call_budget.sql"),
     },
+    Migration {
+        version: 40,
+        description: "stable numbered run citations with immutable visible evidence",
+        sql: include_str!("../../migrations/040_numbered_run_citations.sql"),
+    },
+    Migration {
+        version: 41,
+        description: "explicit model context, output and reasoning capabilities",
+        sql: include_str!("../../migrations/041_model_provider_capabilities.sql"),
+    },
+    Migration {
+        version: 42,
+        description: "numbered citation contract for stock Harness skills",
+        sql: include_str!("../../migrations/042_numbered_citation_skill_contract.sql"),
+    },
 ];
 
 fn seed_detailed_ingest_skill(conn: &Connection) -> Result<(), BrainError> {
@@ -476,7 +491,7 @@ fn overwrite_harness_wiki_skills(conn: &Connection) -> Result<(), BrainError> {
             .map_err(|_| BrainError::Internal("内置 Skill 大小超出限制".to_string()))?;
         let version_count = conn.execute(
             "UPDATE skill_versions SET content_hash = ?1, release_state = 'published',
-                    changelog = '适配 Harness 原生 Skill 与分层语义检索'
+                    changelog = '适配 Harness 原生 Skill、分层检索与实际已读稳定引用'
              WHERE id = ?2 AND skill_id = ?3",
             params![&content_hash, version_id, skill_id],
         )?;
@@ -719,7 +734,7 @@ impl SqliteStore {
                 32 => compact_wiki_skill_versions(&conn),
                 33 => overwrite_structured_presentation_skill(&conn),
                 34 => overwrite_structured_presentation_skill(&conn),
-                38 => overwrite_harness_wiki_skills(&conn),
+                38 | 42 => overwrite_harness_wiki_skills(&conn),
                 _ => Ok(()),
             };
             if let Err(error) = seed_result {
@@ -1762,7 +1777,7 @@ mod tests {
             .with_connection(|conn| {
                 let latest: i64 =
                     conn.query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))?;
-                assert_eq!(latest, 39);
+                assert_eq!(latest as u32, MIGRATIONS.last().unwrap().version);
                 for (skill_id, version_id, content) in [
                     (
                         "skill-book-query",
@@ -1917,7 +1932,7 @@ mod tests {
                         conn.query_row("SELECT MAX(version) FROM _migrations", [], |row| {
                             row.get(0)
                         })?;
-                    assert_eq!(latest, 39);
+                    assert_eq!(latest, MIGRATIONS.last().unwrap().version);
                     for (skill_id, version_id, expected_content) in [
                         (
                             "skill-book-ingest",
@@ -2038,6 +2053,29 @@ mod tests {
                 })
                 .unwrap();
         }
+    }
+
+    #[test]
+    fn test_migration_042_refreshes_stock_citation_contract_without_changing_bookshelf() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("citation-skill-upgrade.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+        store.with_connection(|conn| {
+            conn.execute("DELETE FROM _migrations WHERE version >= 42", [])?;
+            conn.execute("UPDATE skill_files SET content_text='old stock citation rules', content_hash='old' WHERE skill_version_id='skill-version-book-query-v3'", [])?;
+            conn.execute("UPDATE skill_versions SET content_hash='old' WHERE id='skill-version-book-query-v3'", [])?;
+            conn.execute("INSERT INTO app_state (key,value) VALUES ('citation-upgrade-books','original')", [])?;
+            Ok(())
+        }).unwrap();
+        drop(store);
+        let reopened = SqliteStore::new(&db_path).unwrap();
+        reopened.with_connection(|conn| {
+            let body: String = conn.query_row("SELECT content_text FROM skill_files WHERE skill_version_id='skill-version-book-query-v3' AND relative_path='SKILL.md'", [], |row|row.get(0))?;
+            assert!(body.contains("citation.label"));
+            let state: String = conn.query_row("SELECT value FROM app_state WHERE key='citation-upgrade-books'", [], |row|row.get(0))?;
+            assert_eq!(state, "original");
+            Ok(())
+        }).unwrap();
     }
 
     #[test]

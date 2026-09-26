@@ -150,7 +150,7 @@ pub struct BookKnowledgeCard {
     pub knowledge_base: Option<KnowledgeBaseSummary>,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct KnowledgeEntrySummary {
     pub id: String,
     pub knowledge_base_id: String,
@@ -164,7 +164,7 @@ pub struct KnowledgeEntrySummary {
     pub updated_at: String,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct KnowledgeCitation {
     pub id: String,
     pub source_path: String,
@@ -263,6 +263,14 @@ pub struct ModelProviderProfile {
     pub api_key_env: String,
     pub api_key_configured: bool,
     pub enabled: bool,
+    /// Declared model capacity; absent means unknown, not a guessed default.
+    #[serde(default)]
+    pub context_window: Option<u32>,
+    #[serde(default)]
+    pub max_output_tokens: Option<u32>,
+    /// Application policy. `auto` inherits Harness/catalog reasoning defaults.
+    #[serde(default = "default_reasoning_policy")]
+    pub reasoning_policy: String,
     pub revision: i64,
     pub updated_at: String,
 }
@@ -284,7 +292,17 @@ pub struct SaveModelProviderRequest {
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default)]
+    pub context_window: Option<u32>,
+    #[serde(default)]
+    pub max_output_tokens: Option<u32>,
+    #[serde(default = "default_reasoning_policy")]
+    pub reasoning_policy: String,
+    #[serde(default)]
     pub expected_revision: i64,
+}
+
+fn default_reasoning_policy() -> String {
+    "auto".to_string()
 }
 
 fn default_true() -> bool {

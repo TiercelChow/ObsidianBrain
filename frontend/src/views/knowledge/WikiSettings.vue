@@ -65,11 +65,14 @@
               <span>协议：{{ protocolLabel(provider.api_protocol) }}</span>
               <span>Base URL：{{ provider.base_url }}</span>
               <span>凭据来源：{{ provider.credential_source === 'keychain' ? '系统凭据库' : `环境变量 ${provider.api_key_env || '—'}` }}</span>
+              <span>上下文：{{ provider.context_window == null ? '未声明' : `${formatTokenCount(provider.context_window)} tokens` }}</span>
+              <span>最大输出：{{ provider.max_output_tokens == null ? '未声明' : `${formatTokenCount(provider.max_output_tokens)} tokens` }}</span>
+              <span>推理：{{ reasoningPolicyLabel(provider.reasoning_policy || 'auto') }}</span>
             </div>
             <div class="runtime-actions">
               <el-switch v-model="provider.enabled" active-text="启用" @change="toggleProviderEnabled(provider)" />
               <div>
-                <el-button :loading="editingProviderId === provider.provider_id" @click="openEditProvider(provider)">编辑</el-button>
+                <el-button :loading="updatingProviderId === provider.provider_id" @click="openEditProvider(provider)">编辑</el-button>
                 <el-button type="danger" :loading="deletingProviderId === provider.provider_id" @click="removeProvider(provider)">删除</el-button>
               </div>
             </div>
@@ -93,11 +96,11 @@
           <div v-else class="usage-dashboard">
             <div class="usage-disclosure" :class="`is-${usageStats?.usage_source || 'unavailable'}`">
               <el-icon><InfoFilled /></el-icon>
-              <span><strong>{{ usageSourceLabel }}</strong>当前 Harness ACP 未上报精确 token，现有问答和研究任务使用本地文本估算；未来运行时上报后会自动标记为实测。</span>
+              <span><strong>{{ usageSourceLabel }}</strong>当前 Harness ACP 未上报精确 token，估算仅覆盖初始 Prompt 与最终输出，不包含工具历史、模型内部多轮重发、压缩和推理消耗，不能作为供应商账单。上下文占用与 ACP 费用独立记录，不换算为计费 token。</span>
             </div>
             <div class="usage-metrics">
-              <article><span>总 Token</span><strong>{{ formatTokenCount(usageStats?.totals.total_tokens || 0) }}</strong><small>{{ usageStats?.totals.runs || 0 }} 次有记录调用</small></article>
-              <article><span>输入</span><strong>{{ formatTokenCount(usageStats?.totals.input_tokens || 0) }}</strong><small>提示词与检索证据</small></article>
+              <article><span>已记录 Token</span><strong>{{ formatTokenCount(usageStats?.totals.total_tokens || 0) }}</strong><small>{{ usageStats?.totals.runs || 0 }} 次有记录调用，非完整账单</small></article>
+              <article><span>输入</span><strong>{{ formatTokenCount(usageStats?.totals.input_tokens || 0) }}</strong><small>已记录的提示词与可见证据</small></article>
               <article><span>输出</span><strong>{{ formatTokenCount(usageStats?.totals.output_tokens || 0) }}</strong><small>模型回答与任务结果</small></article>
               <article><span>未统计</span><strong>{{ usageStats?.totals.unreported_runs || 0 }}</strong><small>升级前的历史运行</small></article>
             </div>
@@ -239,6 +242,14 @@
           </el-select>
           <el-input v-model="providerDraft.base_url" placeholder="API Base URL，例如：https://dashscope.aliyuncs.com/compatible-mode/v1" />
           <el-input v-model="providerDraft.model" placeholder="模型 ID，例如：glm-5.2" />
+          <section class="provider-capabilities">
+            <header><strong>模型能力</strong><span>按供应商实际限制填写；未知时留空，不推测容量。</span></header>
+            <label><span>上下文容量（tokens）</span><el-input v-model="contextWindowInput" inputmode="numeric" placeholder="未声明，继承 Harness 配置" /></label>
+            <label><span>最大输出（tokens）</span><el-input v-model="maxOutputInput" inputmode="numeric" placeholder="未声明，继承 Harness 配置" /></label>
+            <label class="is-wide"><span>推理策略</span><el-select v-model="providerDraft.reasoning_policy" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option v-for="policy in modelReasoningPolicies" :key="policy" :label="reasoningPolicyLabel(policy)" :value="policy" /></el-select></label>
+            <p v-if="capabilityError" class="capability-error is-wide" role="alert">{{ capabilityError }}</p>
+            <p v-else class="is-wide">输出上限、推理策略分别设置；能力声明不是本轮已消耗的预算。</p>
+          </section>
           <el-select v-model="providerDraft.credential_source" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true">
             <el-option label="系统凭据库（页面填写 API Key）" value="keychain" />
             <el-option label="环境变量（启动进程注入）" value="environment" />
@@ -250,7 +261,7 @@
           </template>
           <el-switch v-model="providerDraft.enabled" active-text="启用" />
         </div>
-        <div class="knowledge-modal-actions"><el-button @click="providerEditorVisible = false">取消</el-button><el-button type="primary" :loading="savingProvider" :disabled="!providerDraft.display_name.trim() || !providerDraft.base_url.trim() || !providerDraft.model.trim()" @click="saveProviderDraft">保存供应商</el-button></div>
+        <div class="knowledge-modal-actions"><el-button @click="providerEditorVisible = false">取消</el-button><el-button type="primary" :loading="savingProvider" :disabled="!providerDraft.display_name.trim() || !providerDraft.base_url.trim() || !providerDraft.model.trim() || Boolean(capabilityError)" @click="saveProviderDraft">保存供应商</el-button></div>
       </div>
     </MotionModal>
 
@@ -361,6 +372,7 @@ import { ElMessage } from 'element-plus'
 import { Connection, Cpu, DataAnalysis, Document, Download, InfoFilled, Loading, Lock, MagicStick, Plus, UploadFilled } from '@element-plus/icons-vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
+import { modelReasoningPolicies, validateModelCapabilities } from '@/utils/knowledgeRuntimePolicy'
 import {
   getBookWikiSettings,
   getAgentUsageStats,
@@ -406,7 +418,7 @@ const activeDocumentId = ref('')
 const runtimeHealth = ref<RuntimeHealth[]>([])
 const modelProviders = ref<ModelProviderProfile[]>([])
 const providerEditorVisible = ref(false)
-const editingProviderId = ref('')
+const updatingProviderId = ref('')
 const savingProvider = ref(false)
 const deletingProviderId = ref('')
 const providerDraft = reactive<SaveModelProviderRequest & { api_key_configured: boolean }>({
@@ -415,6 +427,9 @@ const providerDraft = reactive<SaveModelProviderRequest & { api_key_configured: 
   api_protocol: 'openai-completions',
   base_url: '',
   model: '',
+  context_window: null,
+  max_output_tokens: null,
+  reasoning_policy: 'auto',
   credential_source: 'keychain',
   api_key_env: '',
   api_key: '',
@@ -423,6 +438,15 @@ const providerDraft = reactive<SaveModelProviderRequest & { api_key_configured: 
   expected_revision: 0,
   api_key_configured: false,
 })
+const contextWindowInput = computed({
+  get: () => providerDraft.context_window == null ? '' : String(providerDraft.context_window),
+  set: (value: string) => { providerDraft.context_window = value.trim() ? Number(value) : null },
+})
+const maxOutputInput = computed({
+  get: () => providerDraft.max_output_tokens == null ? '' : String(providerDraft.max_output_tokens),
+  set: (value: string) => { providerDraft.max_output_tokens = value.trim() ? Number(value) : null },
+})
+const capabilityError = computed(() => validateModelCapabilities(providerDraft))
 const loading = ref(false)
 const savingRuntime = ref(false)
 const verifyingRuntimeId = ref('')
@@ -649,6 +673,9 @@ function resetProviderDraft() {
     api_protocol: 'openai-completions',
     base_url: '',
     model: '',
+    context_window: null,
+    max_output_tokens: null,
+    reasoning_policy: 'auto',
     credential_source: 'keychain',
     api_key_env: '',
     api_key: '',
@@ -661,18 +688,19 @@ function resetProviderDraft() {
 
 function openNewProvider() {
   resetProviderDraft()
-  editingProviderId.value = ''
   providerEditorVisible.value = true
 }
 
 function openEditProvider(provider: ModelProviderProfile) {
-  editingProviderId.value = provider.provider_id
   Object.assign(providerDraft, {
     provider_id: provider.provider_id,
     display_name: provider.display_name,
     api_protocol: provider.api_protocol,
     base_url: provider.base_url,
     model: provider.model,
+    context_window: provider.context_window ?? null,
+    max_output_tokens: provider.max_output_tokens ?? null,
+    reasoning_policy: provider.reasoning_policy || 'auto',
     credential_source: provider.credential_source,
     api_key_env: provider.api_key_env,
     api_key: '',
@@ -687,12 +715,17 @@ function openEditProvider(provider: ModelProviderProfile) {
 async function saveProviderDraft() {
   savingProvider.value = true
   try {
+    const invalidCapabilities = validateModelCapabilities(providerDraft)
+    if (invalidCapabilities) throw new Error(invalidCapabilities)
     const response = await saveModelProvider({
       provider_id: providerDraft.provider_id || undefined,
       display_name: providerDraft.display_name.trim(),
       api_protocol: providerDraft.api_protocol,
       base_url: providerDraft.base_url.trim(),
       model: providerDraft.model.trim(),
+      context_window: providerDraft.context_window ?? null,
+      max_output_tokens: providerDraft.max_output_tokens ?? null,
+      reasoning_policy: providerDraft.reasoning_policy || 'auto',
       credential_source: providerDraft.credential_source,
       api_key_env: providerDraft.api_key_env?.trim() ?? '',
       api_key: providerDraft.api_key || undefined,
@@ -727,7 +760,7 @@ async function removeProvider(provider: ModelProviderProfile) {
 
 async function toggleProviderEnabled(provider: ModelProviderProfile) {
   // optimistic inline toggle persisted immediately so disabled providers cannot stay selected by a runtime
-  editingProviderId.value = provider.provider_id
+  updatingProviderId.value = provider.provider_id
   try {
     const response = await saveModelProvider({
       provider_id: provider.provider_id,
@@ -735,6 +768,9 @@ async function toggleProviderEnabled(provider: ModelProviderProfile) {
       api_protocol: provider.api_protocol,
       base_url: provider.base_url,
       model: provider.model,
+      context_window: provider.context_window ?? null,
+      max_output_tokens: provider.max_output_tokens ?? null,
+      reasoning_policy: provider.reasoning_policy || 'auto',
       credential_source: provider.credential_source,
       api_key_env: provider.api_key_env,
       enabled: provider.enabled,
@@ -746,8 +782,12 @@ async function toggleProviderEnabled(provider: ModelProviderProfile) {
     ElMessage.error((error as Error).message)
     await loadSettings()
   } finally {
-    editingProviderId.value = ''
+    updatingProviderId.value = ''
   }
+}
+
+function reasoningPolicyLabel(policy: string) {
+  return ({ auto: '继承 Harness', off: '关闭推理', minimal: '最少推理', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最大' } as Record<string, string>)[policy] || policy
 }
 
 async function initialize() {
@@ -1167,6 +1207,15 @@ onMounted(initialize)
 .settings-empty { color: var(--text-faint); font-size: 12px; padding: 28px 4px; }
 .provider-editor-form { display: grid; gap: 11px; }
 .provider-editor-form .el-select { width: 100%; }
+.provider-capabilities { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; padding: 13px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); }
+.provider-capabilities header { grid-column: 1 / -1; display: grid; gap: 3px; }
+.provider-capabilities strong { font-size: 12px; font-weight: 650; }
+.provider-capabilities header span, .provider-capabilities p { color: var(--text-faint); font-size: 11px; line-height: 1.6; }
+.provider-capabilities label { min-width: 0; display: grid; gap: 5px; }
+.provider-capabilities label > span { color: var(--text-muted); font-size: 11px; }
+.provider-capabilities .is-wide { grid-column: 1 / -1; }
+.provider-capabilities .capability-error { color: var(--danger, #d9342b); }
+@media (max-width: 560px) { .provider-capabilities { grid-template-columns: minmax(0, 1fr); } }
 .runtime-actions { display: flex; align-items: center; justify-content: space-between; }
 .runtime-actions > div { display: flex; gap: 8px; }
 .usage-head { align-items: flex-start !important; }

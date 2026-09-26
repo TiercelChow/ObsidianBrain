@@ -53,6 +53,17 @@ pub enum AgentRuntimeEvent {
         used: u64,
         size: u64,
     },
+    /// ACP context occupancy is not billable token usage. Optional cost is a
+    /// separately reported cumulative session value, never a per-update delta.
+    UsageCost {
+        amount: f64,
+        currency: String,
+    },
+    /// A nonempty answer is complete only after a successful end_turn.
+    Completed {
+        stop_reason: String,
+        complete: bool,
+    },
 }
 
 #[async_trait]
@@ -104,6 +115,12 @@ impl DeepSeekHarnessRuntime {
         events: Option<tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
         cancel: tokio::sync::watch::Receiver<bool>,
     ) -> Result<String, BrainError> {
+        if *cancel.borrow() {
+            emit_completion(events.as_ref(), "cancelled", false);
+            return Err(BrainError::KnowledgeValidation(
+                "Agent 运行已取消".to_string(),
+            ));
+        }
         if request.command.trim().is_empty() {
             return Err(harness_error("ACP 启动命令为空"));
         }
@@ -144,6 +161,7 @@ impl DeepSeekHarnessRuntime {
         let model = request.model;
         let prompt = request.prompt;
         let operation_events = events.clone();
+        let completion_events = events.clone();
 
         let operation = agent_client_protocol::Client
             .builder()
@@ -261,6 +279,7 @@ impl DeepSeekHarnessRuntime {
         let (answer, stop_reason) = tokio::time::timeout(request_timeout, operation)
             .await
             .map_err(|_| {
+                emit_completion(completion_events.as_ref(), "timeout", false);
                 harness_error(format!(
                     "DeepSeek Harness 在 {}内没有完成回答",
                     duration_label(request_timeout)
@@ -268,20 +287,17 @@ impl DeepSeekHarnessRuntime {
             })?
             .map_err(|error| {
                 if error.to_string().contains(AGENT_RUNTIME_CANCELLED) {
+                    emit_completion(completion_events.as_ref(), "cancelled", false);
                     BrainError::KnowledgeValidation("Agent 运行已取消".to_string())
                 } else {
+                    emit_completion(completion_events.as_ref(), "runtime_error", false);
                     harness_error(acp_error_message(
                         &error.to_string(),
                         request.credential_env.as_deref(),
                     ))
                 }
             })?;
-        if answer.trim().is_empty()
-            || matches!(stop_reason, StopReason::Refusal | StopReason::Cancelled)
-        {
-            return Err(empty_answer_error(stop_reason));
-        }
-        Ok(answer)
+        finish_answer(answer, stop_reason, completion_events.as_ref())
     }
 }
 
@@ -350,6 +366,18 @@ fn handle_session_update(
                     size: usage.size,
                 },
             );
+            if let Some(cost) = usage.cost {
+                if cost.amount.is_finite() && cost.amount >= 0.0 && !cost.currency.trim().is_empty()
+                {
+                    emit_event(
+                        events,
+                        AgentRuntimeEvent::UsageCost {
+                            amount: cost.amount,
+                            currency: cost.currency,
+                        },
+                    );
+                }
+            }
         }
         _ => {}
     }
@@ -380,6 +408,52 @@ fn stop_reason_code(reason: StopReason) -> &'static str {
         StopReason::Refusal => "refusal",
         StopReason::Cancelled => "cancelled",
         _ => "unknown",
+    }
+}
+
+fn emit_completion(
+    events: Option<&tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+    stop_reason: &str,
+    complete: bool,
+) {
+    emit_event(
+        events,
+        AgentRuntimeEvent::Completed {
+            stop_reason: stop_reason.to_string(),
+            complete,
+        },
+    );
+}
+
+/// Never convert exhausted or refused turns into successful business results.
+/// Their already emitted TextDelta events remain available for partial display.
+fn finish_answer(
+    answer: String,
+    reason: StopReason,
+    events: Option<&tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+) -> Result<String, BrainError> {
+    let empty = answer.trim().is_empty();
+    let complete = !empty && matches!(reason, StopReason::EndTurn);
+    emit_completion(events, stop_reason_code(reason), complete);
+    if complete {
+        return Ok(answer);
+    }
+    if empty {
+        return Err(empty_answer_error(reason));
+    }
+    match reason {
+        StopReason::Cancelled => Err(BrainError::KnowledgeValidation("Agent 运行已取消".to_string())),
+        StopReason::MaxTokens => Err(harness_error(
+            "DeepSeek Harness 达到输出 token 上限，回答未完成；已生成正文保留为部分结果 (stop_reason=max_tokens)",
+        )),
+        StopReason::MaxTurnRequests => Err(harness_error(
+            "DeepSeek Harness 达到请求轮次上限，回答未完成；已生成正文保留为部分结果 (stop_reason=max_turn_requests)",
+        )),
+        StopReason::Refusal => Err(empty_answer_error(reason)),
+        _ => Err(harness_error(format!(
+            "DeepSeek Harness 未确认完整结束，回答未完成 (stop_reason={})",
+            stop_reason_code(reason)
+        ))),
     }
 }
 
@@ -619,6 +693,300 @@ mod tests {
 
         let refused = empty_answer_error(agent_client_protocol::schema::v1::StopReason::Refusal);
         assert!(refused.to_string().contains("拒绝回答"));
+    }
+
+    #[test]
+    fn test_finish_answer_reports_a_nonempty_normal_completion() {
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+
+        let answer =
+            finish_answer("完整答案".to_string(), StopReason::EndTurn, Some(&events)).unwrap();
+
+        assert_eq!(answer, "完整答案");
+        assert_eq!(
+            received.try_recv().unwrap(),
+            AgentRuntimeEvent::Completed {
+                stop_reason: "end_turn".to_string(),
+                complete: true,
+            }
+        );
+    }
+
+    #[test]
+    fn test_finish_answer_rejects_nonempty_truncation_without_losing_streamed_text() {
+        for reason in [StopReason::MaxTokens, StopReason::MaxTurnRequests] {
+            let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+            let mut output = String::new();
+            handle_session_update(
+                SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                    agent_client_protocol::schema::v1::TextContent::new("已生成但尚未完成"),
+                ))),
+                &mut output,
+                Some(&events),
+            );
+
+            let error = finish_answer(output, reason, Some(&events)).unwrap_err();
+
+            assert!(error.to_string().contains(stop_reason_code(reason)));
+            assert!(error.to_string().contains("未完成"));
+            assert_eq!(
+                received.try_recv().unwrap(),
+                AgentRuntimeEvent::TextDelta {
+                    delta: "已生成但尚未完成".to_string(),
+                }
+            );
+            assert_eq!(
+                received.try_recv().unwrap(),
+                AgentRuntimeEvent::Completed {
+                    stop_reason: stop_reason_code(reason).to_string(),
+                    complete: false,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn test_finish_answer_rejects_empty_refused_and_cancelled_answers() {
+        for (answer, reason) in [
+            (" \n", StopReason::EndTurn),
+            ("部分拒绝文本", StopReason::Refusal),
+            ("部分取消文本", StopReason::Cancelled),
+        ] {
+            let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+
+            assert!(finish_answer(answer.to_string(), reason, Some(&events)).is_err());
+            assert_eq!(
+                received.try_recv().unwrap(),
+                AgentRuntimeEvent::Completed {
+                    stop_reason: stop_reason_code(reason).to_string(),
+                    complete: false,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn test_usage_context_remains_context_only_and_preserves_reported_cost() {
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let mut output = String::new();
+        handle_session_update(
+            SessionUpdate::UsageUpdate(
+                agent_client_protocol::schema::v1::UsageUpdate::new(128, 4096)
+                    .cost(agent_client_protocol::schema::v1::Cost::new(0.045, "USD")),
+            ),
+            &mut output,
+            Some(&events),
+        );
+
+        assert_eq!(
+            received.try_recv().unwrap(),
+            AgentRuntimeEvent::UsageContext {
+                used: 128,
+                size: 4096
+            }
+        );
+        assert_eq!(
+            received.try_recv().unwrap(),
+            AgentRuntimeEvent::UsageCost {
+                amount: 0.045,
+                currency: "USD".to_string()
+            }
+        );
+        assert!(received.try_recv().is_err());
+    }
+
+    #[test]
+    fn test_usage_update_does_not_accept_invalid_cost() {
+        for amount in [-1.0, f64::NAN, f64::INFINITY] {
+            let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+            handle_session_update(
+                SessionUpdate::UsageUpdate(
+                    agent_client_protocol::schema::v1::UsageUpdate::new(128, 4096)
+                        .cost(agent_client_protocol::schema::v1::Cost::new(amount, "USD")),
+                ),
+                &mut String::new(),
+                Some(&events),
+            );
+            assert!(matches!(
+                received.try_recv().unwrap(),
+                AgentRuntimeEvent::UsageContext { .. }
+            ));
+            assert!(received.try_recv().is_err());
+        }
+    }
+
+    // Exercise the real ACP transport without network, provider credentials or
+    // Harness installation. POSIX sh is sufficient for this test-only agent.
+    #[cfg(unix)]
+    fn fake_acp_request(
+        reason: &str,
+        answer: &str,
+        wait_for_cancel: bool,
+    ) -> (tempfile::TempDir, AgentPromptRequest) {
+        let workspace = tempfile::tempdir().unwrap();
+        let script_path = workspace.path().join("fake-acp.sh");
+        let notification = serde_json::json!({
+            "jsonrpc": "2.0", "method": "session/update",
+            "params": {"sessionId": "fixture-session", "update": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": answer}
+            }}
+        })
+        .to_string();
+        let settlement = if wait_for_cancel {
+            "prompt_id=\"$request_id\"".to_string()
+        } else {
+            format!(
+                "printf '{{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{{\"stopReason\":\"{reason}\"}}}}\\n' \"$request_id\""
+            )
+        };
+        let script = format!(
+            r#"while IFS= read -r request; do
+    request_id=$(printf '%s\n' "$request" | sed -n 's/.*"id":\([^,}}]*\).*/\1/p')
+    case "$request" in
+        *'"method":"initialize"'*)
+            printf '{{"jsonrpc":"2.0","id":%s,"result":{{"protocolVersion":1,"agentCapabilities":{{}}}}}}\n' "$request_id" ;;
+        *'"method":"session/new"'*)
+            printf '{{"jsonrpc":"2.0","id":%s,"result":{{"sessionId":"fixture-session"}}}}\n' "$request_id" ;;
+        *'"method":"session/prompt"'*)
+            printf '%s\n' {notification}
+            {settlement} ;;
+        *'"method":"session/cancel"'*)
+            printf '{{"jsonrpc":"2.0","id":%s,"result":{{"stopReason":"cancelled"}}}}\n' "$prompt_id" ;;
+    esac
+done
+"#,
+            notification = shell_words::quote(&notification),
+        );
+        std::fs::write(&script_path, script).unwrap();
+        let request = AgentPromptRequest {
+            command: format!(
+                "/bin/sh {}",
+                shell_words::quote(&script_path.to_string_lossy())
+            ),
+            model: String::new(),
+            cwd: workspace.path().to_path_buf(),
+            prompt: "Transport fixture".to_string(),
+            patch_paths: Vec::new(),
+            credential_env: None,
+            credential_value: None,
+            timeout: Some(Duration::from_secs(3)),
+        };
+        (workspace, request)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_acp_transport_preserves_partial_output_and_stop_reason() {
+        for (reason, answer, expected_complete) in [
+            ("end_turn", "完整答案", true),
+            ("end_turn", "", false),
+            ("max_tokens", "输出一半", false),
+            ("max_turn_requests", "工具执行一半", false),
+            ("refusal", "拒绝回答", false),
+            ("cancelled", "取消前输出", false),
+        ] {
+            let (_workspace, request) = fake_acp_request(reason, answer, false);
+            let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+            let (_guard, cancel) = tokio::sync::watch::channel(false);
+            let result = DeepSeekHarnessRuntime::default()
+                .prompt_with_events(request, Some(events), cancel)
+                .await;
+            assert_eq!(result.is_ok(), expected_complete, "{reason}: {result:?}");
+            let mut streamed = String::new();
+            let mut completion = None;
+            while let Ok(event) = received.try_recv() {
+                match event {
+                    AgentRuntimeEvent::TextDelta { delta } => streamed.push_str(&delta),
+                    AgentRuntimeEvent::Completed {
+                        stop_reason,
+                        complete,
+                    } => {
+                        assert!(completion.is_none(), "duplicate completion");
+                        completion = Some((stop_reason, complete));
+                    }
+                    _ => {}
+                }
+            }
+            assert_eq!(streamed, answer);
+            assert_eq!(completion, Some((reason.to_string(), expected_complete)));
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_acp_transport_cancellation_preserves_streamed_partial_answer() {
+        let (_workspace, request) = fake_acp_request("cancelled", "取消前输出", true);
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let (cancel_sender, cancel) = tokio::sync::watch::channel(false);
+        let runtime = DeepSeekHarnessRuntime::default();
+        let operation = runtime.prompt_with_events(request, Some(events), cancel);
+        tokio::pin!(operation);
+        let mut streamed = String::new();
+        let mut completion = None;
+        let result = tokio::time::timeout(Duration::from_secs(4), async {
+            loop {
+                tokio::select! {
+                    result = &mut operation => break result,
+                    event = received.recv() => {
+                        match event {
+                            Some(AgentRuntimeEvent::TextDelta { delta }) => {
+                                streamed.push_str(&delta);
+                                cancel_sender.send(true).unwrap();
+                            }
+                            Some(AgentRuntimeEvent::Completed { stop_reason, complete }) => {
+                                completion = Some((stop_reason, complete));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(result.unwrap_err().to_string().contains("取消"));
+        while let Ok(event) = received.try_recv() {
+            if let AgentRuntimeEvent::Completed {
+                stop_reason,
+                complete,
+            } = event
+            {
+                assert!(completion.is_none(), "duplicate completion");
+                completion = Some((stop_reason, complete));
+            }
+        }
+        assert_eq!(streamed, "取消前输出");
+        assert_eq!(completion, Some(("cancelled".to_string(), false)));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_acp_transport_timeout_reports_incomplete_not_success() {
+        let (_workspace, mut request) = fake_acp_request("end_turn", "未完成正文", true);
+        request.timeout = Some(Duration::from_millis(250));
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let (_guard, cancel) = tokio::sync::watch::channel(false);
+        let result = DeepSeekHarnessRuntime::default()
+            .prompt_with_events(request, Some(events), cancel)
+            .await;
+        assert!(result.unwrap_err().to_string().contains("250 毫秒"));
+        let mut streamed = String::new();
+        let mut completion = None;
+        while let Ok(event) = received.try_recv() {
+            match event {
+                AgentRuntimeEvent::TextDelta { delta } => streamed.push_str(&delta),
+                AgentRuntimeEvent::Completed {
+                    stop_reason,
+                    complete,
+                } => {
+                    completion = Some((stop_reason, complete));
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(streamed, "未完成正文");
+        assert_eq!(completion, Some(("timeout".to_string(), false)));
     }
 
     #[tokio::test]

@@ -122,7 +122,7 @@
           </div>
           <button v-if="activeTask.knowledge_change_state === 'proposed'" class="review-result-link" type="button" @click="openTaskReview(activeTask)">研究结论已作为候选保存，前往 Wiki 工作台审核</button>
           <div v-if="activeEvidence.length" class="task-result-evidence">
-            <button v-for="(entry, index) in activeEvidence" :key="entry.id" type="button" @click="openEvidence(index)">
+            <button v-for="(entry, index) in activeEvidence" :key="`${index}-${entry.id}`" type="button" @click="openEvidence(index)">
               <b>S{{ index + 1 }}</b><span>{{ entry.title }}</span><small>{{ entry.source_path || '数据库实体' }}</small>
             </button>
           </div>
@@ -139,6 +139,23 @@
                 <span><small>Prompt</small><strong>{{ activeInspection.snapshot?.prompt_characters || 0 }} 字符</strong></span>
                 <span><small>事件</small><strong>{{ inspectionEvents.length }} 个阶段</strong></span>
               </div>
+              <section v-if="activeInspection.snapshot?.evidence_refs.runtime_budget" class="run-inspector-section">
+                <h4>本轮模型能力与运行上限</h4>
+                <div class="run-inspector-metrics">
+                  <span><small>声明上下文</small><strong>{{ runtimeDiagnostics.budget.context_window == null ? '未声明' : `${runtimeDiagnostics.budget.context_window.toLocaleString()} tokens` }}</strong></span>
+                  <span><small>有效输出上限</small><strong>{{ runtimeDiagnostics.budget.effective_max_output_tokens == null ? '继承 Harness' : `${runtimeDiagnostics.budget.effective_max_output_tokens.toLocaleString()} tokens` }}</strong></span>
+                  <span><small>推理策略</small><strong>{{ runtimeDiagnostics.budget.reasoning_policy }}</strong></span>
+                  <span><small>执行上限</small><strong>{{ runtimeDiagnostics.budget.timeout_seconds ?? '—' }} 秒 · {{ runtimeDiagnostics.budget.tool_call_limit ?? '—' }} 次工具</strong></span>
+                </div>
+                <p class="run-budget-note">这里显示能力声明与运行上限，不代表已消耗的 token。</p>
+              </section>
+              <section v-if="runtimeDiagnostics.completion || runtimeDiagnostics.context || runtimeDiagnostics.cost" class="run-inspector-section">
+                <h4>运行完成与用量性质</h4>
+                <p v-if="runtimeDiagnostics.completion" class="run-budget-note" :class="{ 'is-incomplete': !runtimeDiagnostics.completion.complete }">{{ runtimeDiagnostics.completion.complete ? 'ACP 正常结束' : 'ACP 未完整结束，已有内容不能视为完整报告' }} · {{ runtimeDiagnostics.completion.stopReason }}</p>
+                <p v-if="runtimeDiagnostics.context" class="run-budget-note">最近上下文占用：{{ runtimeDiagnostics.context.used.toLocaleString() }} / {{ runtimeDiagnostics.context.size.toLocaleString() }}（不是计费用量）</p>
+                <p v-if="runtimeDiagnostics.cost" class="run-budget-note">ACP 会话累计费用：{{ runtimeDiagnostics.cost.amount }} {{ runtimeDiagnostics.cost.currency }}（不换算为 token，不叠加累计快照）</p>
+                <p class="run-budget-note">Token 估算仅覆盖初始 Prompt 与最终输出，不含工具历史、内部多轮重发、压缩或推理消耗，不是完整供应商账单。</p>
+              </section>
               <section v-if="activeInspection.snapshot?.skill_snapshots.length" class="run-inspector-section">
                 <h4>Skill 快照</h4>
                 <div class="run-skill-list"><span v-for="skill in activeInspection.snapshot.skill_snapshots" :key="skill.id"><b>{{ skill.name }}</b><small>{{ skill.slug }} · Revision {{ skill.revision }} · {{ skill.application_mode === 'harness_native_available' ? 'Harness 可按需读取' : skill.application_mode === 'declared_only' ? '仅声明' : '已注入 Prompt' }}</small></span></div>
@@ -183,6 +200,7 @@
         </div>
       </div>
     </MotionModal>
+    <KnowledgeCitationPreview v-model="sourcePreviewVisible" :entry="sourcePreviewEntry" :run-id="reportRunId || undefined" :source-index="sourcePreviewIndex" />
   </KnowledgePageShell>
 </template>
 
@@ -193,8 +211,10 @@ import { DataAnalysis, Download, Loading, Operation, Plus, Refresh, Select, Vide
 import { useRoute, useRouter } from 'vue-router'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import KnowledgeAnswerMarkdown from '@/components/knowledge/KnowledgeAnswerMarkdown.vue'
+import KnowledgeCitationPreview from '@/components/knowledge/KnowledgeCitationPreview.vue'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import { canFocusDocument } from '@/utils/modalFocusPolicy'
+import { knowledgeRunDiagnostics } from '@/utils/knowledgeRunDiagnostics'
 import {
   createKnowledgeTask,
   cancelKnowledgeTask,
@@ -230,11 +250,16 @@ const activeEvidence = ref<KnowledgeEntrySummary[]>([])
 const activeArtifacts = ref<KnowledgeArtifact[]>([])
 const activeInspection = ref<AgentRunInspection | null>(null)
 const activeRunId = ref('')
+const reportRunId = ref('')
+const sourcePreviewVisible = ref(false)
+const sourcePreviewEntry = ref<KnowledgeEntrySummary | null>(null)
+const sourcePreviewIndex = ref(0)
 const resultTab = ref<'report' | 'inspector'>('report')
 const inspectionLoading = ref(false)
 const inspectionError = ref('')
 const taskActivity = ref<Record<string, string>>({})
 const inspectionEvents = computed(() => (activeInspection.value?.events || []).filter(event => event.event_type !== 'run.text_delta'))
+const runtimeDiagnostics = computed(() => knowledgeRunDiagnostics(activeInspection.value?.events || [], activeInspection.value?.snapshot?.evidence_refs.runtime_budget))
 const draft = reactive({ knowledgeBaseId: '', title: '', description: '', taskType: 'research' as KnowledgeTask['task_type'], deliverableType: 'report' as KnowledgeTask['deliverable_type'], externalResearchEnabled: false, externalDomains: '', externalRequestLimit: 6 })
 let viewActive = true
 let inspectionRequestId = 0
@@ -409,6 +434,7 @@ function showResult(result: KnowledgeTaskExecution) {
   activeEvidence.value = result.evidence
   activeArtifacts.value = result.artifacts
   activeRunId.value = result.run_id
+  reportRunId.value = result.run_id
   resultTab.value = 'report'
   resultVisible.value = true
   void loadRunInspection(result.run_id)
@@ -474,8 +500,9 @@ async function loadRunInspection(runId: string) {
 function openEvidence(sourceIndex: number) {
   const entry = activeEvidence.value[sourceIndex]
   if (!entry) return
-  resultVisible.value = false
-  router.push({ path: '/knowledge/wiki', query: { base: entry.knowledge_base_id, entry: entry.id } })
+  sourcePreviewEntry.value = entry
+  sourcePreviewIndex.value = sourceIndex
+  sourcePreviewVisible.value = true
 }
 
 function openTaskReview(task: KnowledgeTask) {
@@ -547,6 +574,8 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId })
 .task-inspection-state { min-height: 140px; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; color: var(--text-muted); font-size: 12px; text-align: center; }
 .task-inspection-state.is-error { color: var(--danger, #d9342b); }
 .task-result-content { min-width: 0; }
+.run-budget-note { margin: 6px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.run-budget-note.is-incomplete { color: var(--danger, #d9342b); }
 .task-result-content :deep(.knowledge-answer-markdown) { border-radius: 14px; }
 .artifact-failure { display: grid; gap: 3px; padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--danger, #d9342b) 24%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--danger, #d9342b) 8%, transparent); }
 .artifact-failure strong { color: var(--danger, #d9342b); font-size: 11px; }

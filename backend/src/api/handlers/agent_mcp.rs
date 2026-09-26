@@ -93,8 +93,8 @@ async fn call_tool(
         Ok(_) => call_agent_knowledge_tool(store, token, name, arguments),
         Err(error) => Err(error),
     };
-    let result = result.and_then(|value| {
-        record_tool_evidence(ctx.book_wiki_service.store(), token, name, &value)?;
+    let result = result.and_then(|mut value| {
+        record_tool_evidence(ctx.book_wiki_service.store(), token, name, &mut value)?;
         Ok(value)
     });
     match result {
@@ -118,7 +118,7 @@ fn record_tool_evidence(
     store: &crate::infra::book_wiki_store::BookWikiStore,
     token: &str,
     tool: &str,
-    result: &Value,
+    result: &mut Value,
 ) -> Result<(), BrainError> {
     let (kind, object, version, snapshot) = match tool {
         "knowledge_get_entry" => {
@@ -137,6 +137,8 @@ fn record_tool_evidence(
                     "title": result.get("title"),
                     "summary": result.get("summary"),
                     "source_path": result.get("source_path"),
+                    "content_md": result.get("content_md"),
+                    "offset_chars": result.get("offset_chars"),
                 }),
             )
         }
@@ -165,6 +167,7 @@ fn record_tool_evidence(
                     "offset_chars": span.and_then(|value| value.get("offset_chars")),
                     "returned_chars": span.and_then(|value| value.get("content")).and_then(Value::as_str).map(|value| value.chars().count()),
                     "total_chars": span.and_then(|value| value.get("total_chars")),
+                    "content_md": span.and_then(|value| value.get("content")),
                 }),
             )
         }
@@ -186,13 +189,21 @@ fn record_tool_evidence(
                     "content_sha256": hash,
                     "content_type": result.get("content_type"),
                     "request_number": result.get("request_number"),
+                    "content_md": text,
                 }),
             )
         }
         _ => return Ok(()),
     };
     let grant = store.validate_agent_run_token(token)?;
-    store.record_agent_run_evidence(&grant.run_id, kind, &object, &version, &snapshot)
+    let index =
+        store.record_visible_agent_evidence(&grant.run_id, kind, &object, &version, &snapshot)?;
+    let citation = json!({"citation_index":index,"label":format!("S{index}"),"object_id":object,"version_id":version});
+    result["citation"] = citation.clone();
+    if kind == "source_span" {
+        result["span"]["citation"] = citation;
+    }
+    Ok(())
 }
 
 fn bearer_token(headers: &HeaderMap) -> Result<&str, BrainError> {
@@ -394,6 +405,19 @@ mod tests {
         assert_eq!(ledger[0].version_id, "version-evidence");
         assert_eq!(ledger[0].snapshot["offset_chars"], 0);
         assert_eq!(ledger[0].snapshot["returned_chars"], 4_000);
+        assert_eq!(
+            payload["result"]["structuredContent"]["citation"]["label"],
+            "S1"
+        );
+        assert_eq!(
+            store
+                .get_agent_run_citation(&run.id, 0)
+                .unwrap()
+                .content_md
+                .chars()
+                .count(),
+            4_000
+        );
 
         let next_page = Request::post("/v1/knowledge/agent-mcp")
             .header("content-type", "application/json")
@@ -425,5 +449,12 @@ mod tests {
         let ledger = store.list_agent_run_evidence(&run.id).unwrap();
         assert_eq!(ledger.len(), 2);
         assert_eq!(ledger[1].snapshot["offset_chars"], 4_000);
+        assert_eq!(
+            payload["result"]["structuredContent"]["citation"]["label"],
+            "S1"
+        );
+        let citations = store.list_agent_run_citations(&run.id).unwrap();
+        assert_eq!(citations.len(), 1);
+        assert_eq!(citations[0].content_md.chars().count(), 6_000);
     }
 }

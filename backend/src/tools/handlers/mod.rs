@@ -211,6 +211,9 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .await;
     registry.register(Arc::new(GetAgentRunEventsHandler)).await;
     registry
+        .register(Arc::new(GetAgentRunCitationHandler))
+        .await;
+    registry
         .register(Arc::new(GetAgentRunInspectionHandler))
         .await;
     registry
