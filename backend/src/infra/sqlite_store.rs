@@ -300,6 +300,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "server authorized status-only historical archives",
         sql: include_str!("../../migrations/050_historical_archive_authorizations.sql"),
     },
+    Migration {
+        version: 51,
+        description: "lease fenced research deliverable checkpoints",
+        sql: include_str!("../../migrations/051_research_stage_checkpoints.sql"),
+    },
 ];
 
 fn seed_detailed_ingest_skill(conn: &Connection) -> Result<(), BrainError> {
@@ -471,6 +476,29 @@ fn overwrite_wiki_prompt_contract_skills(conn: &Connection) -> Result<(), BrainE
 }
 
 fn overwrite_harness_wiki_skills(conn: &Connection) -> Result<(), BrainError> {
+    overwrite_selected_harness_wiki_skills(conn, None)
+}
+
+fn migrate_research_execution_epoch(conn: &Connection) -> Result<(), BrainError> {
+    // Retry counts reset on an explicit retry; worker identities must never do so.
+    // The schema guard also permits recovery fixtures to replay the migration.
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('knowledge_tasks') WHERE name='research_execution_epoch')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        conn.execute_batch(
+            "ALTER TABLE knowledge_tasks ADD COLUMN research_execution_epoch INTEGER NOT NULL DEFAULT 0 CHECK(research_execution_epoch>=0);",
+        )?;
+    }
+    overwrite_selected_harness_wiki_skills(conn, Some("skill-book-research"))
+}
+
+fn overwrite_selected_harness_wiki_skills(
+    conn: &Connection,
+    selected: Option<&str>,
+) -> Result<(), BrainError> {
     for (skill_id, version_id, content) in [
         (
             "skill-book-ingest",
@@ -488,6 +516,9 @@ fn overwrite_harness_wiki_skills(conn: &Connection) -> Result<(), BrainError> {
             include_str!("../../skills/book-research/SKILL.md"),
         ),
     ] {
+        if selected.is_some_and(|selected| selected != skill_id) {
+            continue;
+        }
         let current: Option<(String, String, String, i64)> = conn
             .query_row(
                 "SELECT s.current_version_id, s.source_type, v.release_state,
@@ -781,6 +812,7 @@ impl SqliteStore {
                 34 => overwrite_structured_presentation_skill(&conn),
                 38 | 42 | 45 | 47 => overwrite_harness_wiki_skills(&conn),
                 48 => crate::infra::book_wiki_store::backfill_source_impacts(&conn),
+                51 => migrate_research_execution_epoch(&conn),
                 _ => Ok(()),
             };
             if let Err(error) = seed_result {
@@ -2700,4 +2732,15 @@ mod tests {
             Some("preserved")
         );
     }
+}
+#[test]
+fn test_research_epoch_migration_is_idempotent_and_preserves_worker_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = SqliteStore::new(&dir.path().join("epoch.db")).unwrap();
+    store.with_connection(|conn| {
+            migrate_research_execution_epoch(conn)?;
+            let columns:i64=conn.query_row("SELECT COUNT(*) FROM pragma_table_info('knowledge_tasks') WHERE name='research_execution_epoch'",[],|row|row.get(0))?;
+            assert_eq!(columns,1);
+            Ok(())
+        }).unwrap();
 }

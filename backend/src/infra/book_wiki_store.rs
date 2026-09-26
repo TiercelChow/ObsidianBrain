@@ -106,7 +106,9 @@ pub use conversation_memory::ConversationMemory;
 mod compile_quality;
 mod compile_reports;
 mod historical_archive;
+mod research;
 pub(crate) use compile_quality::CompileEntrySnapshot;
+pub(crate) use research::{validate_plan as validate_research_plan, ResearchStageClaim};
 mod source_impacts;
 mod source_quality;
 pub(crate) use source_impacts::backfill_source_impacts;
@@ -3104,6 +3106,7 @@ impl BookWikiStore {
         let mut audit_issues = Vec::<String>::new();
         let mut impact_totals = [0_i64; 4];
         self.db.transaction(|conn| {
+            let research_task = research::validate_report_candidate_write(conn, run_id)?;
             conn.execute(
                 "INSERT INTO knowledge_change_sets
                  (id, knowledge_base_id, agent_run_id, title, reason, risk_level, status,
@@ -3326,6 +3329,12 @@ impl BookWikiStore {
                  WHERE id = ?1",
                 params![base_id, now],
             )?;
+            if let Some(task) = research_task {
+                conn.execute(
+                    "UPDATE knowledge_tasks SET knowledge_change_state='proposed' WHERE id=?1",
+                    [task],
+                )?;
+            }
             Ok(())
         })?;
         self.get_change_set(&change_set_id)
@@ -4142,7 +4151,8 @@ impl BookWikiStore {
             Ok(conn.execute(
                 "UPDATE knowledge_tasks
                  SET status = 'running', result_summary = '', cancel_requested = 0,
-                     attempt_count = attempt_count + 1, lease_expires_at = ?3,
+                     attempt_count = attempt_count + 1,
+                     research_execution_epoch = research_execution_epoch + 1, lease_expires_at = ?3,
                      last_heartbeat_at = ?2, next_attempt_at = NULL,
                      artifact_state = CASE
                          WHEN deliverable_type = 'presentation' THEN 'pending'
@@ -4270,6 +4280,7 @@ impl BookWikiStore {
             let updated = conn.execute(
                 "UPDATE knowledge_tasks
                  SET status = 'running', attempt_count = attempt_count + 1,
+                     research_execution_epoch = research_execution_epoch + 1,
                      lease_expires_at = ?3, last_heartbeat_at = ?2, updated_at = ?2
                  WHERE id = ?1 AND status = 'queued'",
                 params![task_id, now_text, lease_expires_at],
@@ -4519,6 +4530,7 @@ impl BookWikiStore {
         let validation_details_json = serde_json::to_string(validation_details)
             .map_err(|error| BrainError::Internal(format!("成果校验详情序列化失败: {error}")))?;
         self.db.transaction(|conn| {
+            research::validate_artifact_write(conn,task_id,run_id)?;
             conn.execute(
                 "INSERT INTO knowledge_artifacts
                  (id, knowledge_base_id, knowledge_task_id, agent_run_id, skill_id,
@@ -6113,6 +6125,8 @@ impl BookWikiStore {
         tool: &str,
     ) -> Result<AgentCapabilityGrant, BrainError> {
         let grant = self.validate_agent_run_token(token)?;
+        self.db
+            .with_connection(|conn| research::validate_run_lease(conn, &grant.run_id))?;
         if !grant.allowed_tools.iter().any(|allowed| allowed == tool) {
             return Err(BrainError::KnowledgeValidation(format!(
                 "Agent 能力令牌没有 {tool} 工具权限"
@@ -6143,6 +6157,7 @@ impl BookWikiStore {
                     "Agent能力令牌已过期、撤销或运行已结束".into(),
                 ));
             }
+            research::validate_run_lease(conn, &grant.run_id)?;
             let adaptive = adaptive::consume_call_in_transaction(conn, &grant.run_id, tool)?;
             if adaptive
                 && matches!(

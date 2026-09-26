@@ -8,7 +8,10 @@ function strings(value: unknown): string[] { return Array.isArray(value) ? value
 /** Business diagnostics only. No thought payloads and no invented billing or semantic proof. */
 export function adaptiveKnowledgeDiagnostics(refsValue: unknown, events: BudgetEvent[]) {
   const refs = object(refsValue)
-  const plan = object(refs.qa_plan)
+  const plan = Object.keys(object(refs.qa_plan)).length ? object(refs.qa_plan) : object(refs.research_plan)
+  const question = object(refs.research_question)
+  const resources = object(refs.research_resources)
+  const presentation = object(refs.presentation_materialization)
   const stats = object(refs.planning_stats)
   let state: ObjectValue = {}
   const reports = new Map<number, ObjectValue>()
@@ -39,6 +42,8 @@ export function adaptiveKnowledgeDiagnostics(refsValue: unknown, events: BudgetE
   return {
     available: Object.keys(plan).length > 0 || Object.keys(state).length > 0,
     plan: { goal: text(plan.goal), constraints: strings(plan.constraints), subquestions: strings(plan.subquestions), depth: text(plan.depth), scope: text(plan.scope) },
+    research: { stageKey: text(refs.research_stage_key), question: text(question.question), title: text(question.title), requirements: strings(question.required_evidence), initialTarget: number(resources.initial_entry_target), capacity: number(resources.capacity_tokens), capacityKnown: resources.capacity_basis === 'configured_model_capacity' ? true : resources.capacity_basis === 'unknown_model_application_guard' ? false : null, secondsLimit: number(object(resources.policy).timeout_seconds) },
+    presentation: { mode: text(presentation.mode), reportCharacters: number(presentation.report_characters), omittedCharacters: number(presentation.omitted_characters), sections: number(presentation.section_count), materialTokens: number(presentation.estimated_material_tokens) },
     planning: { seen: number(stats.catalog_seen), total: number(stats.catalog_total), tokens: number(stats.estimated_payload_tokens), tokenLimit: number(stats.token_limit), elapsedMs: number(stats.elapsed_ms), secondsLimit: number(stats.time_limit_seconds), stopReason: text(stats.stop_reason) },
     budget: { used: number(state.used_tool_calls), soft: number(state.soft_tool_calls), hard: number(policy.hard_tool_calls), tokens: number(state.estimated_tool_payload_tokens), softTokens: number(state.soft_retrieval_tokens), hardTokens: number(policy.hard_retrieval_tokens), extensions: number(state.extension_count), deadline: text(state.deadline) },
     coverage: [...reports.entries()].sort(([a], [b]) => a - b).map(([index, item]) => ({ index, question: text(item.question), status: text(item.status), finding: text(item.finding), citationIndices: Array.isArray(item.citation_indices) ? item.citation_indices.filter((v): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0) : [] })),

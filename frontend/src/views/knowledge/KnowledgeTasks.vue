@@ -5,7 +5,7 @@
     </template>
 
     <div class="task-filter knowledge-toolbar">
-      <el-select v-model="filterBaseId" class="knowledge-select is-responsive" popper-class="system-select-popper system-toolbar-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="全部知识库" clearable @change="loadTasks">
+      <el-select v-model="filterBaseId" class="knowledge-select is-responsive" popper-class="system-select-popper system-toolbar-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="全部知识库" clearable @change="loadTasks()">
         <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
       </el-select>
       <button class="mobile-create-task" type="button" aria-label="新建研究任务" :disabled="!bases.length" @click="openCreate"><el-icon><Plus /></el-icon></button>
@@ -24,6 +24,7 @@
             <i></i><span>{{ taskActivity[task.id] }}</span>
           </div>
           <p v-if="task.result_summary" class="task-result-preview">{{ task.result_summary }}</p>
+          <button class="task-stage-link" type="button" @click="openStages(task)">阶段与已保存成果</button>
           <footer><span>{{ typeLabel(task.task_type) }}</span><span>{{ task.deliverable_type === 'presentation' ? 'PPTX 演示文稿' : '研究报告' }}</span><span v-if="task.external_research_enabled">外部资料 {{ task.external_requests_used }}/{{ task.external_request_limit }}</span><span v-if="task.knowledge_change_state === 'proposed'">待知识审核</span><time>{{ formatDate(task.updated_at) }}</time></footer>
         </div>
         <button class="task-action" type="button" :class="{ 'is-cancel': task.status === 'running' || task.status === 'queued' }" :aria-label="taskActionLabel(task)" :disabled="(Boolean(executingTaskId) && executingTaskId !== task.id) || Boolean(loadingResultId)" @click="runOrOpen(task)">
@@ -92,13 +93,14 @@
           <span class="knowledge-status" :class="`is-${activeTask.status}`">{{ statusLabel(activeTask.status) }}</span>
         </div>
         <div class="task-result-tabs" role="group" aria-label="研究任务结果内容">
-          <button type="button" :aria-pressed="resultTab === 'report'" :class="{ 'is-active': resultTab === 'report' }" @click="resultTab = 'report'">研究报告</button>
+          <button type="button" :aria-pressed="resultTab === 'stages'" :class="{ 'is-active': resultTab === 'stages' }" @click="resultTab = 'stages'">研究阶段</button>
+          <button type="button" :aria-pressed="resultTab === 'report'" :class="{ 'is-active': resultTab === 'report' }" @click="openResult(activeTask)">研究报告</button>
           <button type="button" :aria-pressed="resultTab === 'inspector'" :class="{ 'is-active': resultTab === 'inspector' }" @click="resultTab = 'inspector'"><el-icon><View /></el-icon>运行检查器</button>
         </div>
         <div v-if="resultTab === 'report'" class="task-result-scroll" role="region" aria-label="研究报告">
           <div v-if="activeTask.artifact_state === 'failed'" class="artifact-failure" role="status"><strong>PPTX 生成失败，研究报告已保留</strong><span>可在下方阅读完整报告，或打开运行检查器定位原因后重新运行。</span></div>
           <div class="task-result-content">
-            <KnowledgeAnswerMarkdown :content="activeTask.result_summary" :evidence-count="activeEvidence.length" @citation="openEvidence" />
+            <KnowledgeAnswerMarkdown :content="reportContent" :evidence-count="activeEvidence.length" @citation="openEvidence" />
           </div>
           <div v-if="activeArtifacts.length" class="task-artifacts">
             <article v-for="artifact in activeArtifacts" :key="artifact.id" class="artifact-card">
@@ -126,6 +128,9 @@
               <b>S{{ index + 1 }}</b><span>{{ entry.title }}</span><small>{{ entry.source_path || '数据库实体' }}</small>
             </button>
           </div>
+        </div>
+        <div v-else-if="resultTab === 'stages'" class="task-result-scroll" role="region" aria-label="研究阶段">
+          <KnowledgeResearchWorkspace :task-id="activeTask.id" :task-status="activeTask.status" :active="resultVisible && resultTab === 'stages'" @inspect="inspectStage" />
         </div>
         <div v-else class="task-result-scroll" role="region" aria-label="运行检查器">
           <div v-if="inspectionLoading" class="task-inspection-state"><el-icon class="is-loading"><Loading /></el-icon>正在读取运行记录…</div>
@@ -196,7 +201,8 @@
           </div>
         </div>
         <div class="knowledge-modal-actions">
-          <el-button v-if="activeTask.status === 'failed'" :loading="executingTaskId === activeTask.id" @click="runTask(activeTask)">重新运行</el-button>
+          <el-button v-if="['failed', 'cancelled'].includes(activeTask.status)" :loading="executingTaskId === activeTask.id" @click="runTask(activeTask)">恢复未完成阶段</el-button>
+          <el-button v-if="['queued', 'running'].includes(activeTask.status)" @click="cancelTask(activeTask)">取消任务</el-button>
           <el-button type="primary" @click="resultVisible = false">完成</el-button>
         </div>
       </div>
@@ -213,6 +219,7 @@ import { useRoute, useRouter } from 'vue-router'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import KnowledgeAnswerMarkdown from '@/components/knowledge/KnowledgeAnswerMarkdown.vue'
 import KnowledgeRunInspector from '@/components/knowledge/KnowledgeRunInspector.vue'
+import KnowledgeResearchWorkspace from '@/components/knowledge/KnowledgeResearchWorkspace.vue'
 import KnowledgeCitationPreview from '@/components/knowledge/KnowledgeCitationPreview.vue'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import { canFocusDocument } from '@/utils/modalFocusPolicy'
@@ -253,10 +260,11 @@ const activeArtifacts = ref<KnowledgeArtifact[]>([])
 const activeInspection = ref<AgentRunInspection | null>(null)
 const activeRunId = ref('')
 const reportRunId = ref('')
+const reportContent = ref('')
 const sourcePreviewVisible = ref(false)
 const sourcePreviewEntry = ref<KnowledgeEntrySummary | null>(null)
 const sourcePreviewIndex = ref(0)
-const resultTab = ref<'report' | 'inspector'>('report')
+const resultTab = ref<'report' | 'inspector' | 'stages'>('report')
 const inspectionLoading = ref(false)
 const inspectionError = ref('')
 const taskActivity = ref<Record<string, string>>({})
@@ -265,6 +273,10 @@ const runtimeDiagnostics = computed(() => knowledgeRunDiagnostics(activeInspecti
 const draft = reactive({ knowledgeBaseId: '', title: '', description: '', taskType: 'research' as KnowledgeTask['task_type'], deliverableType: 'report' as KnowledgeTask['deliverable_type'], externalResearchEnabled: false, externalDomains: '', externalRequestLimit: 6 })
 let viewActive = true
 let inspectionRequestId = 0
+let resultRequestId = 0
+let taskPollTimer: ReturnType<typeof setTimeout> | undefined
+let tasksRequestId = 0
+watch(resultVisible, visible => { if (!visible) { ++resultRequestId; ++inspectionRequestId; loadingResultId.value = '' } })
 
 watch(() => draft.taskType, taskType => {
   if (taskType !== 'research') draft.externalResearchEnabled = false
@@ -290,17 +302,42 @@ async function loadData() {
   }
 }
 
-async function loadTasks() {
-  loading.value = true
+async function loadTasks(quiet = false) {
+  const request = ++tasksRequestId
+  if (!quiet) loading.value = true
   try {
     const response = await listKnowledgeTasks(filterBaseId.value || undefined)
+    if (request !== tasksRequestId || !viewActive) return
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '任务加载失败')
     tasks.value = response.result.tasks
+    const updated = tasks.value.find(task => task.id === activeTask.value?.id)
+    if (updated) activeTask.value = updated
   } catch (error) {
-    ElMessage.error((error as Error).message)
+    if (!quiet && request === tasksRequestId && viewActive) ElMessage.error((error as Error).message)
   } finally {
-    loading.value = false
+    if (request === tasksRequestId) { loading.value = false; scheduleTaskPoll() }
   }
+}
+
+function scheduleTaskPoll() {
+  clearTimeout(taskPollTimer)
+  if (viewActive && !executingTaskId.value && document.visibilityState === 'visible' && tasks.value.some(task => ['queued', 'running'].includes(task.status))) taskPollTimer = setTimeout(() => void loadTasks(true), 2400)
+}
+function taskVisibilityChanged() { if (document.visibilityState === 'visible') void loadTasks(true); else { clearTimeout(taskPollTimer); ++tasksRequestId; loading.value = false } }
+
+function openStages(task: KnowledgeTask) {
+  ++resultRequestId; ++inspectionRequestId
+  loadingResultId.value = ''
+  activeTask.value = task
+  activeEvidence.value = []; activeArtifacts.value = []; activeInspection.value = null
+  activeRunId.value = ''; reportRunId.value = ''; reportContent.value = ''; inspectionError.value = ''; inspectionLoading.value = false
+  resultTab.value = 'stages'
+  resultVisible.value = true
+}
+function inspectStage(runId: string) {
+  activeRunId.value = runId
+  resultTab.value = 'inspector'
+  void loadRunInspection(runId)
 }
 
 function openCreate() {
@@ -352,10 +389,10 @@ function runOrOpen(task: KnowledgeTask) {
 async function runTask(task: KnowledgeTask) {
   executingTaskId.value = task.id
   resultVisible.value = false
-  const index = tasks.value.findIndex(item => item.id === task.id)
   try {
     const response = await executeKnowledgeTask(task.id)
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '任务执行失败')
+    const index = tasks.value.findIndex(item => item.id === task.id)
     if (index >= 0) tasks.value[index] = response.result
     ElMessage.info('任务已进入后台队列，可以离开此页面')
     const completed = await waitForTask(task.id)
@@ -365,10 +402,10 @@ async function runTask(task: KnowledgeTask) {
       return
     }
     if (completed.status === 'failed') throw new Error(completed.result_summary || '任务执行失败')
-    if (canFocusDocument(document)) {
+    if (canFocusDocument(document) && !resultVisible.value) {
       const result = await getKnowledgeTaskResult(task.id)
       if (result.status !== 'success' || !result.result) throw new Error(result.error?.message || '报告加载失败')
-      if (canFocusDocument(document)) {
+      if (canFocusDocument(document) && !resultVisible.value) {
         showResult(result.result)
         ElMessage.success(result.result.artifacts.length ? '报告与演示文稿已生成' : '研究报告已生成')
       }
@@ -378,6 +415,7 @@ async function runTask(task: KnowledgeTask) {
     await loadTasks()
   } finally {
     executingTaskId.value = ''
+    scheduleTaskPoll()
   }
 }
 
@@ -386,11 +424,12 @@ async function waitForTask(taskId: string) {
     await new Promise(resolve => window.setTimeout(resolve, 1200))
     if (!viewActive) return null
     if (!canFocusDocument(document)) continue
-    const response = await listKnowledgeTasks(filterBaseId.value || undefined)
+    const response = await listKnowledgeTasks()
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '任务状态读取失败')
-    tasks.value = response.result.tasks
-    const current = tasks.value.find(item => item.id === taskId)
+    tasks.value = response.result.tasks.filter(task => !filterBaseId.value || task.knowledge_base_id === filterBaseId.value)
+    const current = response.result.tasks.find(item => item.id === taskId)
     if (!current) throw new Error('任务已不存在')
+    if (activeTask.value?.id === current.id) activeTask.value = current
     if (current.status === 'running') await refreshTaskActivity(taskId)
     if (['completed', 'failed', 'cancelled'].includes(current.status)) return current
   }
@@ -412,6 +451,7 @@ async function cancelTask(task: KnowledgeTask) {
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '取消失败')
     const index = tasks.value.findIndex(item => item.id === task.id)
     if (index >= 0) tasks.value[index] = response.result
+    if (activeTask.value?.id === task.id) activeTask.value = response.result
     ElMessage.info(response.result.status === 'cancelled' ? '任务已取消' : '已发送中断请求，Harness 正在停止')
   } catch (error) {
     ElMessage.error((error as Error).message)
@@ -419,15 +459,16 @@ async function cancelTask(task: KnowledgeTask) {
 }
 
 async function openResult(task: KnowledgeTask) {
+  const requestId = ++resultRequestId
   loadingResultId.value = task.id
   try {
     const response = await getKnowledgeTaskResult(task.id)
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '报告加载失败')
-    showResult(response.result)
+    if (requestId === resultRequestId && viewActive && canFocusDocument(document)) showResult(response.result)
   } catch (error) {
-    ElMessage.error((error as Error).message)
+    if (requestId === resultRequestId) ElMessage.error((error as Error).message)
   } finally {
-    loadingResultId.value = ''
+    if (requestId === resultRequestId) loadingResultId.value = ''
   }
 }
 
@@ -437,6 +478,7 @@ function showResult(result: KnowledgeTaskExecution) {
   activeArtifacts.value = result.artifacts
   activeRunId.value = result.run_id
   reportRunId.value = result.run_id
+  reportContent.value = result.task.result_summary
   resultTab.value = 'report'
   resultVisible.value = true
   void loadRunInspection(result.run_id)
@@ -461,11 +503,15 @@ function themeLabel(theme?: PresentationQualityReport['theme']) {
 }
 
 async function openFailedInspection(task: KnowledgeTask) {
+  const requestId = ++resultRequestId
   loadingResultId.value = task.id
   try {
     const response = await getKnowledgeTaskActivity(task.id)
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '运行记录加载失败')
+    if (requestId !== resultRequestId || !viewActive || !canFocusDocument(document)) return
     activeTask.value = task
+    reportContent.value = ''
+    reportRunId.value = ''
     activeEvidence.value = []
     activeArtifacts.value = []
     activeRunId.value = response.result.run?.id || ''
@@ -473,9 +519,9 @@ async function openFailedInspection(task: KnowledgeTask) {
     resultVisible.value = true
     void loadRunInspection(activeRunId.value)
   } catch (error) {
-    ElMessage.error((error as Error).message)
+    if (requestId === resultRequestId && viewActive) ElMessage.error((error as Error).message)
   } finally {
-    loadingResultId.value = ''
+    if (requestId === resultRequestId) loadingResultId.value = ''
   }
 }
 
@@ -527,13 +573,14 @@ function taskActionLabel(task: KnowledgeTask) {
 function formatBytes(bytes: number) { return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB` }
 function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
 
-onMounted(() => { viewActive = true; void loadData() })
-onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId })
+onMounted(() => { viewActive = true; void loadData(); document.addEventListener('visibilitychange', taskVisibilityChanged) })
+onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultRequestId; ++tasksRequestId; clearTimeout(taskPollTimer); document.removeEventListener('visibilitychange', taskVisibilityChanged) })
 </script>
 
 <style scoped>
 .task-filter { margin-bottom: 12px; }
 .task-summary { color: var(--text-faint); font-size: 12px; }
+.task-stage-link { min-height: 34px; margin-top: 6px; padding: 3px 9px; border: 0; border-radius: 9px; background: var(--accent-light); color: var(--accent); font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
 .research-task-list { display: grid; gap: 9px; }
 .research-task { display: grid; grid-template-columns: 52px minmax(0, 1fr) minmax(96px, auto); align-items: center; gap: 15px; padding: 16px 17px; animation: task-in var(--motion-normal) var(--ease-spring-gentle) both; animation-delay: calc(var(--order) * 30ms); }
 .task-kind { width: 52px; height: 52px; display: grid; place-items: center; border-radius: 16px; background: var(--accent-light); color: var(--accent); font-size: 22px; }
@@ -663,6 +710,7 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId })
   .task-action span { display: none; }
 }
 @media (max-width: 768px) {
+  .task-stage-link { min-height: 44px; }
   .task-filter { display: grid; grid-template-columns: minmax(0, 1fr) 46px; align-items: stretch; }
   .mobile-create-task { width: 46px; min-height: 46px; display: grid; place-items: center; border: 0; border-radius: 14px; background: var(--accent); color: white; font-size: 18px; box-shadow: 0 7px 18px color-mix(in srgb, var(--accent) 22%, transparent); }
   .task-summary { grid-column: 1 / -1; }

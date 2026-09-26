@@ -21,7 +21,33 @@ const entry = { id: 'mock-entry', knowledge_base_id: 'mock-base', entry_type: 'c
 const staleEntry = { ...entry, id: 'mock-stale', slug: 'expired', title: '依据已变化的知识主题', status: 'stale' }
 const base = { id: 'mock-base', book_id: 'mock-book', book_name: '隔离测试书籍', book_path: '/mock/not-a-real-book', book_kind: 'folder', lifecycle: 'active', source_available: true, entry_count: 3, sync_state: 'clean', compile_mode: 'smart', compile_state: 'ready', compile_phase: 'completed' }
 const provider = { provider_id: 'mock-provider', display_name: '隔离模型供应商', api_protocol: 'openai-completions', base_url: 'https://never-contact.example/v1', model: 'mock-model', credential_source: 'environment', api_key_env: 'MOCK_NOT_A_REAL_SECRET', api_key_configured: false, context_window: null, max_output_tokens: null, reasoning_policy: 'auto', enabled: true, revision: 1, updated_at: timestamp }
-const state = { provider: { ...provider }, providerSaves: [], chatAttempts: 0, chatRequests: [], snapshotReads: [], currentReads: 0, fallbackSearches: 0, reportReads: [], reportReviewMode: false, archiveProposal: null, archiveRequests: [], archiveResolutions: [], reviewRetries: [], reviewRetryReportReads: 0, unsupported: [] }
+const state = { provider: { ...provider }, providerSaves: [], chatAttempts: 0, chatRequests: [], snapshotReads: [], currentReads: 0, fallbackSearches: 0, reportReads: [], reportReviewMode: false, archiveProposal: null, archiveRequests: [], archiveResolutions: [], reviewRetries: [], reviewRetryReportReads: 0, researchStatus: 'failed', researchQueuePolls: 0, researchHold: false, researchExecutions: [], workspaceReads: [], stageReads: [], stageDelay: 0, unsupported: [] }
+const researchTask = { id: 'mock-research', knowledge_base_id: base.id, book_name: base.book_name, title: '跨主题研究与失败恢复', description: '隔离测试：保存机制、条件、历史基线和完整报告', task_type: 'research', deliverable_type: 'presentation', artifact_state: 'failed', knowledge_change_state: 'none', status: 'failed', result_summary: '演示阶段未完成；报告仍保留', external_research_enabled: false, external_domains: [], external_request_limit: 0, external_requests_used: 0, created_at: timestamp, updated_at: timestamp }
+const runningTask = { ...researchTask, id: 'mock-running', title: '仍在执行的另一个研究', status: 'running', deliverable_type: 'report', artifact_state: 'none' }
+const researchPlan = { goal: '比较机制、公式与适用边界', constraints: ['不新增书外事实'], acceptance: ['保留公式与条件差异'], depth: 'deep', terminology: ['使用统一术语但保留不同条件'], questions: [{ id: 'mechanism', title: '机制与公式', question: '机制和完整公式是什么？', required_evidence: ['公式与变量含义'] }, { id: 'boundary', title: '边界与反例', question: '哪些条件下不成立？', required_evidence: ['反例与适用条件'] }] }
+const researchStages = [
+  { stage_key: 'plan', title: '研究目标规划', kind: 'plan', status: 'completed', run_id: 'research-plan', revision: 2 },
+  { stage_key: 'section:mechanism', title: '机制与公式', kind: 'section', status: 'completed', run_id: 'research-mechanism', revision: 2, summary: '完整公式已保存' },
+  { stage_key: 'section:boundary', title: '边界与反例', kind: 'section', status: 'failed', run_id: 'research-boundary-new', revision: 3, error: '仍缺少反例证据，不宣称核验完成' },
+  { stage_key: 'synthesis', title: '综合结论与交叉核验', kind: 'synthesis', status: 'stale', run_id: 'research-synthesis-new', revision: 3, error: '综合所读依据变化，原章节仍保留' },
+  { stage_key: 'report', title: '完整报告', kind: 'report', status: 'stale', run_id: 'research-report-new', revision: 3, error: '依据变化；旧报告与原始引用保留' },
+  { stage_key: 'validation', title: '引用与结构校验', kind: 'validation', status: 'pending', revision: 1 },
+  { stage_key: 'presentation', title: '演示交付', kind: 'presentation', status: 'failed', run_id: 'research-ppt', revision: 2, error: '演示策划尚未完成，完整报告保留' },
+].map((stage, ordinal) => ({ summary: '', content_characters: 0, finding_count: 0, updated_at: timestamp, ...stage, ordinal }))
+const savedResearchBody = `## 已保存的完整成果\n\n${'机制、步骤与条件保持完整，不用篇幅冒充事实证明。\n\n'.repeat(80)}$$d_k=d_v=128$$\n\n报告尾部条件与反例完整保留。[S1]`
+function researchWorkspace(taskId) {
+  return { task_id: taskId, knowledge_base_id: base.id, original_request: {}, plan: researchPlan, stages: researchStages, baselines: [{ question_id: 'boundary', entry_id: entry.id, revision: 2, title: entry.title, status: 'verified', claim_count: 30, content_characters: 32000, captured_at: timestamp }], created_at: timestamp, updated_at: timestamp }
+}
+function researchStage(args) {
+  const stage = researchStages.find(stage => stage.stage_key === args.stage_key)
+  assert.ok(stage, 'fixture accepts only actual research phases')
+  const historical = args.revision === 1
+  const contentRun = args.stage_key === 'validation' ? null : historical ? 'research-mechanism-old' : args.stage_key === 'report' ? 'research-report-old' : args.stage_key === 'synthesis' ? 'research-synthesis-old' : stage.run_id
+  return { stage: historical ? { ...stage, status: 'completed', revision: 1, run_id: 'research-mechanism-old' } : stage, content_run_id: contentRun,
+    content_md: args.stage_key === 'validation' ? '' : historical ? '## 保存的旧版主题\n\n旧版公式与限制。[S1]' : args.stage_key === 'synthesis' ? '## 跨章节综合判断\n\n不同版本和条件分别成立，不强行合并。\n\n### 跨章节对照记录\n\n这是模型的公开对照判断，不是独立事实证明。' : savedResearchBody,
+    findings: args.stage_key === 'validation' ? [] : [{ finding: '机制已有依据，条件尚需复核', status: 'partial', citation_indices: args.stage_key === 'synthesis' ? [] : [1], limitations: ['缺少对称的反例，不能得出无条件结论'], baseline_entry_id: args.stage_key === 'synthesis' ? null : entry.id, baseline_claim_id: args.stage_key === 'synthesis' ? null : 'real-baseline-claim' }],
+    evidence: args.stage_key === 'validation' || args.stage_key === 'synthesis' ? [] : [{ citation_index: 1, kind: 'entry', object_id: entry.id, version_id: '2', run_id: contentRun }] }
+}
 const reportFragments = Array.from({ length: 31 }, (_, index) => ({ ordinal: index, batch: index < 25 ? 1 : 2, source_document_id: 'mock-doc', source_version_id: 'mock-v2', source_span_id: `mock-span-${index}`, source_path: `${'很长的路径/'.repeat(8)}chapter-${index}.md`, line_start: index * 10 + 1, line_end: index * 10 + 10, locator: { heading_path: ['完整主题', `机制与条件 ${index}`] }, status: index < 4 ? 'no_material' : index < 25 ? 'analyzed' : index < 27 ? 'failed' : 'unprocessed', run_id: 'mock-run', candidate_slugs: index >= 4 && index < 25 ? ['paged-attention'] : [], reason: index < 4 ? '纯导航，没有新增事实' : null }))
 const reportTopics = Array.from({ length: 25 }, (_, index) => ({ slug: `topic-${index}`, title: `归并主题 ${index}`, outcome: 'reconciled_topic', preserved_claim_count: 5, retired_claim_count: index === 0 ? 2 : 0, body_coverage: 'model_reported_not_independent_fact_verification', conflicts: index === 0 ? [{ claim_indices: [0, 1], reason: '同一测试条件的数字不同，保留分歧等待审核' }] : [] }))
 function compileReport(args) {
@@ -75,6 +101,20 @@ const mockApi = {
       if (request.url !== '/v1/tools/call') { state.unsupported.push(request.url); response.statusCode = 501; return json(response, { error: 'Mock API only; production requests forbidden' }) }
       const { tool, arguments: args = {} } = payload
       switch (tool) {
+        case 'list_knowledge_tasks': {
+          if (state.researchStatus === 'queued' && ++state.researchQueuePolls >= 3 && !state.researchHold) state.researchStatus = 'completed'
+          return json(response, success(tool, { tasks: [{ ...researchTask, status: state.researchStatus }, runningTask] }))
+        }
+        case 'get_knowledge_research_workspace': state.workspaceReads.push(args); return json(response, success(tool, researchWorkspace(args.task_id)))
+        case 'get_knowledge_research_stage': {
+          state.stageReads.push(args)
+          const result = researchStage(args)
+          if (state.stageDelay) return setTimeout(() => json(response, success(tool, result)), state.stageDelay)
+          return json(response, success(tool, result))
+        }
+        case 'get_knowledge_task_result': return json(response, success(tool, { task: { ...researchTask, status: state.researchStatus, result_summary: savedResearchBody }, run_id: 'research-report-old', evidence: [entry], artifacts: [] }))
+        case 'get_knowledge_task_activity': return json(response, success(tool, { run: { id: 'research-ppt', status: 'failed' }, events: [] }))
+        case 'execute_knowledge_task': state.researchExecutions.push(args); state.researchStatus = 'queued'; state.researchQueuePolls = 0; return json(response, success(tool, { ...researchTask, status: 'queued' }))
         case 'retry_knowledge_source_review': state.reviewRetries.push(args); return json(response, success(tool, { knowledge_base: { ...base, compile_state: 'compiling' }, queued: true, message: '来源复核已进入后台队列；真实变更仍需审核' }))
         case 'get_book_knowledge_base': return json(response, success(tool, { ...base, compile_state: state.reviewRetries.length ? 'compiling' : base.compile_state }))
         case 'propose_knowledge_entry_archive': {
@@ -99,7 +139,17 @@ const mockApi = {
         case 'get_knowledge_entry': state.currentReads += 1; return json(response, success(tool, { ...(args.entry_id === staleEntry.id ? staleEntry : entry), content_md: '## 保留的历史知识正文\n\n当前 version-3（不应偷偷替换历史快照）', citations: [], aliases: [], revision: 3, claims: [], relations: [], versions: [], source_impact_count: args.entry_id === staleEntry.id ? 1 : 0, source_impacts: args.entry_id === staleEntry.id ? [{ source_document_id: 'mock-doc', source_path: `${'长来源路径/'.repeat(10)}chapter.md`, previous_version_id: 'v1', current_version_id: 'v2', reason: 'source_changed', affected_via_entry_id: null, affected_via_entry_title: null, detected_at: timestamp }] : [] }))
         case 'list_knowledge_change_sets': return json(response, success(tool, { change_sets: state.archiveProposal ? [state.archiveProposal] : state.reportReviewMode ? [{ id: 'mock-change-report', knowledge_base_id: base.id, title: '报告关联审核', reason: '完整归并候选', risk_level: 'high', status: 'proposed', classification_summary: { new: 1, update: 0, disputed: 0 }, citation_audit: { passed: true, entry_citations: 1, claim_citations: 1, issues: [] }, impact_summary: { entries: 1, claims: 1, relations: 0, citations: 1 }, changes: [] }] : [] }))
         case 'lint_book_knowledge_base': return json(response, success(tool, { knowledge_base_id: base.id, state: 'warning', semantic_entry_count: 1, source_span_count: 1, pending_review_count: 0, issues: [{ code: 'expired-source-evidence', severity: 'warning', title: '1 个主题的来源或依赖需要复核', detail: '历史正文仍保留，不能作为当前有效知识。', object_ids: [staleEntry.id] }], generated_at: timestamp }))
-        case 'get_agent_run_inspection': return json(response, success(tool, {
+        case 'get_agent_run_inspection': {
+          if (args.run_id.startsWith('research-')) return json(response, success(tool, {
+            run: { id: args.run_id, task_type: 'knowledge_task_research', status: 'completed', runtime: 'deepseek_harness', input: {}, created_at: timestamp, started_at: timestamp }, events: [], evidence: [],
+            snapshot: { run_id: args.run_id, tool_names: [], skill_snapshots: [], config_snapshots: [], prompt_text: '公开业务目标，不包含隐藏推理', evidence_refs: {
+              research_stage_key: args.run_id === 'research-ppt' ? 'presentation' : 'section:boundary', research_plan: researchPlan, research_question: researchPlan.questions[1],
+              research_resources: { capacity_tokens: 32768, capacity_basis: 'unknown_model_application_guard', initial_entry_target: 14, policy: { timeout_seconds: 480 } },
+              adaptive_state: { used_tool_calls: 5, soft_tool_calls: 18, estimated_tool_payload_tokens: 4000, soft_retrieval_tokens: 8000, policy: { hard_tool_calls: 72, hard_retrieval_tokens: 32000 }, coverage: [{ question_index: 0, question: '反例与适用条件', status: 'partial', citation_indices: [1], finding: '尚缺反例，不把局部依据当全书结论' }] },
+              ...(args.run_id === 'research-ppt' ? { presentation_materialization: { mode: 'whole_structure_projection', report_characters: 95000, omitted_characters: 71000, section_count: 10, estimated_material_tokens: 8000, billing_usage: false } } : {}),
+            } },
+          }))
+          return json(response, success(tool, {
           run: { id: args.run_id, task_type: 'knowledge_qa', status: 'completed', runtime: 'deepseek_harness', input: {}, created_at: timestamp, started_at: timestamp },
           events: [{ event_type: 'run.budget_changed', payload: { reason: '需要核对后半书的条件差异' }, message: '扩大取证范围' }], evidence: [],
           snapshot: { run_id: args.run_id, tool_names: [], skill_snapshots: [], config_snapshots: [], prompt_text: '', evidence_refs: {
@@ -107,7 +157,8 @@ const mockApi = {
             planning_stats: { catalog_seen: 120, catalog_total: 120, elapsed_ms: 1200, time_limit_seconds: 180 },
             adaptive_state: { used_tool_calls: 14, soft_tool_calls: 36, extension_count: 1, estimated_tool_payload_tokens: 14000, soft_retrieval_tokens: 32000, policy: { hard_tool_calls: 120, hard_retrieval_tokens: 64000 }, coverage: [{ question_index: 0, question: '机制', status: 'supported', citation_indices: [1], finding: '从编译知识正文核对机制' }, { question_index: 1, question: '不同版本中的适用边界、条件与例外是否存在冲突', status: 'partial', citation_indices: [1], finding: '仍需核对后半书的具体条件，不冒称全书已覆盖' }] },
           } },
-        }))
+          }))
+        }
         case 'list_knowledge_entries': state.fallbackSearches += 1; return json(response, success(tool, { entries: args.include_stale ? [entry, staleEntry] : [entry], offset: 0, limit: args.limit || 6, total: args.include_stale ? 2 : 1, has_more: false }))
         default: state.unsupported.push(tool); response.statusCode = 501; return json(response, { tool, status: 'error', error: { code: 'MOCK_ONLY', message: `Unimplemented mock tool: ${tool}` } })
       }
@@ -141,6 +192,7 @@ try {
     state.archiveResolutions = []
     state.reviewRetries = []
     state.reviewRetryReportReads = 0
+    state.researchStatus = 'failed'; state.researchQueuePolls = 0; state.researchHold = false; state.researchExecutions = []; state.workspaceReads = []; state.stageReads = []; state.stageDelay = 0
     const context = await browser.newContext({ viewport, reducedMotion: 'reduce' })
     await context.route('**/*', route => {
       const url = route.request().url()
@@ -305,8 +357,99 @@ try {
     await reportReview.waitFor({ state: 'hidden' })
     assert.equal(state.archiveResolutions[0].change_set_id, 'mock-archive')
     assert.equal(state.archiveResolutions[0].decision, 'reject')
+    await page.goto(`${origin}/knowledge/tasks`)
+    const researchCard = page.locator('.research-task').filter({ has: page.getByRole('heading', { name: researchTask.title, exact: true }) })
+    const taskDialog = page.getByRole('dialog', { name: '研究任务结果', exact: true })
+    await researchCard.getByRole('button', { name: '阶段与已保存成果', exact: true }).click()
+    await taskDialog.getByText('已保存 1 / 2 个主题', { exact: true }).waitFor()
+    await taskDialog.getByText('研究目标、约束与验收条件', { exact: true }).click()
+    await taskDialog.getByText('版本 2 · 30 条具体主张 · 32,000 字符', { exact: true }).waitFor()
+    await taskDialog.locator('.research-stages button').filter({ hasText: '综合结论与交叉核验' }).click()
+    await taskDialog.getByRole('heading', { name: '跨章节对照记录', exact: true }).waitFor()
+    await taskDialog.getByText('不同版本和条件分别成立，不强行合并。', { exact: true }).waitFor()
+    await taskDialog.getByRole('heading', { name: '跨章节对照记录', exact: true }).scrollIntoViewIfNeeded()
+    await checkLayout('research-cross-review', taskDialog)
+    await taskDialog.locator('.research-stages button').filter({ hasText: '机制与公式' }).click()
+    await taskDialog.getByText('报告尾部条件与反例完整保留。', { exact: false }).waitFor()
+    assert.equal(await taskDialog.locator('.katex').count() > 0, true, 'saved formula is rendered')
+    await taskDialog.getByRole('spinbutton', { name: '研究阶段历史版本' }).fill('1')
+    await taskDialog.getByRole('button', { name: '读取版本', exact: true }).click()
+    await taskDialog.getByRole('heading', { name: '保存的旧版主题', exact: true }).waitFor()
+    await checkLayout('research-stage-history', taskDialog)
+    const currentReadsBeforeStage = state.currentReads
+    await taskDialog.getByRole('button', { name: 'S1 · 实际读取快照', exact: true }).click()
+    const stageCitation = page.getByRole('dialog', { name: '来源预览', exact: true })
+    await stageCitation.getByText(/运行当时读取的 version-2/).waitFor()
+    assert.deepEqual(state.snapshotReads.at(-1), { run_id: 'research-mechanism-old', source_index: 0 }, 'selected revision uses its original content run')
+    assert.equal(state.currentReads, currentReadsBeforeStage, 'stage snapshot does not require a live entity or substitute current text')
+    await stageCitation.getByRole('button', { name: '关闭', exact: true }).click()
+    await stageCitation.waitFor({ state: 'hidden' })
+    await taskDialog.getByRole('button', { name: '本次阶段检查器', exact: true }).click()
+    await taskDialog.getByText('未知模型容量 · 应用护栏', { exact: true }).waitFor()
+    await taskDialog.getByText('尚缺反例，不把局部依据当全书结论', { exact: true }).waitFor()
+    await checkLayout('research-stage-inspector', taskDialog)
+    await taskDialog.getByRole('button', { name: '研究阶段', exact: true }).click()
+    await taskDialog.locator('.research-stages button').filter({ hasText: '完整报告' }).click()
+    await taskDialog.getByRole('button', { name: '保留正文的来源运行', exact: true }).waitFor()
+    await taskDialog.getByText('依据变化；旧报告与原始引用保留', { exact: true }).waitFor()
+    await checkLayout('research-retained-report', taskDialog)
+    await taskDialog.locator('.research-stages button').filter({ hasText: '引用与结构校验' }).click()
+    await taskDialog.getByText('此阶段尚未保存完整成果。失败、排队和运行中的内容不会冒充已完成报告。', { exact: true }).waitFor()
+    await taskDialog.locator('.research-stages button').filter({ hasText: '演示交付' }).click()
+    await taskDialog.getByRole('button', { name: '本次阶段检查器', exact: true }).click()
+    await taskDialog.getByRole('region', { name: '演示选材范围' }).waitFor()
+    await taskDialog.getByText('71,000 字符', { exact: true }).waitFor()
+    await checkLayout('research-presentation-material', taskDialog)
+    const footerRect = await taskDialog.getByRole('button', { name: '完成', exact: true }).boundingBox()
+    assert.ok(footerRect && footerRect.y >= 0 && footerRect.y + footerRect.height <= viewport.height, 'completion action remains in view beneath long inspector')
+    state.researchHold = true
+    await taskDialog.getByRole('button', { name: '恢复未完成阶段', exact: true }).click()
+    await taskDialog.waitFor({ state: 'hidden' })
+    await researchCard.getByRole('button', { name: '阶段与已保存成果', exact: true }).click()
+    await taskDialog.getByText('已保存 1 / 2 个主题', { exact: true }).waitFor()
+    await taskDialog.getByRole('button', { name: '研究报告', exact: true }).click()
+    await taskDialog.getByText('报告尾部条件与反例完整保留。', { exact: false }).waitFor()
+    await page.waitForTimeout(2800)
+    assert.ok(state.researchQueuePolls >= 2, 'queued recovery receives status polling')
+    assert.equal(await taskDialog.getByText('报告尾部条件与反例完整保留。', { exact: false }).count() > 0, true, 'status polling cannot replace the saved full report with a queue summary')
+    await checkLayout('research-report-during-recovery', taskDialog)
+    await taskDialog.getByRole('button', { name: '研究阶段', exact: true }).click()
+    state.researchHold = false
+    await page.waitForFunction(() => document.querySelector('.task-result-modal .knowledge-status')?.textContent === '已完成')
+    assert.deepEqual(state.researchExecutions, [{ task_id: researchTask.id }], 'explicit recovery queues exactly one authorized task')
+    assert.equal(await taskDialog.getByRole('region', { name: '研究阶段', exact: true }).isVisible(), true, 'completion does not force-switch the open stage view')
+    await taskDialog.getByRole('button', { name: '研究报告', exact: true }).click()
+    await taskDialog.getByText(/报告尾部条件与反例完整保留/).waitFor()
+    await checkLayout('research-complete-report', taskDialog)
+    await taskDialog.getByRole('button', { name: '完成', exact: true }).click()
+    await taskDialog.waitFor({ state: 'hidden' })
+    const runningCard = page.locator('.research-task').filter({ has: page.getByRole('heading', { name: runningTask.title, exact: true }) })
+    await runningCard.getByRole('button', { name: '阶段与已保存成果', exact: true }).click()
+    await taskDialog.getByText('已保存 1 / 2 个主题', { exact: true }).waitFor()
+    await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')) })
+    const hiddenWorkspaceReads = state.workspaceReads.length
+    await page.waitForTimeout(2700)
+    assert.equal(state.workspaceReads.length, hiddenWorkspaceReads, 'hidden window does not poll research bodies or request focus')
+    await page.evaluate(() => { delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')) })
+    await page.waitForFunction(count => window.document.visibilityState === 'visible', hiddenWorkspaceReads)
+    await taskDialog.getByRole('button', { name: '完成', exact: true }).click()
+    await taskDialog.waitFor({ state: 'hidden' })
+    const closedWorkspaceReads = state.workspaceReads.length
+    await page.waitForTimeout(2700)
+    assert.equal(state.workspaceReads.length, closedWorkspaceReads, 'closing stages cancels its poll independently of the task list')
+    await runningCard.getByRole('button', { name: '阶段与已保存成果', exact: true }).click()
+    await taskDialog.getByText('已保存 1 / 2 个主题', { exact: true }).waitFor()
+    state.stageDelay = 500
+    const previousStageReads = state.stageReads.length
+    await taskDialog.locator('.research-stages button').filter({ hasText: '机制与公式' }).click()
+    await page.waitForFunction(() => document.querySelector('.research-workspace [role="status"]')?.textContent.includes('所选阶段'))
+    assert.ok(state.stageReads.length > previousStageReads)
+    await taskDialog.getByRole('button', { name: '完成', exact: true }).click()
+    await page.waitForTimeout(700)
+    assert.equal(await taskDialog.count(), 0, 'late stage body cannot reopen a closed modal')
+    state.stageDelay = 0
     assert.deepEqual(pageErrors, [], `${mode}: browser runtime errors`)
-    results.push({ viewport, providerRoundtrip: true, nullClearing: true, cancelAndReedit: true, interruptedTextPreserved: true, explicitRecovery: true, adaptiveInspector: true, nextRequestRetried: true, historicalSnapshot: true, restoredConversationSnapshot: true, sourceImpactDetail: true, healthToAffectedEntry: true, compileReportPagination: true, compileReportHistory: true, compileReportToReview: true, explicitSourceReview: true, historicalArchive: true, clippedDialogs: false })
+    results.push({ viewport, providerRoundtrip: true, nullClearing: true, cancelAndReedit: true, interruptedTextPreserved: true, explicitRecovery: true, adaptiveInspector: true, nextRequestRetried: true, historicalSnapshot: true, restoredConversationSnapshot: true, sourceImpactDetail: true, healthToAffectedEntry: true, compileReportPagination: true, compileReportHistory: true, compileReportToReview: true, explicitSourceReview: true, historicalArchive: true, researchStages: true, frozenBaselineMetadata: true, researchHistoricalCitation: true, retainedReportIdentity: true, researchPhaseInspector: true, presentationProjection: true, explicitResearchRecovery: true, hiddenAndClosedPollStopped: true, lateStageIgnored: true, clippedDialogs: false })
     await context.close()
   }
   assert.deepEqual(state.unsupported, [], 'unexpected API calls must be explicitly mocked')

@@ -2727,3 +2727,14 @@ http-body-util = "0.1"
 - `propose_knowledge_entry_archive`（`book_wiki`）：必填 `entry_id`、正整数 `expected_revision`，其余字段拒绝。返回 `KnowledgeChangeSet`，高风险 `archive` 候选，必须经 `resolve_knowledge_change_set` 批准或驳回。服务端保存不可由 Agent 申请的元数据归档授权；前后仅状态与人工保护不同，批准保留全部历史知识与证据、不认证当前事实。来源章节/已归档/过期基线/重复待审/非活动知识库拒绝。
 
 两者只供本地应用显式操作，不加入 Harness 运行工具白名单；不扩大 Agent 写权限。归档审计的 `historical_archive: true` 是展示字段，权限依据是数据库服务端授权及载荷/基线复核，不是这个布尔值。
+
+### 持久研究阶段只读接口（第四批）
+
+- `get_knowledge_research_workspace`：必填 `task_id`，拒绝其他字段。返回完整业务目标、规划和阶段元数据/计数，不加载全部章节正文；旧任务没有工作区时返回 null，不补造历史阶段。
+- `get_knowledge_research_stage`：必填 `task_id`、`stage_key`；可选正整数 `revision`。按需返回单个阶段的完整正文、公开证据矩阵和冻结引用；不存在的任务/阶段/历史版本明确拒绝。`stage.run_id` 为当前尝试，`content_run_id` 为保留正文的真正产出运行，两者在恢复时可能不同。历史查询不替换为当前知识正文。
+
+两个接口只供本地应用查看，不加入 Harness 取证或写权限。规划、章节、综合核验、报告、结构与引用检查、PPTX 是业务成果边界，不是隐藏思维链；程序结构检查与 Agent 自报支持均不冒充事实正确性证明。workspace 的 baselines 只包含已冻结对象的元数据，不加载所有基线正文。阶段界面按需读取当前/历史成果，区分活动 Run 与保留正文的原始 Run，关闭或隐藏时停止轮询。
+
+原生研究工具 `knowledge_get_research_baseline`：必填 `entry_id`；可选非负 `offset_chars`、`metadata_offset`、`source_basis_index` 及 1–12000 的 `max_chars`。服务端从当前能力令牌的 Run 确定 task_id 和 section 的 question_id，拒绝自行指定任务/问题、跨书或未冻结对象。分页返回旧版正文、主张和来源元数据；source_basis_index 可读取指定旧版原文。has_more/metadata_has_more 表示还有输入，不静默忽略后段。它占用真实工具/负载预算，但不分配当前证据 S 编号；只能作为核验/刷新对照，不自动认证当前事实，也不扩大网络或写权限。
+
+原生研究工具 `knowledge_get_research_section`：必填 `question_id`；可选非负 `offset_chars`、1–12000 的 `max_chars`。仅当前任务的 synthesis Run 可以读取其已规划并完整保存的章节；task_id 由服务端确定，未知字段/其他任务/未完成章节拒绝。分页偏移以中性化后的业务正文为准，旧 S 标签改为“旧章节引用，非本轮证据”，保留原始证据对象与版本线索。章节成果不是新事实，不分配当前 S；关键事实必须回读当前实体/原文。调用与负载受同一 Run 的能力令牌、租约及自适应预算约束。

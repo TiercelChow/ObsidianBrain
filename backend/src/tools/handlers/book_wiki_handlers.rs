@@ -1215,6 +1215,57 @@ impl ToolHandler for GetKnowledgeTaskResultHandler {
 
 pub struct ExecuteKnowledgeTaskHandler;
 
+pub struct GetKnowledgeResearchWorkspaceHandler;
+pub struct GetKnowledgeResearchStageHandler;
+
+#[async_trait]
+impl ToolHandler for GetKnowledgeResearchWorkspaceHandler {
+    fn name(&self) -> &str {
+        "get_knowledge_research_workspace"
+    }
+    fn description(&self) -> &str {
+        "读取持久研究目标与阶段元数据，不加载全部章节正文；旧任务返回 null，不补造历史"
+    }
+    fn input_schema(&self) -> Value {
+        required_id_schema("task_id")
+    }
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(
+            ctx.book_wiki_service
+                .store()
+                .get_research_workspace(required_string(&args, "task_id")?)?,
+        )
+        .map_err(|error| BrainError::Internal(format!("研究工作区序列化失败: {error}")))
+    }
+}
+
+#[async_trait]
+impl ToolHandler for GetKnowledgeResearchStageHandler {
+    fn name(&self) -> &str {
+        "get_knowledge_research_stage"
+    }
+    fn description(&self) -> &str {
+        "按需读取一个研究阶段的完整成果、证据矩阵与版本；不给未完成阶段伪造结果"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"task_id":{"type":"string","minLength":1},"stage_key":{"type":"string","minLength":1,"maxLength":128},"revision":{"type":"integer","minimum":1}},"required":["task_id","stage_key"],"additionalProperties":false})
+    }
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(ctx.book_wiki_service.store().get_research_stage_content(
+            required_string(&args, "task_id")?,
+            required_string(&args, "stage_key")?,
+            args.get("revision").and_then(Value::as_i64),
+        )?)
+        .map_err(|error| BrainError::Internal(format!("研究阶段序列化失败: {error}")))
+    }
+}
+
 pub struct CancelKnowledgeTaskHandler;
 
 #[async_trait]
@@ -2328,6 +2379,97 @@ fn required_id_schema(key: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn test_research_read_tools_distinguish_legacy_pending_content_and_invalid_mutations() {
+        use crate::models::book_wiki::{BookKind, ReaderBook};
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+        let (ctx, dir, _vault) = crate::AppContext::for_test();
+        let store = ctx.book_wiki_service.store();
+        store
+            .save_reader_books(&[ReaderBook {
+                id: "read-research".into(),
+                path: dir.path().display().to_string(),
+                kind: BookKind::Folder,
+                name: "读取研究状态".into(),
+                description: String::new(),
+                category: String::new(),
+                added_at: 1,
+                progress: None,
+            }])
+            .unwrap();
+        let base = store.initialize_base("read-research").unwrap();
+        let task = store
+            .create_task(&base.id, "读取阶段", "不启动真实模型", "research")
+            .unwrap();
+        ctx.tool_registry
+            .register(Arc::new(GetKnowledgeResearchWorkspaceHandler))
+            .await;
+        ctx.tool_registry
+            .register(Arc::new(GetKnowledgeResearchStageHandler))
+            .await;
+        let app = crate::api::router::create_router(ctx.clone());
+        for (arguments, tool, success, legacy) in [
+            (
+                json!({"task_id":task.id}),
+                "get_knowledge_research_workspace",
+                true,
+                true,
+            ),
+            (
+                json!({"task_id":task.id,"stage_key":"plan","revision":0}),
+                "get_knowledge_research_stage",
+                false,
+                false,
+            ),
+            (
+                json!({"task_id":task.id,"claim_id":"inject-write"}),
+                "get_knowledge_research_workspace",
+                false,
+                false,
+            ),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post("/v1/tools/call")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({"tool":tool,"arguments":arguments}).to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let raw = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .unwrap();
+            let value: Value = serde_json::from_slice(&raw).unwrap();
+            assert_eq!(value["status"] == "success", success);
+            if legacy {
+                assert!(value["result"].is_null())
+            }
+        }
+        store.start_task_execution(&task.id).unwrap();
+        store.ensure_research_workspace(&task.id).unwrap();
+        let workspace = GetKnowledgeResearchWorkspaceHandler
+            .handle(json!({"task_id":task.id}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(workspace["stages"][0]["status"], "pending");
+        assert!(workspace["stages"][0].get("content_md").is_none());
+        let stage = GetKnowledgeResearchStageHandler
+            .handle(json!({"task_id":task.id,"stage_key":"plan"}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(stage["stage"]["status"], "pending");
+        assert_eq!(stage["content_md"], "");
+        assert!(GetKnowledgeResearchStageHandler
+            .handle(json!({"task_id":task.id,"stage_key":"unknown"}), &ctx)
+            .await
+            .is_err());
+    }
 
     #[test]
     fn test_model_provider_handlers_expose_schemas_and_module() {

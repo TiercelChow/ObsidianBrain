@@ -256,6 +256,135 @@ pub struct KnowledgeTask {
     pub updated_at: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ResearchQuestion {
+    pub id: String,
+    pub title: String,
+    pub question: String,
+    pub required_evidence: Vec<String>,
+    /// Planner's per-topic estimate, subject to provider and context hard caps.
+    #[serde(default)]
+    pub expected_output_tokens: Option<u32>,
+    /// Stable compiled objects selected by planning for review/refresh.
+    #[serde(default)]
+    pub target_entry_ids: Vec<String>,
+}
+
+/// Public business scope and output criteria, never hidden reasoning.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ResearchPlan {
+    pub goal: String,
+    pub constraints: Vec<String>,
+    pub acceptance: Vec<String>,
+    pub depth: String,
+    pub terminology: Vec<String>,
+    pub questions: Vec<ResearchQuestion>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ResearchFinding {
+    pub finding: String,
+    pub status: String,
+    /// This stage's one-based, actually read S numbers; not global numbering.
+    pub citation_indices: Vec<usize>,
+    pub limitations: Vec<String>,
+    #[serde(default)]
+    pub baseline_entry_id: Option<String>,
+    #[serde(default)]
+    pub baseline_claim_id: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ResearchSectionOutput {
+    pub summary: String,
+    pub content_md: String,
+    pub findings: Vec<ResearchFinding>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ResearchSectionCheck {
+    pub question_id: String,
+    pub revision: i64,
+    pub assessment: String,
+    pub note: String,
+}
+
+/// Cross-topic business conclusions and explicit limits, not a proof of truth.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ResearchSynthesisOutput {
+    pub summary: String,
+    pub content_md: String,
+    pub findings: Vec<ResearchFinding>,
+    pub section_checks: Vec<ResearchSectionCheck>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ResearchEvidenceReference {
+    pub run_id: String,
+    pub citation_index: usize,
+    pub kind: String,
+    pub object_id: String,
+    pub version_id: String,
+    pub snapshot_hash: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ResearchStageSummary {
+    pub stage_key: String,
+    pub title: String,
+    pub kind: String,
+    pub ordinal: i64,
+    pub status: String,
+    pub revision: i64,
+    pub run_id: Option<String>,
+    pub summary: String,
+    pub content_characters: i64,
+    pub finding_count: i64,
+    pub error: Option<String>,
+    pub updated_at: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct ResearchWorkspace {
+    pub task_id: String,
+    pub knowledge_base_id: String,
+    pub original_request: Value,
+    pub plan: Option<ResearchPlan>,
+    pub stages: Vec<ResearchStageSummary>,
+    pub baselines: Vec<ResearchBaselineSummary>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ResearchBaselineSummary {
+    pub question_id: String,
+    pub entry_id: String,
+    pub revision: i64,
+    pub title: String,
+    pub status: String,
+    pub content_characters: usize,
+    pub claim_count: usize,
+    pub captured_at: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ResearchStageContent {
+    pub stage: ResearchStageSummary,
+    /// Active retry and retained content have different provenance.
+    #[serde(default)]
+    pub content_run_id: Option<String>,
+    pub content_md: String,
+    pub findings: Vec<ResearchFinding>,
+    pub evidence: Vec<ResearchEvidenceReference>,
+}
+
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct ConfigDocument {
     pub id: String,

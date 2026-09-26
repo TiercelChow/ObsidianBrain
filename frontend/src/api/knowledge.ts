@@ -249,6 +249,52 @@ export interface KnowledgeTask {
   updated_at: string
 }
 
+export interface ResearchFinding {
+  finding: string
+  status: 'supported' | 'partial' | 'missing' | 'conflict'
+  citation_indices: number[]
+  limitations: string[]
+  baseline_entry_id?: string | null
+  baseline_claim_id?: string | null
+}
+
+export interface ResearchStageSummary {
+  stage_key: string
+  title: string
+  kind: 'plan' | 'section' | 'synthesis' | 'report' | 'validation' | 'presentation'
+  ordinal: number
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'stale'
+  revision: number
+  run_id?: string | null
+  summary: string
+  content_characters: number
+  finding_count: number
+  error?: string | null
+  updated_at: string
+}
+
+export interface ResearchWorkspace {
+  task_id: string
+  knowledge_base_id: string
+  original_request: Record<string, unknown>
+  plan?: {
+    goal: string; constraints: string[]; acceptance: string[]; depth: string; terminology: string[]
+    questions: { id: string; title: string; question: string; required_evidence: string[]; target_entry_ids?: string[]; expected_output_tokens?: number | null }[]
+  } | null
+  stages: ResearchStageSummary[]
+  baselines: { question_id: string; entry_id: string; revision: number; title: string; status: string; content_characters: number; claim_count: number; captured_at: string }[]
+  created_at: string
+  updated_at: string
+}
+
+export interface ResearchStageContent {
+  stage: ResearchStageSummary
+  content_run_id?: string | null
+  content_md: string
+  findings: ResearchFinding[]
+  evidence: { run_id: string; citation_index: number; kind: string; object_id: string; version_id: string; snapshot_hash: string }[]
+}
+
 export interface ConfigDocument {
   id: string
   knowledge_base_id?: string | null
@@ -1050,6 +1096,14 @@ export function getKnowledgeTaskResult(taskId: string) {
   return callTool('get_knowledge_task_result', {
     task_id: taskId,
   }) as unknown as Promise<ToolEnvelope<KnowledgeTaskExecution>>
+}
+
+export function getKnowledgeResearchWorkspace(taskId: string) {
+  return callTool('get_knowledge_research_workspace', { task_id: taskId }) as unknown as Promise<ToolEnvelope<ResearchWorkspace | null>>
+}
+
+export function getKnowledgeResearchStage(taskId: string, stageKey: string, revision?: number) {
+  return callTool('get_knowledge_research_stage', { task_id: taskId, stage_key: stageKey, ...(revision == null ? {} : { revision }) }) as unknown as Promise<ToolEnvelope<ResearchStageContent>>
 }
 
 export function cancelKnowledgeTask(taskId: string) {

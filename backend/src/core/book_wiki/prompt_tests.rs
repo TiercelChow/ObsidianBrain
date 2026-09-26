@@ -1,6 +1,49 @@
 use super::*;
 
 #[test]
+fn test_old_run_cleanup_does_not_remove_new_attempt_cancellation() {
+    let (sender, receiver) = tokio::sync::watch::channel(false);
+    let mut map = HashMap::new();
+    map.insert(
+        "task".into(),
+        ActiveRunCancellation {
+            run_id: "new-run".into(),
+            attempt: Some(2),
+            sender,
+        },
+    );
+    remove_run_cancellation(&mut map, "task", "old-run");
+    assert!(map.contains_key("task"));
+    let (sender, _) = tokio::sync::watch::channel(false);
+    assert!(!register_run_cancellation(
+        &mut map,
+        "task",
+        ActiveRunCancellation {
+            run_id: "late-old-run".into(),
+            attempt: Some(1),
+            sender
+        }
+    ));
+    assert_eq!(map["task"].run_id, "new-run");
+    assert!(!*receiver.borrow());
+    let (sender, _) = tokio::sync::watch::channel(false);
+    assert!(register_run_cancellation(
+        &mut map,
+        "task",
+        ActiveRunCancellation {
+            run_id: "newest-run".into(),
+            attempt: Some(3),
+            sender
+        }
+    ));
+    assert!(*receiver.borrow());
+    remove_run_cancellation(&mut map, "task", "new-run");
+    assert!(map.contains_key("task"));
+    remove_run_cancellation(&mut map, "task", "newest-run");
+    assert!(map.is_empty());
+}
+
+#[test]
 fn test_qa_planning_does_not_retry_denied_credentials_as_a_search_fallback() {
     assert!(!qa_planning_allows_fallback(&BrainError::Internal(
         "系统凭据库操作失败: User canceled the operation".into()
@@ -475,13 +518,17 @@ fn test_presentation_prompt_keeps_report_evidence_and_strict_contract() {
         usage_scope: "research".into(),
         updated_at: String::new(),
     };
-    let report = "## 结论\n即时反馈能降低不确定性。[S1]";
+    let report = format!(
+        "## 结论\n即时反馈能降低不确定性。[S1]\n{}\n## 最后一章\n尾部关键结论和条件必须进入演示。",
+        "完整论证。".repeat(12000)
+    );
 
-    let prompt = build_presentation_prompt(&task, report, &evidence, &skill);
+    let prompt = build_presentation_prompt(&task, &report, &evidence, &skill);
 
     assert!(prompt.contains(PRESENTATION_INSTRUCTIONS));
     assert!(prompt.contains(skill.instructions.trim()));
-    assert!(prompt.contains(report));
+    assert!(prompt.contains(&report));
+    assert!(prompt.contains("尾部关键结论和条件必须进入演示"));
     assert!(prompt.contains("\"citation\":\"S1\""));
     assert!(prompt.contains("只输出符合演示策划合同的单个 JSON 对象"));
     assert!(!prompt.contains("调用工具生成 PPTX"));
@@ -501,13 +548,14 @@ fn test_presentation_repair_is_single_object_and_bounded() {
 }
 
 #[test]
-fn test_presentation_failure_summary_preserves_completed_research_report() {
-    let report = "## 研究结论\n完整报告正文。[S1]";
-    let error = BrainError::KnowledgeValidation("演示规格未通过校验".into());
-
-    let summary = build_presentation_failure_summary(report, &error);
-
-    assert!(summary.starts_with("> [!warning] PPTX 生成失败"));
-    assert!(summary.contains("演示规格未通过校验"));
-    assert!(summary.ends_with(report));
+fn test_research_and_presentation_honor_per_phase_output_allocation() {
+    let input = serde_json::json!({"request_max_output_tokens":16384});
+    assert_eq!(
+        runtime_max_output_tokens_for_invocation("knowledge_task_research", &input),
+        Some(16384)
+    );
+    assert_eq!(
+        runtime_max_output_tokens_for_invocation("knowledge_task_presentation_plan", &input),
+        Some(16384)
+    );
 }

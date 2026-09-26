@@ -27,3 +27,35 @@ test('legacy fields are unknown, budget extension reason and latest coverage rem
   assert.equal(result.coverage[0].status, 'missing')
   assert.deepEqual(result.expansions, ['缺少条件'])
 })
+
+test('research diagnostics retain phase scope and distinguish capacity guard from model capability', () => {
+  const result = adaptiveKnowledgeDiagnostics({
+    research_stage_key: 'section:boundaries',
+    research_plan: { goal: '比较机制与边界', constraints: ['不新增书外事实'], depth: 'deep' },
+    research_question: { title: '边界与反例', question: '哪些条件下不成立？', required_evidence: ['反例与适用条件'] },
+    research_resources: { capacity_tokens: 32768, capacity_basis: 'unknown_model_application_guard', initial_entry_target: 14, policy: { timeout_seconds: 480 } },
+    adaptive_state: { used_tool_calls: 5, soft_tool_calls: 18, policy: { hard_tool_calls: 72 } },
+  }, [])
+  assert.equal(result.available, true)
+  assert.equal(result.plan.goal, '比较机制与边界')
+  assert.equal(result.research.stageKey, 'section:boundaries')
+  assert.equal(result.research.question, '哪些条件下不成立？')
+  assert.deepEqual(result.research.requirements, ['反例与适用条件'])
+  assert.equal(result.research.capacityKnown, false)
+  assert.equal(result.research.capacity, 32768)
+  assert.equal(result.research.initialTarget, 14)
+  assert.equal(result.budget.used, 5)
+  assert.equal(result.planning.seen, null, 'seed target is not actual catalog coverage')
+  assert.equal(adaptiveKnowledgeDiagnostics({ research_resources: { capacity_tokens: 1000000, capacity_basis: 'configured_model_capacity' } }, []).research.capacityKnown, true)
+})
+
+test('presentation diagnostics expose whole-report projection without fabricating usage or coverage', () => {
+  const result = adaptiveKnowledgeDiagnostics({ research_stage_key: 'presentation', presentation_materialization: { mode: 'whole_structure_projection', report_characters: 95000, section_count: 10, omitted_characters: 71000, estimated_material_tokens: 8000, billing_usage: false } }, [])
+  assert.equal(result.presentation.mode, 'whole_structure_projection')
+  assert.equal(result.presentation.sections, 10)
+  assert.equal(result.presentation.omittedCharacters, 71000)
+  assert.equal(result.presentation.materialTokens, 8000)
+  assert.equal(result.budget.tokens, null, 'projection estimate is not tool consumption or model billing')
+  assert.equal(result.research.capacityKnown, null)
+  assert.equal(adaptiveKnowledgeDiagnostics({}, []).presentation.mode, '')
+})

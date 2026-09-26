@@ -13,6 +13,8 @@ pub const AGENT_KNOWLEDGE_TOOLS: &[&str] = &[
     "knowledge_list_compiled_catalog",
     "knowledge_search_entries",
     "knowledge_get_entry",
+    "knowledge_get_research_baseline",
+    "knowledge_get_research_section",
     "knowledge_get_neighbors",
     "knowledge_propose_changes",
     "knowledge_create_task",
@@ -115,6 +117,12 @@ pub fn agent_knowledge_tool_schemas() -> Vec<Value> {
                 &["entry_id"],
             ),
         ),
+        tool_schema(
+            "knowledge_get_research_baseline",
+            "分页读取当前研究主题选定的冻结正文、主张及旧版来源；它是待核验的历史输入，没有S编号，不能冒充当前证据。metadata_offset继续读取主张/来源元数据，source_basis_index读取指定旧版原文",
+            object_schema(json!({"entry_id":{"type":"string"},"offset_chars":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000},"metadata_offset":{"type":"integer","minimum":0},"source_basis_index":{"type":"integer","minimum":0}}), &["entry_id"]),
+        ),
+        tool_schema("knowledge_get_research_section", "仅在本任务综合阶段分页读取已保存章节；旧编号不是本轮证据，核对当前实体/原文后才能获得S引用", object_schema(json!({"question_id":{"type":"string","minLength":1,"maxLength":80},"offset_chars":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000}}), &["question_id"])),
         tool_schema(
             "knowledge_get_neighbors",
             "读取一个授权知识条目的关系邻居",
@@ -345,6 +353,60 @@ pub fn call_agent_knowledge_tool(
             result["metadata_counts"] = counts;
             Ok(result)
         }
+        "knowledge_get_research_section" => {
+            let args: ResearchSectionArgs = parse_arguments(arguments)?;
+            let run = store.get_agent_run(&grant.run_id)?;
+            if run.input["research_stage_key"] != "synthesis" {
+                return Err(BrainError::KnowledgeValidation(
+                    "仅综合阶段可读取本任务的保存章节".into(),
+                ));
+            }
+            let task_id = run.input["knowledge_task_id"].as_str().ok_or_else(|| {
+                BrainError::KnowledgeValidation("章节读取缺少当前任务范围".into())
+            })?;
+            let task = store.get_task(task_id)?;
+            require_scope(&grant, &task.knowledge_base_id)?;
+            store.read_research_section_page(
+                task_id,
+                &args.question_id,
+                args.offset_chars.unwrap_or(0),
+                args.max_chars.unwrap_or(12000),
+            )
+        }
+        "knowledge_get_research_baseline" => {
+            let args: ResearchBaselineArgs = parse_arguments(arguments)?;
+            let run = store.get_agent_run(&grant.run_id)?;
+            let task = run.input["knowledge_task_id"]
+                .as_str()
+                .ok_or_else(|| BrainError::KnowledgeValidation("当前Run没有研究任务身份".into()))?;
+            let question = run.input["research_stage_key"]
+                .as_str()
+                .and_then(|key| key.strip_prefix("section:"))
+                .ok_or_else(|| {
+                    BrainError::KnowledgeValidation("只能读取当前研究章节的冻结基线".into())
+                })?;
+            let knowledge_task = store.get_task(task)?;
+            require_scope(&grant, &knowledge_task.knowledge_base_id)?;
+            let mut result = store.read_research_baseline_page(
+                task,
+                question,
+                &args.entry_id,
+                args.offset_chars.unwrap_or(0),
+                args.max_chars.unwrap_or(12000),
+                args.metadata_offset.unwrap_or(0),
+            )?;
+            if let Some(index) = args.source_basis_index {
+                result["source_basis_page"] = store.read_research_baseline_source_page(
+                    task,
+                    question,
+                    &args.entry_id,
+                    index,
+                    args.offset_chars.unwrap_or(0),
+                    args.max_chars.unwrap_or(12000),
+                )?;
+            }
+            Ok(result)
+        }
         "knowledge_get_neighbors" => {
             let args: EntryArgs = parse_arguments(arguments)?;
             let entry = store.get_entry(&args.entry_id)?;
@@ -534,6 +596,24 @@ struct EntryArgs {
 #[serde(deny_unknown_fields)]
 struct ReadEntryArgs {
     entry_id: String,
+    offset_chars: Option<usize>,
+    max_chars: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResearchBaselineArgs {
+    entry_id: String,
+    offset_chars: Option<usize>,
+    max_chars: Option<usize>,
+    metadata_offset: Option<usize>,
+    source_basis_index: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResearchSectionArgs {
+    question_id: String,
     offset_chars: Option<usize>,
     max_chars: Option<usize>,
 }

@@ -18,7 +18,7 @@
       <footer class="knowledge-modal-actions">
         <el-button @click="visible = false">关闭</el-button>
         <el-button v-if="preview && preview.kind !== 'external'" type="primary" @click="openWorkspace">在 Wiki 工作台打开当前版本</el-button>
-        <el-button v-else-if="error && entry?.entry_type !== 'external'" @click="loadCurrent">查看当前版本（非本轮证据）</el-button>
+        <el-button v-else-if="error && entry && entry.entry_type !== 'external'" @click="loadCurrent">查看当前版本（非本轮证据）</el-button>
       </footer>
     </div>
   </MotionModal>
@@ -44,12 +44,18 @@ let requestId = 0
 
 async function load(runId?: string) {
   const currentRequest = ++requestId
-  if (!props.entry) return
+  if (!props.entry && !runId) return
   preview.value = null
   error.value = ''
   loading.value = true
   try {
-    const result = await loadKnowledgeCitationPreview(props.entry, runId, props.sourceIndex, { snapshot: getAgentRunCitation, current: getKnowledgeEntry })
+    let result: AgentRunCitationPreview
+    if (props.entry) result = await loadKnowledgeCitationPreview(props.entry, runId, props.sourceIndex, { snapshot: getAgentRunCitation, current: getKnowledgeEntry })
+    else {
+      const response = await getAgentRunCitation(runId!, props.sourceIndex)
+      if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '历史来源读取失败')
+      result = response.result
+    }
     if (currentRequest === requestId) preview.value = result
   } catch (failure) {
     if (currentRequest === requestId) error.value = (failure as Error).message
