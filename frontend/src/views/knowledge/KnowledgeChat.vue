@@ -89,7 +89,9 @@
               <div v-if="message.interruption" class="answer-interruption" role="status">
                 <strong>{{ message.interruption.notice }}</strong>
                 <span v-if="message.interruption.kind !== 'cancelled'">{{ message.interruption.detail }}</span>
+                <button v-if="message.interruption.kind === 'truncated' && message.runId && message.originalQuestion && message.content" type="button" :disabled="searching || !runtimeReady" @click="ask(message.originalQuestion, message)">继续完成完整答案</button>
               </div>
+              <button v-if="message.role === 'assistant' && message.runId && message.id !== streamingMessageId" type="button" class="save-answer" @click="inspectRun(message.runId)">查看本轮目标与取证预算</button>
               <button v-if="message.role === 'assistant' && message.runId && !message.interruption && message.id !== streamingMessageId" class="save-answer" type="button" :disabled="savingRunId === message.runId" @click="saveAnswer(message)">
                 <el-icon :class="{ 'is-loading': savingRunId === message.runId }"><Loading v-if="savingRunId === message.runId" /><Checked v-else /></el-icon>{{ savingRunId === message.runId ? '正在生成候选' : '保存到 Wiki' }}
               </button>
@@ -122,6 +124,18 @@
         </form>
       </section>
     </div>
+
+    <MotionModal v-model="inspectorVisible" aria-label="问答运行检查器" size="wide">
+      <div class="knowledge-modal-card qa-inspector-modal">
+        <header class="source-preview-head"><h3>本轮问答</h3><button type="button" aria-label="关闭问答运行检查器" @click="inspectorVisible = false"><el-icon><Close /></el-icon></button></header>
+        <div class="source-preview-body">
+          <p v-if="inspectorLoading" role="status">正在读取运行记录…</p>
+          <p v-else-if="inspectorError" role="alert">{{ inspectorError }}</p>
+          <KnowledgeRunInspector v-else :inspection="inspection" />
+        </div>
+        <footer class="knowledge-modal-actions"><el-button @click="inspectorVisible = false">关闭</el-button><el-button :disabled="inspectorLoading" @click="inspectRun(inspectedRunId)">刷新状态</el-button></footer>
+      </div>
+    </MotionModal>
 
     <MotionModal v-model="sourceVisible" aria-label="来源预览" size="wide">
       <div class="knowledge-modal-card source-preview-modal">
@@ -172,6 +186,7 @@ import { ArrowRight, ChatDotRound, Checked, Close, Loading, Lock, Plus, Top } fr
 import { useRoute, useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import KnowledgeAnswerMarkdown from '@/components/knowledge/KnowledgeAnswerMarkdown.vue'
+import KnowledgeRunInspector from '@/components/knowledge/KnowledgeRunInspector.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { shouldSendComposerOnEnter } from '@/utils/chatComposer'
@@ -183,6 +198,7 @@ import {
   getKnowledgeConversation,
   getKnowledgeEntry,
   getAgentRunCitation,
+  getAgentRunInspection,
   listBookKnowledgeBases,
   listKnowledgeConversations,
   listKnowledgeEntries,
@@ -192,6 +208,7 @@ import {
   type KnowledgeConversationSummary,
   type KnowledgeEntryDetail,
   type KnowledgeEntrySummary,
+  type AgentRunInspection,
 } from '@/api/knowledge'
 
 interface ChatMessage {
@@ -200,6 +217,8 @@ interface ChatMessage {
   content: string
   evidence?: KnowledgeEntrySummary[]
   runId?: string
+  originalQuestion?: string
+  requestConversationId?: string
   interruption?: ReturnType<typeof interruptedKnowledgeAnswer>
 }
 
@@ -231,6 +250,12 @@ const sourceCurrentEntry = ref<KnowledgeEntrySummary | null>(null)
 const sourceHtml = ref('')
 const sourceMarkdownRef = ref<HTMLElement | null>(null)
 const savingRunId = ref('')
+const inspectorVisible = ref(false)
+const inspectorLoading = ref(false)
+const inspectorError = ref('')
+const inspection = ref<AgentRunInspection | null>(null)
+const inspectedRunId = ref('')
+let inspectorRequestId = 0
 let localMessageId = 0
 let historyRequestId = 0
 let sourceRequestId = 0
@@ -382,13 +407,33 @@ function replaceChatQuery() {
   })
 }
 
-async function ask(question: string) {
+async function inspectRun(runId: string) {
+  const request = ++inspectorRequestId
+  inspectedRunId.value = runId
+  inspectorVisible.value = true
+  inspectorLoading.value = true
+  inspectorError.value = ''
+  inspection.value = null
+  try {
+    const response = await getAgentRunInspection(runId)
+    if (request !== inspectorRequestId) return
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '运行记录读取失败')
+    inspection.value = response.result
+  } catch (error) {
+    if (request === inspectorRequestId) inspectorError.value = (error as Error).message
+  } finally {
+    if (request === inspectorRequestId) inspectorLoading.value = false
+  }
+}
+
+async function ask(question: string, recovery?: ChatMessage) {
   const value = question.trim()
   if (!value || !activeBaseId.value || searching.value) return
   draft.value = ''
-  messages.value.push({ id: `local-${++localMessageId}`, role: 'user', content: value })
+  const requestConversationId = recovery ? recovery.requestConversationId : activeConversationId.value || undefined
+  messages.value.push({ id: `local-${++localMessageId}`, role: 'user', content: recovery ? `继续完成：${value}` : value })
   const assistantIndex = messages.value.length
-  messages.value.push({ id: `local-${++localMessageId}`, role: 'assistant', content: '', evidence: [] })
+  messages.value.push({ id: `local-${++localMessageId}`, role: 'assistant', content: '', evidence: [], originalQuestion: value, requestConversationId })
   // Always mutate the proxy stored in the reactive array, not the raw object passed to push().
   const assistantMessage = messages.value[assistantIndex]
   streamingMessageId.value = assistantMessage.id
@@ -406,7 +451,7 @@ async function ask(question: string) {
       const result = await streamBookKnowledge(
         activeBaseId.value,
         value,
-        activeConversationId.value || undefined,
+        requestConversationId,
         (event) => {
           if (event.type === 'evidence') {
             answerEvidenceDelivered = true
@@ -429,6 +474,7 @@ async function ask(question: string) {
           }
         },
         askController.signal,
+        recovery?.runId,
       )
       if (result.answer.startsWith(receivedText)) textBuffer.push(result.answer.slice(receivedText.length))
       else if (!receivedText) textBuffer.push(result.answer)
@@ -578,6 +624,7 @@ onMounted(loadContext)
 onBeforeUnmount(() => {
   ++historyRequestId
   ++sourceRequestId
+  ++inspectorRequestId
   askController?.abort()
   activeTextBuffer?.cancel()
   cleanup()
@@ -589,6 +636,8 @@ onBeforeUnmount(() => {
 .answer-interruption { display: grid; gap: 5px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); color: var(--text-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .answer-interruption strong { font-weight: 600; }
 .answer-interruption span { color: var(--text-faint); }
+.answer-interruption button { justify-self: start; min-height: 40px; padding: 8px 12px; border: 0; border-radius: 10px; color: var(--accent); background: var(--accent-soft); cursor: pointer; font: inherit; }
+.answer-interruption button:disabled { opacity: .45; cursor: default; }
 .source-preview-error, .source-snapshot-note { color: var(--text-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .chat-context { align-self: start; display: grid; gap: 14px; padding: 18px; }
 .context-label { color: var(--text-faint); font-size: 10px; font-weight: 720; letter-spacing: .08em; }
@@ -654,7 +703,7 @@ onBeforeUnmount(() => {
 .chat-composer button:disabled { opacity: .35; cursor: default; }
 .chat-composer button.is-stop { background: var(--text-primary); }
 .stop-square { width: 11px; height: 11px; border-radius: 3px; background: var(--bg-base); }
-.source-preview-modal { width: 100%; max-height: calc(100dvh - 48px); display: flex; flex-direction: column; }
+.source-preview-modal, .qa-inspector-modal { width: 100%; max-height: calc(100dvh - 48px); display: flex; flex-direction: column; }
 .source-preview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 24px 24px 15px; border-bottom: 1px solid var(--border-faint); }
 .source-preview-head > div { min-width: 0; }
 .source-preview-head span { color: var(--accent); font-size: 10px; font-weight: 720; letter-spacing: .05em; }
@@ -705,7 +754,7 @@ onBeforeUnmount(() => {
   .message { max-width: 92%; }
   .evidence-grid { grid-template-columns: 1fr; }
   .chat-composer { flex: none; margin: 0 8px 8px; }
-  .source-preview-modal { width: 100%; max-height: calc(min(88dvh, 760px) - env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; }
+  .source-preview-modal, .qa-inspector-modal { width: 100%; max-height: calc(min(88dvh, 760px) - env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; }
   .source-preview-head { padding: 34px 16px 13px; }
   .source-preview-head h3 { font-size: 19px; }
   .source-preview-body { padding: 18px 16px; }

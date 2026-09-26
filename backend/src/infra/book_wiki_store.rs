@@ -86,7 +86,11 @@ pub struct AgentEvidenceRef {
     pub snapshot: serde_json::Value,
 }
 
+mod adaptive;
 mod evidence;
+pub use adaptive::{AdaptiveBudgetPolicy, AdaptiveRunBudget};
+mod conversation_memory;
+pub use conversation_memory::ConversationMemory;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IssuedAgentCapability {
@@ -5881,11 +5885,14 @@ impl BookWikiStore {
         let now = Utc::now();
         let expires_at = (now + chrono::Duration::seconds(ttl_seconds.max(0))).to_rfc3339();
         let created_at = now.to_rfc3339();
-        let max_calls = match run.task_type.as_str() {
-            "knowledge_qa" => 20,
-            "knowledge_task_research" => 80,
-            _ => 40,
-        };
+        let max_calls = self
+            .get_adaptive_run_budget(run_id)?
+            .map(|budget| budget.policy.hard_tool_calls)
+            .unwrap_or_else(|| match run.task_type.as_str() {
+                "knowledge_qa" => 20,
+                "knowledge_task_research" => 80,
+                _ => 40,
+            });
         let tools_json = serde_json::to_string(&tools)
             .map_err(|error| BrainError::Internal(format!("Agent 工具权限序列化失败: {error}")))?;
         self.db.transaction(|conn| {
@@ -5934,6 +5941,30 @@ impl BookWikiStore {
         use sha2::{Digest, Sha256};
         let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
         let updated = self.db.transaction(|conn| {
+            let valid: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM agent_run_capabilities arc
+                 JOIN agent_runs ar ON ar.id=arc.run_id
+                 WHERE arc.token_hash=?1 AND arc.run_id=?2 AND arc.revoked_at IS NULL
+                   AND ar.status='running' AND julianday(arc.expires_at)>julianday('now'))",
+                params![token_hash, &grant.run_id],
+                |row| row.get(0),
+            )?;
+            if !valid {
+                return Err(BrainError::KnowledgeValidation(
+                    "Agent能力令牌已过期、撤销或运行已结束".into(),
+                ));
+            }
+            let adaptive = adaptive::consume_call_in_transaction(conn, &grant.run_id, tool)?;
+            if adaptive
+                && matches!(
+                    tool,
+                    "knowledge_get_run_budget"
+                        | "knowledge_request_budget_extension"
+                        | "knowledge_report_evidence_coverage"
+                )
+            {
+                return Ok(1);
+            }
             conn.execute(
                 "UPDATE agent_run_capabilities
                  SET used_calls = used_calls + 1
@@ -6424,6 +6455,12 @@ impl BookWikiStore {
                 })
             })
             .transpose()?;
+        let mut snapshot = snapshot;
+        if let (Some(snapshot), Some(budget)) =
+            (snapshot.as_mut(), self.get_adaptive_run_budget(run_id)?)
+        {
+            snapshot.evidence_refs["adaptive_state"] = serde_json::json!(budget);
+        }
         Ok(AgentRunInspection {
             run,
             events,
@@ -7648,6 +7685,9 @@ fn validate_agent_event_type(value: &str) -> Result<(), BrainError> {
             | "run.text_delta"
             | "run.usage"
             | "run.usage_cost"
+            | "run.budget_changed"
+            | "run.budget_limited"
+            | "run.evidence_coverage"
             | "run.runtime_completed"
             | "run.tool_started"
             | "run.tool_finished"
@@ -10976,7 +11016,9 @@ mod tests {
             .db
             .with_connection(|conn| {
                 conn.execute_batch(
-                    "DROP TABLE agent_run_citations;
+                    "DROP TABLE agent_run_adaptive_budgets;
+                 DROP TABLE knowledge_conversation_memories;
+                 DROP TABLE agent_run_citations;
                  DROP TRIGGER llm_provider_capabilities_context_insert;
                  DROP TRIGGER llm_provider_capabilities_context_update;
                  ALTER TABLE llm_provider_profiles DROP COLUMN max_output_tokens;

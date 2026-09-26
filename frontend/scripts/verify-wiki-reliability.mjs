@@ -20,7 +20,7 @@ const timestamp = '2026-09-26T00:00:00Z'
 const entry = { id: 'mock-entry', knowledge_base_id: 'mock-base', entry_type: 'concept', slug: 'mechanism', title: '历史引用实体', summary: '编译后的机制', status: 'verified', source_path: 'chapter.md', updated_at: timestamp }
 const base = { id: 'mock-base', book_id: 'mock-book', book_name: '隔离测试书籍', book_path: '/mock/not-a-real-book', book_kind: 'folder', lifecycle: 'active', source_available: true, entry_count: 3 }
 const provider = { provider_id: 'mock-provider', display_name: '隔离模型供应商', api_protocol: 'openai-completions', base_url: 'https://never-contact.example/v1', model: 'mock-model', credential_source: 'environment', api_key_env: 'MOCK_NOT_A_REAL_SECRET', api_key_configured: false, context_window: null, max_output_tokens: null, reasoning_policy: 'auto', enabled: true, revision: 1, updated_at: timestamp }
-const state = { provider: { ...provider }, providerSaves: [], chatAttempts: 0, snapshotReads: [], currentReads: 0, fallbackSearches: 0, unsupported: [] }
+const state = { provider: { ...provider }, providerSaves: [], chatAttempts: 0, chatRequests: [], snapshotReads: [], currentReads: 0, fallbackSearches: 0, unsupported: [] }
 
 function json(response, value) { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify(value)) }
 function success(tool, result) { return { tool, status: 'success', result } }
@@ -43,6 +43,7 @@ const mockApi = {
       const payload = body ? JSON.parse(body) : {}
       if (request.url === '/v1/knowledge/chat/stream') {
         state.chatAttempts += 1
+        state.chatRequests.push(payload)
         const runId = `mock-run-${state.chatAttempts}`
         response.setHeader('Content-Type', 'text/event-stream')
         response.setHeader('Cache-Control', 'no-cache')
@@ -70,6 +71,15 @@ const mockApi = {
         case 'get_knowledge_conversation': return json(response, success(tool, { ...conversation, messages: [{ id: 'persisted-user', role: 'user', content: '第二次：重新提问', evidence: [], created_at: timestamp }, { id: 'persisted-assistant', role: 'assistant', content: completedAnswer, run_id: 'mock-run-2', evidence: [entry], created_at: timestamp }] }))
         case 'get_agent_run_citation': state.snapshotReads.push(args); return json(response, success(tool, { run_id: args.run_id, citation_index: args.source_index + 1, kind: 'entry', object_id: entry.id, version_id: 'mock-revision-2', entry, content_md: '## 历史快照正文\n\n这是运行当时读取的 version-2；当前实体已改为 version-3。', citations: [], historical: true, read_ranges: [{ offset_chars: 0, returned_chars: 100 }] }))
         case 'get_knowledge_entry': state.currentReads += 1; return json(response, success(tool, { ...entry, content_md: '当前 version-3（不应偷偷替换历史快照）', citations: [], aliases: [], revision: 3, claims: [], relations: [], versions: [] }))
+        case 'get_agent_run_inspection': return json(response, success(tool, {
+          run: { id: args.run_id, task_type: 'knowledge_qa', status: 'completed', runtime: 'deepseek_harness', input: {}, created_at: timestamp, started_at: timestamp },
+          events: [{ event_type: 'run.budget_changed', payload: { reason: '需要核对后半书的条件差异' }, message: '扩大取证范围' }], evidence: [],
+          snapshot: { run_id: args.run_id, tool_names: [], skill_snapshots: [], config_snapshots: [], prompt_text: '', evidence_refs: {
+            qa_plan: { goal: '对比全书的优化机制及适用边界', constraints: ['保留公式和单位'], subquestions: ['机制', '边界'], depth: 'comprehensive' },
+            planning_stats: { catalog_seen: 120, catalog_total: 120, elapsed_ms: 1200, time_limit_seconds: 180 },
+            adaptive_state: { used_tool_calls: 14, soft_tool_calls: 36, extension_count: 1, estimated_tool_payload_tokens: 14000, soft_retrieval_tokens: 32000, policy: { hard_tool_calls: 120, hard_retrieval_tokens: 64000 }, coverage: [{ question_index: 0, question: '机制', status: 'supported', citation_indices: [1], finding: '从编译知识正文核对机制' }, { question_index: 1, question: '不同版本中的适用边界、条件与例外是否存在冲突', status: 'partial', citation_indices: [1], finding: '仍需核对后半书的具体条件，不冒称全书已覆盖' }] },
+          } },
+        }))
         case 'list_knowledge_entries': state.fallbackSearches += 1; return json(response, success(tool, { entries: [entry], offset: 0, limit: 6, total: 1, has_more: false }))
         default: state.unsupported.push(tool); response.statusCode = 501; return json(response, { tool, status: 'error', error: { code: 'MOCK_ONLY', message: `Unimplemented mock tool: ${tool}` } })
       }
@@ -91,6 +101,7 @@ try {
   for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
     const mode = viewport.width > 700 ? 'desktop' : 'phone'
     state.chatAttempts = 0
+    state.chatRequests = []
     state.provider = { ...provider }
     state.providerSaves = []
     state.snapshotReads = []
@@ -106,13 +117,14 @@ try {
     const pageErrors = []
     page.on('pageerror', error => pageErrors.push(error.message))
     async function checkLayout(label, dialog) {
+      if (dialog) await page.waitForFunction(() => !document.querySelector('.motion-modal-enter-active'))
       const data = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight, scrollWidth: document.documentElement.scrollWidth }))
       assert.ok(data.scrollWidth <= data.width + 1, `${label}: horizontal overflow ${JSON.stringify(data)}`)
       if (dialog) {
         const rect = await dialog.boundingBox()
         assert.ok(rect && rect.x >= -1 && rect.x + rect.width <= data.width + 1 && rect.y >= -1 && rect.y + rect.height <= data.height + 1, `${label}: dialog clipped ${JSON.stringify(rect)}`)
       }
-      await page.screenshot({ path: join(screenshotDir, `${mode}-${label}.png`) })
+      await page.screenshot({ path: join(screenshotDir, `${mode}-${label}.png`), animations: 'disabled' })
     }
     await page.goto(`${origin}/knowledge/settings`)
     await page.getByRole('button', { name: /模型供应商/ }).click()
@@ -154,11 +166,20 @@ try {
     await page.waitForFunction(text => document.querySelector('.message.assistant .knowledge-answer-markdown')?.textContent?.includes(text), interruptedBody)
     assert.equal(await page.getByRole('button', { name: '保存到 Wiki', exact: true }).count(), 0)
     await checkLayout('interrupted-answer')
-    await composer.fill('第二次：重新提问')
-    await page.getByRole('button', { name: '发送问题' }).click()
+    await page.getByRole('button', { name: '继续完成完整答案', exact: true }).click()
     await page.getByRole('button', { name: '保存到 Wiki', exact: true }).waitFor()
     assert.equal(state.chatAttempts, 2, 'second request must retry Runtime')
+    assert.equal(state.chatRequests[1].resume_run_id, 'mock-run-1', 'recovery must explicitly address the truncated run')
+    assert.equal(state.chatRequests[1].question, state.chatRequests[0].question, 'recovery must keep the original question')
     assert.equal(state.fallbackSearches, 0, 'runtime failure must not silently replace model output with FTS')
+    await page.getByRole('button', { name: '查看本轮目标与取证预算' }).last().click()
+    const inspectorDialog = page.getByRole('dialog', { name: '问答运行检查器' })
+    await inspectorDialog.getByText('对比全书的优化机制及适用边界', { exact: true }).waitFor()
+    await inspectorDialog.getByText('仍需核对后半书的具体条件，不冒称全书已覆盖', { exact: true }).waitFor()
+    await checkLayout('adaptive-inspector', inspectorDialog)
+    await inspectorDialog.getByRole('button', { name: '关闭', exact: true }).scrollIntoViewIfNeeded()
+    await inspectorDialog.getByRole('button', { name: '关闭', exact: true }).click()
+    await inspectorDialog.waitFor({ state: 'hidden' })
     await page.locator('.evidence-grid button').last().click()
     const citationDialog = page.getByRole('dialog', { name: '来源预览' })
     await citationDialog.getByText('历史快照正文', { exact: true }).waitFor()
@@ -176,7 +197,7 @@ try {
     await citationDialog.getByRole('button', { name: '关闭来源预览' }).click()
     await citationDialog.waitFor({ state: 'hidden' })
     assert.deepEqual(pageErrors, [], `${mode}: browser runtime errors`)
-    results.push({ viewport, providerRoundtrip: true, nullClearing: true, cancelAndReedit: true, interruptedTextPreserved: true, nextRequestRetried: true, historicalSnapshot: true, restoredConversationSnapshot: true, clippedDialogs: false })
+    results.push({ viewport, providerRoundtrip: true, nullClearing: true, cancelAndReedit: true, interruptedTextPreserved: true, explicitRecovery: true, adaptiveInspector: true, nextRequestRetried: true, historicalSnapshot: true, restoredConversationSnapshot: true, clippedDialogs: false })
     await context.close()
   }
   assert.deepEqual(state.unsupported, [], 'unexpected API calls must be explicitly mocked')

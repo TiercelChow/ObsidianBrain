@@ -16,7 +16,7 @@ export function interruptedKnowledgeAnswer(displayedText: string, receivedText: 
     : kind === 'credentials'
       ? '本次凭据授权未完成，内容可能不完整。检查供应商凭据后可以再次尝试。'
       : kind === 'truncated'
-        ? '本次输出达到运行上限，内容不完整。可以缩小问题范围后再次尝试。'
+        ? '本次输出达到运行上限，内容不完整。可继续完成完整答案，或缩小问题范围后重新提问。'
         : '本次回答未完成，已有内容已保留。下一次提问会再次尝试连接模型。'
   return { content: receivedText || displayedText, kind, notice, detail }
 }

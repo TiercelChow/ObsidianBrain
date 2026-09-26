@@ -2700,3 +2700,19 @@ http-body-util = "0.1"
 - `save_model_provider` / `list_model_providers` 增加可空的 `context_window`、`max_output_tokens` 与默认 `auto` 的 `reasoning_policy`。未知容量留空；显式最大输出必须小于上下文容量。输出限制不隐式关闭问答/研究推理，结构化编译提取仍采用独立的低推理策略。
 - `run.runtime_completed` 记录 ACP `stop_reason` 与 `complete`；`run.usage` 仅表示上下文占用，`run.usage_cost` 为运行时报告的累计会话费用，两者均不是实测 token 账单。当前 token 估算只涵盖初始 Prompt 与最终输出，不含 Harness 内部工具历史、重放、压缩或思考开销。
 - 截断、取消、拒绝和超时不得标记正常完成；已流式输出的正文保存在运行的 `partial_answer`，不能直接保存为正式知识。
+
+## 15. 自适应问答工具与恢复（2026-09-26）
+
+仅在具备本轮 Capability、同书 scope、未结束/未过期运行下使用。预算变更不增加授权书籍、工具白名单、外部网络或写权限。
+
+| Agent 工具 | 参数 | 作用 |
+| --- | --- | --- |
+| `knowledge_get_run_budget` | `knowledge_base_id` | 当前软/硬调用和负载额度、期限、上下文观察与子问题覆盖；旧运行无预算时明确 `available=false`。 |
+| `knowledge_request_budget_extension` | `knowledge_base_id`, `reason`, `missing_question_indices` | 子问题零起始；只能针对尚未充分覆盖的真实缺口扩展软额，最多三次，后续扩展必须有新的已读正文片段。 |
+| `knowledge_report_evidence_coverage` | `knowledge_base_id`, `question_index`, `status`, `citation_indices`, `finding` | `supported/partial/missing/conflict`；引用是一基 S 编号，须来自本轮已读账本。自报覆盖不是事实证明。 |
+
+调用次数、真实拟返回的工具负载及错误回应均参与预算。预览与目录同样占用上下文，但不登记为已读引用。超预算正文在分配引用前被拒绝；Agent 可缩小 `limit` / `max_chars` 后重试，不能声明读过被拒绝的区间。管理查询不耗费数据软调用，但有独立的 128 次管理硬限，仍受总返回负载、实际容量和期限限制。ACP 上下文观察允许采用 Harness 压缩后的真实占用，累计负载不因此抹除；未知容量采用应用请求护栏，不伪装成模型能力。
+
+`POST /v1/knowledge/chat/stream` 新增可选 `resume_run_id`。只能恢复同书、同原问题、同会话、已失败且 `max_tokens/max_turn_requests`、有部分正文的问答；凭据拒绝、普通服务失败、取消和正常完成均不走自动续写。用户明确触发后建立新 Run，重新规划/读取当前证据、适度增加受模型能力约束的输出额度；旧草稿的 S 编号移除，不作为事实来源，新 Run 输出完整答案而非仅拼接尾巴。原失败运行和部分正文保留。HTTP 非流式问答客户端需允许最长约 810 秒的规划加执行期限，前端问答使用 SSE。
+
+运行检查器的 `evidence_refs` 增加 `qa_plan`、`qa_resources`、`planning_stats`、`planning_run_ids`、`selected_candidate_ids`、`adaptive_budget` 和动态读取的 `adaptive_state`。`run.budget_changed`、`run.evidence_coverage`、`run.budget_limited` 分别记录初始/扩展、Agent 自报取证覆盖和被限制的原因；限制事件不是 ACP 完整结束事件。工具预算的估算与 token 计费统计保持分离。

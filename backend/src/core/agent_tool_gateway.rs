@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::BrainError;
-use crate::infra::book_wiki_store::{AgentCapabilityGrant, BookWikiStore};
+use crate::infra::book_wiki_store::{AdaptiveRunBudget, AgentCapabilityGrant, BookWikiStore};
 
 pub const AGENT_KNOWLEDGE_TOOLS: &[&str] = &[
     "book_get_context",
@@ -18,12 +18,21 @@ pub const AGENT_KNOWLEDGE_TOOLS: &[&str] = &[
     "knowledge_create_task",
     "knowledge_report_progress",
     "knowledge_get_review_result",
+    "knowledge_get_run_budget",
+    "knowledge_request_budget_extension",
+    "knowledge_report_evidence_coverage",
 ];
 
 pub const AGENT_EXTERNAL_RESEARCH_TOOL: &str = "book_fetch_external";
 
 pub fn agent_knowledge_tool_schemas() -> Vec<Value> {
     vec![
+        tool_schema("knowledge_get_run_budget", "查看本轮软/硬预算、当前上下文和子问题覆盖；这是业务估算，不是计费",
+            object_schema(json!({"knowledge_base_id":{"type":"string"}}),&["knowledge_base_id"])),
+        tool_schema("knowledge_request_budget_extension", "按具体证据缺口申请扩大软取证预算；不扩大授权、硬上限或期限，无新取证时停止扩展",
+            object_schema(json!({"knowledge_base_id":{"type":"string"},"reason":{"type":"string","minLength":1,"maxLength":2000},"missing_question_indices":{"type":"array","items":{"type":"integer","minimum":0},"minItems":1,"maxItems":12}}),&["knowledge_base_id","reason","missing_question_indices"])),
+        tool_schema("knowledge_report_evidence_coverage", "记录子问题的依据与缺口（Agent自报，不是事实核验）；question_index从0开始，引用必须为本轮真实S编号",
+            object_schema(json!({"knowledge_base_id":{"type":"string"},"question_index":{"type":"integer","minimum":0},"status":{"type":"string","enum":["supported","partial","missing","conflict"]},"citation_indices":{"type":"array","items":{"type":"integer","minimum":1},"maxItems":64},"finding":{"type":"string","maxLength":2000}}),&["knowledge_base_id","question_index","status","citation_indices","finding"])),
         tool_schema(
             "book_get_context",
             "读取当前授权书籍、知识库状态和配置文档",
@@ -202,6 +211,36 @@ pub fn call_agent_knowledge_tool(
     }
     let grant = store.validate_agent_run_capability(token, tool)?;
     match tool {
+        "knowledge_get_run_budget" => {
+            let args: BaseArgs = parse_arguments(arguments)?;
+            require_scope(&grant, &args.knowledge_base_id)?;
+            let budget = store.get_adaptive_run_budget(&grant.run_id)?;
+            Ok(json!({"available":budget.is_some(),"budget":budget,"agent_reported_coverage":true}))
+        }
+        "knowledge_request_budget_extension" => {
+            let args: BudgetExtensionArgs = parse_arguments(arguments)?;
+            require_scope(&grant, &args.knowledge_base_id)?;
+            let budget = store.request_adaptive_budget_extension(
+                &grant.run_id,
+                &args.reason,
+                &args.missing_question_indices,
+            )?;
+            Ok(json!({"budget":budget_summary(&budget),"permissions_unchanged":true}))
+        }
+        "knowledge_report_evidence_coverage" => {
+            let args: EvidenceCoverageArgs = parse_arguments(arguments)?;
+            require_scope(&grant, &args.knowledge_base_id)?;
+            let budget = store.report_adaptive_evidence_coverage(
+                &grant.run_id,
+                args.question_index,
+                &args.status,
+                &args.citation_indices,
+                &args.finding,
+            )?;
+            Ok(
+                json!({"budget":budget_summary(&budget),"coverage":budget.coverage.get(args.question_index),"agent_reported_coverage":true}),
+            )
+        }
         "book_get_context" => {
             let args: BaseArgs = parse_arguments(arguments)?;
             require_scope(&grant, &args.knowledge_base_id)?;
@@ -402,6 +441,13 @@ fn tool_schema(name: &str, description: &str, input_schema: Value) -> Value {
     })
 }
 
+fn budget_summary(budget: &AdaptiveRunBudget) -> Value {
+    json!({"used_tool_calls":budget.used_tool_calls,"soft_tool_calls":budget.soft_tool_calls,
+        "hard_tool_calls":budget.policy.hard_tool_calls,"estimated_tool_payload_tokens":budget.estimated_tool_payload_tokens,
+        "soft_retrieval_tokens":budget.soft_retrieval_tokens,"hard_retrieval_tokens":budget.policy.hard_retrieval_tokens,
+        "extension_count":budget.extension_count,"deadline":budget.deadline})
+}
+
 fn object_schema(properties: Value, required: &[&str]) -> Value {
     json!({
         "type": "object",
@@ -446,6 +492,24 @@ fn validate_query(query: &str) -> Result<(), BrainError> {
 #[serde(deny_unknown_fields)]
 struct BaseArgs {
     knowledge_base_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BudgetExtensionArgs {
+    knowledge_base_id: String,
+    reason: String,
+    missing_question_indices: Vec<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvidenceCoverageArgs {
+    knowledge_base_id: String,
+    question_index: usize,
+    status: String,
+    citation_indices: Vec<usize>,
+    finding: String,
 }
 
 #[derive(Deserialize)]

@@ -94,6 +94,31 @@ async fn call_tool(
         Err(error) => Err(error),
     };
     let result = result.and_then(|mut value| {
+        // Search previews and catalog rows also occupy context. Charge the
+        // actual payload before allocating citations for any returned body.
+        let grant = store.validate_agent_run_capability(token, name)?;
+        if store.get_adaptive_run_budget(&grant.run_id)?.is_some() {
+            let tokens = crate::core::book_wiki::estimate_knowledge_payload_tokens(&value);
+            let management = matches!(
+                name,
+                "knowledge_get_run_budget"
+                    | "knowledge_request_budget_extension"
+                    | "knowledge_report_evidence_coverage"
+            );
+            let budget = if management {
+                store.record_adaptive_management_payload(&grant.run_id, tokens)?
+            } else {
+                store.record_adaptive_tool_payload(&grant.run_id, tokens)?
+            };
+            value["budget_feedback"] = json!({
+                "used_tool_calls":budget.used_tool_calls,"soft_tool_calls":budget.soft_tool_calls,
+                "hard_tool_calls":budget.policy.hard_tool_calls,
+                "estimated_data_payload_tokens":budget.estimated_data_payload_tokens,
+                "soft_retrieval_tokens":budget.soft_retrieval_tokens,
+                "hard_retrieval_tokens":budget.policy.hard_retrieval_tokens,
+                "deadline":budget.deadline,"billing_usage":false,
+            });
+        }
         record_tool_evidence(ctx.book_wiki_service.store(), token, name, &mut value)?;
         Ok(value)
     });
@@ -107,10 +132,36 @@ async fn call_tool(
                 "isError": false
             }))
         }
-        Err(error) => Ok(json!({
-            "content": [{ "type": "text", "text": error.to_string() }],
-            "isError": true
-        })),
+        Err(error) => {
+            let detail = error.to_string().chars().take(1000).collect::<String>();
+            if let Ok(grant) = store.validate_agent_run_token(token) {
+                if store
+                    .get_adaptive_run_budget(&grant.run_id)
+                    .ok()
+                    .flatten()
+                    .is_some()
+                {
+                    // Error replies also occupy context. They must not be
+                    // counted as evidence or hidden behind successful-only usage.
+                    let _ = store.record_adaptive_management_payload(
+                        &grant.run_id,
+                        crate::core::book_wiki::estimate_knowledge_payload_tokens(
+                            &json!({"error":detail}),
+                        ),
+                    );
+                    if ["预算", "上限", "上下文", "期限"]
+                        .iter()
+                        .any(|word| detail.contains(word))
+                    {
+                        let _ = store.record_adaptive_limit_event(&grant.run_id, name, &detail);
+                    }
+                }
+            }
+            Ok(json!({
+                "content": [{ "type": "text", "text": detail }],
+                "isError": true
+            }))
+        }
     }
 }
 
@@ -226,6 +277,133 @@ mod tests {
     use crate::api::router::create_router;
     use crate::infra::book_wiki_store::{MarkdownSourceDraft, SourceSectionDraft};
     use crate::models::book_wiki::{BookKind, ReaderBook};
+
+    #[tokio::test]
+    async fn test_adaptive_mcp_rejects_oversize_body_before_citation_and_recovers_with_paging() {
+        let (ctx, _dir, vault) = crate::AppContext::for_test();
+        let store = ctx.book_wiki_service.store();
+        store
+            .save_reader_books(&[ReaderBook {
+                id: "adaptive-mcp-book".into(),
+                path: vault.display().to_string(),
+                kind: BookKind::Folder,
+                name: "预算MCP".into(),
+                description: String::new(),
+                category: String::new(),
+                added_at: 1,
+                progress: None,
+            }])
+            .unwrap();
+        let base = store.initialize_base("adaptive-mcp-book").unwrap();
+        store
+            .sync_markdown_sources(
+                &base.id,
+                &[MarkdownSourceDraft {
+                    id: "adaptive-source".into(),
+                    version_id: "adaptive-version".into(),
+                    original_path: vault.join("mock.md").display().to_string(),
+                    relative_path: "mock.md".into(),
+                    title: "来源".into(),
+                    ordinal: 0,
+                    content_hash: "adaptive-hash".into(),
+                    size_bytes: 10000,
+                    modified_at: None,
+                    sections: vec![SourceSectionDraft {
+                        id: "adaptive-span".into(),
+                        entry_id: "adaptive-entry".into(),
+                        slug: "adaptive-entry".into(),
+                        title: "原文".into(),
+                        summary: "原文条件".into(),
+                        content_md: "需要完整取证的条件。".repeat(500),
+                        line_start: 1,
+                        line_end: 1,
+                        content_hash: "adaptive-section".into(),
+                    }],
+                }],
+            )
+            .unwrap();
+        let run = store
+            .start_agent_run(&base.id, "deepseek_harness", "knowledge_qa", &json!({}))
+            .unwrap();
+        store
+            .init_adaptive_run_budget(
+                &run.id,
+                &crate::infra::book_wiki_store::AdaptiveBudgetPolicy {
+                    initial_prompt_tokens: 100,
+                    soft_tool_calls: 2,
+                    hard_tool_calls: 12,
+                    soft_retrieval_tokens: 600,
+                    hard_retrieval_tokens: 32000,
+                    context_window: Some(32768),
+                    max_output_tokens: Some(2048),
+                    timeout_seconds: 60,
+                    subquestions: vec!["条件是什么".into()],
+                },
+            )
+            .unwrap();
+        let capability = store
+            .issue_agent_run_capability(
+                &run.id,
+                std::slice::from_ref(&base.id),
+                &[
+                    "book_read_source_span".into(),
+                    "knowledge_get_run_budget".into(),
+                    "knowledge_request_budget_extension".into(),
+                    "knowledge_report_evidence_coverage".into(),
+                ],
+                300,
+            )
+            .unwrap();
+        let params = json!({"name":"book_read_source_span","arguments":{"knowledge_base_id":base.id,"source_span_id":"adaptive-span"}});
+        let response = call_tool(&ctx, &capability.token, Some(&params))
+            .await
+            .unwrap();
+        assert_eq!(response["isError"], true);
+        assert!(store.list_agent_run_citations(&run.id).unwrap().is_empty());
+        let extension = json!({"name":"knowledge_request_budget_extension","arguments":{"knowledge_base_id":base.id,"reason":"需要补读条件，先缩小分页","missing_question_indices":[0]}});
+        let response = call_tool(&ctx, &capability.token, Some(&extension))
+            .await
+            .unwrap();
+        assert_eq!(response["isError"], false);
+        let params = json!({"name":"book_read_source_span","arguments":{"knowledge_base_id":base.id,"source_span_id":"adaptive-span","max_chars":20}});
+        let response = call_tool(&ctx, &capability.token, Some(&params))
+            .await
+            .unwrap();
+        assert_eq!(response["isError"], false, "{response}");
+        assert_eq!(response["structuredContent"]["citation"]["label"], "S1");
+        let citations = store.list_agent_run_citations(&run.id).unwrap();
+        assert_eq!(citations.len(), 1);
+        assert_eq!(citations[0].content_md.chars().count(), 20);
+        let invalid = json!({"name":"knowledge_report_evidence_coverage","arguments":{"knowledge_base_id":base.id,"question_index":0,"status":"supported","citation_indices":[99],"finding":"假引用不能通过"}});
+        assert_eq!(
+            call_tool(&ctx, &capability.token, Some(&invalid))
+                .await
+                .unwrap()["isError"],
+            true
+        );
+        let valid = json!({"name":"knowledge_report_evidence_coverage","arguments":{"knowledge_base_id":base.id,"question_index":0,"status":"partial","citation_indices":[1],"finding":"仅核对了开头的条件"}});
+        assert_eq!(
+            call_tool(&ctx, &capability.token, Some(&valid))
+                .await
+                .unwrap()["isError"],
+            false
+        );
+        let state = store.get_adaptive_run_budget(&run.id).unwrap().unwrap();
+        assert_eq!(state.coverage[0].status, "partial");
+        assert!(state.estimated_tool_payload_tokens > 0);
+        let wrong = json!({"name":"knowledge_get_run_budget","arguments":{"knowledge_base_id":"not-authorized"}});
+        assert_eq!(
+            call_tool(&ctx, &capability.token, Some(&wrong))
+                .await
+                .unwrap()["isError"],
+            true
+        );
+        assert!(!store
+            .validate_agent_run_token(&capability.token)
+            .unwrap()
+            .allowed_tools
+            .contains(&"book_fetch_external".into()));
+    }
 
     #[tokio::test]
     async fn test_agent_mcp_lists_only_capability_tools_and_revokes_after_run() {

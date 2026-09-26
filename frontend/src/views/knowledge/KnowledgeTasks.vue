@@ -156,6 +156,7 @@
                 <p v-if="runtimeDiagnostics.cost" class="run-budget-note">ACP 会话累计费用：{{ runtimeDiagnostics.cost.amount }} {{ runtimeDiagnostics.cost.currency }}（不换算为 token，不叠加累计快照）</p>
                 <p class="run-budget-note">Token 估算仅覆盖初始 Prompt 与最终输出，不含工具历史、内部多轮重发、压缩或推理消耗，不是完整供应商账单。</p>
               </section>
+              <KnowledgeRunInspector :inspection="activeInspection" />
               <section v-if="activeInspection.snapshot?.skill_snapshots.length" class="run-inspector-section">
                 <h4>Skill 快照</h4>
                 <div class="run-skill-list"><span v-for="skill in activeInspection.snapshot.skill_snapshots" :key="skill.id"><b>{{ skill.name }}</b><small>{{ skill.slug }} · Revision {{ skill.revision }} · {{ skill.application_mode === 'harness_native_available' ? 'Harness 可按需读取' : skill.application_mode === 'declared_only' ? '仅声明' : '已注入 Prompt' }}</small></span></div>
@@ -211,6 +212,7 @@ import { DataAnalysis, Download, Loading, Operation, Plus, Refresh, Select, Vide
 import { useRoute, useRouter } from 'vue-router'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import KnowledgeAnswerMarkdown from '@/components/knowledge/KnowledgeAnswerMarkdown.vue'
+import KnowledgeRunInspector from '@/components/knowledge/KnowledgeRunInspector.vue'
 import KnowledgeCitationPreview from '@/components/knowledge/KnowledgeCitationPreview.vue'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import { canFocusDocument } from '@/utils/modalFocusPolicy'

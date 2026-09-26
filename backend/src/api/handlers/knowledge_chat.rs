@@ -17,6 +17,7 @@ pub struct KnowledgeChatStreamRequest {
     pub knowledge_base_id: String,
     pub question: String,
     pub conversation_id: Option<String>,
+    pub resume_run_id: Option<String>,
 }
 
 pub async fn stream_knowledge_chat(
@@ -25,15 +26,26 @@ pub async fn stream_knowledge_chat(
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let (events, receiver) = tokio::sync::mpsc::unbounded_channel();
     tokio::spawn(async move {
-        let result = ctx
-            .book_wiki_service
-            .ask_streaming(
-                &request.knowledge_base_id,
-                &request.question,
-                request.conversation_id.as_deref(),
-                events.clone(),
-            )
-            .await;
+        let result = if let Some(run_id) = request.resume_run_id.as_deref() {
+            ctx.book_wiki_service
+                .resume_qa_streaming(
+                    &request.knowledge_base_id,
+                    &request.question,
+                    request.conversation_id.as_deref(),
+                    run_id,
+                    events.clone(),
+                )
+                .await
+        } else {
+            ctx.book_wiki_service
+                .ask_streaming(
+                    &request.knowledge_base_id,
+                    &request.question,
+                    request.conversation_id.as_deref(),
+                    events.clone(),
+                )
+                .await
+        };
         let terminal = match result {
             Ok(result) => KnowledgeChatStreamEvent::Completed { result },
             Err(error) => KnowledgeChatStreamEvent::Error {

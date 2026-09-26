@@ -855,7 +855,7 @@ export function askBookKnowledge(knowledgeBaseId: string, question: string, conv
     knowledge_base_id: knowledgeBaseId,
     question,
     ...(conversationId ? { conversation_id: conversationId } : {}),
-  }, { timeout: 190_000 }) as unknown as Promise<ToolEnvelope<KnowledgeAnswer>>
+  }, { timeout: 850_000 }) as unknown as Promise<ToolEnvelope<KnowledgeAnswer>>
 }
 
 export async function streamBookKnowledge(
@@ -864,6 +864,7 @@ export async function streamBookKnowledge(
   conversationId: string | undefined,
   onEvent: (event: KnowledgeChatStreamEvent) => void,
   signal?: AbortSignal,
+  resumeRunId?: string,
 ) {
   const response = await fetch('/v1/knowledge/chat/stream', {
     method: 'POST',
@@ -872,6 +873,7 @@ export async function streamBookKnowledge(
       knowledge_base_id: knowledgeBaseId,
       question,
       ...(conversationId ? { conversation_id: conversationId } : {}),
+      ...(resumeRunId ? { resume_run_id: resumeRunId } : {}),
     }),
     signal,
   })

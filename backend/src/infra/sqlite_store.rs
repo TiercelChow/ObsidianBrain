@@ -260,6 +260,21 @@ const MIGRATIONS: &[Migration] = &[
         description: "numbered citation contract for stock Harness skills",
         sql: include_str!("../../migrations/042_numbered_citation_skill_contract.sql"),
     },
+    Migration {
+        version: 43,
+        description: "run scoped adaptive budgets and evidence coverage",
+        sql: include_str!("../../migrations/043_adaptive_run_budgets.sql"),
+    },
+    Migration {
+        version: 44,
+        description: "explicit conversation goals and constraints",
+        sql: include_str!("../../migrations/044_conversation_memory.sql"),
+    },
+    Migration {
+        version: 45,
+        description: "adaptive query budget and coverage skill contract",
+        sql: include_str!("../../migrations/045_adaptive_query_skill_contract.sql"),
+    },
 ];
 
 fn seed_detailed_ingest_skill(conn: &Connection) -> Result<(), BrainError> {
@@ -734,7 +749,7 @@ impl SqliteStore {
                 32 => compact_wiki_skill_versions(&conn),
                 33 => overwrite_structured_presentation_skill(&conn),
                 34 => overwrite_structured_presentation_skill(&conn),
-                38 | 42 => overwrite_harness_wiki_skills(&conn),
+                38 | 42 | 45 => overwrite_harness_wiki_skills(&conn),
                 _ => Ok(()),
             };
             if let Err(error) = seed_result {
@@ -2061,6 +2076,7 @@ mod tests {
         let db_path = dir.path().join("citation-skill-upgrade.db");
         let store = SqliteStore::new(&db_path).unwrap();
         store.with_connection(|conn| {
+            conn.execute_batch("DROP TABLE agent_run_adaptive_budgets; DROP TABLE knowledge_conversation_memories;")?;
             conn.execute("DELETE FROM _migrations WHERE version >= 42", [])?;
             conn.execute("UPDATE skill_files SET content_text='old stock citation rules', content_hash='old' WHERE skill_version_id='skill-version-book-query-v3'", [])?;
             conn.execute("UPDATE skill_versions SET content_hash='old' WHERE id='skill-version-book-query-v3'", [])?;
