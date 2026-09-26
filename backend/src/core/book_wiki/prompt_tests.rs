@@ -295,6 +295,8 @@ fn test_question_and_each_evidence_survive_large_optional_context() {
             claims: vec![],
             relations: vec![],
             versions: vec![],
+            source_impact_count: 0,
+            source_impacts: vec![],
         })
         .collect::<Vec<_>>();
     let question = format!("当前关键问题：{}问题末尾", "需回答".repeat(500));
@@ -351,6 +353,7 @@ fn test_compile_preserves_full_batch_with_detailed_skills_and_schema() {
             line_start: Some(1),
             line_end: Some(500),
             content: format!("{}尾部证据{index}", "资料".repeat(3_000)),
+            locator: serde_json::json!({}),
         })
         .collect::<Vec<_>>();
     let prompt = build_semantic_compile_prompt(SemanticCompilePromptInput {
@@ -369,6 +372,47 @@ fn test_compile_preserves_full_batch_with_detailed_skills_and_schema() {
     assert!(prompt.contains(semantic_output::OUTPUT_SCHEMA));
     assert!(prompt.contains(skills[0].instructions.trim()));
     assert!(prompt.chars().count() <= MAX_PROMPT_CHARS);
+}
+
+#[test]
+fn test_compile_does_not_silently_drop_large_skill_or_book_configuration_tail() {
+    let skill = WikiSkill {
+        id: "custom".into(),
+        slug: "custom".into(),
+        name: "完整规则".into(),
+        description: String::new(),
+        source_type: "custom".into(),
+        status: "ready".into(),
+        permissions: vec![],
+        requirements: vec![],
+        revision: 1,
+        instructions: format!("{}规则尾部必须保留", "规则内容。".repeat(3000)),
+        enabled: true,
+        usage_scope: "ingest".into(),
+        updated_at: String::new(),
+    };
+    let document = ConfigDocument {
+        id: "purpose".into(),
+        knowledge_base_id: None,
+        scope: "global".into(),
+        name: "Purpose.md".into(),
+        content_md: format!("{}配置尾部必须保留", "目的与条件。".repeat(5000)),
+        revision: 1,
+        updated_at: String::new(),
+    };
+    let prompt = build_semantic_compile_prompt(SemanticCompilePromptInput {
+        book_name: "配置",
+        spans: &[],
+        existing: &[],
+        current_candidates: &[],
+        documents: &[document],
+        skills: &[skill],
+        batch_index: 1,
+        batch_count: 1,
+    });
+    assert!(prompt.contains("规则尾部必须保留"));
+    assert!(prompt.contains("配置尾部必须保留"));
+    assert!(compile_policy::CompileResources::new(None, None, &prompt).is_err());
 }
 
 #[test]

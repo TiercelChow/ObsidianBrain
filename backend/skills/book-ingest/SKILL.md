@@ -38,28 +38,31 @@
 
 同一批只有新主题内部的分歧、尚无既有条目时，仍按 new 建立有条件的主题，在摘要与不同论断中保留双方依据，不凭空指定既有实体。服务端会复核新增和更新分类。
 
-## 三、把主题压缩为可核验的候选
+## 三、构建导航、知识正文、原子证据
 
-- summary 直接回答主题的核心问题，保留关键限定，最多 160 个字符。不写“本章介绍了”“文章提到”等外壳，不把全文再次复制进来。
-- claims 是最多三条原子论断，每条最多 160 个字符；一个论断只陈述一件可核验的事。predicate 用简短关系词，普通陈述可用 states；object_text 填入清楚的对象，没有适当对象时填空字符串，不重复整句来凑内容。
+- summary 用于导航与候选选择，通常 80–400 字符，点明对象、机制与范围；不写“本章介绍了”等外壳，不承担完整知识正文。
+- content_md 是必须提供的、独立可读的 Markdown 正文。按主题复杂度提供定义、机制、适用条件、完整公式及变量说明、步骤、例外、反例与取舍；只包含原文实际支持的部分。简单定义可短，复杂方法不能压成一句摘要。30000 字符是安全边界，不是篇幅指标。
+- concept/entity 重点保留定义、机制和边界；method 保留输入输出、前提、完整步骤与失败条件；comparison 保留共同比较维度、测试条件和权衡；synthesis/overview 组织跨片段的关联与缺口；question 说明真实未解问题而不是把未读当未知。没有原文依据的章节不要为填模板而补写。
+- 完整保留表格、代码、公式结构和重要推导条件。来源 locator 提供标题路径和相邻位置，fragment 给出实际范围；同一 span 的多个片段不是独立证据。只对本批实际提供的范围作结论，不自行续写未提供内容。
+- claims 最多八条原子论断，每条只陈述一件可核验的事，完整保留必要限定和否定；claim_text/object_text 的硬上限为 2048 字符，通常远短于上限。不要为变短删掉适用条件，也不要用 claims 代替正文。predicate 用简短关系词，普通陈述可用 states；object_text 没有适当对象时填空字符串。
 - 每条 claim 显式带自己的 citations，不能省略后指望继承条目引用。每项数字、公式、比较或因果都必须由这些来源支持。
-- 条目 citations 覆盖摘要和全部 claims 的依据，至少一个且最多六个；每条 claim 的引用也最多六个，均去重。只复制本批给出的真实 span_id，不能使用 [S1]、slug、路径、猜测的 ID 或旧批次 ID。
-- aliases 最多三个，不能把无关的检索关键词堆成别名。无合适别名、论断或关系时使用空数组。
+- 条目 citations 覆盖摘要、正文和全部 claims 的依据，至少一个且最多十二个；每条 claim 的引用也最多十二个，均去重。只复制本批给出的真实 span_id，不能使用 [S1]、slug、路径、猜测的 ID 或旧批次 ID。
+- aliases 最多八个，不能把无关检索关键词堆成别名。无合适别名、论断或关系时使用空数组。
 - confidence 表达证据对当前陈述的支持程度，不是精确测量的概率。直接且完整的定义可较高；上下文有限、条件不明或有争议时降低。条目及 claim 的 confidence、关系 strength 均用 0 到 1 的 JSON 数值，不能用百分比字符串、NaN 或 Infinity。
-- 每条最多两个 relations。方向始终为当前主题 → to_slug；to_slug 只能来自已提供的既有主题或本批实际输出的其他主题，不能指向自己、被舍弃的候选或想象中的实体。证据不足就省略关系。
-- relation_type 只用“解释、依赖、对比、支持、冲突、属于”之一。evidence 最多 120 个字符，说明为什么存在此关系；“有关联”“同章出现”不足以构成依据。关系只补充已受本批引用支持的知识，不能偷偷引入新事实。
+- 每条最多六个 relations。方向始终为当前主题 → to_slug；to_slug 只能来自已提供的既有主题或本批实际输出的其他主题，不能指向自己、被舍弃的候选或想象中的实体。证据不足就省略关系。
+- relation_type 只用“解释、依赖、对比、支持、冲突、属于”之一。evidence 最多 2048 字符，通常一句完整说明即可；“有关联”“同章出现”不足以构成依据。关系只补充已受本批引用支持的知识，不能偷偷引入新事实。
 
 ## 四、输出协议与长度控制
 
 顶层格式是 {"entries":[候选]}；无候选时必须是 {"entries":[],"no_material_reason":"本批没有实质候选的具体原因"}。no_material_reason 只在空结果时使用，说明实际观察到的情况，例如“本批只有目录链接，未包含定义、方法或事实正文”，不要只写“无”“不适用”或“证据不足”。材料本来有可用主题时，不得用空结果掩盖格式困难。
 
-entries 最多五条，这是上限而非指标。优先输出最有价值且证据完整的一至三条；无须凑五条、三个 claims 或两个 relations。预计内容太长时先减少主题或次要论断，不能输出半个对象、以省略号截断或用多段 JSON 接续。
+entries 最多十二条，这是上限而非指标。依本批主题与证据价值选择，不能为了凑满而逐段摘要。预计输出过长时减少低价值主题，但保留已选择主题的完整核心公式、机制和条件；不能输出半个对象、以省略号截断或用多段 JSON 接续。
 
-候选字段仅使用运行时协议规定的 _classification、entry_type、slug、title、summary、aliases、confidence、citations、claims、relations。entry_type 仅用 concept、entity、method、event、comparison、synthesis、question、overview；不输出 chapter、answer 或自造类型。不输出 content_md、SQL、操作日志、审核结果或额外解释字段。
+候选字段仅使用运行时协议规定的 _classification、entry_type、slug、title、summary、content_md、aliases、confidence、citations、claims、relations。entry_type 仅用 concept、entity、method、event、comparison、synthesis、question、overview；不输出 chapter、answer 或自造类型。不输出 SQL、操作日志、审核结果或额外解释字段。
 
 以下仅演示结构，示例 ID 和知识不能复制到真实结果；真实结果必须换为本批已核验内容：
 
-{"entries":[{"_classification":"new","entry_type":"method","slug":"example-method","title":"示例方法","summary":"此处放入来源支持的核心机制与条件。","aliases":[],"confidence":0.8,"citations":["实际的span_id"],"claims":[{"claim_text":"此处是一条来源直接支持的事实。","predicate":"states","object_text":"示例对象","confidence":0.8,"citations":["实际的span_id"]}],"relations":[]}]}
+{"entries":[{"_classification":"new","entry_type":"method","slug":"example-method","title":"示例方法","summary":"此处放入来源支持的核心机制与条件。","content_md":"## 前提与步骤\n此处放入来源支持的完整方法与适用边界。","aliases":[],"confidence":0.8,"citations":["实际的span_id"],"claims":[{"claim_text":"此处是一条来源直接支持的事实。","predicate":"states","object_text":"示例对象","confidence":0.8,"citations":["实际的span_id"]}],"relations":[]}]}
 
 JSON 序列化必须满足：
 
@@ -75,7 +78,7 @@ JSON 序列化必须满足：
 - 分类、身份和关系目标是否与实际提供的既有主题一致？
 - 每个摘要事实、原子论断和关系是否有本批证据，是否保留数字单位、版本、否定和限制？
 - 是否把相同来源的重复片段误当成独立佐证，或把推断写成来源定论？
-- 是否满足五个条目、三个别名、三条论断、两个关系、六个引用及文字上限？
+- 正文是否完整保留公式、步骤和条件，而不是导航摘要的重复？是否遵守运行时 Schema 的数量与文字上限而未机械丢弃重要后半内容？
 - 空结果是否确有依据并附具体原因？JSON 是否只有一个完整对象且字符串合法转义？
 
 本 Skill 由 ObsidianBrain 为数据库候选与人工审核流程独立撰写；正文规则不构成对模型输出正确性的保证，最终仍须服务端结构校验与人工审核。

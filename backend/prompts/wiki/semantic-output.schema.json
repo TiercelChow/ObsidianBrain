@@ -39,13 +39,14 @@
     },
     "entry": {
       "type": "object", "additionalProperties": false,
-      "required": ["_classification", "entry_type", "slug", "title", "summary", "aliases", "confidence", "citations", "claims", "relations"],
+      "required": ["_classification", "entry_type", "slug", "title", "summary", "content_md", "aliases", "confidence", "citations", "claims", "relations"],
       "properties": {
         "_classification": {"enum": ["new", "update", "disputed"]},
         "entry_type": {"enum": ["concept", "entity", "method", "event", "comparison", "synthesis", "question", "overview"]},
         "slug": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S"},
         "title": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S"},
-        "summary": {"type": "string", "minLength": 1, "maxLength": 2048, "pattern": "\\S"},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 1000, "pattern": "\\S"},
+        "content_md": {"type": "string", "minLength": 1, "maxLength": 30000, "pattern": "\\S"},
         "aliases": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 100, "pattern": "\\S"}},
         "confidence": {"$ref": "#/definitions/score"},
         "citations": {"$ref": "#/definitions/citations"},

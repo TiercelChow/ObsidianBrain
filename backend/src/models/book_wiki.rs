@@ -3,7 +3,7 @@ use serde_json::Value;
 
 /// Markdown 抽取算法版本。切分规则变更时递增并纳入 source version 派生：
 /// 旧版本与其 span 原样保留（历史引用可回放），新同步建立新版本。
-pub const MARKDOWN_EXTRACTION_VERSION: &str = "markdown-v2";
+pub const MARKDOWN_EXTRACTION_VERSION: &str = "markdown-v3-structured";
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -186,6 +186,21 @@ pub struct KnowledgeEntryDetail {
     pub claims: Vec<KnowledgeClaimSummary>,
     pub relations: Vec<KnowledgeRelationSummary>,
     pub versions: Vec<KnowledgeEntryVersionSummary>,
+    pub source_impact_count: i64,
+    /// Bounded preview; the count reports additional affected sources.
+    pub source_impacts: Vec<KnowledgeSourceImpact>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeSourceImpact {
+    pub source_document_id: String,
+    pub source_path: String,
+    pub previous_version_id: String,
+    pub current_version_id: Option<String>,
+    pub reason: String,
+    pub affected_via_entry_id: Option<String>,
+    pub affected_via_entry_title: Option<String>,
+    pub detected_at: String,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -645,6 +660,9 @@ pub struct SourceSpanSnapshot {
     pub line_start: Option<i64>,
     pub line_end: Option<i64>,
     pub content: String,
+    /// Stable outline/neighbor locations; compilation fragments add exact
+    /// character ranges. Empty for legacy extractions, never inferred facts.
+    pub locator: Value,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -698,6 +716,53 @@ pub struct SemanticCompileResult {
     pub change_set: KnowledgeChangeSet,
     pub processed_sources: i64,
     pub total_sources: i64,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeCompileFragment {
+    pub ordinal: i64,
+    pub batch: i64,
+    pub source_document_id: String,
+    pub source_version_id: String,
+    pub source_span_id: String,
+    pub source_path: String,
+    pub line_start: Option<i64>,
+    pub line_end: Option<i64>,
+    pub locator: Value,
+    pub status: String,
+    pub run_id: Option<String>,
+    /// Candidate references are batch-level, not a proof of fragment coverage.
+    pub candidate_slugs: Vec<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct KnowledgeCompileReport {
+    pub id: String,
+    pub knowledge_base_id: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub selected_sources: i64,
+    pub current_sources: i64,
+    pub selected_spans: i64,
+    pub planned: bool,
+    pub fragment_total: i64,
+    pub analyzed_fragments: i64,
+    pub no_material_fragments: i64,
+    pub failed_fragments: i64,
+    pub unprocessed_fragments: i64,
+    pub fragment_offset: usize,
+    pub fragment_has_more: bool,
+    pub fragments: Vec<KnowledgeCompileFragment>,
+    pub topic_total: i64,
+    pub topic_offset: usize,
+    pub topic_has_more: bool,
+    pub topics: Vec<Value>,
+    pub change_set_id: Option<String>,
+    pub error: Option<String>,
+    pub previous_report_id: Option<String>,
+    pub next_report_id: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]

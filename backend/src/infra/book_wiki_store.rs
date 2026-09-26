@@ -78,6 +78,18 @@ pub struct QaCatalogEntry {
     pub entry_type: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct CompileCatalogEntry {
+    pub id: String,
+    pub entry_type: String,
+    pub slug: String,
+    pub title: String,
+    pub summary: String,
+    pub aliases: Vec<String>,
+    pub status: String,
+    pub revision: i64,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct AgentEvidenceRef {
     pub kind: String,
@@ -91,6 +103,13 @@ mod evidence;
 pub use adaptive::{AdaptiveBudgetPolicy, AdaptiveRunBudget};
 mod conversation_memory;
 pub use conversation_memory::ConversationMemory;
+mod compile_quality;
+mod compile_reports;
+mod historical_archive;
+pub(crate) use compile_quality::CompileEntrySnapshot;
+mod source_impacts;
+mod source_quality;
+pub(crate) use source_impacts::backfill_source_impacts;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IssuedAgentCapability {
@@ -150,6 +169,17 @@ pub struct MarkdownSourceDraft {
     pub size_bytes: i64,
     pub modified_at: Option<String>,
     pub sections: Vec<SourceSectionDraft>,
+}
+
+fn source_locator_from_row(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<Value> {
+    let text: String = row.get(column)?;
+    serde_json::from_str(&text).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            column,
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        )
+    })
 }
 
 impl BookWikiStore {
@@ -740,6 +770,15 @@ impl BookWikiStore {
         base_id: &str,
         sources: &[MarkdownSourceDraft],
     ) -> Result<(), BrainError> {
+        self.sync_markdown_sources_with_locators(base_id, sources, &HashMap::new())
+    }
+
+    pub fn sync_markdown_sources_with_locators(
+        &self,
+        base_id: &str,
+        sources: &[MarkdownSourceDraft],
+        locators: &HashMap<String, Value>,
+    ) -> Result<(), BrainError> {
         let now = Utc::now().to_rfc3339();
         self.db.transaction(|conn| {
             let existing_versions = {
@@ -861,6 +900,9 @@ impl BookWikiStore {
                         params![source.version_id, ordinal as i64],
                         |row| row.get::<_, String>(0),
                     )?;
+                    if let Some(locator)=locators.get(&section.id) {
+                        conn.execute("INSERT OR IGNORE INTO source_span_structures (source_span_id,locator_json) VALUES (?1,?2)",params![span_id,locator.to_string()])?;
+                    }
                     conn.execute(
                         "INSERT INTO knowledge_entries
                          (id, knowledge_base_id, origin_document_id, entry_type, slug, title,
@@ -997,6 +1039,8 @@ impl BookWikiStore {
                  WHERE id = ?1",
                 params![base_id, health, now, i64::from(sources_changed)],
             )?;
+            source_impacts::refresh_source_impacts(conn, base_id, &now)?;
+            refresh_review_state(conn, base_id, &now)?;
             Ok(())
         })
     }
@@ -1044,7 +1088,8 @@ impl BookWikiStore {
             .with_connection(|conn| {
                 conn.query_row(
                     "SELECT ss.id, sd.id, ss.source_version_id, sd.relative_path, ss.heading,
-                            ss.line_start, ss.line_end, ss.content
+                            ss.line_start, ss.line_end, ss.content,
+                            COALESCE((SELECT locator_json FROM source_span_structures WHERE source_span_id=ss.id),'{}')
                      FROM source_spans ss
                      JOIN source_versions sv ON sv.id = ss.source_version_id
                      JOIN source_documents sd ON sd.id = sv.source_document_id
@@ -1062,6 +1107,7 @@ impl BookWikiStore {
                             line_start: row.get(5)?,
                             line_end: row.get(6)?,
                             content: row.get(7)?,
+                            locator: source_locator_from_row(row,8)?,
                         })
                     },
                 )
@@ -1079,7 +1125,8 @@ impl BookWikiStore {
         self.db.with_connection(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT ss.id, sd.id, ss.source_version_id, sd.relative_path, ss.heading,
-                        ss.line_start, ss.line_end, ss.content
+                        ss.line_start, ss.line_end, ss.content,
+                        COALESCE((SELECT locator_json FROM source_span_structures WHERE source_span_id=ss.id),'{}')
                  FROM source_spans ss
                  JOIN source_versions sv ON sv.id = ss.source_version_id
                  JOIN source_documents sd ON sd.id = sv.source_document_id
@@ -1098,6 +1145,7 @@ impl BookWikiStore {
                     line_start: row.get(5)?,
                     line_end: row.get(6)?,
                     content: row.get(7)?,
+                    locator: source_locator_from_row(row,8)?,
                 })
             })?;
             rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -1113,7 +1161,8 @@ impl BookWikiStore {
         self.db.with_connection(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT ss.id, sd.id, ss.source_version_id, sd.relative_path, ss.heading,
-                        ss.line_start, ss.line_end, ss.content
+                        ss.line_start, ss.line_end, ss.content,
+                        COALESCE((SELECT locator_json FROM source_span_structures WHERE source_span_id=ss.id),'{}')
                  FROM source_spans ss
                  JOIN source_versions sv ON sv.id = ss.source_version_id
                  JOIN source_documents sd ON sd.id = sv.source_document_id
@@ -1125,7 +1174,29 @@ impl BookWikiStore {
                    AND sd.current_version_id = ss.source_version_id
                    AND (checkpoint.source_version_id IS NULL
                         OR checkpoint.source_version_id != ss.source_version_id
-                        OR checkpoint.compile_fingerprint != ?2)
+                        OR checkpoint.compile_fingerprint != ?2
+                        OR EXISTS (
+                            SELECT 1 FROM knowledge_source_impacts impact
+                            JOIN knowledge_entries affected ON affected.id=impact.entry_id
+                            JOIN knowledge_citations citation ON citation.knowledge_base_id=impact.knowledge_base_id
+                            LEFT JOIN knowledge_claims claim ON claim.id=citation.claim_id
+                            JOIN source_spans old_span ON old_span.id=citation.source_span_id
+                            JOIN source_versions old_version ON old_version.id=old_span.source_version_id
+                            JOIN source_documents changed ON changed.id=impact.source_document_id
+                            LEFT JOIN knowledge_compile_checkpoints changed_checkpoint
+                              ON changed_checkpoint.knowledge_base_id=?1
+                             AND changed_checkpoint.source_document_id=changed.id
+                            WHERE impact.knowledge_base_id=?1 AND impact.resolved_at IS NULL
+                              AND affected.status<>'archived'
+                              AND old_span.knowledge_base_id=?1
+                              AND COALESCE(citation.entry_id,claim.entry_id) IN (impact.entry_id,impact.root_entry_id)
+                              AND old_version.source_document_id=sd.id
+                              AND (checkpoint.compiled_at<impact.detected_at
+                                   OR (changed.sync_status='current' AND
+                                       (changed_checkpoint.source_version_id IS NULL
+                                        OR changed_checkpoint.source_version_id<>changed.current_version_id
+                                        OR changed_checkpoint.compile_fingerprint<>?2)))
+                        ))
                  ORDER BY sd.ordinal, ss.ordinal",
             )?;
             let rows = stmt.query_map(params![base_id, compile_fingerprint], |row| {
@@ -1138,6 +1209,7 @@ impl BookWikiStore {
                     line_start: row.get(5)?,
                     line_end: row.get(6)?,
                     content: row.get(7)?,
+                    locator: source_locator_from_row(row,8)?,
                 })
             })?;
             rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -1149,6 +1221,16 @@ impl BookWikiStore {
         base_id: &str,
         query: &str,
         limit: usize,
+    ) -> Result<Vec<SourceSpanSnapshot>, BrainError> {
+        self.search_source_spans_inner(base_id, query, limit, true)
+    }
+
+    fn search_source_spans_inner(
+        &self,
+        base_id: &str,
+        query: &str,
+        limit: usize,
+        include_content: bool,
     ) -> Result<Vec<SourceSpanSnapshot>, BrainError> {
         self.get_base(base_id)?;
         self.ensure_knowledge_fts_current()?;
@@ -1165,7 +1247,8 @@ impl BookWikiStore {
             if let Some(fts_query) = fts_query.as_deref() {
                 let mut stmt = conn.prepare(
                     "SELECT ss.id, sd.id, ss.source_version_id, sd.relative_path, ss.heading,
-                            ss.line_start, ss.line_end, ss.content
+                            ss.line_start, ss.line_end, CASE WHEN ?4=1 THEN ss.content ELSE '' END,
+                            COALESCE((SELECT locator_json FROM source_span_structures WHERE source_span_id=ss.id),'{}')
                      FROM source_spans_fts
                      JOIN source_spans ss ON ss.id = source_spans_fts.span_id
                      JOIN source_versions sv ON sv.id = ss.source_version_id
@@ -1179,7 +1262,7 @@ impl BookWikiStore {
                               sd.ordinal, ss.ordinal
                      LIMIT ?3",
                 )?;
-                let rows = stmt.query_map(params![base_id, fts_query, limit], |row| {
+                let rows = stmt.query_map(params![base_id, fts_query, limit,i64::from(include_content)], |row| {
                     Ok(SourceSpanSnapshot {
                         id: row.get(0)?,
                         source_document_id: row.get(1)?,
@@ -1189,6 +1272,7 @@ impl BookWikiStore {
                         line_start: row.get(5)?,
                         line_end: row.get(6)?,
                         content: row.get(7)?,
+                        locator: source_locator_from_row(row,8)?,
                     })
                 })?;
                 for row in rows {
@@ -1201,7 +1285,8 @@ impl BookWikiStore {
 
             let mut fallback_stmt = conn.prepare(
                 "SELECT ss.id, sd.id, ss.source_version_id, sd.relative_path, ss.heading,
-                        ss.line_start, ss.line_end, ss.content
+                        ss.line_start, ss.line_end, CASE WHEN ?4=1 THEN ss.content ELSE '' END,
+                        COALESCE((SELECT locator_json FROM source_span_structures WHERE source_span_id=ss.id),'{}')
                  FROM source_spans ss
                  JOIN source_versions sv ON sv.id = ss.source_version_id
                  JOIN source_documents sd ON sd.id = sv.source_document_id
@@ -1220,7 +1305,7 @@ impl BookWikiStore {
                     break;
                 }
                 let rows =
-                    fallback_stmt.query_map(params![base_id, pattern, remaining], |row| {
+                    fallback_stmt.query_map(params![base_id, pattern, remaining,i64::from(include_content)], |row| {
                         Ok(SourceSpanSnapshot {
                             id: row.get(0)?,
                             source_document_id: row.get(1)?,
@@ -1230,6 +1315,7 @@ impl BookWikiStore {
                             line_start: row.get(5)?,
                             line_end: row.get(6)?,
                             content: row.get(7)?,
+                            locator: source_locator_from_row(row,8)?,
                         })
                     })?;
                 for row in rows {
@@ -1376,6 +1462,23 @@ impl BookWikiStore {
         base_id: &str,
         total_sources: i64,
     ) -> Result<KnowledgeBaseSummary, BrainError> {
+        self.begin_compile_selection(base_id, total_sources, false)
+    }
+
+    pub(crate) fn begin_source_review_compile(
+        &self,
+        base_id: &str,
+        total_sources: i64,
+    ) -> Result<KnowledgeBaseSummary, BrainError> {
+        self.begin_compile_selection(base_id, total_sources, true)
+    }
+
+    fn begin_compile_selection(
+        &self,
+        base_id: &str,
+        total_sources: i64,
+        source_review: bool,
+    ) -> Result<KnowledgeBaseSummary, BrainError> {
         let now = Utc::now().to_rfc3339();
         let updated = self.db.with_connection(|conn| {
             Ok(conn.execute(
@@ -1388,14 +1491,16 @@ impl BookWikiStore {
                      compile_started_at = ?3, compile_heartbeat_at = ?3,
                      compile_cancel_requested = 0,
                      revision = revision + 1, updated_at = ?3
-                 WHERE id = ?1 AND compile_state != 'compiling'",
-                params![base_id, total_sources, now],
+                 WHERE id = ?1 AND compile_state != 'compiling' AND lifecycle='active'
+                   AND (?4=0 OR (sync_state='clean' AND NOT EXISTS(
+                       SELECT 1 FROM knowledge_change_sets s WHERE s.knowledge_base_id=?1 AND s.status='proposed')))",
+                params![base_id, total_sources, now, source_review],
             )?)
         })?;
         if updated == 0 {
-            self.get_base(base_id)?;
+            self.get_active_base(base_id)?;
             return Err(BrainError::KnowledgeValidation(
-                "智能编译已经在后台执行，请勿重复启动".to_string(),
+                "智能编译已在执行，或同步/审核状态已变化；请刷新后处理，不要重复启动".to_string(),
             ));
         }
         self.get_base(base_id)
@@ -1748,6 +1853,18 @@ impl BookWikiStore {
         offset: usize,
         limit: usize,
     ) -> Result<KnowledgeEntryPage, BrainError> {
+        self.list_entries_page_with_stale(base_id, query, entry_type, offset, limit, false)
+    }
+
+    pub fn list_entries_page_with_stale(
+        &self,
+        base_id: &str,
+        query: Option<&str>,
+        entry_type: Option<&str>,
+        offset: usize,
+        limit: usize,
+        include_stale: bool,
+    ) -> Result<KnowledgeEntryPage, BrainError> {
         self.get_base(base_id)?;
         self.ensure_knowledge_fts_current()?;
         let limit = limit.clamp(1, 100) as i64;
@@ -1763,9 +1880,9 @@ impl BookWikiStore {
                      WHERE knowledge_entries_fts MATCH ?3
                        AND knowledge_entries_fts.knowledge_base_id = ?1
                        AND ke.knowledge_base_id = ?1
-                       AND ke.status NOT IN ('archived', 'stale')
+                       AND ke.status <> 'archived' AND (ke.status <> 'stale' OR (?6 = 1 AND ke.entry_type <> 'source_section'))
                        AND (?2 IS NULL OR ke.entry_type = ?2)",
-                    params![base_id, entry_type, fts_query],
+                    params![base_id, entry_type, fts_query, limit, offset, include_stale],
                     |row| row.get::<_, i64>(0),
                 )?;
                 let mut statement = conn.prepare(
@@ -1777,7 +1894,7 @@ impl BookWikiStore {
                      WHERE knowledge_entries_fts MATCH ?3
                        AND knowledge_entries_fts.knowledge_base_id = ?1
                        AND ke.knowledge_base_id = ?1
-                       AND ke.status NOT IN ('archived', 'stale')
+                       AND ke.status <> 'archived' AND (ke.status <> 'stale' OR (?6 = 1 AND ke.entry_type <> 'source_section'))
                        AND (?2 IS NULL OR ke.entry_type = ?2)
                      ORDER BY CASE WHEN ke.entry_type = 'source_section' THEN 1 ELSE 0 END,
                               bm25(knowledge_entries_fts, 0.0, 0.0, 12.0, 8.0, 4.0, 1.0,
@@ -1786,7 +1903,7 @@ impl BookWikiStore {
                      LIMIT ?4 OFFSET ?5",
                 )?;
                 let rows = statement.query_map(
-                    params![base_id, entry_type, fts_query, limit, offset],
+                    params![base_id, entry_type, fts_query, limit, offset, include_stale],
                     map_entry_summary,
                 )?;
                 (rows.collect::<Result<Vec<_>, _>>()?, total)
@@ -1796,9 +1913,9 @@ impl BookWikiStore {
                 let total = conn.query_row(
                     "SELECT COUNT(*) FROM knowledge_entries ke
                      WHERE ke.knowledge_base_id = ?1
-                       AND ke.status NOT IN ('archived', 'stale')
+                       AND ke.status <> 'archived' AND (ke.status <> 'stale' OR (?5 = 1 AND ke.entry_type <> 'source_section'))
                        AND (?2 IS NULL OR ke.entry_type = ?2)",
-                    params![base_id, entry_type],
+                    params![base_id, entry_type, limit, offset, include_stale],
                     |row| row.get::<_, i64>(0),
                 )?;
                 let mut statement = conn.prepare(
@@ -1807,14 +1924,14 @@ impl BookWikiStore {
                      FROM knowledge_entries ke
                      LEFT JOIN source_documents sd ON sd.id = ke.origin_document_id
                      WHERE ke.knowledge_base_id = ?1
-                       AND ke.status NOT IN ('archived', 'stale')
+                       AND ke.status <> 'archived' AND (ke.status <> 'stale' OR (?5 = 1 AND ke.entry_type <> 'source_section'))
                        AND (?2 IS NULL OR ke.entry_type = ?2)
                      ORDER BY CASE WHEN ke.entry_type = 'source_section' THEN 1 ELSE 0 END,
                               sd.ordinal, ke.title COLLATE NOCASE
                      LIMIT ?3 OFFSET ?4",
                 )?;
                 let rows = statement.query_map(
-                    params![base_id, entry_type, limit, offset],
+                    params![base_id, entry_type, limit, offset, include_stale],
                     map_entry_summary,
                 )?;
                 (rows.collect::<Result<Vec<_>, _>>()?, total)
@@ -1849,6 +1966,16 @@ impl BookWikiStore {
                 |row| row.get::<_, i64>(0),
             )?;
             let mut issues = Vec::new();
+            let (affected_count, affected_ids) = source_impacts::affected_entries(conn, base_id)?;
+            if affected_count > 0 {
+                issues.push(KnowledgeHealthIssue {
+                    code: "expired-source-evidence".into(),
+                    severity: "warning".into(),
+                    title: format!("{affected_count} 个主题的来源或依赖需要复核"),
+                    detail: "原文已变化或缺失，旧正文与历史引用仍保留，但不能作为当前有效知识。重新编译并审核实际证据后才能恢复；无新增知识不等于旧依据仍有效。".into(),
+                    object_ids: affected_ids,
+                });
+            }
             if source_span_count == 0 {
                 issues.push(KnowledgeHealthIssue {
                     code: "no-source-spans".to_string(),
@@ -2104,6 +2231,8 @@ impl BookWikiStore {
                 claims,
                 relations,
                 versions,
+                source_impact_count: source_impacts::entry_impact_count(conn, entry_id)?,
+                source_impacts: source_impacts::entry_impacts(conn, entry_id)?,
             })
         })
     }
@@ -2409,17 +2538,21 @@ impl BookWikiStore {
                 .query_map(params![entry_id], |row| row.get::<_, String>(0))?
                 .collect::<Result<Vec<_>, _>>()?;
             let mut claim_stmt = conn.prepare(
-                "SELECT predicate, object_text, claim_text, confidence
+                "SELECT predicate, object_text, claim_text, confidence, id, verification_status
                  FROM knowledge_claims WHERE entry_id = ?1 ORDER BY created_at, id",
             )?;
             let claims = claim_stmt
                 .query_map(params![entry_id], |row| {
+                    let claim_id: String = row.get(4)?;
+                    let mut refs = conn.prepare("SELECT source_span_id FROM knowledge_citations WHERE claim_id=?1 ORDER BY source_span_id")?;
+                    let claim_citations = refs.query_map([claim_id], |ref_row| ref_row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
                     Ok(serde_json::json!({
                         "predicate": row.get::<_, String>(0)?,
                         "object_text": row.get::<_, Option<String>>(1)?,
                         "claim_text": row.get::<_, String>(2)?,
                         "confidence": row.get::<_, Option<f64>>(3)?,
-                        "citations": citations.clone(),
+                        "verification_status": row.get::<_, String>(5)?,
+                        "citations": claim_citations,
                     }))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -3063,6 +3196,25 @@ impl BookWikiStore {
                 let requested_classification = candidate
                     .get("_classification")
                     .and_then(serde_json::Value::as_str);
+                if let Some(expected) = candidate.get("_expected_revision") {
+                    let expected = if expected.is_null() {
+                        None
+                    } else {
+                        Some(
+                            expected
+                                .as_i64()
+                                .filter(|value| *value > 0)
+                                .ok_or_else(|| {
+                                    BrainError::KnowledgeValidation("编译基线版本无效".to_string())
+                                })?,
+                        )
+                    };
+                    if expected != expected_revision {
+                        return Err(BrainError::KnowledgeValidation(format!(
+                            "主题 {slug} 的基线版本已变化，请重新编译；未覆盖较新的内容"
+                        )));
+                    }
+                }
                 let classification = if expected_revision.is_none() {
                     "new"
                 } else if requested_classification == Some("disputed") {
@@ -3089,9 +3241,20 @@ impl BookWikiStore {
                 impact_totals[2] += impact["relations"].as_i64().unwrap_or(0);
                 impact_totals[3] += impact["citations"].as_i64().unwrap_or(0);
                 let mut after = candidate.clone();
+                // Approval updates content, not ownership of a manual lock.
+                // A model omitting or supplying agent_managed must not silently
+                // release human protection; unlocking needs a separate action.
+                if before
+                    .as_ref()
+                    .and_then(|value| value["edit_policy"].as_str())
+                    == Some("human_protected")
+                {
+                    after["edit_policy"] = serde_json::json!("human_protected");
+                }
                 if let Some(object) = after.as_object_mut() {
                     object.remove("_operation");
                     object.remove("_classification");
+                    object.remove("_expected_revision");
                 }
                 let operation = requested_operation.unwrap_or(default_operation);
                 after["id"] = serde_json::Value::String(object_id.clone());
@@ -3217,7 +3380,7 @@ impl BookWikiStore {
         total_sources: i64,
     ) -> Result<KnowledgeBaseSummary, BrainError> {
         let now = Utc::now().to_rfc3339();
-        self.db.with_connection(|conn| {
+        self.db.transaction(|conn| {
             conn.execute(
                 "UPDATE knowledge_bases
                  SET compile_mode = 'smart', compile_state = 'ready', compile_error = NULL,
@@ -3236,6 +3399,7 @@ impl BookWikiStore {
                     now
                 ],
             )?;
+            refresh_review_state(conn, base_id, &now)?;
             Ok(())
         })?;
         self.get_base(base_id)
@@ -3446,13 +3610,16 @@ impl BookWikiStore {
             return self.get_change_set(change_set_id);
         }
 
-        let current_span_ids = self
-            .list_current_source_spans(&change_set.knowledge_base_id)?
-            .into_iter()
-            .map(|span| span.id)
-            .collect::<HashSet<_>>();
-        for change in &change_set.changes {
-            validate_semantic_candidate(&change.after, &current_span_ids)?;
+        let historical_archive = self
+            .db
+            .with_connection(|conn| historical_archive::authorized(conn, &change_set))?;
+        if !historical_archive {
+            let current_span_ids = self.db.with_connection(|conn| {
+                source_impacts::current_span_ids(conn, &change_set.knowledge_base_id)
+            })?;
+            for change in &change_set.changes {
+                validate_semantic_candidate(&change.after, &current_span_ids)?;
+            }
         }
         if change_set.changes.len() >= 50 {
             self.db
@@ -3460,16 +3627,34 @@ impl BookWikiStore {
         }
         let now = Utc::now().to_rfc3339();
         self.db.transaction(|conn| {
+            // Recheck under the write transaction, not only before acquiring
+            // it: a concurrent source sync must not approve obsolete evidence.
+            let historical_archive = historical_archive::authorized(conn, &change_set)?;
+            if !historical_archive {
+                let current_span_ids =
+                    source_impacts::current_span_ids(conn, &change_set.knowledge_base_id)?;
+                for change in &change_set.changes {
+                    validate_semantic_candidate(&change.after, &current_span_ids)?;
+                }
+            }
             for change in &change_set.changes {
                 validate_change_revision(conn, &change_set.knowledge_base_id, change)?;
             }
-            for change in &change_set.changes {
-                apply_entry_change(conn, &change_set, change, &now)?;
+            if historical_archive {
+                historical_archive::apply(conn, &change_set, &now)?;
+            } else {
+                for change in &change_set.changes {
+                    apply_entry_change(conn, &change_set, change, &now)?;
+                }
+                for change in &change_set.changes {
+                    apply_entry_relations(conn, &change_set.knowledge_base_id, change, &now)?;
+                }
+                apply_merge_redirects(conn, &change_set, &now)?;
+                for change in &change_set.changes {
+                    source_impacts::resolve_reviewed_entry_impacts(conn, &change.object_id, &now)?;
+                }
             }
-            for change in &change_set.changes {
-                apply_entry_relations(conn, &change_set.knowledge_base_id, change, &now)?;
-            }
-            apply_merge_redirects(conn, &change_set, &now)?;
+            source_impacts::refresh_source_impacts(conn, &change_set.knowledge_base_id, &now)?;
             conn.execute(
                 "UPDATE knowledge_change_sets
                  SET status = 'applied', resolved_at = ?2, resolved_by = 'user'
@@ -3482,16 +3667,18 @@ impl BookWikiStore {
                  WHERE change_set_id = ?1",
                 params![change_set_id, note.trim(), now],
             )?;
-            conn.execute(
-                "UPDATE knowledge_bases
+            if !historical_archive {
+                conn.execute(
+                    "UPDATE knowledge_bases
                  SET compile_mode = 'smart', compile_state = 'ready', compile_error = NULL,
                      compile_phase = 'completed', compile_message = '智能 Wiki 已审核并应用',
                      compile_active_run_id = NULL, compile_change_set_id = NULL,
                      compile_cancel_requested = 0,
                      last_compiled_at = ?2, updated_at = ?2
                  WHERE id = ?1",
-                params![change_set.knowledge_base_id, now],
-            )?;
+                    params![change_set.knowledge_base_id, now],
+                )?;
+            }
             if let Some(task_id) = related_task_id.as_deref() {
                 conn.execute(
                     "UPDATE knowledge_tasks
@@ -4016,6 +4203,8 @@ impl BookWikiStore {
     pub fn recover_interrupted_tasks(&self) -> Result<usize, BrainError> {
         let now = Utc::now().to_rfc3339();
         self.db.with_connection(|conn| {
+            conn.execute("UPDATE knowledge_compile_report_fragments SET status='failed',reason='服务重启中断了本批分析' WHERE status='analyzing' AND report_id IN (SELECT id FROM knowledge_compile_reports WHERE status='running')", [])?;
+            conn.execute("UPDATE knowledge_compile_reports SET status='failed',error='服务重启中断了智能编译，请重新开始',updated_at=?1 WHERE status='running'", [&now])?;
             let recovered = conn.execute(
                 "UPDATE knowledge_tasks
                  SET status = CASE WHEN cancel_requested = 1 THEN 'cancelled' ELSE 'queued' END,
@@ -7681,6 +7870,9 @@ fn validate_agent_event_type(value: &str) -> Result<(), BrainError> {
         value,
         "run.started"
             | "run.phase_changed"
+            | "run.knowledge_reconciled"
+            | "run.compile_reconciliation_completed"
+            | "run.validation_rejected"
             | "run.progress"
             | "run.text_delta"
             | "run.usage"
@@ -7864,8 +8056,22 @@ fn validate_semantic_candidate(
                 "单个条目的论断数量不能超过 60".to_string(),
             ));
         }
+        let mut claim_keys = HashSet::new();
         for claim in claims {
-            required_json_string(claim, "claim_text")?;
+            let claim_text = required_json_string(claim, "claim_text")?;
+            let key = (
+                claim_text,
+                claim
+                    .get("predicate")
+                    .and_then(Value::as_str)
+                    .unwrap_or("states"),
+                claim.get("object_text").and_then(Value::as_str),
+            );
+            if !claim_keys.insert(key) {
+                return Err(BrainError::KnowledgeValidation(
+                    "知识候选含重复的同条件论断，请合并引用后再提交；未创建无法应用的变更".into(),
+                ));
+            }
             let claim_citations = json_string_list(claim, "citations")?;
             if let Some(invalid) = claim_citations
                 .iter()
@@ -7874,6 +8080,23 @@ fn validate_semantic_candidate(
                 return Err(BrainError::KnowledgeValidation(format!(
                     "论断引用不属于当前书籍版本: {invalid}"
                 )));
+            }
+        }
+    }
+    if let Some(relations) = candidate.get("relations") {
+        let relations = relations.as_array().ok_or_else(|| {
+            BrainError::KnowledgeValidation("知识候选 relations 必须是数组".into())
+        })?;
+        let mut keys = HashSet::new();
+        for relation in relations {
+            let key = (
+                required_json_string(relation, "to_slug")?,
+                required_json_string(relation, "relation_type")?,
+            );
+            if !keys.insert(key) {
+                return Err(BrainError::KnowledgeValidation(
+                    "知识候选含重复的关系方向/类型，请合并全部依据后提交".into(),
+                ));
             }
         }
     }
@@ -8095,6 +8318,20 @@ fn apply_entry_change(
         ],
     )?;
 
+    let previous_claim_statuses = {
+        let mut stmt = conn.prepare("SELECT claim_text,predicate,object_text,verification_status FROM knowledge_claims WHERE entry_id=?1")?;
+        let rows = stmt.query_map([&change.object_id], |row| {
+            Ok((
+                (
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ),
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        rows.collect::<Result<HashMap<_, _>, _>>()?
+    };
     conn.execute(
         "DELETE FROM knowledge_claims WHERE entry_id = ?1",
         params![change.object_id],
@@ -8124,20 +8361,38 @@ fn apply_entry_change(
     {
         for claim in claims {
             let claim_text = required_json_string(claim, "claim_text")?;
-            let claim_id = stable_id("claim", &format!("{}:{claim_text}", change.object_id));
             let predicate = claim
                 .get("predicate")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("states");
             let object_text = claim.get("object_text").and_then(serde_json::Value::as_str);
+            let claim_key = serde_json::to_string(&(
+                change.object_id.as_str(),
+                claim_text,
+                predicate,
+                object_text,
+            ))
+            .map_err(|error| BrainError::Internal(format!("论断身份编码失败: {error}")))?;
+            let claim_id = stable_id("claim", &claim_key);
             let claim_confidence = claim
                 .get("confidence")
                 .and_then(serde_json::Value::as_f64)
                 .map(|value| value.clamp(0.0, 1.0));
-            let verification_status = if change.classification == "disputed" {
-                "disputed"
-            } else {
-                "unverified"
+            // A model rewrite is not an independent verdict. In particular it
+            // cannot turn a previously disputed/rejected identical atom into an
+            // accepted fact merely by copying it into another update.
+            let previous_status = previous_claim_statuses
+                .get(&(
+                    claim_text.to_string(),
+                    predicate.to_string(),
+                    object_text.map(str::to_string),
+                ))
+                .map(String::as_str);
+            let verification_status = match previous_status {
+                Some("rejected") => "rejected",
+                Some("disputed") => "disputed",
+                _ if change.classification == "disputed" => "disputed",
+                _ => "unverified",
             };
             conn.execute(
                 "INSERT INTO knowledge_claims
@@ -8383,13 +8638,21 @@ fn refresh_review_state(
         params![base_id],
         |row| row.get(0),
     )?;
+    let (affected, _) = source_impacts::affected_entries(conn, base_id)?;
+    let missing_sources: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM source_documents WHERE knowledge_base_id=?1 AND sync_status IN ('missing','failed')",
+        [base_id], |row| row.get(0),
+    )?;
     conn.execute(
         "UPDATE knowledge_bases
          SET pending_review_count = ?2,
-             health_state = CASE WHEN ?2 > 0 THEN 'needs_review' ELSE 'healthy' END,
+             health_state = CASE WHEN ?2 > 0 THEN 'needs_review' WHEN ?4 > 0 OR ?5 > 0 THEN 'warning' ELSE 'healthy' END,
+             compile_state = CASE WHEN ?4 > 0 AND compile_state='ready' THEN 'outdated' ELSE compile_state END,
+             compile_phase = CASE WHEN ?4 > 0 AND compile_state='ready' THEN 'needs_source_review' ELSE compile_phase END,
+             compile_message = CASE WHEN ?4 > 0 AND compile_state='ready' THEN '来源或依赖已变化，部分知识仍需要复核' ELSE compile_message END,
              updated_at = ?3
          WHERE id = ?1",
-        params![base_id, pending, now],
+        params![base_id, pending, now, affected, missing_sources],
     )?;
     Ok(())
 }
@@ -8572,13 +8835,13 @@ mod tests {
     use super::*;
     use crate::models::book_wiki::BookProgress;
 
-    fn test_store() -> (BookWikiStore, tempfile::TempDir) {
+    pub(super) fn test_store() -> (BookWikiStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = Arc::new(SqliteStore::new(&dir.path().join("book-wiki.db")).expect("db"));
         (BookWikiStore::new(db), dir)
     }
 
-    fn sample_book(id: &str, path: &str) -> ReaderBook {
+    pub(super) fn sample_book(id: &str, path: &str) -> ReaderBook {
         ReaderBook {
             id: id.to_string(),
             path: path.to_string(),
@@ -8596,7 +8859,7 @@ mod tests {
         }
     }
 
-    fn sample_source(id: &str, entry_id: &str, span_id: &str) -> MarkdownSourceDraft {
+    pub(super) fn sample_source(id: &str, entry_id: &str, span_id: &str) -> MarkdownSourceDraft {
         MarkdownSourceDraft {
             id: format!("source-{id}"),
             version_id: format!("version-{id}"),
@@ -8621,7 +8884,7 @@ mod tests {
         }
     }
 
-    fn semantic_candidate(span_id: &str, title: &str) -> serde_json::Value {
+    pub(super) fn semantic_candidate(span_id: &str, title: &str) -> serde_json::Value {
         serde_json::json!({
             "entry_type": "concept",
             "slug": "semantic-concept",
@@ -9912,6 +10175,16 @@ mod tests {
             store.queue_task_execution(&task.id).unwrap().status,
             "queued"
         );
+        store
+            .db
+            .with_connection(|conn| {
+                conn.execute(
+                    "UPDATE knowledge_tasks SET next_attempt_at=NULL WHERE id=?1",
+                    [&task.id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(store.claim_next_queued_task().unwrap().unwrap().id, task.id);
         assert_eq!(
             store.request_task_cancel(&task.id).unwrap().status,
@@ -9923,13 +10196,72 @@ mod tests {
         );
 
         store.queue_task_execution(&task.id).unwrap();
-        store.claim_next_queued_task().unwrap();
+        // Model a due queued task explicitly: RFC3339 nanoseconds and SQLite's
+        // millisecond clock can otherwise disagree at the immediate boundary.
+        store
+            .db
+            .with_connection(|conn| {
+                conn.execute(
+                    "UPDATE knowledge_tasks SET next_attempt_at=NULL WHERE id=?1",
+                    [&task.id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(store.claim_next_queued_task().unwrap().unwrap().id, task.id);
         assert_eq!(store.recover_interrupted_tasks().unwrap(), 1);
         assert_eq!(store.get_task(&task.id).unwrap().status, "queued");
         assert_eq!(
             store.request_task_cancel(&task.id).unwrap().status,
             "cancelled"
         );
+    }
+
+    #[test]
+    fn test_semantic_claim_identity_keeps_distinct_conditions_with_same_wording() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("claim-identity", "/tmp/claim-identity")])
+            .unwrap();
+        let base = store.initialize_base("claim-identity").unwrap();
+        store
+            .sync_markdown_sources(
+                &base.id,
+                &[sample_source(
+                    "claim-identity",
+                    "claim-source-entry",
+                    "claim-span",
+                )],
+            )
+            .unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_ingest",
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        let mut candidate = semantic_candidate("claim-span", "有条件的方法");
+        let mut other = candidate["claims"][0].clone();
+        other["object_text"] = serde_json::json!("另一版本的条件");
+        candidate["claims"].as_array_mut().unwrap().push(other);
+        let changes = store
+            .create_semantic_change_set(
+                &base.id,
+                &run.id,
+                "条件",
+                "同句不同对象",
+                "claim-identity",
+                &[candidate],
+            )
+            .unwrap();
+        store
+            .resolve_change_set(&changes.id, true, "分别保留条件")
+            .unwrap();
+        let detail = store.get_entry(&changes.changes[0].object_id).unwrap();
+        assert_eq!(detail.claims.len(), 2);
+        assert_ne!(detail.claims[0].id, detail.claims[1].id);
     }
 
     #[test]
@@ -11016,7 +11348,8 @@ mod tests {
             .db
             .with_connection(|conn| {
                 conn.execute_batch(
-                    "DROP TABLE agent_run_adaptive_budgets;
+                    "DROP TABLE source_span_structures;
+                 DROP TABLE agent_run_adaptive_budgets;
                  DROP TABLE knowledge_conversation_memories;
                  DROP TABLE agent_run_citations;
                  DROP TRIGGER llm_provider_capabilities_context_insert;

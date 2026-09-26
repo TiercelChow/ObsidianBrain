@@ -115,6 +115,15 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(CompileBookKnowledgeBaseHandler))
         .await;
     registry
+        .register(Arc::new(RetryKnowledgeSourceReviewHandler))
+        .await;
+    registry
+        .register(Arc::new(ProposeKnowledgeEntryArchiveHandler))
+        .await;
+    registry
+        .register(Arc::new(GetKnowledgeCompileReportHandler))
+        .await;
+    registry
         .register(Arc::new(CancelBookKnowledgeCompileHandler))
         .await;
     registry

@@ -4,8 +4,6 @@ use serde_json::Value;
 
 use crate::error::BrainError;
 
-use super::normalize_semantic_candidate;
-
 pub(super) const OUTPUT_SCHEMA: &str =
     include_str!("../../../prompts/wiki/semantic-output.schema.json");
 
@@ -17,7 +15,7 @@ pub(super) struct SemanticBatchOutput {
     pub entries: Vec<Value>,
     pub no_material_reason: Option<String>,
     pub normalized_wrapper: bool,
-    /// 服务端已执行的机械修复（超长截断、数量截断、论断引用并入条目 citations）。
+    /// 服务端只修复引用集合，不截断可能包含条件、公式或否定的知识。
     pub repairs: Vec<String>,
 }
 
@@ -114,7 +112,18 @@ pub(super) fn parse_semantic_candidates(
             .ok_or_else(|| invalid(format!("{label}/citations 必须是数组")))?;
         check_citations(citations, span_ids, &label)?;
         if let Some(claims) = entry["claims"].as_array() {
+            let mut claim_keys = HashSet::new();
             for (claim_index, claim) in claims.iter().enumerate() {
+                let key = (
+                    claim["claim_text"].as_str().unwrap_or(""),
+                    claim["predicate"].as_str().unwrap_or(""),
+                    claim["object_text"].as_str().unwrap_or(""),
+                );
+                if !claim_keys.insert(key) {
+                    return Err(invalid(format!(
+                        "{label} 中有重复的同条件论断，请先归并引用；不同条件不能强行合并"
+                    )));
+                }
                 let claim_label = format!("{label}/claims/{claim_index}");
                 let references = claim["citations"]
                     .as_array()
@@ -131,8 +140,15 @@ pub(super) fn parse_semantic_candidates(
             }
         }
         if let Some(relations) = entry["relations"].as_array() {
+            let mut relation_keys = HashSet::new();
             for (relation_index, relation) in relations.iter().enumerate() {
                 let target = string(relation, "to_slug")?;
+                if !relation_keys.insert((target, relation["relation_type"].as_str().unwrap_or("")))
+                {
+                    return Err(invalid(format!(
+                        "{label} 中有重复方向/类型的关系，请保留全部依据并合为一条"
+                    )));
+                }
                 if !targets.contains(target) || target == string(entry, "slug")? {
                     return Err(invalid(format!(
                         "{label}/relations/{relation_index}/to_slug 不是已提供的其他主题: {target}"
@@ -142,14 +158,7 @@ pub(super) fn parse_semantic_candidates(
         }
     }
     Ok(SemanticBatchOutput {
-        entries: entries
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(index, entry)| {
-                normalize_semantic_candidate(entry, &format!("entries/{index}"), &mut repairs)
-            })
-            .collect(),
+        entries: entries.clone(),
         no_material_reason,
         normalized_wrapper,
         repairs,
@@ -243,14 +252,13 @@ fn check_citations(
 
 #[cfg(test)]
 mod tests {
-    use super::super::SEMANTIC_MAX_CLAIMS;
     use super::*;
     use serde_json::json;
 
     fn candidate() -> Value {
         json!({
             "_classification": "new", "entry_type": "concept", "slug": "layering",
-            "title": "分层", "summary": "将职责分为多个层次。", "aliases": [],
+            "title": "分层", "summary": "将职责分为多个层次。", "content_md": "## 机制\n将职责分为多个层次；界面层负责交互。", "aliases": [],
             "confidence": 0.8, "citations": ["s1"],
             "claims": [{"claim_text": "界面层负责交互。", "predicate": "states",
                 "object_text": "界面层", "confidence": 0.8, "citations": ["s1"]}],
@@ -263,9 +271,57 @@ mod tests {
     }
 
     #[test]
+    fn test_semantic_output_preserves_rich_body_and_all_valid_claim_conditions() {
+        let mut entry = candidate();
+        let body = format!("## 定义与条件\n{}\n\n## 公式\n$$\nd_k=d_v=128\n$$\n\n## 操作步骤\n1. 先校验输入\n2. 仅在长度匹配时执行\n\n| 条件 | 反例 |\n|---|---|\n| 非空 | 空值不适用 |", "有依据的机制说明。".repeat(350));
+        entry["content_md"] = json!(body);
+        let claim = format!(
+            "{}注意：仅在输入非空且版本一致时适用。",
+            "完整的前置条件，".repeat(30)
+        );
+        entry["claims"][0]["claim_text"] = json!(claim);
+        let parsed = parse(&json!({"entries":[entry]}).to_string()).unwrap();
+        assert_eq!(parsed.entries[0]["content_md"], body);
+        assert_eq!(parsed.entries[0]["claims"][0]["claim_text"], claim);
+        assert!(parsed.repairs.is_empty());
+    }
+
+    #[test]
+    fn test_semantic_output_requires_knowledge_body_instead_of_abstract_only() {
+        let mut entry = candidate();
+        entry.as_object_mut().unwrap().remove("content_md");
+        assert!(parse(&json!({"entries":[entry]}).to_string()).is_err());
+    }
+
+    #[test]
+    fn test_semantic_output_rejects_duplicate_atom_and_edge_identity_before_sqlite() {
+        let mut entry = candidate();
+        let duplicate = entry["claims"][0].clone();
+        entry["claims"].as_array_mut().unwrap().push(duplicate);
+        assert!(parse(&json!({"entries":[entry]}).to_string())
+            .unwrap_err()
+            .to_string()
+            .contains("重复"));
+        let mut entry = candidate();
+        entry["relations"] = json!([
+            {"to_slug":"target","relation_type":"支持","strength":0.8,"evidence":"依据一"},
+            {"to_slug":"target","relation_type":"支持","strength":0.7,"evidence":"依据二"}
+        ]);
+        assert!(parse_semantic_candidates(
+            &json!({"entries":[entry]}).to_string(),
+            &HashSet::from(["s1".into()]),
+            &HashSet::from(["target".into()])
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("重复"));
+    }
+
+    #[test]
     fn test_semantic_output_accepts_one_object_and_safe_wrapping() {
         let mut entry = candidate();
         entry["summary"] = json!("原文包含 {x}、\"引号\" 与 \\alpha。\n保留条件。");
+        entry["content_md"] = entry["summary"].clone();
         let answer = json!({"entries": [entry]}).to_string();
         for wrapped in [
             answer.clone(),
@@ -371,7 +427,7 @@ mod tests {
     }
 
     #[test]
-    fn test_semantic_output_repairs_overlong_claim_text_at_sentence_boundary() {
+    fn test_semantic_output_preserves_valid_long_claim_including_tail_condition() {
         let sentence = "界面层负责用户交互并校验输入格式。";
         let mut entry = candidate();
         entry["claims"][0]["claim_text"] = json!(sentence.repeat(12));
@@ -380,30 +436,24 @@ mod tests {
             .as_str()
             .unwrap();
         let sentence_length = sentence.chars().count();
-        assert_eq!(
-            claim_text.chars().count(),
-            sentence_length * (160 / sentence_length)
-        );
+        assert_eq!(claim_text.chars().count(), sentence_length * 12);
         assert!(claim_text.ends_with('。'));
-        assert!(parsed
-            .repairs
-            .iter()
-            .any(|repair| repair.contains("claim_text")));
+        assert!(parsed.repairs.is_empty());
     }
 
     #[test]
-    fn test_semantic_output_repairs_overlong_claim_text_without_sentence_end_by_hard_cut() {
+    fn test_semantic_output_does_not_hard_cut_valid_claim_without_sentence_end() {
         let mut entry = candidate();
         entry["claims"][0]["claim_text"] = json!("持续描述而无句末标点的超长论断内容".repeat(20));
         let parsed = parse(&json!({"entries":[entry]}).to_string()).unwrap();
         let claim_text = parsed.entries[0]["claims"][0]["claim_text"]
             .as_str()
             .unwrap();
-        assert_eq!(claim_text.chars().count(), 160);
+        assert_eq!(claim_text, "持续描述而无句末标点的超长论断内容".repeat(20));
     }
 
     #[test]
-    fn test_semantic_output_repairs_claim_overflow_by_keeping_first_six() {
+    fn test_semantic_output_keeps_all_eight_supported_claims() {
         let mut entry = candidate();
         entry["claims"] = json!([
             {"claim_text": "论断一。", "predicate": "states", "object_text": "一",
@@ -425,12 +475,9 @@ mod tests {
         ]);
         let parsed = parse(&json!({"entries":[entry]}).to_string()).unwrap();
         let claims = parsed.entries[0]["claims"].as_array().unwrap();
-        assert_eq!(claims.len(), SEMANTIC_MAX_CLAIMS);
+        assert_eq!(claims.len(), 8);
         assert_eq!(claims[0]["claim_text"].as_str().unwrap(), "论断一。");
-        assert!(parsed
-            .repairs
-            .iter()
-            .any(|repair| repair.contains("claims")));
+        assert!(parsed.repairs.is_empty());
     }
 
     #[test]
@@ -446,15 +493,18 @@ mod tests {
         too_many_claims["claims"] = json!((0..9).map(|_| single_claim.clone()).collect::<Vec<_>>());
         assert!(parse(&json!({"entries":[too_many_claims]}).to_string()).is_err());
 
-        // 信封内、指令层（6）外：机械收敛保留前六条，记 repair 而非拒绝
+        // 合法信封内的所有论断保留，不能静默丢弃后半条件。
         let mut clamp_claims = candidate();
-        clamp_claims["claims"] = json!((0..7).map(|_| single_claim.clone()).collect::<Vec<_>>());
+        clamp_claims["claims"] = json!((0..7)
+            .map(|index| {
+                let mut claim = single_claim.clone();
+                claim["claim_text"] = json!(format!("论断 {index}：保留各自成立条件。"));
+                claim
+            })
+            .collect::<Vec<_>>());
         let clamped = parse(&json!({"entries":[clamp_claims]}).to_string()).unwrap();
-        assert_eq!(clamped.entries[0]["claims"].as_array().unwrap().len(), 6);
-        assert!(clamped
-            .repairs
-            .iter()
-            .any(|repair| repair.contains("claims")));
+        assert_eq!(clamped.entries[0]["claims"].as_array().unwrap().len(), 7);
+        assert!(clamped.repairs.is_empty());
 
         let spans = HashSet::from(["s1".to_string(), "s2".to_string()]);
         let mut foreign = candidate();

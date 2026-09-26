@@ -55,7 +55,7 @@ pub fn agent_knowledge_tool_schemas() -> Vec<Value> {
         ),
         tool_schema(
             "book_search_sources",
-            "全文检索当前授权书籍的 Markdown 来源片段",
+            "检索当前授权书籍的 Markdown 来源，返回命中附近的候选预览（不是已读证据）；用 preview_offset_chars 读取命中上下文，locator 提供标题路径与相邻片段",
             object_schema(
                 json!({
                     "knowledge_base_id": { "type": "string" },
@@ -67,7 +67,7 @@ pub fn agent_knowledge_tool_schemas() -> Vec<Value> {
         ),
         tool_schema(
             "book_read_source_span",
-            "分页读取当前授权书籍中的一个来源片段；超长片段需按字符偏移继续读取",
+            "分页读取当前授权书籍的原文；offset_chars 可取检索返回的 preview_offset_chars，返回实际行位置及相邻片段；has_more 时继续补读完整公式、表格或条件，只有真实读取才获得引用",
             object_schema(
                 json!({
                     "knowledge_base_id": { "type": "string" },
@@ -260,51 +260,24 @@ pub fn call_agent_knowledge_tool(
             let args: SearchSourcesArgs = parse_arguments(arguments)?;
             require_scope(&grant, &args.knowledge_base_id)?;
             validate_query(&args.query)?;
-            let spans = store.search_source_spans(
+            let spans = store.search_source_span_previews(
                 &args.knowledge_base_id,
                 &args.query,
                 args.limit.unwrap_or(12).clamp(1, 50),
             )?;
             Ok(json!({
-                "spans": spans.into_iter().map(|span| json!({
-                    "id": span.id,
-                    "source_path": span.source_path,
-                    "heading": span.heading,
-                    "line_start": span.line_start,
-                    "line_end": span.line_end,
-                    "preview": span.content.chars().take(240).collect::<String>(),
-                })).collect::<Vec<_>>()
+                "spans": spans
             }))
         }
         "book_read_source_span" => {
             let args: ReadSourceSpanArgs = parse_arguments(arguments)?;
             require_scope(&grant, &args.knowledge_base_id)?;
-            let span =
-                store.get_current_source_span(&args.knowledge_base_id, &args.source_span_id)?;
-            let total_chars = span.content.chars().count();
-            let offset_chars = args.offset_chars.unwrap_or(0).min(total_chars);
-            let max_chars = args.max_chars.unwrap_or(4_000).clamp(1, 4_000);
-            let content = span
-                .content
-                .chars()
-                .skip(offset_chars)
-                .take(max_chars)
-                .collect::<String>();
-            Ok(json!({
-                "span": {
-                    "id": span.id,
-                    "source_document_id": span.source_document_id,
-                    "source_version_id": span.source_version_id,
-                    "source_path": span.source_path,
-                    "heading": span.heading,
-                    "line_start": span.line_start,
-                    "line_end": span.line_end,
-                    "content": content,
-                    "offset_chars": offset_chars,
-                    "total_chars": total_chars,
-                    "has_more": offset_chars.saturating_add(max_chars) < total_chars,
-                }
-            }))
+            store.read_source_span_page(
+                &args.knowledge_base_id,
+                &args.source_span_id,
+                args.offset_chars.unwrap_or(0),
+                args.max_chars.unwrap_or(4_000),
+            )
         }
         "knowledge_search_entries" => {
             let args: SearchEntriesArgs = parse_arguments(arguments)?;
@@ -345,6 +318,11 @@ pub fn call_agent_knowledge_tool(
             let args: ReadEntryArgs = parse_arguments(arguments)?;
             let mut entry = store.get_entry(&args.entry_id)?;
             require_scope(&grant, &entry.entry.knowledge_base_id)?;
+            if matches!(entry.entry.status.as_str(), "stale" | "archived")
+                || entry.source_impact_count > 0
+            {
+                return Err(BrainError::KnowledgeValidation("该知识的来源或依赖需要复核，不能作为当前证据；请检索当前编译知识或读取当前原文。历史正文可在 Wiki 工作台查看。".into()));
+            }
             let total_chars = entry.content_md.chars().count();
             let offset = args.offset_chars.unwrap_or(0).min(total_chars);
             let max_chars = args.max_chars.unwrap_or(12_000).clamp(1, 12_000);

@@ -91,9 +91,11 @@ impl BookWikiStore {
                 let detail = self.get_entry(object_id)?;
                 if detail.entry.knowledge_base_id != base_id
                     || detail.revision.to_string() != version_id
+                    || matches!(detail.entry.status.as_str(), "stale" | "archived")
+                    || detail.source_impact_count > 0
                 {
                     return Err(BrainError::KnowledgeValidation(
-                        "证据条目不属于当前书籍或版本不匹配".into(),
+                        "证据条目不属于当前书籍、版本不匹配或来源需要复核".into(),
                     ));
                 }
                 let spans = self.db.with_connection(|conn| {
@@ -157,7 +159,7 @@ impl BookWikiStore {
             // Recheck the live revision inside the write transaction. Source
             // versions are immutable; changed current pointers also reject.
             let valid = match kind {
-                "entry" => conn.query_row("SELECT EXISTS(SELECT 1 FROM knowledge_entries WHERE id=?1 AND knowledge_base_id=?2 AND CAST(revision AS TEXT)=?3)", params![object_id,base_id,version_id], |row| row.get::<_,bool>(0))?,
+                "entry" => conn.query_row("SELECT EXISTS(SELECT 1 FROM knowledge_entries ke WHERE id=?1 AND knowledge_base_id=?2 AND CAST(revision AS TEXT)=?3 AND status NOT IN ('stale','archived') AND NOT EXISTS(SELECT 1 FROM knowledge_source_impacts i WHERE i.entry_id=ke.id AND i.resolved_at IS NULL))", params![object_id,base_id,version_id], |row| row.get::<_,bool>(0))?,
                 "source_span" => conn.query_row("SELECT EXISTS(SELECT 1 FROM source_spans ss JOIN source_versions sv ON sv.id=ss.source_version_id JOIN source_documents sd ON sd.id=sv.source_document_id WHERE ss.id=?1 AND ss.knowledge_base_id=?2 AND ss.source_version_id=?3 AND sd.current_version_id=sv.id AND sd.sync_status='current')",params![object_id,base_id,version_id], |row| row.get::<_,bool>(0))?,
                 _ => true,
             };

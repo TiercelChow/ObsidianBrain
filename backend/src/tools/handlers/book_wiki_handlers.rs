@@ -226,6 +226,102 @@ impl ToolHandler for CompileBookKnowledgeBaseHandler {
 
 pub struct CancelBookKnowledgeCompileHandler;
 
+pub struct RetryKnowledgeSourceReviewHandler;
+
+#[async_trait]
+impl ToolHandler for RetryKnowledgeSourceReviewHandler {
+    fn name(&self) -> &str {
+        "retry_knowledge_source_review"
+    }
+    fn description(&self) -> &str {
+        "用户显式重新分析受影响主题的当前来源，不清除历史或假装解除过期状态"
+    }
+    fn input_schema(&self) -> Value {
+        required_id_schema("knowledge_base_id")
+    }
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let base = ctx
+            .book_wiki_service
+            .queue_source_review_compile(required_string(&args, "knowledge_base_id")?)?;
+        Ok(
+            json!({"knowledge_base":base,"queued":true,"message":"来源复核已进入后台队列；真实变更仍需审核"}),
+        )
+    }
+}
+
+pub struct ProposeKnowledgeEntryArchiveHandler;
+
+#[async_trait]
+impl ToolHandler for ProposeKnowledgeEntryArchiveHandler {
+    fn name(&self) -> &str {
+        "propose_knowledge_entry_archive"
+    }
+    fn description(&self) -> &str {
+        "人工提交仅改变状态的历史归档，保留旧正文和依据，审核后生效"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"entry_id":{"type":"string"},"expected_revision":{"type":"integer","minimum":1}},"required":["entry_id","expected_revision"],"additionalProperties":false})
+    }
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(ctx.book_wiki_service.store().propose_entry_archive(
+            required_string(&args, "entry_id")?,
+            required_i64(&args, "expected_revision")?,
+        )?)
+        .map_err(|error| BrainError::Internal(format!("归档候选序列化失败: {error}")))
+    }
+}
+
+pub struct GetKnowledgeCompileReportHandler;
+
+#[async_trait]
+impl ToolHandler for GetKnowledgeCompileReportHandler {
+    fn name(&self) -> &str {
+        "get_knowledge_compile_report"
+    }
+    fn description(&self) -> &str {
+        "分页查看真实编译分析覆盖、主题归并及审核状态；不是事实完整性评分"
+    }
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{
+            "knowledge_base_id":{"type":"string"},"report_id":{"type":"string"},
+            "fragment_offset":{"type":"integer","minimum":0},"topic_offset":{"type":"integer","minimum":0},
+            "limit":{"type":"integer","minimum":1,"maximum":100}
+        },"required":["knowledge_base_id"],"additionalProperties":false})
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let offset = |key: &str, default: usize| -> Result<usize, BrainError> {
+            args.get(key)
+                .map(|value| {
+                    value
+                        .as_u64()
+                        .and_then(|v| usize::try_from(v).ok())
+                        .ok_or_else(|| {
+                            BrainError::KnowledgeValidation(format!("{key} 必须是非负整数"))
+                        })
+                })
+                .transpose()
+                .map(|v| v.unwrap_or(default))
+        };
+        let report = ctx.book_wiki_service.store().get_compile_report(
+            required_string(&args, "knowledge_base_id")?,
+            args.get("report_id").and_then(Value::as_str),
+            offset("fragment_offset", 0)?,
+            offset("topic_offset", 0)?,
+            offset("limit", 50)?,
+        )?;
+        Ok(json!({"report":report}))
+    }
+}
+
 #[async_trait]
 impl ToolHandler for CancelBookKnowledgeCompileHandler {
     fn name(&self) -> &str {
@@ -381,6 +477,7 @@ impl ToolHandler for ListKnowledgeEntriesHandler {
                 "knowledge_base_id": { "type": "string" },
                 "query": { "type": "string" },
                 "entry_type": { "type": "string" },
+                "include_stale": { "type": "boolean", "default": false, "description": "工作台复核时包含过期知识；不用于问答证据召回" },
                 "offset": { "type": "integer", "minimum": 0, "maximum": 100000, "default": 0 },
                 "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 60 }
             },
@@ -400,9 +497,16 @@ impl ToolHandler for ListKnowledgeEntriesHandler {
         let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(60) as usize;
         let offset = args.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
         serde_json::to_value(
-            ctx.book_wiki_service
-                .store()
-                .list_entries_page(base_id, query, entry_type, offset, limit)?,
+            ctx.book_wiki_service.store().list_entries_page_with_stale(
+                base_id,
+                query,
+                entry_type,
+                offset,
+                limit,
+                args.get("include_stale")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            )?,
         )
         .map_err(|error| BrainError::Internal(format!("实体分页结果序列化失败: {error}")))
     }

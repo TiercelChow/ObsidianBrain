@@ -129,6 +129,7 @@
                 @click="sync(card)"
               ><el-icon><Refresh /></el-icon>同步</el-button>
               <el-button @click="openManage(card)">管理</el-button>
+              <el-button @click="reportBase = card.knowledge_base; reportVisible = true">编译报告</el-button>
             </template>
             <el-button text @click="$router.push({ path: '/reader', query: { book: card.book.id } })">
               阅读
@@ -148,6 +149,7 @@
       <el-button type="primary" @click="$router.push('/reader')">前往阅境轩</el-button>
     </div>
 
+    <KnowledgeCompileReport v-model="reportVisible" :base-id="reportBase?.id || ''" :book-name="reportBase?.book_name" @review="id => router.push({ path: '/knowledge/wiki', query: { base: reportBase?.id, review: id } })" />
     <MotionModal v-model="manageVisible" aria-label="管理知识库">
       <div v-if="managedCard?.knowledge_base" class="knowledge-modal-card manage-modal">
         <div class="knowledge-modal-head">
@@ -177,6 +179,7 @@ import { ElMessage } from 'element-plus'
 import { Collection, FolderOpened, Loading, MagicStick, Refresh } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
+import KnowledgeCompileReport from '@/components/knowledge/KnowledgeCompileReport.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import { canFocusDocument } from '@/utils/modalFocusPolicy'
 import {
@@ -198,6 +201,8 @@ const busyBookId = ref('')
 const compilingBaseId = ref('')
 const cancellingBaseId = ref('')
 const manageVisible = ref(false)
+const reportVisible = ref(false)
+const reportBase = ref<KnowledgeBaseSummary | null>(null)
 const managedCard = ref<BookKnowledgeCard | null>(null)
 const deleteConfirmation = ref('')
 const managing = ref(false)

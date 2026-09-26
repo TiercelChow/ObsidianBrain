@@ -275,6 +275,31 @@ const MIGRATIONS: &[Migration] = &[
         description: "adaptive query budget and coverage skill contract",
         sql: include_str!("../../migrations/045_adaptive_query_skill_contract.sql"),
     },
+    Migration {
+        version: 46,
+        description: "immutable source outline and neighboring span locations",
+        sql: include_str!("../../migrations/046_source_span_structure.sql"),
+    },
+    Migration {
+        version: 47,
+        description: "complete knowledge body and hit centered source skill contracts",
+        sql: include_str!("../../migrations/047_knowledge_body_skill_contract.sql"),
+    },
+    Migration {
+        version: 48,
+        description: "derived source expiry and explicit review impacts",
+        sql: include_str!("../../migrations/048_derived_source_impacts.sql"),
+    },
+    Migration {
+        version: 49,
+        description: "paged compile coverage and reconciliation reports",
+        sql: include_str!("../../migrations/049_compile_coverage_reports.sql"),
+    },
+    Migration {
+        version: 50,
+        description: "server authorized status-only historical archives",
+        sql: include_str!("../../migrations/050_historical_archive_authorizations.sql"),
+    },
 ];
 
 fn seed_detailed_ingest_skill(conn: &Connection) -> Result<(), BrainError> {
@@ -448,6 +473,11 @@ fn overwrite_wiki_prompt_contract_skills(conn: &Connection) -> Result<(), BrainE
 fn overwrite_harness_wiki_skills(conn: &Connection) -> Result<(), BrainError> {
     for (skill_id, version_id, content) in [
         (
+            "skill-book-ingest",
+            "skill-version-book-ingest-v3",
+            include_str!("../../skills/book-ingest/SKILL.md"),
+        ),
+        (
             "skill-book-query",
             "skill-version-book-query-v3",
             include_str!("../../skills/book-query/SKILL.md"),
@@ -506,7 +536,7 @@ fn overwrite_harness_wiki_skills(conn: &Connection) -> Result<(), BrainError> {
             .map_err(|_| BrainError::Internal("内置 Skill 大小超出限制".to_string()))?;
         let version_count = conn.execute(
             "UPDATE skill_versions SET content_hash = ?1, release_state = 'published',
-                    changelog = '适配 Harness 原生 Skill、分层检索与实际已读稳定引用'
+                    changelog = '适配完整知识正文、自适应预算、命中定位与实际已读稳定引用'
              WHERE id = ?2 AND skill_id = ?3",
             params![&content_hash, version_id, skill_id],
         )?;
@@ -749,7 +779,8 @@ impl SqliteStore {
                 32 => compact_wiki_skill_versions(&conn),
                 33 => overwrite_structured_presentation_skill(&conn),
                 34 => overwrite_structured_presentation_skill(&conn),
-                38 | 42 | 45 => overwrite_harness_wiki_skills(&conn),
+                38 | 42 | 45 | 47 => overwrite_harness_wiki_skills(&conn),
+                48 => crate::infra::book_wiki_store::backfill_source_impacts(&conn),
                 _ => Ok(()),
             };
             if let Err(error) = seed_result {
@@ -2076,7 +2107,7 @@ mod tests {
         let db_path = dir.path().join("citation-skill-upgrade.db");
         let store = SqliteStore::new(&db_path).unwrap();
         store.with_connection(|conn| {
-            conn.execute_batch("DROP TABLE agent_run_adaptive_budgets; DROP TABLE knowledge_conversation_memories;")?;
+            conn.execute_batch("DROP TABLE source_span_structures; DROP TABLE agent_run_adaptive_budgets; DROP TABLE knowledge_conversation_memories;")?;
             conn.execute("DELETE FROM _migrations WHERE version >= 42", [])?;
             conn.execute("UPDATE skill_files SET content_text='old stock citation rules', content_hash='old' WHERE skill_version_id='skill-version-book-query-v3'", [])?;
             conn.execute("UPDATE skill_versions SET content_hash='old' WHERE id='skill-version-book-query-v3'", [])?;
@@ -2251,8 +2282,8 @@ mod tests {
                     assert_eq!(content_hash, hex::encode(Sha256::digest(content.as_bytes())));
                     assert_eq!(size_bytes, content.len() as i64);
                     assert!(content.chars().count() > 700, "{slug} is still too terse");
-                    assert!(content.chars().count() <= 3_000 || slug == "book-ingest",
-                        "{slug} will be truncated by the runtime prompt");
+                    // Native Harness skills are loaded in full; a 3000-character
+                    // prompt-prefix assumption no longer describes execution.
                 }
                 Ok(())
             })

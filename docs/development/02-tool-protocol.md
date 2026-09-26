@@ -2716,3 +2716,14 @@ http-body-util = "0.1"
 `POST /v1/knowledge/chat/stream` 新增可选 `resume_run_id`。只能恢复同书、同原问题、同会话、已失败且 `max_tokens/max_turn_requests`、有部分正文的问答；凭据拒绝、普通服务失败、取消和正常完成均不走自动续写。用户明确触发后建立新 Run，重新规划/读取当前证据、适度增加受模型能力约束的输出额度；旧草稿的 S 编号移除，不作为事实来源，新 Run 输出完整答案而非仅拼接尾巴。原失败运行和部分正文保留。HTTP 非流式问答客户端需允许最长约 810 秒的规划加执行期限，前端问答使用 SSE。
 
 运行检查器的 `evidence_refs` 增加 `qa_plan`、`qa_resources`、`planning_stats`、`planning_run_ids`、`selected_candidate_ids`、`adaptive_budget` 和动态读取的 `adaptive_state`。`run.budget_changed`、`run.evidence_coverage`、`run.budget_limited` 分别记录初始/扩展、Agent 自报取证覆盖和被限制的原因；限制事件不是 ACP 完整结束事件。工具预算的估算与 token 计费统计保持分离。
+
+### 编译覆盖报告（2026-09-26）
+
+`get_knowledge_compile_report`（`book_wiki`）：必填 `knowledge_base_id`；可选 `report_id`、非负整数 `fragment_offset/topic_offset` 和 `limit`（1–100，默认 50）。返回 `{report: KnowledgeCompileReport | null}`；未指定 ID 时无报告返回 null，指定其他书籍/不存在 ID 明确拒绝。来源/主题独立分页，计数覆盖数据库完整结果，提供较早/较新报告 ID。记录当时来源与分析范围、批次结果、归并/冲突、错误及所关联变更集的真实审核状态，不返回来源或知识正文，不把分析次数当语义完整性评分。该工具只供本地应用查看，不增加 Harness 取证或写权限。
+
+### 来源显式复核与历史归档（2026-09-26）
+
+- `retry_knowledge_source_review`（`book_wiki`）：必填 `knowledge_base_id`，其余字段拒绝。返回 `{knowledge_base, queued: true, message}`，后台复用智能编译流程，只读取受影响主题/依赖根的当前贡献来源；不删除检查点或解除影响。未同步/无当前贡献来源/存在待审/正在运行/非活动知识库拒绝。每次明确请求采用独立尝试身份，避免复用之前的无实质结果。
+- `propose_knowledge_entry_archive`（`book_wiki`）：必填 `entry_id`、正整数 `expected_revision`，其余字段拒绝。返回 `KnowledgeChangeSet`，高风险 `archive` 候选，必须经 `resolve_knowledge_change_set` 批准或驳回。服务端保存不可由 Agent 申请的元数据归档授权；前后仅状态与人工保护不同，批准保留全部历史知识与证据、不认证当前事实。来源章节/已归档/过期基线/重复待审/非活动知识库拒绝。
+
+两者只供本地应用显式操作，不加入 Harness 运行工具白名单；不扩大 Agent 写权限。归档审计的 `historical_archive: true` 是展示字段，权限依据是数据库服务端授权及载荷/基线复核，不是这个布尔值。

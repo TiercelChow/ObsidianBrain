@@ -4,6 +4,7 @@
       <el-button v-if="activeBase?.pending_review_count" type="primary" @click="openReviews"><el-icon><Checked /></el-icon>审核 {{ activeBase.pending_review_count }}</el-button>
       <el-button v-if="activeBase" @click="openGraph"><el-icon><Connection /></el-icon>关系洞察</el-button>
       <el-button v-if="activeBase" :loading="linting" @click="runLint"><el-icon><DataAnalysis /></el-icon>知识体检</el-button>
+      <el-button v-if="activeBase" @click="compileReportVisible = true"><el-icon><Tickets /></el-icon>编译报告</el-button>
       <el-button v-if="activeBase" :loading="syncing" :disabled="activeBase.lifecycle !== 'active' || !activeBase.source_available" @click="syncActive"><el-icon><Refresh /></el-icon>同步来源</el-button>
     </template>
 
@@ -59,6 +60,7 @@
             @click="selectEntry(entry)"
           >
             <span class="entry-type">{{ entryTypeLabel(entry.entry_type) }}</span>
+            <span v-if="entry.status === 'stale'" class="knowledge-status is-warning">来源需复核</span>
             <strong>{{ entry.title }}</strong>
             <span class="entry-summary">{{ entry.summary || '此章节没有摘要' }}</span>
             <span class="entry-source">{{ entry.source_path || '数据库实体' }}</span>
@@ -81,8 +83,8 @@
               <p>{{ selectedEntry.source_path || '数据库实体' }}</p>
             </div>
             <div class="entry-detail-actions">
-              <el-button v-if="detail && detail.entry_type !== 'source_section' && activeBase?.lifecycle === 'active'" circle title="调整实体" @click="openEntryEdit"><el-icon><Edit /></el-icon></el-button>
-              <span class="knowledge-status is-healthy">{{ selectedEntry.status === 'verified' ? '可追溯' : selectedEntry.status }}</span>
+              <el-button v-if="detail && detail.entry_type !== 'source_section' && activeBase?.lifecycle === 'active' && !needsSourceReview(detail)" circle title="调整实体" @click="openEntryEdit"><el-icon><Edit /></el-icon></el-button>
+              <span class="knowledge-status" :class="needsSourceReview(detail || selectedEntry) ? 'is-warning' : 'is-healthy'">{{ knowledgeStatusLabel(detail?.status || selectedEntry.status) }}</span>
             </div>
           </header>
           <div v-if="detailLoading" class="detail-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
@@ -93,6 +95,23 @@
               <span v-if="detail.confidence != null">置信度 {{ Math.round(detail.confidence * 100) }}%</span>
               <span v-for="alias in detail.aliases" :key="alias">别名 · {{ alias }}</span>
             </div>
+            <section v-if="needsSourceReview(detail)" class="source-review-notice" aria-label="来源复核提示">
+              <strong>这份知识的依据需要重新复核</strong>
+              <p>旧正文与引用保留供回看，不代表内容已被证伪，也不再作为当前问答证据。请重新编译并审核实际依据。</p>
+              <ul v-if="detail.source_impacts?.length">
+                <li v-for="impact in detail.source_impacts" :key="`${impact.previous_version_id}:${impact.affected_via_entry_id || 'direct'}`">
+                  <span>{{ sourceImpactLabel(impact.reason) }} · {{ impact.source_path }}</span>
+                  <button v-if="impact.affected_via_entry_id" type="button" @click="selectRelatedEntry(impact.affected_via_entry_id)">依赖主题：{{ impact.affected_via_entry_title }}</button>
+                </li>
+              </ul>
+              <small v-if="(detail.source_impact_count || 0) > (detail.source_impacts?.length || 0)">已展示前 {{ detail.source_impacts?.length || 0 }} 项，共 {{ detail.source_impact_count }} 项来源影响。</small>
+              <div class="source-review-actions">
+                <el-button v-if="activeBase?.lifecycle === 'active' && detail.status !== 'archived'" :loading="retryingSources" :disabled="activeBase.compile_state === 'compiling' || !activeBase.source_available || activeBase.sync_state !== 'clean' || activeBase.pending_review_count > 0" @click="retrySourceReview">重新分析当前依据</el-button>
+                <el-button v-if="activeBase?.lifecycle === 'active' && detail.status !== 'archived'" @click="openHistoricalArchive">提交历史归档</el-button>
+                <el-button @click="$router.push({ path: '/knowledge', query: { base: activeBaseId } })">前往知识库处理</el-button>
+              </div>
+              <small v-if="activeBase?.pending_review_count">已有候选待审核，请先处理审核；重复分析不会自动批准或解除来源影响。</small>
+            </section>
             <div ref="markdownRef" class="entity-markdown markdown-body" v-html="renderedHtml"></div>
             <section v-if="detail.claims.length" class="entity-structure-section">
               <h3>可核验论断 <span>{{ detail.claims.length }}</span></h3>
@@ -141,6 +160,7 @@
       </article>
     </section>
 
+    <KnowledgeCompileReport v-model="compileReportVisible" :base-id="activeBaseId" :book-name="activeBase?.book_name" @review="openCompileReportReview" @base-updated="updateCompileBase" />
     <MotionModal v-model="mobileActionsVisible" aria-label="Wiki 操作">
       <div class="knowledge-modal-card wiki-action-sheet">
         <div class="knowledge-modal-head"><div><h3>Wiki 操作</h3><p>{{ activeBase?.book_name || '当前知识库' }}</p></div></div>
@@ -148,6 +168,7 @@
           <button type="button" :disabled="!activeBase?.pending_review_count" @click="runMobileAction('review')"><el-icon><Checked /></el-icon><span><strong>审核候选</strong><small>{{ activeBase?.pending_review_count || 0 }} 项待处理变更</small></span></button>
           <button type="button" :disabled="!activeBase" @click="runMobileAction('graph')"><el-icon><Connection /></el-icon><span><strong>关系洞察</strong><small>查看连接与孤立实体</small></span></button>
           <button type="button" :disabled="!activeBase || linting" @click="runMobileAction('lint')"><el-icon><DataAnalysis /></el-icon><span><strong>知识体检</strong><small>检查证据与结构</small></span></button>
+          <button type="button" :disabled="!activeBase" @click="runMobileAction('report')"><el-icon><Tickets /></el-icon><span><strong>编译报告</strong><small>分析范围、主题归并与冲突</small></span></button>
           <button type="button" :disabled="syncing || activeBase?.lifecycle !== 'active' || !activeBase?.source_available" @click="runMobileAction('sync')"><el-icon><Refresh /></el-icon><span><strong>同步来源</strong><small>读取原书的最新 Markdown</small></span></button>
         </div>
         <div class="knowledge-modal-actions"><el-button @click="mobileActionsVisible = false">完成</el-button></div>
@@ -156,12 +177,12 @@
 
     <MotionModal v-model="reviewVisible" aria-label="审核 Wiki 变更" size="wide">
       <div class="knowledge-modal-card review-modal">
-        <div class="knowledge-modal-head"><div><h3>审核语义 Wiki 变更</h3><p>批准后在一个事务中写入正式条目、论断、关系、版本和引用。</p></div><span v-if="activeReview" class="knowledge-status" :class="`is-${activeReview.risk_level === 'high' ? 'warning' : 'draft'}`">{{ activeReview.risk_level }} risk</span></div>
+        <div class="knowledge-modal-head"><div><h3>审核语义 Wiki 变更</h3><p>{{ activeReview?.citation_audit.historical_archive ? '仅归档状态，历史正文、论断、关系和引用保留；不代表旧依据已通过当前事实校验。' : '批准后在一个事务中写入正式条目、论断、关系、版本和引用。' }}</p></div><span v-if="activeReview" class="knowledge-status" :class="`is-${activeReview.risk_level === 'high' ? 'warning' : 'draft'}`">{{ activeReview.risk_level }} risk</span></div>
         <div v-if="activeReview" class="review-content">
           <div class="review-summary"><strong>{{ activeReview.title }}</strong><span>{{ activeReview.reason }}</span></div>
           <div class="review-audit-grid">
             <section><span>变更分类</span><strong>{{ activeReview.classification_summary.new }} 新增 · {{ activeReview.classification_summary.update }} 更新 · {{ activeReview.classification_summary.disputed }} 争议</strong></section>
-            <section><span>引用审计</span><strong :class="{ warning: !activeReview.citation_audit.passed }">{{ activeReview.citation_audit.passed ? '通过' : `${activeReview.citation_audit.issues.length} 项问题` }}</strong><small>{{ activeReview.citation_audit.entry_citations }} 条目引用 · {{ activeReview.citation_audit.claim_citations }} 论断引用</small></section>
+            <section><span>引用审计</span><strong :class="{ warning: !activeReview.citation_audit.passed }">{{ activeReview.citation_audit.historical_archive ? '历史保留 · 不作事实核验' : activeReview.citation_audit.passed ? '通过' : `${activeReview.citation_audit.issues.length} 项问题` }}</strong><small>{{ activeReview.citation_audit.historical_archive ? '不刷新或重分配任何历史证据' : `${activeReview.citation_audit.entry_citations} 条目引用 · ${activeReview.citation_audit.claim_citations} 论断引用` }}</small></section>
             <section><span>级联影响</span><strong>{{ activeReview.impact_summary.entries }} 个实体</strong><small>{{ activeReview.impact_summary.claims }} 论断 · {{ activeReview.impact_summary.relations }} 关系 · {{ activeReview.impact_summary.citations }} 历史引用</small></section>
           </div>
           <article v-for="change in activeReview.changes" :key="change.id" class="review-change">
@@ -174,6 +195,14 @@
         </div>
         <div v-else class="knowledge-empty"><strong>没有待审核变更</strong><span>智能编译生成的候选会显示在这里。</span></div>
         <div class="knowledge-modal-actions"><el-button @click="reviewVisible = false">稍后处理</el-button><template v-if="activeReview"><el-button :loading="resolvingReview" @click="resolveReview('reject')">驳回</el-button><el-button type="primary" :loading="resolvingReview" :disabled="!activeReview.citation_audit.passed" @click="resolveReview('approve')">批准并应用</el-button></template></div>
+      </div>
+    </MotionModal>
+
+    <MotionModal v-model="archiveVisible" aria-label="提交历史归档">
+      <div class="knowledge-modal-card">
+        <div class="knowledge-modal-head"><div><h3>归档历史主题</h3><p>{{ archiveTarget?.title }}</p></div><span class="knowledge-status is-warning">审核后生效</span></div>
+        <div class="knowledge-modal-body archive-explanation"><p>仅归档该主题，不删除正文、论断、关系和引用。归档后不再作为当前问答证据，智能编译也不会自动恢复它。</p><p>历史依据仍保留原来的来源版本和验证状态，不会因此变成当前可用事实。依赖它的其他主题仍可能需要复核。</p></div>
+        <div class="knowledge-modal-actions"><el-button @click="archiveVisible = false">取消</el-button><el-button type="primary" :loading="savingArchive" @click="submitHistoricalArchive">生成归档审核</el-button></div>
       </div>
     </MotionModal>
 
@@ -227,7 +256,12 @@
         <template v-if="healthReport">
           <div class="health-counts"><span><b>{{ healthReport.semantic_entry_count }}</b>主题</span><span><b>{{ healthReport.source_span_count }}</b>片段</span><span><b>{{ healthReport.pending_review_count }}</b>待审核</span></div>
           <div v-if="healthReport.issues.length" class="health-issues">
-            <article v-for="issue in healthReport.issues" :key="issue.code + issue.title" :class="`is-${issue.severity}`"><strong>{{ issue.title }}</strong><p>{{ issue.detail }}</p></article>
+            <article v-for="issue in healthReport.issues" :key="issue.code + issue.title" :class="`is-${issue.severity}`">
+              <strong>{{ issue.title }}</strong><p>{{ issue.detail }}</p>
+              <div v-if="issue.code === 'expired-source-evidence'" class="health-entry-links">
+                <button v-for="(id, index) in issue.object_ids.slice(0, 8)" :key="id" type="button" @click="openHealthEntry(id)">{{ entries.find(entry => entry.id === id)?.title || `查看主题 ${index + 1}` }}</button>
+              </div>
+            </article>
           </div>
           <div v-else class="knowledge-empty"><strong>没有发现结构问题</strong><span>主题知识、引用和论断证据结构完整。</span></div>
         </template>
@@ -244,8 +278,10 @@ import { ArrowLeft, Checked, Connection, DataAnalysis, Document, Edit, Loading, 
 import { useRoute, useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import KnowledgeGraphCanvas from '@/components/knowledge/KnowledgeGraphCanvas.vue'
+import KnowledgeCompileReport from '@/components/knowledge/KnowledgeCompileReport.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
+import { knowledgeStatusLabel, needsSourceReview, sourceImpactLabel } from '@/utils/knowledgeSourceImpacts'
 import {
   findKnowledgeGraphPath,
   getKnowledgeGraphOverview,
@@ -256,10 +292,12 @@ import {
   listKnowledgeChangeSets,
   listKnowledgeEntries,
   proposeKnowledgeEntryEdit,
+  proposeKnowledgeEntryArchive,
   proposeKnowledgeEntryMerge,
   proposeKnowledgeEntrySplit,
   resolveKnowledgeChangeSet,
   syncBookKnowledgeBase,
+  retryKnowledgeSourceReview,
   type KnowledgeBaseSummary,
   type KnowledgeEntryDetail,
   type KnowledgeEntrySummary,
@@ -285,9 +323,14 @@ const loadingBases = ref(false)
 const loadingEntries = ref(false)
 const detailLoading = ref(false)
 const syncing = ref(false)
+const retryingSources = ref(false)
+const archiveVisible = ref(false)
+const savingArchive = ref(false)
+const archiveTarget = ref<{ id: string; title: string; revision: number; baseId: string } | null>(null)
 const pendingReviews = ref<KnowledgeChangeSet[]>([])
 const activeReview = ref<KnowledgeChangeSet | null>(null)
 const reviewVisible = ref(false)
+const compileReportVisible = ref(false)
 const mobileActionsVisible = ref(false)
 const reviewNote = ref('')
 const resolvingReview = ref(false)
@@ -370,7 +413,7 @@ async function loadEntries(preselectId = '', append = false) {
   loadingEntries.value = true
   try {
     const offset = append ? entries.value.length : 0
-    const response = await listKnowledgeEntries(activeBaseId.value, { query: query.value, offset, limit: 60 })
+    const response = await listKnowledgeEntries(activeBaseId.value, { query: query.value, offset, limit: 60, includeStale: true })
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '实体加载失败')
     entries.value = append ? [...entries.value, ...response.result.entries] : response.result.entries
     entryTotal.value = response.result.total
@@ -454,17 +497,76 @@ async function loadReviews() {
   pendingReviews.value = response.result.change_sets
 }
 
+async function retrySourceReview() {
+  const baseId = activeBaseId.value
+  if (!baseId || retryingSources.value) return
+  retryingSources.value = true
+  try {
+    const response = await retryKnowledgeSourceReview(baseId)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '来源复核启动失败')
+    if (activeBaseId.value !== baseId) return
+    const index = bases.value.findIndex(base => base.id === baseId)
+    if (index >= 0) bases.value[index] = response.result.knowledge_base
+    ElMessage.success(response.result.message)
+    compileReportVisible.value = true
+  } catch (error) { ElMessage.error((error as Error).message) }
+  finally { retryingSources.value = false }
+}
+
+function updateCompileBase(base: KnowledgeBaseSummary) {
+  const index = bases.value.findIndex(item => item.id === base.id)
+  if (index >= 0) bases.value[index] = base
+}
+
+function openHistoricalArchive() {
+  if (!detail.value || detail.value.status === 'archived') return
+  archiveTarget.value = { id: detail.value.id, title: detail.value.title, revision: detail.value.revision, baseId: activeBaseId.value }
+  archiveVisible.value = true
+}
+
+async function submitHistoricalArchive() {
+  const target = archiveTarget.value
+  if (!target || savingArchive.value) return
+  savingArchive.value = true
+  try {
+    const response = await proposeKnowledgeEntryArchive(target.id, target.revision)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '归档审核生成失败')
+    const shouldOpenReview = archiveVisible.value && archiveTarget.value === target
+    archiveVisible.value = false
+    if (activeBaseId.value !== target.baseId) { ElMessage.success('归档候选已保存，可在对应知识库审核'); return }
+    await loadReviews()
+    const base = bases.value.find(item => item.id === target.baseId)
+    if (base) base.pending_review_count = pendingReviews.value.length
+    if (!shouldOpenReview || activeBaseId.value !== target.baseId) { ElMessage.success('归档候选已保存，请在审核入口处理'); return }
+    activeReview.value = response.result
+    reviewNote.value = ''
+    reviewVisible.value = true
+  } catch (error) { ElMessage.error((error as Error).message) }
+  finally { savingArchive.value = false }
+}
+
 function openReviews() {
   activeReview.value = pendingReviews.value[0] || null
   reviewNote.value = ''
   reviewVisible.value = true
 }
 
-function runMobileAction(action: 'review' | 'graph' | 'lint' | 'sync') {
+async function openCompileReportReview(changeSetId: string) {
+  try {
+    await loadReviews()
+    activeReview.value = pendingReviews.value.find(item => item.id === changeSetId) || null
+    if (!activeReview.value) { ElMessage.info('该变更已处理，请刷新报告查看结果'); return }
+    reviewNote.value = ''
+    reviewVisible.value = true
+  } catch (error) { ElMessage.error((error as Error).message) }
+}
+
+function runMobileAction(action: 'review' | 'graph' | 'lint' | 'sync' | 'report') {
   mobileActionsVisible.value = false
   if (action === 'review') openReviews()
   else if (action === 'graph') void openGraph()
   else if (action === 'lint') void runLint()
+  else if (action === 'report') compileReportVisible.value = true
   else void syncActive()
 }
 
@@ -497,6 +599,11 @@ async function runLint() {
   } finally {
     linting.value = false
   }
+}
+
+async function openHealthEntry(entryId: string) {
+  healthVisible.value = false
+  await selectRelatedEntry(entryId)
 }
 
 async function syncActive() {
@@ -743,6 +850,7 @@ onBeforeUnmount(() => {
 .entry-row { width: 100%; display: grid; gap: 4px; margin: 0 0 5px; padding: 12px; border: 0; border-radius: 13px; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; transition: var(--transition-interactive); }
 .entry-row:hover { background: var(--bg-hover); }
 .entry-row.active { background: var(--accent-light); box-shadow: inset 0 0 0 1px var(--accent-border); }
+.entry-row > .knowledge-status { justify-self: start; }
 .entry-type { width: fit-content; color: var(--accent); font-size: 10px; font-weight: 700; letter-spacing: .04em; }
 .entry-row strong { overflow: hidden; font-size: 14px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .entry-summary { display: -webkit-box; overflow: hidden; color: var(--text-muted); font-size: 11px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
@@ -759,6 +867,18 @@ onBeforeUnmount(() => {
 .detail-symbol { width: 62px; height: 62px; display: grid; place-items: center; border-radius: 20px; background: var(--accent-light); color: var(--accent); font-size: 27px; }
 .entity-meta-strip { display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 18px; }
 .entity-meta-strip span { padding: 5px 9px; border: 1px solid var(--border-faint); border-radius: 999px; background: var(--bg-glass-subtle); color: var(--text-muted); font-size: 10px; }
+.source-review-notice { display: grid; gap: 10px; margin-bottom: 20px; padding: 16px; border: 1px solid var(--accent-border); border-radius: 16px; background: var(--accent-light); overflow-wrap: anywhere; }
+.source-review-notice strong { font-size: 14px; font-weight: 650; }
+.source-review-notice p, .source-review-notice li, .source-review-notice small { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.65; }
+.source-review-notice ul { display: grid; gap: 8px; margin: 0; padding-left: 18px; }
+.source-review-notice li > span { display: block; }
+.source-review-notice > .el-button { justify-self: start; max-width: 100%; }
+.source-review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.source-review-actions :deep(.el-button) { margin-left: 0; }
+.archive-explanation { color: var(--text-muted); line-height: 1.7; overflow-wrap: anywhere; }
+.source-review-notice li button, .health-entry-links button { min-height: 36px; padding: 6px 8px; border: 0; border-radius: 9px; background: var(--bg-glass-subtle); color: var(--accent); text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.source-review-notice li button:active, .health-entry-links button:active { background: var(--accent-light); }
+.health-entry-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .entity-markdown { color: var(--text-secondary); font-size: 15px; line-height: 1.8; overflow-wrap: anywhere; }
 @media (min-width: 1101px) {
   .wiki-workspace { min-height: 0; overflow: hidden; }

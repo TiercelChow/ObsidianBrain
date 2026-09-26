@@ -279,6 +279,99 @@ mod tests {
     use crate::models::book_wiki::{BookKind, ReaderBook};
 
     #[tokio::test]
+    async fn test_mcp_source_tail_candidate_requires_actual_read_before_citation() {
+        let (ctx, _dir, vault) = crate::AppContext::for_test();
+        let store = ctx.book_wiki_service.store();
+        store
+            .save_reader_books(&[ReaderBook {
+                id: "tail-book".into(),
+                path: vault.display().to_string(),
+                kind: BookKind::Folder,
+                name: "尾部取证".into(),
+                description: String::new(),
+                category: String::new(),
+                added_at: 1,
+                progress: None,
+            }])
+            .unwrap();
+        let base = store.initialize_base("tail-book").unwrap();
+        let content = format!(
+            "# 原文\n{}\n关键条件 needle $x_i$。\n",
+            "普通段落🙂\n".repeat(3000)
+        );
+        store
+            .sync_markdown_sources(
+                &base.id,
+                &[MarkdownSourceDraft {
+                    id: "tail-source".into(),
+                    version_id: "tail-version".into(),
+                    original_path: vault.join("tail.md").display().to_string(),
+                    relative_path: "tail.md".into(),
+                    title: "原文".into(),
+                    ordinal: 0,
+                    content_hash: "tail-hash".into(),
+                    size_bytes: content.len() as i64,
+                    modified_at: None,
+                    sections: vec![SourceSectionDraft {
+                        id: "tail-span".into(),
+                        entry_id: "tail-entry".into(),
+                        slug: "tail-entry".into(),
+                        title: "原文".into(),
+                        summary: "开头概述".into(),
+                        content_md: content.clone(),
+                        line_start: 1,
+                        line_end: 3003,
+                        content_hash: "tail-span-hash".into(),
+                    }],
+                }],
+            )
+            .unwrap();
+        let run = store
+            .start_agent_run(&base.id, "deepseek_harness", "knowledge_qa", &json!({}))
+            .unwrap();
+        let capability = store
+            .issue_agent_run_capability(
+                &run.id,
+                std::slice::from_ref(&base.id),
+                &["book_search_sources".into(), "book_read_source_span".into()],
+                300,
+            )
+            .unwrap();
+        let search = json!({"name":"book_search_sources","arguments":{"knowledge_base_id":base.id,"query":"needle","limit":2}});
+        let result = call_tool(&ctx, &capability.token, Some(&search))
+            .await
+            .unwrap();
+        assert_eq!(result["isError"], false, "{result}");
+        let candidate = &result["structuredContent"]["spans"][0];
+        assert!(candidate["preview"].as_str().unwrap().contains("needle"));
+        assert_eq!(candidate["candidate_only"], true);
+        assert!(store.list_agent_run_citations(&run.id).unwrap().is_empty());
+        let offset = candidate["preview_offset_chars"].as_u64().unwrap() as usize;
+        assert!(offset > 10000);
+        let read = json!({"name":"book_read_source_span","arguments":{"knowledge_base_id":base.id,"source_span_id":"tail-span","offset_chars":offset,"max_chars":240}});
+        let result = call_tool(&ctx, &capability.token, Some(&read))
+            .await
+            .unwrap();
+        assert_eq!(result["isError"], false, "{result}");
+        assert_eq!(result["structuredContent"]["citation"]["label"], "S1");
+        let expected = content.chars().skip(offset).take(240).collect::<String>();
+        assert_eq!(result["structuredContent"]["span"]["content"], expected);
+        let citations = store.list_agent_run_citations(&run.id).unwrap();
+        assert_eq!(citations.len(), 1);
+        assert!(citations[0].content_md.ends_with(&expected));
+        assert!(citations[0].content_md.contains("未读取的区间已省略"));
+        assert!(!citations[0].content_md.contains("# 原文"));
+        let wrong = json!({"name":"book_read_source_span","arguments":{"knowledge_base_id":"foreign","source_span_id":"tail-span"}});
+        assert_eq!(
+            call_tool(&ctx, &capability.token, Some(&wrong))
+                .await
+                .unwrap()["isError"],
+            true
+        );
+        assert_eq!(store.list_agent_run_citations(&run.id).unwrap().len(), 1);
+    }
+
+    #[tokio::test]
     async fn test_adaptive_mcp_rejects_oversize_body_before_citation_and_recovers_with_paging() {
         let (ctx, _dir, vault) = crate::AppContext::for_test();
         let store = ctx.book_wiki_service.store();
