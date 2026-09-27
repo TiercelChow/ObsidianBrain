@@ -6,7 +6,7 @@
 
 ## 项目概述
 
-ObsidianBrain 是一个运行在本地的 **Rust 知识引擎**，对外提供标准化的 LLM Tool API（兼容 MCP 协议与 OpenAI function calling）。围绕用户的 Obsidian 知识库和本地代码仓库，提供记忆管理、代码仓概览、灵感催化、外部信息聚合、时间线回顾等能力。
+ObsidianBrain 是一个运行在本地的 **Rust 知识引擎**，对外提供标准化的 LLM Tool API（兼容 MCP 协议与 OpenAI function calling）。围绕用户的 Obsidian 知识库和本地代码仓库，提供记忆管理、代码仓概览、每书独立知识库、时间线回顾等能力。
 
 **核心原则**：对话由 LLM 前端完成，本引擎是 LLM 的"手"和"眼"——负责感知和执行。
 
@@ -25,8 +25,6 @@ docs/
 │   ├── 03-memory-engine.md          # 记忆引擎
 │   ├── 04-timeline.md               # 时间线
 │   ├── 05-code-repo.md              # 代码仓管理
-│   ├── 06-inspiration.md            # 灵感熔炉
-│   ├── 07-radar.md                  # 智识雷达
 │   ├── 08-llm-wiki.md               # LLM Wiki
 │   └── 09-task-management.md        # 个人任务管理
 └── development/                     # 开发设计文档（How）
@@ -35,8 +33,6 @@ docs/
     ├── 03-memory-engine.md          # 记忆引擎
     ├── 04-timeline.md               # 时间线
     ├── 05-code-repo.md              # 代码仓管理
-    ├── 06-inspiration.md            # 灵感熔炉
-    ├── 07-radar.md                  # 智识雷达
     └── 09-task-management.md        # 个人任务管理
 ```
 
@@ -49,8 +45,6 @@ docs/
 | 03 | 记忆引擎 (Memory Engine) | Phase 1 |
 | 04 | 时间线 (Timeline) | Phase 2 |
 | 05 | 代码仓管理 (Code Repo Hub) | Phase 2 |
-| 06 | 灵感熔炉 (Inspiration Forge) | Phase 3 |
-| 07 | 智识雷达 (Knowledge Radar) | Phase 3 |
 | 08 | LLM Wiki | Phase 4 |
 | 09 | 个人任务管理 (Tasks) | Phase 5 |
 
@@ -97,9 +91,7 @@ ObsidianBrain/
     │   ├── memory.rs
     │   ├── timeline.rs
     │   ├── tasks.rs
-    │   ├── code_repo.rs
-    │   ├── inspiration.rs
-    │   └── radar.rs
+    │   └── code_repo.rs
     ├── infra/                       # 基础设施层
     │   ├── mod.rs
     │   ├── sqlite_store.rs
@@ -118,7 +110,6 @@ ObsidianBrain/
         ├── note.rs
         ├── memory.rs
         ├── repo.rs
-        ├── radar.rs
         └── task.rs
 ```
 
@@ -192,7 +183,7 @@ ObsidianBrain/
   - 外部错误通过 `From` trait 转换为 `BrainError`
 - **类型安全**：
   - 优先使用 newtype pattern 封装业务含义（如 `NotePath(PathBuf)`）
-  - 使用 enum 表达有限状态（如 `FileChangeType`, `RadarStatus`）
+  - 使用 enum 表达有限状态（如 `FileChangeType`, `TaskStatus`）
   - 公共 API 必须有完整的类型签名
 
 ### Trait 抽象
@@ -322,10 +313,9 @@ docker compose down           # 停止
 - [ ] 自动文档化（LLM 生成）
 - [ ] 时间线事件收集与查询
 
-### Phase 3: 灵感 + 雷达
-- [ ] 灵感熔炉三种模式
-- [ ] 智识雷达外部源拉取 + 个性化排序
-- [ ] 文章纳藏到 vault
+### Phase 3: 已退役
+
+原 06/07 模块的功能代码和专属设计文档已移除。历史数据库迁移不重写，也不自动清除用户记录；代码仓入口位于「日常」，导航不再设「管理」分组。
 
 ### Phase 4: 打磨
 - [ ] 技能 YAML 扩展系统

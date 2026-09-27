@@ -68,18 +68,8 @@ const router = createRouter({
       component: () => import('@/views/Tasks.vue'),
       meta: { title: '任务中枢' },
     },
-    {
-      path: '/inspiration',
-      name: 'Inspiration',
-      component: () => import('@/views/Inspiration.vue'),
-      meta: { title: '灵感熔炉' },
-    },
-    {
-      path: '/radar',
-      name: 'Radar',
-      component: () => import('@/views/Radar.vue'),
-      meta: { title: '智识雷达' },
-    },
+    // Retired destinations and stale bookmarks must not leave a blank page.
+    { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
 

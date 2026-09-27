@@ -1402,103 +1402,6 @@ impl SqliteStore {
         Ok(rows_deleted)
     }
 
-    // ── Inspiration History ──
-
-    pub fn insert_inspiration(
-        &self,
-        id: &str,
-        insp_type: &str,
-        input_refs: &str,
-        output: &str,
-    ) -> Result<(), BrainError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO inspiration_history (id, type, input_refs, output) VALUES (?1, ?2, ?3, ?4)",
-            params![id, insp_type, input_refs, output],
-        )
-        .map_err(|e| BrainError::Internal(format!("插入灵感记录失败: {e}")))?;
-        Ok(())
-    }
-
-    pub fn get_recent_inspirations(
-        &self,
-        insp_type: &str,
-        limit: i64,
-    ) -> Result<Vec<(String, String, String, String)>, BrainError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, type, input_refs, output FROM inspiration_history
-                 WHERE type = ?1 ORDER BY created_at DESC LIMIT ?2",
-            )
-            .map_err(|e| BrainError::Internal(format!("准备查询失败: {e}")))?;
-        let rows = stmt
-            .query_map(params![insp_type, limit], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
-            })
-            .map_err(|e| BrainError::Internal(format!("查询灵感记录失败: {e}")))?;
-        let mut results = Vec::new();
-        for row in rows {
-            results.push(row.map_err(|e| BrainError::Internal(format!("读取行失败: {e}")))?);
-        }
-        Ok(results)
-    }
-
-    // ── Radar Items ──
-
-    pub fn insert_radar_item(
-        &self,
-        id: &str,
-        title: &str,
-        summary: &str,
-        source_name: &str,
-        url: &str,
-    ) -> Result<(), BrainError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT OR IGNORE INTO radar_items (id, title, summary, source_name, url) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id, title, summary, source_name, url],
-        )
-        .map_err(|e| BrainError::Internal(format!("插入雷达条目失败: {e}")))?;
-        Ok(())
-    }
-
-    pub fn get_radar_items(
-        &self,
-        status: &str,
-        limit: i64,
-    ) -> Result<Vec<(String, String, String, String, String, String)>, BrainError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, title, summary, source_name, url, status FROM radar_items
-                 WHERE status = ?1 ORDER BY fetched_at DESC LIMIT ?2",
-            )
-            .map_err(|e| BrainError::Internal(format!("准备查询失败: {e}")))?;
-        let rows = stmt
-            .query_map(params![status, limit], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                ))
-            })
-            .map_err(|e| BrainError::Internal(format!("查询雷达条目失败: {e}")))?;
-        let mut results = Vec::new();
-        for row in rows {
-            results.push(row.map_err(|e| BrainError::Internal(format!("读取行失败: {e}")))?);
-        }
-        Ok(results)
-    }
-
     // ── Memos (Time Machine) ──
 
     pub fn insert_memo(
@@ -1681,29 +1584,6 @@ impl SqliteStore {
             results.push(row.map_err(|e| BrainError::Internal(format!("读取行失败: {e}")))?);
         }
         Ok(results)
-    }
-
-    pub fn update_radar_status(&self, id: &str, status: &str) -> Result<bool, BrainError> {
-        let conn = self.conn.lock().unwrap();
-        let rows_changed = conn
-            .execute(
-                "UPDATE radar_items SET status = ?1 WHERE id = ?2",
-                params![status, id],
-            )
-            .map_err(|e| BrainError::Internal(format!("更新雷达状态失败: {e}")))?;
-        Ok(rows_changed > 0)
-    }
-
-    pub fn radar_url_exists(&self, url: &str) -> Result<bool, BrainError> {
-        let conn = self.conn.lock().unwrap();
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM radar_items WHERE url = ?1",
-                params![url],
-                |row| row.get(0),
-            )
-            .map_err(|e| BrainError::Internal(format!("查询雷达URL失败: {e}")))?;
-        Ok(count > 0)
     }
 }
 
@@ -2577,19 +2457,92 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_and_get_radar_item_round_trips_source_name() {
+    fn test_retired_module_records_survive_database_reopen() {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("test.db");
         let store = SqliteStore::new(&db_path).unwrap();
 
-        store
-            .insert_radar_item("r1", "标题", "摘要", "hackernews", "https://example.com/a")
-            .unwrap();
+        store.set_state("reader_books", "existing-shelf").unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            // Legacy rows stay in the database, without exposing retired CRUD APIs.
+            conn.execute("INSERT INTO radar_items (id, title, source_name, url, status, saved_path) VALUES ('r1', '标题', 'hackernews', 'https://example.com/a', 'saved', 'Articles/a.md')", []).unwrap();
+            conn.execute("INSERT INTO inspiration_history (id, type, input_refs, output) VALUES ('i1', 'concept_combo', '[]', '历史灵感')", []).unwrap();
+        }
+        drop(store);
 
-        let items = store.get_radar_items("new", 10).unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].0, "r1");
-        assert_eq!(items[0].3, "hackernews");
+        let reopened = SqliteStore::new(&db_path).unwrap();
+        assert_eq!(
+            reopened.get_state("reader_books").unwrap().as_deref(),
+            Some("existing-shelf")
+        );
+        let conn = reopened.conn.lock().unwrap();
+        let radar: (String, String) = conn
+            .query_row(
+                "SELECT status, saved_path FROM radar_items WHERE id = 'r1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(radar, ("saved".into(), "Articles/a.md".into()));
+        let output: String = conn
+            .query_row(
+                "SELECT output FROM inspiration_history WHERE id = 'i1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(output, "历史灵感");
+    }
+
+    #[test]
+    fn test_legacy_database_upgrade_preserves_retired_records_and_reader_shelf() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("legacy.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("CREATE TABLE _migrations (version INTEGER PRIMARY KEY, description TEXT NOT NULL, applied_at DATETIME DEFAULT CURRENT_TIMESTAMP);").unwrap();
+            for migration in MIGRATIONS
+                .iter()
+                .filter(|migration| migration.version <= 10)
+            {
+                conn.execute_batch(migration.sql).unwrap();
+                conn.execute(
+                    "INSERT INTO _migrations (version, description) VALUES (?1, ?2)",
+                    params![migration.version, migration.description],
+                )
+                .unwrap();
+            }
+            conn.execute("INSERT INTO radar_items (id, title, source, url) VALUES ('old-r', '历史文章', 'rss', 'https://example.com/legacy')", []).unwrap();
+            conn.execute("INSERT INTO inspiration_history (id, type, output) VALUES ('old-i', 'counterpoint', '历史观点')", []).unwrap();
+            conn.execute(
+                "INSERT INTO app_state (key, value) VALUES ('reader_books', 'original-books')",
+                [],
+            )
+            .unwrap();
+        }
+        let store = SqliteStore::new(&path).unwrap();
+        assert_eq!(
+            store.get_state("reader_books").unwrap().as_deref(),
+            Some("original-books")
+        );
+        let conn = store.conn.lock().unwrap();
+        let source: String = conn
+            .query_row(
+                "SELECT source_name FROM radar_items WHERE id = 'old-r'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(source, "rss");
+        let output: String = conn
+            .query_row(
+                "SELECT output FROM inspiration_history WHERE id = 'old-i'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(output, "历史观点");
     }
 
     #[test]

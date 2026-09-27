@@ -125,47 +125,6 @@ impl ToolHandler for SaveConfigHandler {
             }
         }
 
-        // Hot-reload LLM provider
-        if let Some(llm_cfg) = args.get("llm") {
-            let mut new_config = crate::config::LlmConfig::default();
-            if let Some(p) = llm_cfg.get("provider").and_then(|v| v.as_str()) {
-                new_config.provider = p.to_string();
-            }
-            if let Some(m) = llm_cfg.get("model").and_then(|v| v.as_str()) {
-                new_config.model = m.to_string();
-            }
-            if let Some(k) = llm_cfg.get("api_key").and_then(|v| v.as_str()) {
-                new_config.api_key = Some(k.to_string());
-            }
-            if let Some(k) = llm_cfg.get("api_key_env").and_then(|v| v.as_str()) {
-                new_config.api_key_env = Some(k.to_string());
-            }
-            if let Some(u) = llm_cfg.get("base_url").and_then(|v| v.as_str()) {
-                new_config.base_url = Some(u.to_string());
-            }
-            if let Some(t) = llm_cfg.get("max_tokens").and_then(|v| v.as_u64()) {
-                new_config.max_tokens = t as u32;
-            }
-            if let Some(t) = llm_cfg.get("temperature").and_then(|v| v.as_f64()) {
-                new_config.temperature = t;
-            }
-
-            match crate::infra::llm_client::LlmClientFactory::create(&new_config) {
-                Ok(boxed) => {
-                    let new_llm: Arc<dyn crate::infra::llm_client::LlmProvider> = Arc::from(boxed);
-                    ctx.inspiration_service.set_llm(new_llm);
-                    tracing::info!(
-                        "LLM provider hot-reloaded: {} / {}",
-                        new_config.provider,
-                        new_config.model
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to hot-reload LLM: {e}");
-                }
-            }
-        }
-
         tracing::info!("系统配置已保存并热更新");
 
         Ok(json!({

@@ -37,7 +37,7 @@
 - [ ] 添加 `rusqlite` 依赖（bundled feature）
 - [ ] 实现 `SqliteStore` 结构体（连接初始化、WAL 模式）
 - [ ] 实现迁移框架（版本化 SQL 迁移执行）
-- [ ] 编写完整迁移脚本（code_repos, radar_items, inspiration_history, timeline_events, app_state）
+- [ ] 编写完整迁移脚本（code_repos, timeline_events, app_state；历史迁移保留兼容）
 - [ ] 实现 CRUD 辅助方法（事务管理、状态读写）
 
 **参考文档**：`docs/development/01-infrastructure.md` §4
@@ -322,68 +322,9 @@
 
 ---
 
-## Phase 3: 灵感 + 雷达
+## Phase 3: 已退役
 
-**目标**：实现灵感熔炉和智识雷达
-
-**预计时间**：1-2 周
-
-### 3.1 灵感熔炉
-- [ ] 实现概念池构建器（`ConceptPool`）：
-  - 从 vault 标签提取（TF-IDF 加权）
-  - 从笔记标题提取关键词
-  - 从仓库名提取技术概念
-- [ ] 实现概念距离矩阵（Jaccard 距离）
-- [ ] 实现概念选择器（距离加权随机）
-- [ ] 实现三种 LLM 模式：
-  - `concept_combo`：随机概念组合
-  - `reverse_question`：反向提问
-  - `counterpoint`：对立观点
-- [ ] 实现结果格式化（Obsidian URI 链接）
-- [ ] 实现灵感历史记录（SQLite）
-
-**参考文档**：`docs/development/06-inspiration.md`
-
-**验收标准**：
-- 三种模式各返回一个创意 + 相关链接
-- 概念组合的两个概念标签共现度低（距离远）
-- 历史记录不重复
-
-### 3.2 智识雷达
-- [ ] 实现源管理器（`radar_sources.toml` 解析）
-- [ ] 实现内容抓取器：
-  - RSS（`feed-rs`）
-  - arXiv API
-  - HackerNews API
-  - Reddit API
-- [ ] 实现定时调度（`tokio-cron-scheduler`，每 6 小时）
-- [ ] 实现内容处理（清洗、去重）
-- [ ] 实现相关性引擎：
-  - 用户兴趣向量构建（最近 30 天笔记 embedding 加权平均）
-  - 文章 embedding 生成
-  - 余弦相似度计算
-  - 多因子排序（相似度 × 可信度 × 时效性）
-- [ ] 实现纳藏器（正文提取 + Obsidian 笔记生成）
-- [ ] 实现状态管理（New / Read / Saved / Dismissed）
-
-**参考文档**：`docs/development/07-radar.md`
-
-**验收标准**：
-- 定时拉取外部源并缓存
-- `get_radar(limit)` 返回按相关性排序的文章
-- `add_to_vault(article_id)` 生成笔记并索引
-- 已读/已忽略的文章不再推荐
-
-### 3.3 工具实现
-- [ ] `get_inspiration(type?, note_path?)`
-- [ ] `get_radar(limit?, query?)`
-- [ ] `add_to_vault(article_id, target_dir?)`
-- [ ] `dismiss_radar_item(article_id)`
-
-**验收标准**：
-- 所有 4 个工具能通过 API 调用
-
----
+原 06/07 模块不再开发，相关服务、页面、工具和配置已移除。代码仓入口移至「日常」；历史迁移与用户记录保留。参见 [2026-09-28 移除方案](development/2026-09-28-retire-inspiration-radar-plan.md)。
 
 ## Phase 4: 打磨与增强（持续）
 
@@ -416,8 +357,6 @@
 - [ ] 记忆搜索 UI
 - [ ] 代码仓卡片展示
 - [ ] 时间线可视化
-- [ ] 灵感结果展示
-- [ ] 雷达文章列表 + 纳藏操作
 
 ---
 

@@ -5,11 +5,13 @@
 
 ---
 
+> 2026-09-28 更新：模块 06/07 已退役，相关页面、服务和工具不再提供；代码仓入口归属「日常」，不设「管理」分组。历史 SQLite 迁移仅为数据兼容保留。当前范围见[移除方案](../development/2026-09-28-retire-inspiration-radar-plan.md)。
+
 ## 1. 模块概述与定位
 
 ### 1.1 定位
 
-基础设施层是 ObsidianBrain 系统的底座，为上层核心服务层（Memory Service、Timeline Service、CodeRepo Service、Inspiration Service、Radar Service）和 API 层提供通用的技术支撑能力。它不包含业务逻辑，而是封装所有与外部系统、存储、IO 相关的交互细节。
+基础设施层是 ObsidianBrain 系统的底座，为上层核心服务层（Memory Service、Timeline Service、CodeRepo Service、Book Wiki Service、Task Service）和 API 层提供通用的技术支撑能力。它不包含业务逻辑，而是封装所有与外部系统、存储、IO 相关的交互细节。
 
 ### 1.2 职责范围
 
@@ -64,7 +66,6 @@
 - **llm**：LLM Provider 选择（openai / anthropic / ollama）、模型名称、生成参数
 - **memory**：搜索参数（top_k）
 - **timeline**：日期格式匹配列表
-- **radar**：拉取间隔、相关性阈值、每源最大条目数
 - **storage**：SQLite 数据库文件路径
 - **logging**：日志级别、日志文件路径
 
@@ -86,7 +87,7 @@
 - 接收 `SIGHUP` 信号
 
 热重载规则：
-- **可热重载项**：日志级别、雷达拉取间隔、搜索参数（top_k）、LLM 参数（temperature、max_tokens）
+- **可热重载项**：Obsidian 连接配置。通用 LLM 配置保留保存与验证入口；Wiki 使用独立的模型供应商和 Runtime 配置。
 - **不可热重载项**：服务端口、Vault 路径、数据库路径、Obsidian API 地址（变更需重启）
 - 热重载通过内部事件总线通知各消费方，消费方可选择接受或忽略
 
@@ -125,8 +126,6 @@ API Key 等敏感信息不直接写入配置文件，而是通过环境变量名
 |------|------|
 | `code_repos` | 代码仓库注册信息 |
 | `note_repo_links` | 笔记与仓库的关联关系 |
-| `radar_items` | 智识雷达条目缓存 |
-| `inspiration_history` | 灵感生成历史记录 |
 | `timeline_events` | 时间线事件记录 |
 | `app_state` | 应用状态与键值元信息（含迁移版本号） |
 
@@ -136,8 +135,6 @@ API Key 等敏感信息不直接写入配置文件，而是通过环境变量名
 
 - **code_repos**：注册/注销/查询/列表/更新元信息
 - **note_repo_links**：关联/取消关联/按笔记查询/按仓库查询
-- **radar_items**：插入/更新状态/按条件查询/分页列表/去重检查（基于 URL）
-- **inspiration_history**：插入/按时间范围查询/按类型查询
 - **timeline_events**：插入/按日期范围查询/按事件类型查询
 - **app_state**：键值读写（用于存储迁移版本等全局状态）
 
@@ -151,7 +148,7 @@ API Key 等敏感信息不直接写入配置文件，而是通过环境变量名
 #### FR-S04 数据完整性
 
 - 外键约束：`note_repo_links.repo_name` 引用 `code_repos.name`，启用 `PRAGMA foreign_keys = ON`
-- 唯一约束：`code_repos.path`、`radar_items.url` 设置唯一索引
+- 唯一约束：`code_repos.path` 设置唯一索引
 - 所有删除操作需考虑级联影响
 
 ---
@@ -387,16 +384,6 @@ pub trait MetadataStore: Send + Sync {
     async fn get_repos_for_note(&self, note_path: &str) -> Result<Vec<String>>;
     async fn get_notes_for_repo(&self, repo_name: &str) -> Result<Vec<String>>;
     
-    // === radar_items ===
-    async fn upsert_radar_item(&self, item: &RadarItem) -> Result<()>;
-    async fn update_radar_status(&self, id: &str, status: RadarStatus) -> Result<()>;
-    async fn query_radar_items(&self, filter: RadarFilter) -> Result<Vec<RadarItem>>;
-    async fn radar_item_exists(&self, url: &str) -> Result<bool>;
-    
-    // === inspiration_history ===
-    async fn save_inspiration(&self, record: &InspirationRecord) -> Result<()>;
-    async fn query_inspirations(&self, filter: InspirationFilter) -> Result<Vec<InspirationRecord>>;
-    
     // === timeline_events ===
     async fn save_timeline_event(&self, event: &TimelineEvent) -> Result<()>;
     async fn query_timeline_events(&self, filter: TimelineFilter) -> Result<Vec<TimelineEvent>>;
@@ -407,7 +394,7 @@ pub trait MetadataStore: Send + Sync {
 }
 ```
 
-**消费方**：CodeRepo Service、Radar Service、Inspiration Service、Timeline Service、Memory Service。
+**消费方**：CodeRepo Service、Timeline Service、Memory Service。
 
 ### 5.3 Obsidian REST API 客户端接口
 
@@ -455,7 +442,7 @@ pub trait ObsidianClient: Send + Sync {
 }
 ```
 
-**消费方**：Memory Service（笔记搜索与 CRUD）、Radar Service（文章纳藏）、Inspiration Service（素材查询）。
+**消费方**：Memory Service（笔记搜索与 CRUD）。
 
 ### 5.4 LLM 客户端接口
 
@@ -486,7 +473,7 @@ pub trait LlmClient: Send + Sync {
 }
 ```
 
-**消费方**：Inspiration Service（灵感生成）、CodeRepo Service（文档生成）、Skill Engine（技能编排中的 LLM 步骤）。
+**消费方**：CodeRepo Service（文档生成）、Skill Engine（技能编排中的 LLM 步骤）。
 
 ---
 

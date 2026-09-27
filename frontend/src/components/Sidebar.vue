@@ -62,8 +62,6 @@ import {
   Notebook,
   FolderOpened,
   Calendar,
-  MagicStick,
-  DataLine,
   Document,
   ChatDotRound,
   Files,
@@ -124,6 +122,7 @@ const navGroups = [
       { path: '/reader', label: '阅境轩', icon: Files },
       { path: '/timeline', label: '时光机', icon: Calendar },
       { path: '/tasks', label: '任务中枢', icon: Finished },
+      { path: '/code-repo', label: '代码仓', icon: FolderOpened },
     ],
   },
   {
@@ -134,14 +133,6 @@ const navGroups = [
       { path: '/knowledge/chat', label: '知识问答', icon: ChatDotRound },
       { path: '/knowledge/tasks', label: '研究任务', icon: Operation },
       { path: '/knowledge/settings', label: 'Wiki 配置', icon: Setting },
-    ],
-  },
-  {
-    label: '管理',
-    items: [
-      { path: '/code-repo', label: '代码仓', icon: FolderOpened },
-      { path: '/inspiration', label: '灵感熔炉', icon: MagicStick },
-      { path: '/radar', label: '智识雷达', icon: DataLine },
     ],
   },
 ]

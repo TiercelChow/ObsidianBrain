@@ -124,8 +124,6 @@
 
 - **Obsidian REST API** (`infra/obsidian_client.rs`)：提供笔记搜索与 CRUD 的底层能力
 - **时间线模块** (`core/timeline.rs`)：记忆引擎的操作事件（新增/修改/删除）作为时间线事件源
-- **智识雷达** (`core/radar.rs`)：雷达纳藏的文章写入 Vault 后，可直接通过记忆引擎搜索
-- **灵感熔炉** (`core/inspiration.rs`)：灵感生成时通过记忆引擎搜索相关笔记片段
 - **API 层** (`api/handlers/`)：将记忆操作暴露为标准 Tool API
 
 ---
@@ -352,18 +350,6 @@
 - 每条记录包含准确的标题和路径信息
 - 修改时间与 Obsidian 中显示一致
 
-### US-07：外部文章纳藏后可搜索
-
-**角色**：小明通过智识雷达发现了一篇好文章
-**场景**：小明调用 `add_to_vault(article_id="xxx")` 将文章保存到 Vault 的 `radar/` 目录。
-**期望**：
-- 文章保存为 Markdown 文件后，立即可被搜索到
-- 后续可通过 `search_memory` 搜索到该文章的内容
-
-**验收条件**：
-- 纳藏文章后，`search_memory` 可搜索到该文章的相关内容
-- 文章的来源信息（URL、标题）保留在 frontmatter 中
-
 ---
 
 ## 4. 非功能需求
@@ -412,26 +398,6 @@
 ```
 
 **说明**：记忆引擎完成操作后发布事件，时间线模块订阅并记录。
-
-### 5.2 智识雷达 → 记忆引擎
-
-```
-场景: add_to_vault 纳藏文章
-流程:
-  1. 雷达模块通过 Obsidian API 将文章写入 Vault（radar/xxx.md）
-  2. 文章立即可被 Obsidian 搜索索引
-  3. 记忆引擎通过 Obsidian API 可搜索到新文章
-
-无需直接接口调用，通过 Obsidian 的实时索引间接触发。
-```
-
-### 5.3 灵感熔炉 → 记忆引擎
-
-```
-接口: MemoryService::search(query: &str, top_k: usize, tags: &[String]) -> Result<Vec<MemorySearchResult>>
-```
-
-**说明**：灵感熔炉需要获取相关笔记片段作为创意素材时，调用记忆引擎的搜索接口。
 
 ### 5.4 API 层 → 记忆引擎
 

@@ -6,6 +6,8 @@
 
 ---
 
+> 2026-09-28 更新：模块 06/07 已退役，相关页面、服务和工具不再提供；代码仓入口归属「日常」，不设「管理」分组。历史 SQLite 迁移仅为数据兼容保留。当前范围见[移除方案](../development/2026-09-28-retire-inspiration-radar-plan.md)。
+
 ## 1. 技术架构详细设计
 
 ### 1.1 分层架构
@@ -52,11 +54,11 @@
 ┌───────────────────────────────────────────────────────────────┐
 │                      执行层 (Handlers)                         │
 │   ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌──────────┐  │
-│   │ search_*   │ │ memory_*   │ │ repo_*     │ │ radar_*  │  │
+│   │ search_*   │ │ memory_*   │ │ repo_*     │ │ wiki_*   │  │
 │   │ handlers   │ │ handlers   │ │ handlers   │ │ handlers │  │
 │   └────────────┘ └────────────┘ └────────────┘ └──────────┘  │
 │   ┌────────────┐ ┌────────────┐                               │
-│   │ timeline_* │ │ inspiration│                               │
+│   │ timeline_* │ │ task_*     │                               │
 │   │ handlers   │ │ handlers   │                               │
 │   └────────────┘ └────────────┘                               │
 └───────────────────────────────────────────────────────────────┘
@@ -128,8 +130,6 @@ src/
 │       └── memory_handler.rs       # search_memory / add_memory 等工具实现
 │       └── repo_handler.rs         # add_code_repo / list_code_repos 等工具实现
 │       └── timeline_handler.rs     # get_timeline 工具实现
-│       └── inspiration_handler.rs  # get_inspiration 工具实现
-│       └── radar_handler.rs        # get_radar / add_to_vault 等工具实现
 │       └── system_handler.rs       # get_stats 工具实现
 │
 ├── tools/                          # 工具定义与注册
@@ -142,8 +142,7 @@ src/
 │   ├── mod.rs
 │   ├── note.rs
 │   ├── memory.rs
-│   ├── repo.rs
-│   └── radar.rs
+│   └── repo.rs
 │
 ├── error.rs                        # 统一错误类型 BrainError
 ├── config.rs                       # 配置加载
@@ -181,8 +180,6 @@ pub struct AppContext {
     pub memory_service: Arc<MemoryService>,
     pub timeline_service: Arc<TimelineService>,
     pub code_repo_service: Arc<CodeRepoService>,
-    pub inspiration_service: Arc<InspirationService>,
-    pub radar_service: Arc<RadarService>,
     pub obsidian_client: Arc<ObsidianClient>,
     pub config: Arc<AppConfig>,
 }
@@ -1046,10 +1043,6 @@ pub fn build_all_definitions() -> Vec<ToolDefinition> {
         generate_docs_def(),
         open_in_vscode_def(),
         get_timeline_def(),
-        get_inspiration_def(),
-        get_radar_def(),
-        add_to_vault_def(),
-        dismiss_radar_item_def(),
         get_stats_def(),
     ]
 }
@@ -1184,67 +1177,6 @@ fn add_code_repo_def() -> ToolDefinition {
             "additionalProperties": false
         }),
         module: "code_repo".to_string(),
-        version: Some("1.0.0".to_string()),
-    }
-}
-```
-
-### 4.5 `get_inspiration` — 完整 JSON Schema
-
-```rust
-fn get_inspiration_def() -> ToolDefinition {
-    ToolDefinition {
-        name: "get_inspiration".to_string(),
-        description: "触发灵感熔炉，基于用户知识库生成创意灵感。三种模式：concept_combo（随机概念组合，跨界碰撞）、reverse_question（反向提问，挖掘盲区）、counterpoint（对立观点，批判性思考）。当用户需要新想法、思维拓展或反思时使用。".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "type": {
-                    "type": "string",
-                    "enum": ["concept_combo", "reverse_question", "counterpoint"],
-                    "description": "灵感模式。concept_combo: 从知识库中随机选取两个远距离概念进行跨界组合；reverse_question: 针对一篇笔记生成你可能没想过的问题；counterpoint: 对笔记观点生成反方论证和逻辑漏洞分析",
-                    "default": "concept_combo"
-                },
-                "note_path": {
-                    "type": "string",
-                    "description": "指定笔记路径（用于 reverse_question 和 counterpoint 模式）。如果不指定则使用最近修改的笔记。"
-                }
-            },
-            "required": [],
-            "additionalProperties": false
-        }),
-        module: "inspiration".to_string(),
-        version: Some("1.0.0".to_string()),
-    }
-}
-```
-
-### 4.6 `get_radar` — 完整 JSON Schema
-
-```rust
-fn get_radar_def() -> ToolDefinition {
-    ToolDefinition {
-        name: "get_radar".to_string(),
-        description: "获取智识雷达推荐——基于你的知识图谱，从外部信息源（arXiv、Hacker News、RSS、Reddit）中筛选出与你当前兴趣最相关的文章和论文。结果按语义相关性排序，并附带与你笔记的关联。".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "limit": {
-                    "type": "integer",
-                    "description": "返回推荐条目数量，默认 10，最大 50",
-                    "default": 10,
-                    "minimum": 1,
-                    "maximum": 50
-                },
-                "query": {
-                    "type": "string",
-                    "description": "可选的查询词，用于进一步过滤推荐结果。如不指定则返回按相关性排序的全部推荐。"
-                }
-            },
-            "required": [],
-            "additionalProperties": false
-        }),
-        module: "radar".to_string(),
         version: Some("1.0.0".to_string()),
     }
 }
@@ -1410,31 +1342,6 @@ fn get_radar_def() -> ToolDefinition {
     "end_date": { "type": "string", "format": "date", "description": "结束日期（YYYY-MM-DD）" }
   },
   "required": ["start_date", "end_date"],
-  "additionalProperties": false
-}
-```
-
-**`add_to_vault`**:
-```json
-{
-  "type": "object",
-  "properties": {
-    "article_id": { "type": "string" },
-    "target_dir": { "type": "string", "description": "vault 内目标目录，默认 'radar/'" }
-  },
-  "required": ["article_id"],
-  "additionalProperties": false
-}
-```
-
-**`dismiss_radar_item`**:
-```json
-{
-  "type": "object",
-  "properties": {
-    "article_id": { "type": "string" }
-  },
-  "required": ["article_id"],
   "additionalProperties": false
 }
 ```
@@ -1829,14 +1736,6 @@ pub async fn initialize_tools(registry: &ToolRegistry, ctx: Arc<AppContext>) {
 
         // 时间线模块
         Arc::new(GetTimelineHandler { ctx: ctx.clone() }),
-
-        // 灵感熔炉模块
-        Arc::new(GetInspirationHandler { ctx: ctx.clone() }),
-
-        // 智识雷达模块
-        Arc::new(GetRadarHandler { ctx: ctx.clone() }),
-        Arc::new(AddToVaultHandler { ctx: ctx.clone() }),
-        Arc::new(DismissRadarItemHandler { ctx: ctx.clone() }),
 
         // 系统模块
         Arc::new(GetStatsHandler { ctx: ctx.clone() }),

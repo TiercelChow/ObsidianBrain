@@ -19,9 +19,7 @@ use crate::config::AppConfig;
 use crate::core::book_wiki::BookWikiService;
 use crate::core::code_repo::manager::{RepoManager, RepoManagerConfig};
 use crate::core::code_repo::note_linker::NoteLinker;
-use crate::core::inspiration::InspirationService;
 use crate::core::memory_service::MemoryService;
-use crate::core::radar::RadarService;
 use crate::core::tasks::TaskService;
 use crate::core::timeline::store::TimelineStore;
 use crate::core::timeline::{MemoManager, TimelineConfig, TimelineService};
@@ -46,8 +44,6 @@ pub struct AppContext {
     pub timeline_service: Arc<TimelineService>,
     pub memo_manager: Arc<MemoManager>,
     pub task_service: Arc<TaskService>,
-    pub inspiration_service: Arc<InspirationService>,
-    pub radar_service: Arc<RadarService>,
     pub book_wiki_service: Arc<BookWikiService>,
     /// Server start time — used to compute uptime in health endpoint.
     pub start_time: chrono::DateTime<chrono::Utc>,
@@ -404,46 +400,6 @@ async fn run_server_async(
         )),
     );
 
-    let llm: Arc<dyn crate::infra::llm_client::LlmProvider> =
-        crate::infra::llm_client::LlmClientFactory::create(&config.llm)
-            .map(Arc::from)
-            .unwrap_or_else(|e| {
-                tracing::warn!("LLM 客户端创建失败: {e}，灵感功能将受限");
-                Arc::from(
-                    crate::infra::llm_client::LlmClientFactory::create(&crate::config::LlmConfig {
-                        provider: "ollama".to_string(),
-                        ..Default::default()
-                    })
-                    .expect("Fallback LLM creation failed"),
-                )
-            });
-
-    let inspiration_service = Arc::new(InspirationService::new(
-        db.clone(),
-        obsidian.clone(),
-        llm,
-        crate::models::inspiration::InspirationConfig::default(),
-    ));
-
-    let radar_config = crate::models::radar::RadarConfig {
-        sources_path: std::path::PathBuf::from("config/radar_sources.toml"),
-        ..Default::default()
-    };
-    let radar_service = match RadarService::new(db.clone(), obsidian.clone(), radar_config) {
-        Ok(service) => Arc::new(service),
-        Err(e) => {
-            tracing::warn!("RadarService 初始化失败: {e}");
-            Arc::new(
-                RadarService::new(
-                    db.clone(),
-                    obsidian.clone(),
-                    crate::models::radar::RadarConfig::default(),
-                )
-                .expect("Fallback RadarService failed"),
-            )
-        }
-    };
-
     // Build context + register tools
     let tool_registry = Arc::new(ToolRegistry::new());
     let ctx = Arc::new(AppContext {
@@ -458,8 +414,6 @@ async fn run_server_async(
         timeline_service,
         memo_manager,
         task_service,
-        inspiration_service,
-        radar_service,
         book_wiki_service,
         start_time,
     });
@@ -688,27 +642,6 @@ mod test_helpers {
                 Arc::new(DeepSeekHarnessRuntime::default()),
             ));
 
-            let llm_config = crate::config::LlmConfig::default();
-            let llm: Arc<dyn crate::infra::llm_client::LlmProvider> = Arc::from(
-                crate::infra::llm_client::LlmClientFactory::create(&llm_config)
-                    .expect("Test LLM client creation failed"),
-            );
-            let inspiration_service = Arc::new(InspirationService::new(
-                db.clone(),
-                obsidian_provider.clone(),
-                llm,
-                crate::models::inspiration::InspirationConfig::default(),
-            ));
-
-            let radar_config = crate::models::radar::RadarConfig {
-                sources_path: dir.path().join("radar_sources.toml"),
-                ..Default::default()
-            };
-            let radar_service = Arc::new(
-                RadarService::new(db.clone(), obsidian_provider.clone(), radar_config)
-                    .expect("Test RadarService creation failed"),
-            );
-
             let ctx = Arc::new(AppContext {
                 config: Arc::new(config),
                 components: Arc::new(std::sync::Mutex::new(ComponentStatus::default())),
@@ -721,8 +654,6 @@ mod test_helpers {
                 timeline_service,
                 memo_manager,
                 task_service,
-                inspiration_service,
-                radar_service,
                 book_wiki_service,
                 start_time: chrono::Utc::now(),
             });

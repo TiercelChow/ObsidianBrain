@@ -153,27 +153,3 @@ export async function uploadImages(files: File[]): Promise<{ paths: string[] }> 
   if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
   return res.json()
 }
-
-// ── Inspiration ──
-export function getInspiration(type?: string, notePath?: string) {
-  return callTool('get_inspiration', {
-    ...(type ? { type } : {}),
-    ...(notePath ? { note_path: notePath } : {})
-  })
-}
-
-// ── Radar ──
-export function getRadar(limit?: number) {
-  return callTool('get_radar', { ...(limit ? { limit } : {}) })
-}
-
-export function addToVault(articleId: string, targetDir?: string) {
-  return callTool('add_to_vault', {
-    article_id: articleId,
-    ...(targetDir ? { target_dir: targetDir } : {})
-  })
-}
-
-export function dismissRadarItem(articleId: string) {
-  return callTool('dismiss_radar_item', { article_id: articleId })
-}

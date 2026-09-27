@@ -29,10 +29,11 @@ test('scroll observation requires a user gesture and filters overlays', async ()
 })
 
 test('sub-navigation ownership cleans up without erasing a successor route', async () => {
-  const [nav, tasks, inspiration] = await Promise.all([source('composables/useMobileSubnav.ts'), source('views/Tasks.vue'), source('views/Inspiration.vue')])
+  const [nav, tasks, knowledge] = await Promise.all([source('composables/useMobileSubnav.ts'), source('views/Tasks.vue'), source('components/knowledge/KnowledgePageShell.vue')])
   assert.match(nav, /current\.value\?\.owner === owner/)
   assert.match(tasks, /select: \(\) => changeView\(mode\)/)
-  assert.match(inspiration, /selectedMode\.value = mode\.value/)
+  assert.match(knowledge, /useMobileSubnav\(/)
+  assert.match(knowledge, /active: route\.path === item\.path/)
 })
 
 test('compact dock and orb keep the original bottom dock height and footprint', async () => {

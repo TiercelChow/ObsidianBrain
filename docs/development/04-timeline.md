@@ -487,8 +487,6 @@ pub async fn search_memos(&self, query: MemoQuery) -> Result<Vec<Memo>, BrainErr
 
 ### 10.2 与其他模块的集成
 
-- **灵感熔炉**：从小记中提取灵感素材
-- **智识雷达**：基于小记内容推荐相关内容
 - **时间线回顾**：与其他模块的时间线事件融合
 
 ---

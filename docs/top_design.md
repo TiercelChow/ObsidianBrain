@@ -1,6 +1,6 @@
 # ObsidianBrain — 顶层设计文档
 
-> **版本**: v1.3 | **最后更新**: 2026-09-15 | **状态**: 持续演进
+> **版本**: v1.4 | **最后更新**: 2026-09-28 | **状态**: 持续演进
 
 ---
 
@@ -22,8 +22,6 @@ ObsidianBrain 是一个运行在本地的 **Rust 知识引擎**，对外提供�
 |---|---|
 | 笔记写了就忘，难以跨笔记关联 | 通过 Obsidian API 快速检索笔记，支持全文搜索和标签过滤 |
 | 代码仓库与知识笔记割裂 | 代码仓 Hub 打通笔记 ↔ 仓库双向链接 |
-| 缺乏跨界灵感触发 | 灵感熔炉主动制造知识碰撞 |
-| 外部信息过载，手动筛选成本高 | 智识雷达基于个人知识图谱做个性化推荐 |
 | 时间维度上的知识演变不可见 | 时间线回溯知识动态 |
 | 短期待办容易遗忘，长期目标难以持续拆解和追踪 | 个人任务模块统一管理待办、任务树、进展和日历，并持久化到本地 SQLite |
 | 书籍读完后难以形成可查询、可验证的长期知识 | 阅境轩每本书绑定独立 Book Wiki，以 SQLite 管理实体、论断、关系、引用、问答和研究任务 |
@@ -113,8 +111,7 @@ ObsidianBrain/
 ├── Cargo.toml
 ├── docker-compose.yml          # Qdrant（可选，当前未使用）
 ├── config/
-│   ├── default.toml            # 默认配置文件
-│   └── radar_sources.toml      # 智识雷达源配置
+│   └── default.toml            # 默认配置文件
 ├── docs/
 │   └── top_design.md           # 本文档
 ├── migrations/                 # SQLite schema 迁移
@@ -133,8 +130,7 @@ ObsidianBrain/
 │       │   ├── timeline.rs          # 时间线
 │       │   ├── tasks/               # 个人任务管理
 │       │   ├── code_repo/           # 代码仓管理
-│       │   ├── inspiration/         # 灵感熔炉
-│       │   └── radar/               # 智识雷达
+│       │   └── book_wiki/           # 每书独立知识库、问答与研究任务
 │       ├── infra/              # 基础设施层
 │       │   ├── mod.rs
 │       │   ├── sqlite_store.rs      # SQLite 元数据存储
@@ -151,8 +147,6 @@ ObsidianBrain/
 │           ├── note.rs
 │           ├── memory.rs
 │           ├── repo.rs
-│           ├── radar.rs
-│           ├── inspiration.rs
 │           ├── timeline.rs
 │           └── task.rs
 └── frontend/                   # Vue3 前端
@@ -224,7 +218,7 @@ Agent 通过短时、单书、工具白名单能力令牌读取来源和提交�
 └──────────────────────────────────────┘
 ```
 
-**注意**：不再需要 Qdrant Docker 容器或普通笔记的全文/向量索引。普通 Obsidian 笔记仍由 Obsidian 管理；个人任务与 Book Wiki 的生成知识以 SQLite 为唯一权威存储，代码仓、雷达和时间线等模块按各自设计使用 SQLite 状态或投影。
+**注意**：不再需要 Qdrant Docker 容器或普通笔记的全文/向量索引。普通 Obsidian 笔记仍由 Obsidian 管理；个人任务与 Book Wiki 的生成知识以 SQLite 为唯一权威存储，代码仓和时间线等模块按各自设计使用 SQLite 状态或投影。
 
 ---
 
@@ -282,27 +276,6 @@ struct CommitSummary {
 }
 ```
 
-### 4.4 雷达条目 (RadarItem)
-
-```rust
-struct RadarItem {
-    id: Uuid,
-    title: String,
-    summary: String,
-    source: String,             // "arxiv" | "hackernews" | "reddit" | "rss:xxx"
-    url: String,
-    relevance_score: f32,       // 与用户知识的相似度（基于标签匹配）
-    related_notes: Vec<PathBuf>,// 关联的笔记（基于标签匹配）
-    status: RadarStatus,        // New | Read | Saved | Dismissed
-    fetched_at: DateTime<Utc>,
-    published_at: Option<DateTime<Utc>>,
-}
-
-enum RadarStatus { New, Read, Saved, Dismissed }
-```
-
-**注意**：当前版本的相关性计算基于标签匹配，不使用向量相似度。这简化了架构，但相关性精度受限于标签系统的覆盖度。
-
 ### 4.5 时间线事件 (TimelineEvent)
 
 ```rust
@@ -317,6 +290,8 @@ struct TimelineEvent {
 
 enum EventType { NoteCreated, NoteModified, RepoCommit, RadarSaved, MemoryCreated }
 ```
+
+`RadarSaved` 仅用于解码已存在的历史时间线事件；已没有对应服务、工具或新事件生产者。
 
 ### 4.6 个人任务 (Task)
 
@@ -377,6 +352,8 @@ struct KnowledgeEntry {
 
 ### 4.8 SQLite Schema
 
+以下列出仍在使用的表；历史 `002/003/006/007/011` 迁移保持不变，旧表仅保留数据兼容，不再提供对应服务或 CRUD 工具。
+
 ```sql
 -- 代码仓库注册信息
 CREATE TABLE code_repos (
@@ -392,28 +369,6 @@ CREATE TABLE note_repo_links (
     repo_name   TEXT NOT NULL REFERENCES code_repos(name),
     linked_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (note_path, repo_name)
-);
-
--- 雷达条目缓存
-CREATE TABLE radar_items (
-    id          TEXT PRIMARY KEY,
-    title       TEXT NOT NULL,
-    summary     TEXT,
-    source      TEXT NOT NULL,
-    url         TEXT NOT NULL UNIQUE,
-    status      TEXT DEFAULT 'new',
-    relevance_score REAL,
-    fetched_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-    published_at DATETIME
-);
-
--- 灵感历史记录
-CREATE TABLE inspiration_history (
-    id          TEXT PRIMARY KEY,
-    type        TEXT NOT NULL,   -- "concept_combo" | "reverse_question" | "counterpoint"
-    input_refs  JSON,            -- 输入的笔记/仓库引用
-    output      TEXT NOT NULL,
-    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 应用状态与元信息
@@ -482,8 +437,6 @@ obsidian://open?vault=<vault_name>&file=<encoded_path>
 |---|---|---|
 | `summarize_today_notes` | 总结今日修改/新增的笔记 | 文件监控日志 → 读取今日笔记 → LLM 摘要 |
 | `weekly_review` | 生成本周知识动态摘要 | 时间线查询 → 统计聚合 → LLM 综述 |
-| `find_inspiration` | 触发灵感熔炉 | 随机选取 → LLM 创意生成 |
-| `fetch_radar` | 触发智识雷达 | 查询雷达缓存 → 排序过滤 |
 
 **技能扩展（YAML 配置）**：
 
@@ -505,13 +458,9 @@ steps:
     params:
       query: "{{topic}}"
       top_k: 10
-  - action: get_radar
-    params:
-      query: "{{topic}}"
-      limit: 5
   - action: llm_summarize
     params:
-      context: "{{steps[0].results + steps[1].results}}"
+      context: "{{steps[0].results}}"
       instruction: "基于以下资料，生成关于 '{{topic}}' 的研究摘要"
 ```
 
@@ -596,10 +545,6 @@ GET  /v1/health             → 健康检查
 | | `add_task_progress` | `task_id, note, percent_after?, expected_version` | 追加任务进展 |
 | | `get_task_calendar` | `start_date, end_date, filters?` | 查询日历范围内的任务 |
 | | `archive_task` | `task_id, archived, expected_version` | 归档或恢复任务 |
-| **灵感** | `get_inspiration` | `type?, note_path?` | 获取灵感（概念碰撞/反向提问/对立观点） |
-| **雷达** | `get_radar` | `limit?, query?` | 获取外部信息推荐 |
-| | `add_to_vault` | `article_id, target_dir?` | 文章保存到 vault |
-| | `dismiss_radar_item` | `article_id` | 标记为已忽略 |
 | **系统** | `get_stats` | 无 | 系统统计信息 |
 
 ---
@@ -646,13 +591,13 @@ get_timeline(start_date: "2026-05-01", end_date: "2026-05-28")
 
 #### 与其他模块的协作
 
-- **灵感熔炉**：可查询"去年今日的笔记"作为创意素材
 - **周报生成**：`weekly_review` 技能基于时间线数据聚合
-- **雷达**：时间线事件作为用户兴趣漂移的参考信号
 
 ---
 
 ### 📦 5.3 本地代码仓管理 (Code Repository Hub)
+
+导航入口：桌面侧边栏和手机「全部功能」的「日常 → 代码仓」，保持 `/code-repo` 路径及原有功能；不再设置「管理」分组。
 
 #### 定位
 
@@ -727,162 +672,6 @@ add_code_repo(path: "/Users/me/projects/my-app", name: "my-app")
 
 ---
 
-### ⚡ 5.4 灵感熔炉 (Inspiration Forge)
-
-#### 目标
-
-故意制造"知识碰撞"——用用户自己的笔记和代码库为原料，产生新想法。
-
-#### 5.4.1 三种灵感模式
-
-| 模式 | `type` 参数 | 机制 |
-|---|---|---|
-| 🎲 随机概念组合 | `"concept_combo"` | 从 vault 标签/关键词和仓库名中随机抽取两个距离较远的概念，LLM 生成跨界联想 |
-| ❓ 反向提问 | `"reverse_question"` | 选取一篇笔记（指定或最近修改），LLM 生成 3 个用户可能没想过的问题 |
-| ⚔️ 对立观点 | `"counterpoint"` | 对指定笔记生成反方观点和逻辑漏洞分析 |
-
-#### 5.4.2 随机概念组合算法
-
-```
-1. 构建概念池：
-   ├── vault 所有标签（按 TF-IDF 加权）
-   ├── 仓库名称 + 主要技术栈
-   └── 近期高频关键词（从最近 30 天笔记提取）
-
-2. 选取两个概念：
-   ├── 第一个：随机选取
-   └── 第二个：与第一个的标签共现度最低的 top-10 中随机选取
-       （确保"距离远"但非完全无关）
-
-3. LLM 生成创意 prompt：
-   "概念 A: {concept_a} (来源: {source_a})
-    概念 B: {concept_b} (来源: {source_b})
-    请提出一个将这两个概念结合的创新想法，
-    并给出具体的实践建议。"
-
-4. 附带相关笔记和代码的 Obsidian 链接
-```
-
-#### 5.4.3 工具调用
-
-```
-get_inspiration(type: "concept_combo")
-get_inspiration(type: "reverse_question", note_path: "essays/sleep-experiment.md")
-get_inspiration(type: "counterpoint", note_path: "essays/ai-future.md")
-```
-
-返回示例：
-
-```json
-{
-  "type": "concept_combo",
-  "concept_a": {"term": "缓存替换策略", "source": "note: cs/cache-algorithms.md"},
-  "concept_b": {"term": "睡眠实验", "source": "note: life/sleep-experiment.md"},
-  "inspiration": "试着用 LRU 缓存的思路优化你的睡眠实验数据记录：将最近 7 天的数据视为'热数据'保持高频记录，超过 7 天的自动降级为每周摘要——正如缓存淘汰冷数据...",
-  "related_links": [
-    "obsidian://open?vault=brain&file=cs/cache-algorithms.md",
-    "obsidian://open?vault=brain&file=life/sleep-experiment.md"
-  ]
-}
-```
-
----
-
-### 📡 5.5 智识雷达 (Knowledge Radar)
-
-#### 目标
-
-让外部信息来找你的笔记，而不是你去搜索——基于你的知识图谱做个性化推荐。
-
-#### 5.5.1 外部源管理
-
-配置文件 `config/radar_sources.toml`：
-
-```toml
-[[sources]]
-name = "hackernews"
-type = "hackernews"
-enabled = true
-filter = "score > 50"
-
-[[sources]]
-name = "arxiv-cs"
-type = "arxiv"
-enabled = true
-categories = ["cs.AI", "cs.CL", "cs.SE"]
-query = "LLM OR large language model OR retrieval"
-
-[[sources]]
-name = "tech-rss"
-type = "rss"
-enabled = true
-feeds = [
-    "https://blog.rust-lang.org/feed.xml",
-    "https://simonwillison.net/atom/everything/",
-]
-
-[[sources]]
-name = "reddit-programming"
-type = "reddit"
-enabled = false
-subreddits = ["programming", "rust"]
-```
-
-**定时拉取**：通过 tokio-cron-scheduler 每 6 小时执行一次（可配置）。
-
-#### 5.5.2 个性化相关性排序
-
-```
-1. 构建用户兴趣向量：
-   ├── 最近 30 天活跃笔记的 embedding 加权平均
-   ├── 权重：越近越高，access_count 越高权重越大
-   └── 标签频率作为辅助信号
-
-2. 新文章处理：
-   ├── 提取标题 + 摘要 → 生成 embedding
-   ├── 与用户兴趣向量计算余弦相似度
-   └── 过滤：相似度 > 阈值（默认 0.7）且不在已读/已忽略列表
-
-3. 排序：
-   ├── 主排序：语义相似度
-   ├── 加权：来源可信度、时效性（越新越高）
-   └── 去重：与已有笔记内容重复的降权
-```
-
-#### 5.5.3 工具调用
-
-```
-get_radar(limit: 5)
-```
-
-返回：
-
-```json
-{
-  "items": [
-    {
-      "id": "radar-xxxx",
-      "title": "Retrieval-Augmented Generation for Large Language Models: A Survey",
-      "summary": "本文系统综述了 RAG 技术的最新进展...",
-      "source": "arxiv",
-      "url": "https://arxiv.org/abs/xxxx.xxxxx",
-      "relevance_score": 0.89,
-      "related_notes": ["ai/rag-notes.md", "ai/llm-architecture.md"],
-      "published_at": "2026-05-25"
-    }
-  ]
-}
-```
-
-**一键纳藏**：`add_to_vault(article_id, target_dir?)`
-
-- 下载文章正文（readability 提取）
-- 生成 Obsidian 笔记（含来源、链接、自动摘要）
-- 写入 vault 指定目录（默认 `radar/`）
-- 记忆系统自动索引
-
----
-
 ### ✅ 5.6 个人任务管理 (Tasks)
 
 #### 定位
@@ -952,12 +741,6 @@ max_tree_depth = 20
 max_nodes_per_document = 5000
 default_page_size = 50
 calendar_max_range_days = 366
-
-[radar]
-fetch_interval_hours = 6
-relevance_threshold = 0.7
-max_items_per_source = 20
-readability_enabled = true    # 文章正文提取
 
 [storage]
 db_path = "./data/brain.db"
@@ -1044,8 +827,8 @@ enum BrainError {
 ### 8.2 优化策略
 
 - **连接池**：reqwest 连接池复用 HTTP 连接
-- **缓存层**：仓库元信息、雷达结果等缓存在 SQLite，TTL 可控
-- **懒加载**：雷达源仅在定时任务时拉取，不阻塞主流程
+- **缓存层**：仓库元信息等缓存在 SQLite，TTL 可控
+- **懒加载**：页面按需加载，知识库任务在后台执行，不阻塞导航
 - **防抖**：文件变更事件防抖，避免频繁触发
 
 ---
@@ -1077,8 +860,6 @@ enum BrainError {
 - ✅ 统一的 Tool API 层（LLM 直接调用）
 - ✅ 代码仓卡片信息与笔记双向关联
 - ✅ 自动文档化（LLM 生成项目文档笔记）
-- ✅ 灵感熔炉的个性化跨界组合
-- ✅ 智识雷达的语义相关性排序
 - ✅ 跨模块的技能编排
 
 ---
@@ -1114,13 +895,9 @@ enum BrainError {
 - [x] 时间线数据收集与查询
 - [x] 工具：`add_code_repo`, `list_code_repos`, `get_repo_detail`, `link_note_to_repo`, `get_linked_notes`, `open_in_vscode`, `get_timeline`
 
-### Phase 3: 灵感 + 雷达 ✅ 已完成
+### Phase 3: 已退役
 
-- [x] 灵感熔炉三种模式实现（LLM 生成）
-- [x] 雷达外部源拉取（RSS、HN、arXiv、Reddit）
-- [x] 基于标签的相关性排序
-- [x] 文章纳藏到 vault
-- [x] 工具：`get_inspiration`, `get_radar`, `add_to_vault`, `dismiss_radar_item`
+原 06/07 功能及工具已移除，仅保留历史迁移与数据兼容。
 
 ### Phase 4: 打磨与增强（持续）
 
@@ -1201,5 +978,5 @@ enum BrainError {
 | OpenAI Embedding API 费用 | 大量笔记首次索引费用较高 | 增量索引 + 本地 Embedding 备选方案 |
 | Qdrant 容器依赖 | 增加部署复杂度 | 提供 `docker compose up` 一键启动；后续评估内嵌向量库 |
 | 中文分词质量 | 影响搜索准确性 | jieba-rs + 自定义词典（从 vault 标签生成） |
-| LLM 生成质量不稳定 | 文档化/灵感输出可能低质量 | 多 prompt 模板 + 用户反馈调整 + 输出后处理 |
+| LLM 生成质量不稳定 | 文档化/知识问答输出可能低质量 | 多 prompt 模板 + 用户反馈调整 + 输出后处理 |
 | 大 vault 性能 | 数万篇笔记索引/搜索变慢 | 增量索引 + Tantivy 分片 + Qdrant 分区 |

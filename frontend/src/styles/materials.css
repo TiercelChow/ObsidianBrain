@@ -109,9 +109,8 @@
 :root[data-theme] :is(
   .liquid-glass, [data-glass], .glass-surface, .glass-surface-heavy, .glass-panel, .knowledge-surface,
   .el-card, .stat-card, .module-card, .status-card, .tool-card, .stat-chip,
-  .result-card, .recent-card, .repo-card, .mode-option, .radar-card, .insight-card,
-  .config-card, .combo-result, .question-result, .counterpoint-result,
-  .assessment, .pane, .knowledge-search, .knowledge-tabs, .chat-composer, .dock-glass,
+  .result-card, .recent-card, .repo-card, .config-card,
+  .pane, .knowledge-search, .knowledge-tabs, .chat-composer, .dock-glass,
   .reader-topbar, .task-toolbar, .search-box, .shelf-search, .task-search,
   .mobile-filter-summary, .reader-selection-menu,
   .path-trigger, .reader-toast, .error-banner, .undo-snackbar, .published-notice,
@@ -171,7 +170,7 @@
 :root[data-theme] :is(
   .el-input__wrapper, .el-select__wrapper, .el-range-editor, .el-textarea__inner,
   .glass-textarea, .glass-chip, .glass-icon-btn, .glass-btn,
-  .lang-tag, .tag, .stat-chip .stat-label, .concept-chip, .question-item, .counterpoint-item
+  .lang-tag, .tag, .stat-chip .stat-label
 ) {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
@@ -303,10 +302,6 @@
 }
 :root[data-theme] :is(.knowledge-search, .search-box, .task-search, .shelf-search):focus-within {
   --material-border: var(--accent-border);
-}
-:root[data-theme] .mode-option.active {
-  --material-border: var(--accent-border);
-  --material-fill: color-mix(in srgb, var(--accent) 8%, var(--glass-content-fill));
 }
 :root[data-theme] .mobile-filter-summary.active {
   --material-border: var(--accent-border);

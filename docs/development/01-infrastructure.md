@@ -7,6 +7,8 @@
 
 ---
 
+> 2026-09-28 更新：模块 06/07 已退役，相关页面、服务和工具不再提供；代码仓入口归属「日常」，不设「管理」分组。历史 SQLite 迁移仅为数据兼容保留。当前范围见[移除方案](../development/2026-09-28-retire-inspiration-radar-plan.md)。
+
 ## 1. 技术架构详细设计
 
 ### 1.1 整体架构定位
@@ -21,7 +23,7 @@
 │  API 层 (Axum) ──── 工具注册表 ──── 技能编排器 ── 事件总线  │
 ├─────────────────────────────────────────────────────────────┤
 │  核心服务层                                                  │
-│  Memory │ Timeline │ CodeRepo │ Inspiration │ Radar         │
+│  Memory │ Timeline │ CodeRepo │ Book Wiki   │ Tasks         │
 ├─────────────────────────────────────────────────────────────┤
 │  ▶ 基础设施层（本文档范围）◀                                  │
 │  ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌────────────────┐  │
@@ -46,8 +48,6 @@ AppConfig ←──── 所有模块（配置注入）
     ├──→ SqliteStore（元数据持久化）
     │       ↑
     │       ├── CodeRepo Service
-    │       ├── Radar Service
-    │       └── Inspiration Service
     │
     ├──→ FileWatcher（文件变更感知，可选）
     │       ↑
@@ -59,8 +59,6 @@ AppConfig ←──── 所有模块（配置注入）
     │
     └──→ LlmClient（LLM 调用）
             ↑
-            ├── Inspiration Service
-            ├── Radar Service
             └── CodeRepo Service（文档生成）
 ```
 
@@ -72,7 +70,6 @@ AppConfig ←──── 所有模块（配置注入）
 - **Worker Pool**：Tokio 多线程调度器处理工具调用
 - **后台任务**：
   - FileWatcher 事件循环（独立线程 + channel 通知，可选）
-  - Radar 定时拉取（tokio-cron-scheduler）
 - **Channel 通信**：
   - `tokio::sync::mpsc`：FileWatcher → Memory Service 变更事件
   - `tokio::sync::broadcast`：全局事件总线
@@ -126,7 +123,6 @@ pub struct AppConfig {
     pub llm: LlmConfig,
     pub memory: MemoryConfig,
     pub timeline: TimelineConfig,
-    pub radar: RadarConfig,
     pub storage: StorageConfig,
     pub logging: LoggingConfig,
 }
@@ -238,23 +234,6 @@ fn default_date_formats() -> Vec<String> {
     ]
 }
 
-/// 雷达配置
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct RadarConfig {
-    #[serde(default = "default_fetch_interval")]
-    pub fetch_interval_hours: u64,
-    #[serde(default = "default_relevance_threshold")]
-    pub relevance_threshold: f32,
-    #[serde(default = "default_max_items")]
-    pub max_items_per_source: usize,
-    #[serde(default = "default_true")]
-    pub readability_enabled: bool,
-}
-
-fn default_fetch_interval() -> u64 { 6 }
-fn default_relevance_threshold() -> f32 { 0.7 }
-fn default_max_items() -> usize { 20 }
-
 /// 存储配置
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StorageConfig {
@@ -352,13 +331,6 @@ impl Validate for AppConfig {
         if self.memory.chunk_min_tokens >= self.memory.chunk_max_tokens {
             return Err(BrainError::ConfigError(
                 "chunk_min_tokens 必须小于 chunk_max_tokens".to_string()
-            ));
-        }
-
-        // 校验雷达参数
-        if !(0.0..=1.0).contains(&self.radar.relevance_threshold) {
-            return Err(BrainError::ConfigError(
-                "relevance_threshold 必须在 0.0~1.0 之间".to_string()
             ));
         }
 
@@ -542,7 +514,7 @@ CREATE TABLE IF NOT EXISTS note_repo_links (
 CREATE INDEX IF NOT EXISTS idx_note_repo_links_repo ON note_repo_links(repo_name);
 ```
 
-**migrations/002_radar_items.sql**:
+**历史兼容 migrations/002_radar_items.sql（不再对应运行时功能）**:
 ```sql
 CREATE TABLE IF NOT EXISTS radar_items (
     id          TEXT PRIMARY KEY,
@@ -562,7 +534,7 @@ CREATE INDEX IF NOT EXISTS idx_radar_items_score ON radar_items(relevance_score 
 CREATE INDEX IF NOT EXISTS idx_radar_items_source ON radar_items(source);
 ```
 
-**migrations/003_inspiration.sql**:
+**历史兼容 migrations/003_inspiration.sql（不再对应运行时功能）**:
 ```sql
 CREATE TABLE IF NOT EXISTS inspiration_history (
     id          TEXT PRIMARY KEY,

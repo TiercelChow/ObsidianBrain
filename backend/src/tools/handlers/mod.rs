@@ -6,15 +6,11 @@
 //! - `reader_handlers` — list_local_dir, read_local_file, stat_local_path, get/save_reader_history, get/save_reader_books (Markdown Reader)
 //! - `code_repo_handlers` — add_code_repo, list_code_repos, get_repo_detail, link_note_to_repo, get_linked_notes, open_in_vscode
 //! - `timeline_handlers` — get_timeline
-//! - `inspiration_handlers` — get_inspiration
-//! - `radar_handlers` — get_radar, add_to_vault, dismiss_radar_item
 
 pub mod book_wiki_handlers;
 pub mod code_repo_handlers;
 pub mod config_handlers;
-pub mod inspiration_handlers;
 pub mod memory_handlers;
-pub mod radar_handlers;
 pub mod reader_handlers;
 pub mod search_handlers;
 pub mod task_handlers;
@@ -27,15 +23,16 @@ use crate::tools::handlers::code_repo_handlers::*;
 use crate::tools::handlers::config_handlers::{
     GetConfigHandler, SaveConfigHandler, VerifyLlmHandler,
 };
-use crate::tools::handlers::inspiration_handlers::*;
 use crate::tools::handlers::memory_handlers::GetMemoryStatsHandler;
-use crate::tools::handlers::radar_handlers::*;
 use crate::tools::handlers::reader_handlers::*;
 use crate::tools::handlers::search_handlers::*;
 use crate::tools::handlers::task_handlers::*;
 use crate::tools::handlers::timeline_handlers::*;
 use crate::tools::registry::ToolRegistry;
 use crate::AppContext;
+
+#[cfg(test)]
+mod retirement_tests;
 
 /// Register all tool handlers into the given registry.
 ///
@@ -78,14 +75,6 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     registry.register(Arc::new(AddTaskProgressHandler)).await;
     registry.register(Arc::new(GetTaskCalendarHandler)).await;
     registry.register(Arc::new(ArchiveTaskHandler)).await;
-
-    // Inspiration module
-    registry.register(Arc::new(GetInspirationHandler)).await;
-
-    // Radar module
-    registry.register(Arc::new(GetRadarHandler)).await;
-    registry.register(Arc::new(AddToVaultHandler)).await;
-    registry.register(Arc::new(DismissRadarItemHandler)).await;
 
     // System config
     registry.register(Arc::new(GetConfigHandler)).await;

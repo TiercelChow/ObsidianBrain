@@ -9,6 +9,8 @@
 
 ### 1.1 定位
 
+界面入口统一位于「日常 → 代码仓」，桌面与手机共用，路径仍为 `/code-repo`；不再设「管理」导航分组。
+
 代码仓聚合面板（Code Repository Hub，以下简称 CodeRepo）是 ObsidianBrain 的轻量级代码仓管理模块。它**不涉及代码语义检索**，而是聚焦于以下四个核心能力：
 
 | 能力 | 说明 |
@@ -711,13 +713,6 @@ TimelineEvent {
 }
 ```
 
-### 5.3 与灵感熔炉 (Inspiration Service) 的接口
-
-| 交互方向 | 接口 | 说明 |
-|---|---|---|
-| Inspiration → CodeRepo | `get_all_repo_names()` | 灵感熔炉获取仓库名称列表，作为概念池的素材 |
-| Inspiration → CodeRepo | `get_repo_tags(repo_name)` | 获取仓库的主要技术关键词，用于概念距离计算 |
-
 ### 5.4 与文件监控 (FileWatcher) 的接口
 
 | 交互方向 | 接口 | 说明 |
@@ -984,5 +979,4 @@ tags:
 - [ ] 仓库注册事件被时间线记录
 - [ ] commit 事件被时间线记录并可按日期范围查询
 - [ ] 文档生成事件被时间线记录
-- [ ] 灵感熔炉可获取仓库名称和技术关键词
 - [ ] 记忆引擎可索引生成的文档并携带 source_repo 标签

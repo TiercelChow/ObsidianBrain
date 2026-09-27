@@ -6,6 +6,8 @@
 
 ---
 
+> 2026-09-28 更新：模块 06/07 已退役，相关页面、服务和工具不再提供；代码仓入口归属「日常」，不设「管理」分组。历史 SQLite 迁移仅为数据兼容保留。当前范围见[移除方案](../development/2026-09-28-retire-inspiration-radar-plan.md)。
+
 ## 1. 模块概述
 
 ### 1.1 定位
@@ -39,8 +41,8 @@ Tool Protocol & API 层（以下简称"协议层"）是 ObsidianBrain 引擎的*
               ┌───────────────────────┐
               │   核心服务层 (Services) │
               │  Memory / Timeline /  │
-              │  CodeRepo / Radar /   │
-              │  Inspiration          │
+              │  CodeRepo / Tasks /   │
+              │  Book Wiki            │
               └───────────────────────┘
 ```
 
@@ -189,25 +191,11 @@ Tool Protocol & API 层（以下简称"协议层"）是 ObsidianBrain 引擎的*
 |---|---|---|---|---|
 | `get_timeline` | `start_date: string`（必填）, `end_date: string`（必填） | `{ events: TimelineDay[], summary: string }` | 查询指定日期范围内的时间线事件 | `timeline` |
 
-### 3.5 灵感熔炉模块
-
-| 工具名 | 参数 | 返回值 | 描述 | 所属模块 |
-|---|---|---|---|---|
-| `get_inspiration` | `type: string?`（默认"concept_combo"，可选"reverse_question"/"counterpoint"）, `note_path: string?` | `{ type: string, inspiration: string, related_links: string[] }` | 触发灵感熔炉，生成跨界创意/反向提问/对立观点 | `inspiration` |
-
-### 3.6 智识雷达模块
-
-| 工具名 | 参数 | 返回值 | 描述 | 所属模块 |
-|---|---|---|---|---|
-| `get_radar` | `limit: int?`（默认10）, `query: string?` | `{ items: RadarItem[] }` | 获取外部信息个性化推荐列表 | `radar` |
-| `add_to_vault` | `article_id: string`（必填）, `target_dir: string?` | `{ note_path: string, title: string }` | 将雷达文章保存到 Obsidian vault | `radar` |
-| `dismiss_radar_item` | `article_id: string`（必填） | `{ dismissed: bool }` | 标记雷达条目为已忽略 | `radar` |
-
 ### 3.7 系统模块
 
 | 工具名 | 参数 | 返回值 | 描述 | 所属模块 |
 |---|---|---|---|---|
-| `get_stats` | 无 | `{ vault: VaultStats, memory: MemoryStats, repos: RepoStats, radar: RadarStats, uptime: string }` | 获取系统整体统计信息 | `system` |
+| `get_stats` | 无 | `{ vault: VaultStats, memory: MemoryStats, repos: RepoStats, uptime: string }` | 获取系统整体统计信息 | `system` |
 
 ---
 
@@ -500,7 +488,6 @@ Claude Desktop                    ObsidianBrain (MCP Server)
 | `MEMORY_NOT_FOUND` | 200 | 指定 ID 的记忆不存在 | 使用 search_memory 搜索记忆 |
 | `REPO_NOT_FOUND` | 200 | 指定名称的代码仓库未注册 | 使用 add_code_repo 注册仓库，或使用 list_code_repos 查看已注册仓库 |
 | `REPO_PATH_INVALID` | 200 | 代码仓库路径不存在或不是 Git 仓库 | 检查路径是否正确，确保路径下已初始化 Git 仓库 |
-| `RADAR_ITEM_NOT_FOUND` | 200 | 指定 ID 的雷达条目不存在 | 使用 get_radar 获取最新推荐列表 |
 | `SEARCH_ERROR` | 200 | 搜索执行失败 | 请稍后重试，或尝试简化搜索关键词 |
 | `OBSIDIAN_API_ERROR` | 200 | Obsidian REST API 调用失败 | 请确保 Obsidian 正在运行且 Local REST API 插件已启用 |
 | `LLM_API_ERROR` | 200 | LLM API 调用失败 | 请稍后重试，或检查 LLM 配置 |
@@ -583,8 +570,8 @@ Claude Desktop                    ObsidianBrain (MCP Server)
    │                          │     (MemoryService /     │
    │                          │      TimelineService /   │
    │                          │      CodeRepoService /   │
-   │                          │      InspirationService / │
-   │                          │      RadarService)       │
+   │                          │      TaskService /        │
+   │                          │      BookWikiService)     │
    │                          │                          │
    │                          │  ←── ServiceResult ───── │
    │                          │                          │

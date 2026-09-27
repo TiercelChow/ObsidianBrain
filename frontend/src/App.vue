@@ -432,10 +432,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
   .el-card,
   .stat-card, .module-card, .status-card, .tool-card,
   .stat-chip, .result-card, .recent-card,
-  .repo-card, .mode-option, .radar-card,
-  .insight-card, .config-card,
-  .combo-result, .question-result, .counterpoint-result,
-  .assessment {
+  .repo-card, .config-card {
     background: color-mix(in srgb, var(--bg-glass-strong) 88%, var(--bg-base)) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;

@@ -13,6 +13,7 @@ pub enum EventType {
     NoteCreated,
     NoteModified,
     RepoCommit,
+    /// Decode existing timeline records only; no active service produces these events.
     RadarSaved,
     MemoryCreated,
 }

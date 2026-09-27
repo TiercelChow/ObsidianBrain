@@ -8,6 +8,7 @@
  * GLASS_MATERIAL_ONLY=1 verifies optical roles, themes, fallback and interaction.
  * GLASS_CONTROLS_ONLY=1 checks neutral actions, page sidebars and long settings fields.
  * SIDEBAR_LAYOUT_ONLY=1 samples navigation geometry during toggles and interruption.
+ * RETIRED_MODULES_ONLY=1 checks daily CodeRepo navigation and retired bookmarks.
  */
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir } from 'node:fs/promises'
@@ -23,6 +24,7 @@ const dockOnly = process.env.MOBILE_DOCK_ONLY === '1'
 const glassOnly = process.env.GLASS_MATERIAL_ONLY === '1'
 const controlsOnly = process.env.GLASS_CONTROLS_ONLY === '1'
 const sidebarOnly = process.env.SIDEBAR_LAYOUT_ONLY === '1'
+const retirementOnly = process.env.RETIRED_MODULES_ONLY === '1'
 const frontendRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const screenshotDir = process.env.SCREENSHOT_DIR || await mkdtemp(join(tmpdir(), 'wiki-reliability-'))
 await mkdir(screenshotDir, { recursive: true })
@@ -156,7 +158,6 @@ const mockApi = {
         case 'save_reader_history': return json(response, success(tool, { ok: true, count: args.history.length }))
         case 'save_reader_books': return json(response, success(tool, { ok: true, count: args.books.length }))
         case 'browse_timeline': return json(response, success(tool, { memos: [{ id: 'glass-memo', content: '## 清晰的内容，通透的操作层\n\n浮动玻璃属于导航与工具，文字内容保留稳定的阅读底色。', timestamp, tags: ['隔离测试'], images: glassOnly ? ['glass-mock.svg', 'glass-mock-2.svg'] : [] }], total: 1, has_more: false }))
-        case 'get_radar': return json(response, success(tool, { items: [{ id: 'glass-radar', title: '隔离测试：内容与交互的层次', summary: '资料保持可读，操作层保持通透。', source: 'Mock', url: 'https://never-contact.example/article', status: 'new', published_at: timestamp, relevance_score: .9 }] }))
         case 'get_memory_stats': return json(response, success(tool, { total_chunks: 0, total_notes: 0, tags: [] }))
         case 'get_memo_stats': return json(response, success(tool, { total_memos: 0 }))
         case 'list_code_repos': return json(response, success(tool, { repos: [] }))
@@ -211,7 +212,7 @@ try {
   const origin = `http://127.0.0.1:${address.port}`
   // Use the Chromium channel's headless mode, not the separately installed headless-shell package.
   browser = await chromium.launch({ headless: true, channel: 'chromium' })
-  const viewports = sidebarOnly ? [{ width: 1440, height: 1000 }, { width: 1024, height: 768 }, { width: 390, height: 844 }, { width: 667, height: 375 }] : controlsOnly ? [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 667, height: 375 }, { width: 900, height: 850 }, { width: 1100, height: 850 }, { width: 1440, height: 1000 }] : mobileLayoutOnly || dockOnly || glassOnly ? [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 667, height: 375 }, { width: 1440, height: 1000 }] : [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]
+  const viewports = sidebarOnly ? [{ width: 1440, height: 1000 }, { width: 1024, height: 768 }, { width: 390, height: 844 }, { width: 667, height: 375 }] : controlsOnly ? [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 667, height: 375 }, { width: 900, height: 850 }, { width: 1100, height: 850 }, { width: 1440, height: 1000 }] : mobileLayoutOnly || dockOnly || glassOnly || retirementOnly ? [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 667, height: 375 }, { width: 1440, height: 1000 }] : [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]
   for (const viewport of viewports) {
     const mode = mobileLayoutOnly || dockOnly || glassOnly || controlsOnly || sidebarOnly ? `${viewport.width}x${viewport.height}` : viewport.width > 768 ? 'desktop' : 'phone'
     const phone = viewport.width <= 768
@@ -277,6 +278,33 @@ try {
     async function selectStage(dialog, title) {
       if (phone && await dialog.locator('.research-stage-directory').getAttribute('open') === null) await dialog.locator('.research-stage-directory > summary').click()
       await dialog.locator('.research-stages button').filter({ hasText: title }).click()
+    }
+    if (retirementOnly) {
+      await page.goto(`${origin}/`)
+      await page.locator('.config-card').first().waitFor()
+      if (phone) {
+        assert.equal(await page.locator('.mobile-dock-item').count(), 4)
+        await page.getByRole('button', { name: '全部模块', exact: true }).click()
+        await page.getByRole('dialog', { name: '全部功能', exact: true }).waitFor()
+      }
+      const nav = page.locator('.app-aside')
+      assert.deepEqual(await nav.locator('.nav-group-label').allTextContents(), ['日常', '知识'])
+      assert.equal(await nav.locator('.nav-item').count(), 10)
+      const daily = nav.locator('.nav-group').filter({ has: page.locator('.nav-group-label', { hasText: '日常' }) })
+      await daily.getByRole('link', { name: '代码仓', exact: true }).click()
+      await page.waitForURL('**/code-repo')
+      await page.locator('.code-repo-page').waitFor()
+      if (phone) await page.locator('.app-aside.mobile-open').waitFor({ state: 'hidden' })
+      await checkLayout(`retirement-${mode}-code-repo`)
+      for (const path of ['/inspiration', '/radar', '/inspiration?mode=counterpoint', '/obsolete-module']) {
+        await page.goto(`${origin}${path}`)
+        await page.waitForURL(url => url.pathname === '/')
+        await page.locator('.config-card').first().waitFor()
+      }
+      assert.deepEqual(pageErrors, [])
+      results.push({ viewport, codeRepoInDaily: true, noManagementGroup: true, fourMobileShortcuts: true, retiredBookmarksSafe: true })
+      await context.close()
+      continue
     }
     if (sidebarOnly) {
       await page.goto(`${origin}/knowledge/settings`)
@@ -516,7 +544,7 @@ try {
           assert.match(normal.rim.mask, /^exclude(?:, exclude)?$/)
         }
         await checkLayout(`glass-${theme}-knowledge`)
-        for (const [path, selector] of [['/', '.stat-card'], ['/reader', '.reader-topbar'], ['/timeline', '.search-box'], ['/tasks', '.task-search'], ['/code-repo', '.code-repo-page'], ['/inspiration', phone ? '.inspiration-page' : '.mode-option'], ['/radar', '.radar-card']]) {
+        for (const [path, selector] of [['/', '.stat-card'], ['/reader', '.reader-topbar'], ['/timeline', '.search-box'], ['/tasks', '.task-search'], ['/code-repo', '.code-repo-page']]) {
           await page.goto(`${origin}${path}${path === '/reader' ? '?view=shelf' : ''}`)
           await page.locator(selector).first().waitFor()
           await checkLayout(`glass-${theme}-${path === '/' ? 'home' : path.slice(1)}`)
@@ -796,10 +824,9 @@ try {
       await page.locator('.mobile-dock-links').getByRole('link', { name: '任务中枢', exact: true }).click()
       await page.waitForURL('**/tasks?view=tasks')
       assert.equal(await page.locator('.task-calendar').count(), 0, 'root navigation keeps the local view in sync')
-      await page.goto(`${origin}/inspiration`)
-      await page.locator('.mobile-sub-dock').getByRole('button', { name: '对立观点', exact: true }).click()
-      await page.locator('.note-selector').waitFor()
-      assert.equal(await page.locator('.mobile-sub-dock button[aria-pressed="true"]').textContent().then(text => text.trim()), '对立观点')
+      await page.goto(`${origin}/knowledge`)
+      await page.locator('.mobile-sub-dock').getByRole('link', { name: 'Wiki', exact: true }).click()
+      await page.waitForURL('**/knowledge/wiki')
       await page.getByRole('button', { name: '全部模块', exact: true }).click()
       await page.getByRole('dialog', { name: '全部功能', exact: true }).waitFor()
       await page.locator('.mobile-overlay').click({ position: { x: 20, y: 20 } })

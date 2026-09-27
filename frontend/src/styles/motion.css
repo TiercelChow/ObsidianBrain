@@ -97,8 +97,6 @@ select:focus-visible,
 .stat-card:active,
 .module-card:active,
 .repo-card:active,
-.radar-card:active,
-.insight-card:active,
 .memo-card-body:active {
   transform: scale(0.985);
   transition-duration: 140ms;
@@ -304,10 +302,8 @@ select:focus-visible,
 
   /* Long feeds skip layout and paint work until they approach the viewport. */
   .memo-card,
-  .radar-card,
   .article-card,
   .repo-card,
-  .insight-card,
   .question-card,
   .gap-card {
     content-visibility: auto;
