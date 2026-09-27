@@ -1,12 +1,13 @@
 import { onMounted, onScopeDispose, ref, watch, type Ref } from 'vue'
-import { advanceDockGesture, boundedScrollTop, createDockGesture, dockReleaseTarget } from '@/utils/mobileDockMotion'
-import { stepSpring } from '@/utils/motionSpring'
+import { advanceDockGesture, boundedScrollTop, createDockGesture, dockReleaseTarget, stepDockSpring } from '@/utils/mobileDockMotion'
 
 /** Only deliberate scrolling of the touched pane drives navigation geometry. */
 export function useMobileDockMotion(root: Ref<HTMLElement | null>, enabled: () => boolean, routeKey: () => string) {
   const progress = ref(0)
   const keyboardOpen = ref(false)
   let velocity = 0
+  let gestureVelocity = 0
+  let targetProgress = 0
   let frame = 0
   let releaseTimer = 0
   let scroller: HTMLElement | null = null
@@ -31,20 +32,23 @@ export function useMobileDockMotion(root: Ref<HTMLElement | null>, enabled: () =
   }
 
   function settle(target: number) {
-    cancelSpring()
+    targetProgress = target
     if (reducedMotion.matches) {
+      cancelSpring()
       progress.value = target
       velocity = 0
       return
     }
+    // Scroll updates only retarget the existing spring; never restart its clock.
+    if (frame) return
     let lastFrame = performance.now()
     function tick(now: number) {
-      const state = stepSpring({ value: progress.value, velocity }, target, (now - lastFrame) / 1000, { response: 0.34, damping: 1 })
+      const state = stepDockSpring({ value: progress.value, velocity }, targetProgress, (now - lastFrame) / 1000)
       lastFrame = now
-      progress.value = Math.min(100, Math.max(0, state.value))
+      progress.value = state.value
       velocity = state.velocity
-      if (Math.abs(state.value - target) < 0.2 && Math.abs(velocity) < 2) {
-        progress.value = target
+      if (Math.abs(state.value - targetProgress) < 0.03 && Math.abs(velocity) < .3) {
+        progress.value = targetProgress
         velocity = 0
         frame = 0
       } else {
@@ -80,14 +84,16 @@ export function useMobileDockMotion(root: Ref<HTMLElement | null>, enabled: () =
     }
     const next = findScroller(event.target)
     if (!next) return
-    if (scroller !== next || performance.now() > intentUntil) {
+    if (event.type === 'touchstart' || scroller !== next || performance.now() > intentUntil) {
+      // Take over the live presentation without jumping to the previous target.
+      cancelSpring()
       scroller = next
       lastTop = boundedScrollTop(next.scrollTop, next.scrollHeight, next.clientHeight)
       gesture = createDockGesture(progress.value)
+      gestureVelocity = 0
+      targetProgress = progress.value
       lastTime = performance.now()
     }
-    // Touch/wheel grabs the presentation, including an unfinished spring.
-    cancelSpring()
     window.clearTimeout(releaseTimer)
     touching = event.type === 'touchstart'
     intentUntil = performance.now() + 900
@@ -98,7 +104,8 @@ export function useMobileDockMotion(root: Ref<HTMLElement | null>, enabled: () =
     window.clearTimeout(releaseTimer)
     releaseTimer = window.setTimeout(() => {
       if (touching) return
-      const target = dockReleaseTarget(progress.value, velocity)
+      // Gesture intent chooses the endpoint; presentation velocity drives motion.
+      const target = reducedMotion.matches ? progress.value : dockReleaseTarget(gesture.progress, gestureVelocity)
       clearGesture()
       settle(target)
     }, 120)
@@ -117,14 +124,14 @@ export function useMobileDockMotion(root: Ref<HTMLElement | null>, enabled: () =
     const top = boundedScrollTop(scroller.scrollTop, scroller.scrollHeight, scroller.clientHeight)
     const delta = top - lastTop
     lastTop = top
-    const previous = progress.value
+    if (delta === 0) return
+    const previous = gesture.progress
     gesture = advanceDockGesture(gesture, delta)
     if (reducedMotion.matches) {
-      if (gesture.direction) progress.value = gesture.direction < 0 ? 100 : 0
-      velocity = 0
+      if (gesture.direction) settle(gesture.direction > 0 ? 100 : 0)
     } else {
-      progress.value = gesture.progress
-      velocity = Math.max(-800, Math.min(800, (progress.value - previous) / Math.max(0.016, (now - lastTime) / 1000)))
+      gestureVelocity = Math.max(-400, Math.min(400, (gesture.progress - previous) / Math.max(0.016, (now - lastTime) / 1000)))
+      settle(gesture.progress)
     }
     lastTime = now
     intentUntil = now + 900
@@ -144,6 +151,8 @@ export function useMobileDockMotion(root: Ref<HTMLElement | null>, enabled: () =
     cancelSpring()
     progress.value = 0
     velocity = 0
+    gestureVelocity = 0
+    targetProgress = 0
   }
 
   watch([enabled, routeKey], reset)

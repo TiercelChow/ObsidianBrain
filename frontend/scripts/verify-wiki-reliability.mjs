@@ -255,10 +255,13 @@ try {
       await dock.waitFor()
       assert.equal(await page.locator('.mobile-sub-dock a').count(), 5)
       const main = page.locator('.app-main')
+      const expandedDock = await page.locator('.mobile-dock').boundingBox()
       const padding = await main.evaluate(element => getComputedStyle(element).paddingBottom)
       await main.evaluate(element => { element.scrollTop = 500 })
       await page.waitForTimeout(200)
       assert.equal(await dock.getAttribute('data-progress'), '0', 'programmatic scroll never contracts navigation')
+      await main.evaluate(element => { element.scrollTop = 0 })
+      await page.waitForTimeout(160)
       const touch = await context.newCDPSession(page)
       const startY = Math.min(viewport.height - 145, 230)
       async function drag(start, end, finish = true, x = 80) {
@@ -269,12 +272,92 @@ try {
         }
         if (finish) await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
       }
-      await drag(startY, startY + 130)
-      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 100)
+      // A rounded endpoint can be crossed during the bounce; wait for actual rest.
+      async function waitForDockRest(target) {
+        await page.waitForFunction(target => {
+          const dock = document.querySelector('.mobile-navigation')
+          return Number(dock?.getAttribute('data-progress')) === target && dock?.getAttribute('data-settled') === 'true'
+        }, target)
+      }
+      async function recordDockMotion() {
+        await page.evaluate(() => {
+          window.dockMotionFrames = []
+          window.recordDockMotion = true
+          const sample = () => {
+            if (!window.recordDockMotion) return
+            const dock = document.querySelector('.mobile-navigation')
+            const mainElement = document.querySelector('.mobile-dock')
+            const main = mainElement.getBoundingClientRect()
+            const mainStyle = getComputedStyle(mainElement)
+            const subElement = document.querySelector('.mobile-sub-dock')
+            const sub = subElement.getBoundingClientRect()
+            const targets = [...document.querySelectorAll('.mobile-sub-dock-item')].map(item => {
+              const rect = item.getBoundingClientRect()
+              return { width: rect.width, height: rect.height }
+            })
+            window.dockMotionFrames.push({
+              time: performance.now(), progress: Number(dock.getAttribute('data-progress')), rebound: Number(dock.getAttribute('data-rebound')),
+              main: { left: main.left, right: main.right, top: main.top, bottom: main.bottom, width: main.width, height: main.height, radius: Math.min(parseFloat(mainStyle.borderTopLeftRadius), main.width / 2, main.height / 2), opacity: Number(mainStyle.opacity) },
+              sub: { left: sub.left, right: sub.right, top: sub.top, bottom: sub.bottom, width: sub.width, height: sub.height, radius: parseFloat(getComputedStyle(subElement).borderTopRightRadius) },
+              targets,
+            })
+            requestAnimationFrame(sample)
+          }
+          requestAnimationFrame(sample)
+        })
+      }
+      async function stopDockRecording() {
+        return page.evaluate(() => { window.recordDockMotion = false; return window.dockMotionFrames })
+      }
+      function checkReboundFrames(frames) {
+        assert.ok(frames.some(frame => frame.rebound > .01), 'landing has a visible, physical spring rebound')
+        assert.ok(frames.every(frame => frame.rebound >= 0 && frame.rebound < 1), 'rebound deformation remains restrained')
+        assert.ok(frames.every(frame => frame.main.opacity === 1), 'the same glass surface remains visible throughout retraction')
+        for (const frame of frames) {
+          const { main, sub } = frame
+          // Core rectangles + corner radii describe the two persistent glass shapes.
+          const dx = Math.max(main.left + main.radius - (sub.right - sub.radius), sub.left + sub.radius - (main.right - main.radius), 0)
+          const dy = Math.max(main.top + main.radius - (sub.bottom - sub.radius), sub.top + sub.radius - (main.bottom - main.radius), 0)
+          const gap = Math.hypot(dx, dy) - main.radius - sub.radius
+          assert.ok(gap >= .5, `retracting glass surfaces never intersect: ${JSON.stringify(frame)}`)
+        }
+        const smallTarget = frames.find(frame => frame.targets.some(item => item.width < 43.99 || item.height < 43.99))
+        assert.ok(!smallTarget, `rebound never compresses secondary touch targets: ${JSON.stringify(smallTarget)}`)
+      }
+      await recordDockMotion()
+      await drag(startY, startY - 130)
+      await page.waitForFunction(() => {
+        const progress = Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress'))
+        return progress >= 35 && progress <= 85
+      })
+      await checkLayout('dock-mid-arc')
+      await waitForDockRest(100)
+      const frames = await stopDockRecording()
+      const beginning = frames.find(frame => frame.progress >= 5)
+      const ending = frames.find(frame => frame.progress >= 95)
+      const morphDuration = ending?.time - beginning?.time
+      assert.ok(beginning && ending && morphDuration >= 200 && morphDuration <= 550, `a flick is quicker but still visibly retracts: ${morphDuration}ms`)
+      const travelling = frames.filter(frame => frame.progress >= 5 && frame.progress <= 90)
+      assert.ok(travelling.some(frame => frame.progress <= 20 && frame.main.width > 2 * expandedDock.height), 'the original wide capsule remains visible during early retraction')
+      assert.ok(travelling.some(frame => frame.progress >= 35 && frame.progress <= 60 && frame.main.width > expandedDock.height + 4), 'the intermediate shape is a short capsule, not an early standalone circle')
+      assert.ok(travelling.some(frame => frame.progress < 25 && frame.sub.height > 50.5), 'height starts changing during early travel, not in a second phase')
+      for (let index = 1; index < travelling.length; index++) {
+        const previous = travelling[index - 1]
+        const next = travelling[index]
+        if (next.progress <= previous.progress) continue
+        assert.ok(next.sub.width < previous.sub.width && next.sub.height > previous.sub.height && next.sub.bottom > previous.sub.bottom, 'narrowing, thickening and descent continue together')
+        assert.ok(next.main.width <= previous.main.width, 'the glass body itself continuously retracts toward the orb')
+      }
+      checkReboundFrames(frames)
+      assert.equal(Number(await dock.getAttribute('data-rebound')), 0, 'deformation returns completely to rest')
       const orb = await page.locator('.mobile-dock-orb').boundingBox()
+      const compactDock = await page.locator('.mobile-dock').boundingBox()
       const sub = await page.locator('.mobile-sub-dock').boundingBox()
       assert.ok(orb.width >= 44 && orb.height >= 44 && Math.abs(orb.width - orb.height) < 2, 'compact main dock is a tappable circle')
       assert.ok(sub.x + sub.width <= orb.x - 4 && Math.abs(sub.y + sub.height / 2 - (orb.y + orb.height / 2)) < 4, 'sub-navigation sinks left of the orb without overlap')
+      assert.ok(Math.abs(compactDock.height - expandedDock.height) < .5 && Math.abs(sub.height - expandedDock.height) < .5, 'both compact surfaces match the original bottom dock height')
+      assert.ok(Math.abs(compactDock.width - expandedDock.height) < .5, 'orb diameter matches the original dock height')
+      assert.ok(Math.abs(sub.x - expandedDock.x) < .5 && Math.abs(compactDock.x + compactDock.width - expandedDock.x - expandedDock.width) < .5, 'combined dock retains the original horizontal footprint')
       for (const item of await page.locator('.mobile-sub-dock a').all()) {
         const box = await item.boundingBox()
         assert.ok(box.width >= 44 && box.height >= 44, 'compact sub-navigation preserves touch targets')
@@ -283,16 +366,18 @@ try {
       assert.equal(await main.evaluate(element => getComputedStyle(element).paddingBottom), padding, 'scroll morph does not resize content')
       assert.equal(await page.getByRole('navigation', { name: '主要导航', exact: true }).count(), 0, 'contracted links are not exposed to assistive technology')
       await checkLayout('dock-compact')
+      await recordDockMotion()
       await page.getByRole('button', { name: '展开主要导航', exact: true }).click()
-      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 0)
+      await waitForDockRest(0)
+      checkReboundFrames(await stopDockRecording())
       await checkLayout('dock-expanded')
-      await drag(startY, startY + 60, false)
+      await drag(startY, startY - 60, false)
       const partial = Number(await dock.getAttribute('data-progress'))
       assert.ok(partial > 0 && partial < 100, `gesture tracks partial movement ${partial}`)
       // Reverse before releasing: no queued animation or old target may win.
-      await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 80, y: startY - 50 }] })
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 80, y: startY + 50 }] })
       await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 0)
+      await waitForDockRest(0)
       await page.locator('.mobile-sub-dock a').filter({ hasText: '问答' }).click()
       await page.locator('.chat-composer textarea').waitFor()
       assert.equal(await dock.getAttribute('data-progress'), '0', 'route changes expand navigation')
@@ -310,13 +395,14 @@ try {
       assert.equal(await dock.getAttribute('data-progress'), '0', 'streaming and answer auto-follow do not collapse navigation')
       const messages = page.locator('.message-list')
       const messageBox = await messages.boundingBox()
-      await messages.evaluate(element => { element.scrollTop = element.scrollHeight })
+      await messages.evaluate(element => { element.scrollTop = 0 })
       await page.waitForTimeout(160)
-      const nestedStart = messageBox.y + 20
-      await drag(nestedStart, nestedStart + Math.min(120, messageBox.height - 30))
-      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 100)
+      const nestedStart = messageBox.y + messageBox.height - 20
+      await drag(nestedStart, nestedStart - Math.min(120, messageBox.height - 30))
+      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-rebound')) > .01)
+      // Expand while still bouncing: keep the live presentation, never queue input.
       await page.getByRole('button', { name: '展开主要导航', exact: true }).click()
-      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 0)
+      await waitForDockRest(0)
       if (viewport.height > 500) {
         await input.focus()
         await page.evaluate(() => {
@@ -349,25 +435,26 @@ try {
       await page.waitForTimeout(350)
       assert.equal(await page.locator('.mobile-sub-dock').count(), 0)
       await page.locator('.config-card').first().waitFor()
-      await main.evaluate(element => { element.scrollTop = 500 })
+      await main.evaluate(element => { element.scrollTop = 0 })
       await page.waitForTimeout(160)
       // Start on the page gutter, not an editable configuration input.
-      await drag(startY, startY + 130, true, 16)
-      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 100)
+      await drag(startY, startY - 130, true, 16)
+      await waitForDockRest(100)
       await page.getByRole('button', { name: '展开主要导航', exact: true }).press('Enter')
-      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 0)
+      await waitForDockRest(0)
       await page.waitForFunction(() => document.activeElement?.matches('.mobile-dock-item.active'))
       await checkLayout('dock-single-level')
       await page.goto(`${origin}/knowledge`)
-      await main.evaluate(element => { element.scrollTop = 500 })
+      await main.evaluate(element => { element.scrollTop = 0 })
       await page.waitForTimeout(200)
       await page.emulateMedia({ reducedMotion: 'reduce' })
-      await drag(startY, startY + 110)
-      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 100)
+      await drag(startY, startY - 110)
+      await waitForDockRest(100)
+      assert.equal(Number(await dock.getAttribute('data-rebound')), 0, 'reduced motion has no endpoint elasticity')
       await page.getByRole('button', { name: '展开主要导航', exact: true }).click()
       assert.equal(await dock.getAttribute('data-progress'), '0', 'reduced-motion expansion is immediate')
       assert.deepEqual(pageErrors, [])
-      results.push({ viewport, continuousGesture: true, interruption: true, stableContent: true, compactTargets: true, nestedScroll: true, autoScrollIgnored: true, keyboardHidden: viewport.height > 500, routeRegistration: true, singleLevel: true, keyboardNavigation: true, reducedMotion: true })
+      results.push({ viewport, morphDurationMs: Math.round(morphDuration), persistentRetraction: true, reversedScrollDirection: true, singlePhaseArc: true, continuousGesture: true, gracefulMorph: true, elasticLanding: true, equalHeight: true, noSurfaceOverlap: true, interruption: true, reboundInterruption: true, stableContent: true, compactTargets: true, nestedScroll: true, autoScrollIgnored: true, keyboardHidden: viewport.height > 500, routeRegistration: true, singleLevel: true, keyboardNavigation: true, reducedMotion: true })
       await context.close()
       continue
     }

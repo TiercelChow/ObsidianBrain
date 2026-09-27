@@ -3,8 +3,17 @@
     ref="dockRef"
     class="mobile-navigation"
     :class="{ 'has-subnav': !!subnav?.items.length, 'is-compact': compact }"
-    :style="{ '--dock-progress': progress / 100, '--dock-width': `${width}px` }"
+    :style="{
+      '--dock-progress': geometry.shape,
+      '--dock-settle-progress': geometry.sink,
+      '--dock-travel-x': geometry.travelX,
+      '--dock-travel-y': geometry.travelY,
+      '--dock-rebound': rebound,
+      '--dock-width': `${width}px`,
+    }"
     :data-progress="Math.round(progress)"
+    :data-settled="progress === 0 || progress === 100"
+    :data-rebound="rebound"
   >
     <nav v-if="subnav?.items.length" class="mobile-sub-dock dock-glass" :aria-label="subnav.label">
       <template v-for="item in subnav.items" :key="item.id">
@@ -45,6 +54,7 @@ import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { Calendar, Files, Finished, Grid } from '@element-plus/icons-vue'
 import type { MobileNavSection } from '@/utils/mobileNavigationPolicy'
 import type { MobileSubnav } from '@/composables/useMobileSubnav'
+import { dockGeometry, dockRebound } from '@/utils/mobileDockMotion'
 
 const props = defineProps<{
   progress: number
@@ -53,7 +63,9 @@ const props = defineProps<{
   subnav: MobileSubnav | null
 }>()
 const emit = defineEmits<{ expand: []; openModules: [] }>()
-const compact = computed(() => props.progress > 12)
+const geometry = computed(() => dockGeometry(props.progress))
+const rebound = computed(() => dockRebound(props.progress))
+const compact = computed(() => geometry.value.sink > .12)
 const orbIcon = computed(() => ({ reader: Files, timeline: Calendar, tasks: Finished, more: Grid })[props.section])
 const dockRef = ref<HTMLElement | null>(null)
 const width = ref(Math.max(0, window.innerWidth - 16))
@@ -83,7 +95,7 @@ onScopeDispose(() => observer?.disconnect())
 
 <style scoped>
 .mobile-navigation {
-  --dock-orb-size: 56px;
+  --dock-orb-size: var(--mobile-dock-height);
   --dock-gap: 8px;
   position: fixed;
   z-index: 1005;
@@ -107,10 +119,12 @@ onScopeDispose(() => observer?.disconnect())
   right: 0;
   bottom: 0;
   width: calc(100% - (var(--dock-width) - var(--dock-orb-size)) * var(--dock-progress));
-  height: calc(var(--mobile-dock-height) - (var(--mobile-dock-height) - var(--dock-orb-size)) * var(--dock-progress));
-  border-radius: calc(20px + 8px * var(--dock-progress));
+  height: var(--mobile-dock-height);
+  border-radius: calc(20px + (var(--mobile-dock-height) / 2 - 20px) * var(--dock-progress));
   overflow: hidden;
-  pointer-events: auto;
+  transform-origin: right bottom;
+  transform: translate3d(0, calc(-4px * var(--dock-rebound)), 0) scale(calc(1 + .012 * var(--dock-rebound)), calc(1 - .06 * var(--dock-rebound)));
+  pointer-events: none;
 }
 .mobile-dock-links {
   position: absolute;
@@ -121,9 +135,11 @@ onScopeDispose(() => observer?.disconnect())
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   padding: 4px;
-  opacity: clamp(0, 1 - var(--dock-progress) * 4, 1);
-  transform: translate3d(calc(12px * var(--dock-progress)), 0, 0);
+  opacity: clamp(0, 1 - var(--dock-settle-progress) * 3, 1);
+  transform: translate3d(calc(12px * var(--dock-settle-progress)), 0, 0);
+  pointer-events: auto;
 }
+.is-compact .mobile-dock-links { pointer-events: none; }
 .mobile-dock-item {
   min-width: 0;
   min-height: 44px;
@@ -156,8 +172,8 @@ onScopeDispose(() => observer?.disconnect())
   place-items: center;
   background: transparent;
   color: var(--accent);
-  opacity: clamp(0, (var(--dock-progress) - .12) * 2, 1);
-  transform: scale(calc(.8 + .2 * var(--dock-progress)));
+  opacity: clamp(0, (var(--dock-settle-progress) - .12) * 3, 1);
+  transform: scale(calc(.8 + .2 * var(--dock-settle-progress)));
   pointer-events: none;
   transition: background-color var(--motion-fast) ease;
 }
@@ -166,14 +182,15 @@ onScopeDispose(() => observer?.disconnect())
 .dock-orb-hint { position: absolute; bottom: 7px; width: 12px; height: 2px; border-radius: 2px; background: currentColor; opacity: .45; }
 .mobile-sub-dock {
   position: absolute;
-  bottom: 3px;
-  left: calc(12px * (1 - var(--dock-progress)));
-  right: calc(12px + (var(--dock-orb-size) + var(--dock-gap) - 12px) * var(--dock-progress));
-  height: var(--mobile-sub-dock-height);
+  bottom: 0;
+  left: calc(12px * (1 - var(--dock-travel-x)));
+  right: calc(12px + (var(--dock-orb-size) + var(--dock-gap) - 12px) * var(--dock-travel-x));
+  height: calc(var(--mobile-sub-dock-height) + (var(--mobile-dock-height) - var(--mobile-sub-dock-height)) * var(--dock-settle-progress));
   display: flex;
-  padding: 2px;
-  border-radius: 18px;
-  transform: translate3d(0, calc((var(--mobile-dock-height) + var(--dock-gap) - 3px) * (var(--dock-progress) - 1)), 0);
+  padding: calc(2px + 2px * var(--dock-settle-progress));
+  border-radius: calc(18px + 2px * var(--dock-settle-progress));
+  /* A continuous clearing arc follows the retracting capsule; hit areas don't scale. */
+  transform: translate3d(0, calc(-1 * (var(--mobile-dock-height) + var(--dock-gap)) + (var(--mobile-dock-height) + var(--mobile-sub-dock-height) + 2 * var(--dock-gap)) / 2 * var(--dock-travel-y) + (var(--mobile-dock-height) - var(--mobile-sub-dock-height)) / 2 * var(--dock-settle-progress) - 4px * var(--dock-rebound)), 0);
   pointer-events: auto;
 }
 .mobile-sub-dock-item {
@@ -205,6 +222,7 @@ onScopeDispose(() => observer?.disconnect())
   .mobile-sub-dock-item.active, .mobile-dock-item.active { box-shadow: inset 0 0 0 1px var(--accent); }
 }
 @media (prefers-reduced-motion: reduce) {
+  .mobile-navigation { --dock-rebound: 0 !important; }
   .mobile-dock-item, .mobile-dock-orb, .mobile-sub-dock-item { transition: none; }
 }
 </style>
