@@ -24,17 +24,19 @@
             <i></i><span>{{ taskActivity[task.id] }}</span>
           </div>
           <p v-if="task.result_summary" class="task-result-preview">{{ task.result_summary }}</p>
-          <button class="task-stage-link" type="button" @click="openStages(task)">阶段与已保存成果</button>
           <footer><span>{{ typeLabel(task.task_type) }}</span><span>{{ task.deliverable_type === 'presentation' ? 'PPTX 演示文稿' : '研究报告' }}</span><span v-if="task.external_research_enabled">外部资料 {{ task.external_requests_used }}/{{ task.external_request_limit }}</span><span v-if="task.knowledge_change_state === 'proposed'">待知识审核</span><time>{{ formatDate(task.updated_at) }}</time></footer>
         </div>
-        <button class="task-action" type="button" :class="{ 'is-cancel': task.status === 'running' || task.status === 'queued' }" :aria-label="taskActionLabel(task)" :disabled="(Boolean(executingTaskId) && executingTaskId !== task.id) || Boolean(loadingResultId)" @click="runOrOpen(task)">
-          <el-icon :class="{ 'is-loading': task.status === 'running' || executingTaskId === task.id || loadingResultId === task.id }">
-            <Loading v-if="task.status === 'running' || executingTaskId === task.id || loadingResultId === task.id" />
-            <View v-else-if="task.status === 'completed'" />
-            <VideoPlay v-else />
-          </el-icon>
-          <span>{{ taskActionLabel(task) }}</span>
-        </button>
+        <div class="task-card-actions">
+          <button class="task-stage-link" type="button" @click="openStages(task)">阶段与成果</button>
+          <button class="task-action" type="button" :class="{ 'is-cancel': task.status === 'running' || task.status === 'queued' }" :aria-label="taskActionLabel(task)" :disabled="(Boolean(executingTaskId) && executingTaskId !== task.id) || Boolean(loadingResultId)" @click="runOrOpen(task)">
+            <el-icon :class="{ 'is-loading': task.status === 'running' || executingTaskId === task.id || loadingResultId === task.id }">
+              <Loading v-if="task.status === 'running' || executingTaskId === task.id || loadingResultId === task.id" />
+              <View v-else-if="task.status === 'completed'" />
+              <VideoPlay v-else />
+            </el-icon>
+            <span>{{ taskActionLabel(task) }}</span>
+          </button>
+        </div>
       </article>
     </section>
     <div v-else class="knowledge-empty knowledge-surface">
@@ -580,6 +582,7 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
 <style scoped>
 .task-filter { margin-bottom: 12px; }
 .task-summary { color: var(--text-faint); font-size: 12px; }
+.task-card-actions { min-width: 0; display: grid; gap: 8px; }
 .task-stage-link { min-height: 34px; margin-top: 6px; padding: 3px 9px; border: 0; border-radius: 9px; background: var(--accent-light); color: var(--accent); font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
 .research-task-list { display: grid; gap: 9px; }
 .research-task { display: grid; grid-template-columns: 52px minmax(0, 1fr) minmax(96px, auto); align-items: center; gap: 15px; padding: 16px 17px; animation: task-in var(--motion-normal) var(--ease-spring-gentle) both; animation-delay: calc(var(--order) * 30ms); }
@@ -714,14 +717,25 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
   .task-filter { display: grid; grid-template-columns: minmax(0, 1fr) 46px; align-items: stretch; }
   .mobile-create-task { width: 46px; min-height: 46px; display: grid; place-items: center; border: 0; border-radius: 14px; background: var(--accent); color: white; font-size: 18px; box-shadow: 0 7px 18px color-mix(in srgb, var(--accent) 22%, transparent); }
   .task-summary { grid-column: 1 / -1; }
-  .research-task { grid-template-columns: 44px minmax(0, 1fr) 42px; gap: 10px; padding: 14px; }
-  .task-kind { width: 44px; height: 44px; border-radius: 14px; }
-  .task-action { width: 42px; min-height: 42px; padding: 0; border-radius: 13px; }
-  .task-action span { display: none; }
+  .research-task { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 14px; }
+  .task-kind { display: none; }
+  .task-main { grid-column: 1 / -1; }
+  .task-card-actions { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding-top: 10px; border-top: 1px solid var(--border-faint); }
+  .task-stage-link { margin: 0; font-size: 13px; }
+  .task-action { width: 100%; min-height: 44px; padding: 8px; border-radius: 11px; font-size: 13px; }
+  .task-action span { display: inline; }
+  .task-main > p { font-size: 14px; }
+  .task-main h2 { font-size: 17px; line-height: 1.45; }
+  .task-topline { justify-content: space-between; font-size: 12px; }
+  .task-topline > span:first-child { flex: 1; }
+  .task-summary { font-size: 11px; }
   .task-main > p { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .task-result-evidence { grid-template-columns: 1fr; }
   .task-result-modal { height: calc(min(88dvh, 760px) - env(safe-area-inset-bottom)); }
-  .task-result-tabs { margin: 0 16px 12px; }
+  .task-result-tabs { margin: 0 12px 10px; gap: 2px; }
+  .task-result-tabs button { min-width: 0; min-height: 44px; gap: 3px; padding: 4px 2px; font-size: 11px; }
+  .task-result-modal .knowledge-modal-head { flex-wrap: wrap; gap: 8px; }
+  .task-result-heading { flex: 1 1 100%; }
   .task-result-scroll { padding: 0 16px max(24px, env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; }
   .artifact-main-row { grid-template-columns: 38px minmax(0, 1fr) auto; }
   .artifact-main-row > button { grid-column: 2; justify-self: start; }
@@ -729,5 +743,8 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
   .artifact-quality { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .run-inspector-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .run-skill-list { grid-template-columns: 1fr; }
+  .run-inspector-metrics strong, .run-inspector-metrics code { white-space: normal; overflow-wrap: anywhere; }
+  .task-result-modal .knowledge-modal-actions { padding-top: 8px; }
 }
+@media (prefers-reduced-motion: reduce) { .research-task, .task-live i { animation: none; } }
 </style>

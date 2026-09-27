@@ -16,6 +16,8 @@
         </div>
         <div v-if="workspace.baselines?.length" class="baseline-list"><h4>已冻结的核验／刷新基线</h4><p>旧版待核验输入，不是当前证据。模型可通过原生工具分页对照当前知识和原文。</p><article v-for="baseline in workspace.baselines" :key="`${baseline.question_id}-${baseline.entry_id}`"><b>{{ baseline.title }}</b><span>版本 {{ baseline.revision }} · {{ baseline.claim_count }} 条具体主张 · {{ baseline.content_characters.toLocaleString() }} 字符</span></article></div>
       </details>
+      <details class="research-stage-directory" :open="!isMobile || stageDirectoryOpen" @toggle="stageDirectoryOpen = ($event.target as HTMLDetailsElement).open">
+        <summary>研究阶段 <span>{{ selected?.stage.title || `${workspace.stages.length} 个阶段 · 选择查看成果` }}</span></summary>
       <ol class="research-stages">
         <li v-for="stage in workspace.stages" :key="stage.stage_key">
           <button type="button" :class="{ 'is-selected': selected?.stage.stage_key === stage.stage_key }" :aria-pressed="selected?.stage.stage_key === stage.stage_key" @click="loadStage(stage)">
@@ -23,6 +25,7 @@
           </button>
         </li>
       </ol>
+      </details>
       <div v-if="stageLoading" class="workspace-state" role="status">正在读取所选阶段…</div>
       <div v-if="stageError" class="workspace-state" role="alert">{{ stageError }}</div>
       <article v-if="selected" class="selected-stage" aria-label="所选阶段成果">
@@ -47,6 +50,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
 import { getKnowledgeResearchWorkspace, getKnowledgeResearchStage, type ResearchWorkspace, type ResearchStageContent, type ResearchStageSummary } from '@/api/knowledge'
 import { researchCoverage, researchStageStatus, researchFindingStatus } from '@/utils/knowledgeResearch'
 import KnowledgeAnswerMarkdown from './KnowledgeAnswerMarkdown.vue'
@@ -58,6 +62,8 @@ const workspace = ref<ResearchWorkspace | null>(null)
 const loading = ref(false)
 const error = ref('')
 const selected = ref<ResearchStageContent | null>(null)
+const stageDirectoryOpen = ref(true)
+const isMobile = useMediaQuery('(max-width: 768px)')
 const stageLoading = ref(false)
 const stageError = ref('')
 const revision = ref(1)
@@ -102,6 +108,7 @@ async function loadStage(stage: ResearchStageSummary, requestedRevision?: number
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '阶段成果读取失败')
     selected.value = response.result
     revision.value = response.result.stage.revision
+    if (isMobile.value) stageDirectoryOpen.value = false
   } catch (failure) { if (request === stageRequest && visible()) stageError.value = (failure as Error).message }
   finally { if (request === stageRequest) stageLoading.value = false }
 }
@@ -127,6 +134,7 @@ onBeforeUnmount(() => { alive = false; stop(); ++workspaceRequest; ++stageReques
 
 <style scoped>
 .research-workspace { min-width: 0; display: grid; gap: 12px; font-size: 13px; line-height: 1.65; }
+.research-stage-directory > summary { display: none; }
 .research-workspace p { margin: 0; color: var(--text-muted); overflow-wrap: anywhere; }
 .workspace-state { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px; color: var(--text-muted); }
 .workspace-overview { display: grid; gap: 4px; padding: 14px; border-radius: 14px; background: var(--accent-light); }
@@ -149,4 +157,13 @@ onBeforeUnmount(() => { alive = false; stop(); ++workspaceRequest; ++stageReques
 .findings { display: grid; gap: 8px; margin-top: 14px; }.findings article { display: grid; gap: 5px; padding: 12px; border-radius: 12px; background: var(--bg-glass-subtle); }.findings article > span { color: var(--accent); font-size: 11px; }.findings .is-missing, .findings .is-conflict { color: var(--danger,#d9342b); }.findings small { overflow-wrap: anywhere; color: var(--text-muted); }.finding-citations { display: flex; flex-wrap: wrap; gap: 6px; }
 @media (max-width:768px) { .research-stages button { grid-template-columns: 10px minmax(0,1fr); }.research-stages em { grid-column: 2; }.research-scope summary { min-height: 44px; display: flex; align-items: center; }.stage-controls button, .finding-citations button, .stage-notice button { min-height: 44px; }.stage-controls label { flex: 1; }.workspace-overview, .research-scope, .selected-stage { padding: 12px; } }
 @media (prefers-reduced-motion:reduce) { .research-stages button { transition: none; } }
+@media (max-width: 768px) {
+  .research-stage-directory > summary { min-height: 48px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 8px 12px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); color: var(--text-primary); cursor: pointer; list-style: none; }
+  .research-stage-directory > summary::-webkit-details-marker { display: none; }
+  .research-stage-directory > summary::after { content: '+'; margin-left: auto; color: var(--accent); }
+  .research-stage-directory[open] > summary::after { content: '−'; }
+  .research-stage-directory > summary span { min-width: 0; color: var(--text-muted); overflow-wrap: anywhere; font-size: 12px; }
+  .research-stage-directory[open] .research-stages { margin-top: 8px; }
+  .selected-stage { padding: 0; border: 0; background: transparent; }
+}
 </style>

@@ -1,6 +1,14 @@
 <template>
   <KnowledgePageShell title="Wiki 配置" subtitle="集中管理 Agent Runtime、每本书的规则文档与能力边界">
     <div class="settings-layout">
+      <el-select v-model="section" class="mobile-settings-section knowledge-select is-fluid" aria-label="配置分区" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true">
+        <el-option label="Agent Runtime · 执行器与模型" value="runtime" />
+        <el-option label="模型供应商 · 路由与 API Key" value="providers" />
+        <el-option label="Token 用量 · 调用趋势" value="usage" />
+        <el-option label="数据保护 · 备份与恢复" value="protection" />
+        <el-option label="配置文档 · 提示词与规则" value="documents" />
+        <el-option label="Skills · 可配置能力" value="skills" />
+      </el-select>
       <aside class="settings-nav knowledge-surface">
         <button :class="{ active: section === 'runtime' }" @click="section = 'runtime'"><el-icon><Cpu /></el-icon><span><strong>Agent Runtime</strong><small>执行器与模型</small></span></button>
         <button :class="{ active: section === 'providers' }" @click="section = 'providers'"><el-icon><Connection /></el-icon><span><strong>模型供应商</strong><small>路由与 API Key</small></span></button>
@@ -84,7 +92,7 @@
           <header class="settings-section-head split usage-head">
             <div><span>运行可观测性</span><h2>Token 用量</h2><p>按时间与调用方查看输入、输出和调用趋势。</p></div>
             <div class="usage-filters">
-              <el-date-picker v-model="usageDateRange" type="daterange" value-format="YYYY-MM-DD" format="YYYY/MM/DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :clearable="false" unlink-panels popper-class="glass-picker" @change="loadUsage" />
+              <el-date-picker v-model="usageDateRange" type="daterange" value-format="YYYY-MM-DD" format="YYYY/MM/DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :clearable="false" unlink-panels popper-class="glass-picker wiki-usage-picker" @change="loadUsage" />
               <el-select v-model="usageCaller" class="knowledge-select is-compact" popper-class="system-select-popper system-toolbar-popper" placement="bottom-start" :offset="0" :fit-input-width="true" @change="loadUsage">
                 <el-option label="全部调用方" value="" />
                 <el-option label="知识问答" value="knowledge_qa" />
@@ -272,7 +280,8 @@
           <span v-if="skillDetail" class="knowledge-status" :class="skillDetail.skill.source_type === 'builtin' ? 'is-healthy' : 'is-draft'">{{ skillDetail.skill.source_type === 'builtin' ? '系统内置' : '自定义' }}</span>
         </div>
         <div v-if="skillDetailLoading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
-        <div v-else-if="skillDetail" class="skill-detail-layout">
+        <button v-if="skillDetail && !skillDetailLoading" class="mobile-skill-metadata-toggle" type="button" :aria-expanded="skillMetadataExpanded" @click="skillMetadataExpanded = !skillMetadataExpanded">{{ skillMetadataExpanded ? '收起权限与版本说明' : '权限、版本与来源说明' }}<el-icon><ArrowDown /></el-icon></button>
+        <div v-if="skillDetail && !skillDetailLoading" class="skill-detail-layout" :class="{ 'show-metadata': skillMetadataExpanded }">
           <aside class="skill-detail-sidebar">
             <section class="skill-detail-summary">
               <span>{{ skillDetail.skill.slug }}</span>
@@ -369,7 +378,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection, Cpu, DataAnalysis, Document, Download, InfoFilled, Loading, Lock, MagicStick, Plus, UploadFilled } from '@element-plus/icons-vue'
+import { ArrowDown, Connection, Cpu, DataAnalysis, Document, Download, InfoFilled, Loading, Lock, MagicStick, Plus, UploadFilled } from '@element-plus/icons-vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import { modelReasoningPolicies, validateModelCapabilities } from '@/utils/knowledgeRuntimePolicy'
@@ -413,6 +422,7 @@ import {
 const section = ref<'runtime' | 'providers' | 'usage' | 'protection' | 'documents' | 'skills'>('runtime')
 const bases = ref<KnowledgeBaseSummary[]>([])
 const activeBaseId = ref('')
+const skillMetadataExpanded = ref(false)
 const documents = ref<ConfigDocument[]>([])
 const activeDocumentId = ref('')
 const runtimeHealth = ref<RuntimeHealth[]>([])
@@ -822,6 +832,7 @@ async function loadSkills() {
 }
 
 async function openSkillDetail(skill: WikiSkill) {
+  skillMetadataExpanded.value = false
   skillDetailVisible.value = true
   skillDetailLoading.value = true
   skillDetail.value = null
@@ -1164,6 +1175,8 @@ onMounted(initialize)
 </script>
 
 <style scoped>
+.mobile-settings-section { display: none; }
+.mobile-skill-metadata-toggle { display: none; }
 .settings-layout { min-height: 0; display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 12px; }
 .settings-nav { align-self: start; display: grid; gap: 4px; padding: 7px; }
 .settings-nav button { display: flex; align-items: center; gap: 11px; min-height: 58px; padding: 9px 11px; border: 0; border-radius: 13px; background: transparent; color: var(--text-muted); text-align: left; cursor: pointer; transition: var(--transition-interactive); }
@@ -1393,14 +1406,33 @@ onMounted(initialize)
 }
 @media (max-width: 768px) {
   .settings-layout { display: block; }
-  .settings-nav { display: flex; margin-bottom: 10px; overflow-x: auto; }
+  .settings-nav { display: none; }
+  .mobile-settings-section { display: block; margin-bottom: 10px; }
   .settings-nav button { min-height: 48px; justify-content: center; padding: 8px 12px; }
   .settings-nav button span { display: grid; }
   .settings-nav strong { font-size: 12px; }
-  .settings-main { padding: 16px; }
+  .settings-main { padding: 14px; }
+  .settings-section-head { margin-bottom: 14px; padding-bottom: 12px; }
+  .settings-section-head h2 { font-size: 19px; }
+  .settings-section-head p { font-size: 13px; line-height: 1.6; }
+  .runtime-card, .provider-card { gap: 12px; padding: 12px; }
+  .runtime-title { gap: 8px; }
+  .runtime-logo { width: 36px; height: 36px; border-radius: 11px; flex: none; }
+  .provider-mode { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; padding: 10px; }
+  .provider-head { flex-wrap: wrap; gap: 8px; }
+  .provider-head > div { min-width: 0; flex: 1 1 100%; }
+  .provider-head h3, .provider-head p, .provider-meta span, .credential-hint, .document-meta { overflow-wrap: anywhere; }
+  .provider-meta { display: grid; grid-template-columns: minmax(0, 1fr); font-size: 12px; }
+  .runtime-actions .el-button, .skills-actions .el-button, .protection-actions .el-button, .skill-card-actions .el-button, .document-actions .el-button { min-height: 44px; height: auto; }
+  .document-tabs { max-width: 100%; flex-wrap: nowrap; overflow-x: auto; }
+  .document-tabs button { flex: none; min-height: 44px; }
+  .document-editor textarea { font-size: 16px; padding: 14px; }
+  .skill-card { padding: 12px; }
+  .skill-card header { gap: 8px; }
+  .skill-card header h3, .skill-card header code { overflow-wrap: anywhere; white-space: normal; }
   .settings-section-head.split { display: grid; }
   .runtime-title { flex-wrap: wrap; }
-  .runtime-title .knowledge-status { margin-left: 55px; }
+  .runtime-title .knowledge-status { margin-left: 44px; }
   .runtime-actions { align-items: stretch; flex-direction: column; gap: 12px; }
   .runtime-actions > div { display: grid; grid-template-columns: 1fr; gap: 7px; }
   .runtime-actions .el-button { min-width: 0; margin: 0; white-space: normal; }
@@ -1427,12 +1459,20 @@ onMounted(initialize)
   .skills-grid { grid-template-columns: 1fr; }
   .skill-card:hover { transform: none; }
   .skill-detail-layout { min-height: 0; display: block; overflow-y: auto; }
+  .mobile-skill-metadata-toggle { flex: none; min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 16px 10px; padding: 8px 12px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; }
+  .skill-detail-layout:not(.show-metadata) .skill-detail-sidebar,
+  .skill-detail-layout:not(.show-metadata) .skill-version-audit { display: none; }
   .skill-detail-modal { height: calc(min(88dvh, 760px) - env(safe-area-inset-bottom)); }
   .skill-detail-sidebar { overflow: visible; border-right: 0; border-bottom: 1px solid var(--border-faint); }
   .skill-detail-versions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .skill-detail-versions h4 { grid-column: 1 / -1; }
   .skill-detail-content { overflow: visible; }
-  .skill-detail-content > pre { max-height: 38dvh; }
+  .skill-detail-content > pre { min-height: 0; max-height: none; padding: 14px; font-size: 13px; }
+  .skill-file-tabs { flex-wrap: nowrap; overflow-x: auto; }
+  .skill-file-tabs button { flex: none; min-height: 44px; }
+  .skill-detail-content > header { flex-wrap: wrap; gap: 6px; }
+  .skill-detail-content > header > div { min-width: 0; }
+  .skill-detail-content > header strong { overflow-wrap: anywhere; white-space: normal; }
 }
 @media (prefers-reduced-motion: reduce) {
   .usage-bar-column > i { animation: none; }

@@ -3,6 +3,7 @@
  * Run: PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node scripts/verify-wiki-reliability.mjs
  * If Playwright is installed locally, the environment override is unnecessary.
  * Optional SCREENSHOT_DIR selects the generated-artifact directory.
+ * WIKI_MOBILE_LAYOUT_ONLY=1 checks all five pages and settings sections at 320/390/667/1440px.
  */
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir } from 'node:fs/promises'
@@ -13,6 +14,7 @@ import { createServer, loadConfigFromFile } from 'vite'
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const startedAt = Date.now()
+const mobileLayoutOnly = process.env.WIKI_MOBILE_LAYOUT_ONLY === '1'
 const frontendRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const screenshotDir = process.env.SCREENSHOT_DIR || await mkdtemp(join(tmpdir(), 'wiki-reliability-'))
 await mkdir(screenshotDir, { recursive: true })
@@ -20,7 +22,10 @@ const timestamp = '2026-09-26T00:00:00Z'
 const entry = { id: 'mock-entry', knowledge_base_id: 'mock-base', entry_type: 'concept', slug: 'mechanism', title: '历史引用实体', summary: '编译后的机制', status: 'verified', source_path: 'chapter.md', updated_at: timestamp }
 const staleEntry = { ...entry, id: 'mock-stale', slug: 'expired', title: '依据已变化的知识主题', status: 'stale' }
 const base = { id: 'mock-base', book_id: 'mock-book', book_name: '隔离测试书籍', book_path: '/mock/not-a-real-book', book_kind: 'folder', lifecycle: 'active', source_available: true, entry_count: 3, sync_state: 'clean', compile_mode: 'smart', compile_state: 'ready', compile_phase: 'completed' }
+if (mobileLayoutOnly) Object.assign(base, { book_name: '很长的书籍名称：跨章节知识机制与适用边界完整研究', book_path: `/mock/${'long-folder-without-spaces/'.repeat(8)}book`, source_count: 42, claim_count: 128, task_count: 5, health_state: 'healthy' })
 const provider = { provider_id: 'mock-provider', display_name: '隔离模型供应商', api_protocol: 'openai-completions', base_url: 'https://never-contact.example/v1', model: 'mock-model', credential_source: 'environment', api_key_env: 'MOCK_NOT_A_REAL_SECRET', api_key_configured: false, context_window: null, max_output_tokens: null, reasoning_policy: 'auto', enabled: true, revision: 1, updated_at: timestamp }
+if (mobileLayoutOnly) Object.assign(provider, { display_name: '供应商长名称：兼容多种模型与上下文容量的隔离测试', base_url: `https://never-contact.example/${'long-api-path/'.repeat(8)}v1`, api_key_env: 'A_VERY_LONG_ENVIRONMENT_VARIABLE_NAME_WITHOUT_WHITESPACE', model: 'long-model-name-without-whitespace-'.repeat(3) })
+const layoutSkill = { id: 'mock-skill', slug: 'long-skill-slug-without-whitespace'.repeat(3), name: '基于书籍证据的完整知识问答与研究工作流', description: '按当前证据范围研究并保留版本与引用，不修改原书。', source_type: 'builtin', status: 'ready', permissions: ['read_knowledge'], requirements: [], revision: 1, instructions: '# 隔离测试 Skill\n\n完整指令内容。\n'.repeat(40), enabled: true, usage_scope: 'both', updated_at: timestamp }
 const state = { provider: { ...provider }, providerSaves: [], chatAttempts: 0, chatRequests: [], snapshotReads: [], currentReads: 0, fallbackSearches: 0, reportReads: [], reportReviewMode: false, archiveProposal: null, archiveRequests: [], archiveResolutions: [], reviewRetries: [], reviewRetryReportReads: 0, researchStatus: 'failed', researchQueuePolls: 0, researchHold: false, researchExecutions: [], workspaceReads: [], stageReads: [], stageDelay: 0, unsupported: [] }
 const researchTask = { id: 'mock-research', knowledge_base_id: base.id, book_name: base.book_name, title: '跨主题研究与失败恢复', description: '隔离测试：保存机制、条件、历史基线和完整报告', task_type: 'research', deliverable_type: 'presentation', artifact_state: 'failed', knowledge_change_state: 'none', status: 'failed', result_summary: '演示阶段未完成；报告仍保留', external_research_enabled: false, external_domains: [], external_request_limit: 0, external_requests_used: 0, created_at: timestamp, updated_at: timestamp }
 const runningTask = { ...researchTask, id: 'mock-running', title: '仍在执行的另一个研究', status: 'running', deliverable_type: 'report', artifact_state: 'none' }
@@ -63,7 +68,7 @@ function compileReport(args) {
 function json(response, value) { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify(value)) }
 function success(tool, result) { return { tool, status: 'success', result } }
 function runtimeSettings() {
-  return { runtime_profiles: [{ available: true, version: 'mock-harness', message: '隔离启动器', profile: { id: 'mock-runtime', name: 'DeepSeek Harness', runtime: 'deepseek_harness', executable: 'never-executed', model: '', provider_id: provider.provider_id, enabled: true, revision: 1, updated_at: timestamp } }], model_providers: [state.provider], documents: [] }
+  return { runtime_profiles: [{ available: true, version: 'mock-harness', message: '隔离启动器', profile: { id: 'mock-runtime', name: 'DeepSeek Harness', runtime: 'deepseek_harness', executable: 'never-executed', model: '', provider_id: provider.provider_id, enabled: true, revision: 1, updated_at: timestamp } }], model_providers: [state.provider], documents: mobileLayoutOnly ? ['WIKI.md', 'AGENTS.md', 'QUERY.md', 'RESEARCH.md'].map(name => ({ id: name, name, scope: 'book', revision: 1, content_md: '# 隔离规则\n\n规则内容。\n'.repeat(30) })) : [] }
 }
 const interruptedBody = '故障前收到的完整片段。'.repeat(120)
 const completedAnswer = '## 本轮回答\n\n失败后仍然连接模型，引用本轮读取的历史证据。[S1]'
@@ -131,7 +136,10 @@ const mockApi = {
         }
         case 'list_book_knowledge_bases': return json(response, success(tool, { items: [{ book: { id: base.book_id, kind: 'folder', name: base.book_name, path: base.book_path }, knowledge_base: base }] }))
         case 'get_book_wiki_settings': return json(response, success(tool, runtimeSettings()))
-        case 'list_wiki_skills': return json(response, success(tool, { skills: [] }))
+        case 'list_wiki_skills': return json(response, success(tool, { skills: mobileLayoutOnly ? [layoutSkill] : [] }))
+        case 'get_wiki_skill_detail': return json(response, success(tool, { skill: layoutSkill, current_version_id: 'mock-skill-v1', versions: [{ id: 'mock-skill-v1', revision: 1, release_state: 'published', content_hash: 'a'.repeat(64), changelog: '完整的版本与来源说明', created_at: timestamp, files: [{ relative_path: 'SKILL.md', content_text: layoutSkill.instructions, content_hash: 'a'.repeat(64), media_type: 'text/markdown', size_bytes: 2048 }] }] }))
+        case 'list_knowledge_backups': return json(response, success(tool, { backups: [{ filename: 'very-long-backup-file-name-for-responsive-ui.sqlite', reason: 'manual', created_at: timestamp, size_bytes: 1024000 }], retention: 7 }))
+        case 'get_agent_usage_stats': return json(response, success(tool, { start_date: args.start_date, end_date: args.end_date, usage_source: 'unavailable', totals: { runs: 0, unreported_runs: 0, total_tokens: 0, input_tokens: 0, output_tokens: 0 }, daily: [], by_caller: [] }))
         case 'save_model_provider': state.providerSaves.push(args); state.provider = { ...state.provider, ...args, revision: state.provider.revision + 1 }; return json(response, success(tool, state.provider))
         case 'list_knowledge_conversations': return json(response, success(tool, { conversations: state.chatAttempts >= 2 ? [conversation] : [] }))
         case 'get_knowledge_conversation': return json(response, success(tool, { ...conversation, messages: [{ id: 'persisted-user', role: 'user', content: '第二次：重新提问', evidence: [], created_at: timestamp }, { id: 'persisted-assistant', role: 'assistant', content: completedAnswer, run_id: 'mock-run-2', evidence: [entry], created_at: timestamp }] }))
@@ -177,8 +185,10 @@ try {
   const origin = `http://127.0.0.1:${address.port}`
   // Use the Chromium channel's headless mode, not the separately installed headless-shell package.
   browser = await chromium.launch({ headless: true, channel: 'chromium' })
-  for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
-    const mode = viewport.width > 700 ? 'desktop' : 'phone'
+  const viewports = mobileLayoutOnly ? [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 667, height: 375 }, { width: 1440, height: 1000 }] : [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]
+  for (const viewport of viewports) {
+    const mode = mobileLayoutOnly ? `${viewport.width}x${viewport.height}` : viewport.width > 768 ? 'desktop' : 'phone'
+    const phone = viewport.width <= 768
     state.chatAttempts = 0
     state.chatRequests = []
     state.provider = { ...provider }
@@ -212,8 +222,137 @@ try {
       }
       await page.screenshot({ path: join(screenshotDir, `${mode}-${label}.png`), animations: 'disabled' })
     }
+    async function selectSettings(label) {
+      if (phone) {
+        await page.locator('.mobile-settings-section').click()
+        await page.getByRole('option', { name: new RegExp(`^${label}`) }).click()
+      } else await page.locator('.settings-nav').getByRole('button', { name: new RegExp(label) }).click()
+    }
+    async function selectStage(dialog, title) {
+      if (phone && await dialog.locator('.research-stage-directory').getAttribute('open') === null) await dialog.locator('.research-stage-directory > summary').click()
+      await dialog.locator('.research-stages button').filter({ hasText: title }).click()
+    }
+    if (mobileLayoutOnly) {
+      await page.goto(`${origin}/knowledge`)
+      await page.locator('.book-wiki-card').waitFor()
+      const tabs = await page.locator('.knowledge-tabs a').all()
+      assert.equal(tabs.length, 5)
+      for (const tab of tabs) {
+        const box = await tab.boundingBox()
+        assert.ok(box && box.x >= 0 && box.x + box.width <= viewport.width, 'all Wiki destinations are visible without swiping')
+      }
+      if (phone) {
+        const card = await page.locator('.book-wiki-card').boundingBox()
+        const stats = await page.locator('.book-stats').boundingBox()
+        assert.ok(stats.width >= card.width - 32, 'book statistics use the complete card width')
+        await page.getByRole('button', { name: '知识库操作', exact: true }).click()
+        const actions = page.getByRole('dialog', { name: '知识库操作', exact: true })
+        await checkLayout('book-actions', actions)
+        await actions.getByRole('button', { name: '管理知识库', exact: true }).click()
+        const manage = page.getByRole('dialog', { name: '管理知识库', exact: true })
+        await checkLayout('book-manage', manage)
+        await manage.getByRole('button', { name: '完成', exact: true }).click()
+        await manage.waitFor({ state: 'hidden' })
+      }
+      await page.locator('.app-main').evaluate(main => { main.scrollTop = 0 })
+      await checkLayout('knowledge-bases')
+      await page.goto(`${origin}/knowledge/wiki?base=${base.id}`)
+      await page.locator('.entry-row').first().click()
+      await page.locator('.entity-markdown h2').waitFor()
+      if (phone) {
+        assert.equal(await page.locator('.wiki-toolbar .knowledge-search').isVisible(), false)
+        await page.getByRole('button', { name: '返回实体列表' }).click()
+        assert.equal(await page.locator('.wiki-toolbar .knowledge-search').isVisible(), true)
+        await page.locator('.entry-row').first().click()
+      }
+      await page.locator('.detail-loading').waitFor({ state: 'hidden' })
+      await page.locator('.entity-markdown h2').waitFor()
+      await checkLayout('wiki-detail')
+      await page.goto(`${origin}/knowledge/chat`)
+      await page.locator('.chat-composer textarea').waitFor()
+      if (phone) {
+        const body = await page.locator('.message-list').boundingBox()
+        const chat = await page.locator('.chat-layout').boundingBox()
+        const composer = await page.locator('.chat-composer').boundingBox()
+        const dock = await page.locator('.mobile-dock').boundingBox()
+        assert.ok(body.height >= Math.min(220, chat.height * .5), `usable answer area ${JSON.stringify({ body, chat })}`)
+        assert.ok(composer.y + composer.height <= dock.y, 'composer is not behind the dock')
+        assert.ok(await page.locator('.chat-composer textarea').evaluate(input => Number.parseFloat(getComputedStyle(input).fontSize)) >= 16, 'composer avoids mobile input zoom')
+        await page.getByRole('button', { name: '问答历史与设置' }).filter({ visible: true }).click()
+        const history = page.getByRole('dialog', { name: '问答历史与设置' })
+        await checkLayout('chat-history', history)
+        await history.getByRole('button', { name: '新对话', exact: true }).click()
+      }
+      await checkLayout('chat')
+      await page.goto(`${origin}/knowledge/tasks`)
+      await page.locator('.research-task').first().waitFor()
+      if (phone) {
+        const card = await page.locator('.research-task').first().boundingBox()
+        const main = await page.locator('.task-main').first().boundingBox()
+        assert.ok(main.width >= card.width - 32, 'research body uses full width')
+      }
+      await checkLayout('research-tasks')
+      await page.locator('.task-stage-link').first().click()
+      const result = page.getByRole('dialog', { name: '研究任务结果' })
+      await result.locator('.research-stages button').first().waitFor()
+      await selectStage(result, '机制与公式')
+      await result.locator('.selected-stage').waitFor()
+      if (phone) assert.equal(await result.locator('.research-stage-directory').getAttribute('open'), null, 'selecting a stage focuses the saved body')
+      await checkLayout('research-stage', result)
+      await result.getByRole('button', { name: '完成', exact: true }).click()
+      await page.goto(`${origin}/knowledge/settings`)
+      await page.locator('.runtime-card').waitFor()
+      await checkLayout('settings-runtime')
+      for (const [label, name] of [['模型供应商', 'providers'], ['Token 用量', 'usage'], ['数据保护', 'protection'], ['配置文档', 'documents'], ['Skills', 'skills']]) {
+        await selectSettings(label)
+        await page.locator('.settings-section-head h2').filter({ hasText: label }).waitFor()
+        await checkLayout(`settings-${name}`)
+        if (name === 'documents' && phone) assert.ok(await page.locator('.document-editor textarea').evaluate(input => Number.parseFloat(getComputedStyle(input).fontSize)) >= 16, 'document editor avoids mobile input zoom')
+        if (name === 'providers') {
+          await page.getByRole('button', { name: '编辑', exact: true }).click()
+          const editor = page.getByRole('dialog', { name: '编辑模型供应商' })
+          await checkLayout('provider-editor', editor)
+          const cancel = await editor.getByRole('button', { name: '取消', exact: true }).boundingBox()
+          assert.ok(cancel.y >= 0 && cancel.y + cancel.height <= viewport.height, 'editor footer is not clipped')
+          if (phone && viewport.height > 500) {
+            // Emulate the visual viewport shrinking independently of the layout viewport.
+            // This is a layout contract, not a replacement for real-device keyboard testing.
+            await page.evaluate(() => { Object.defineProperty(window.visualViewport, 'height', { value: 350, configurable: true }); window.visualViewport.dispatchEvent(new Event('resize')) })
+            await page.waitForFunction(() => Number.parseFloat(document.querySelector('.motion-modal').style.getPropertyValue('--motion-viewport-height')) === 350)
+            const keyboardFooter = await editor.getByRole('button', { name: '取消', exact: true }).boundingBox()
+            assert.ok(keyboardFooter.y >= 0 && keyboardFooter.y + keyboardFooter.height <= 350, 'drawer footer fits the keyboard visual viewport')
+            await page.evaluate(() => { delete window.visualViewport.height; window.visualViewport.dispatchEvent(new Event('resize')) })
+          }
+          await editor.getByRole('button', { name: '取消', exact: true }).click()
+          await editor.waitFor({ state: 'hidden' })
+        }
+        if (name === 'usage' && phone) {
+          await page.locator('.usage-filters .el-date-editor input').first().click()
+          await page.locator('.wiki-usage-picker').waitFor()
+          const picker = await page.locator('.wiki-usage-picker').boundingBox()
+          assert.ok(picker.x >= -1 && picker.x + picker.width <= viewport.width + 1, 'range picker fits phone')
+          await page.keyboard.press('Escape')
+        }
+        if (name === 'skills') {
+          await page.getByRole('button', { name: '查看内容', exact: true }).click()
+          const skill = page.getByRole('dialog', { name: 'Skill 内容' })
+          await skill.locator('.skill-detail-content > pre').waitFor()
+          await checkLayout('skill-body', skill)
+          if (phone) {
+            assert.equal(await skill.locator('.skill-detail-sidebar').isVisible(), false)
+            await skill.getByRole('button', { name: '权限、版本与来源说明' }).click()
+            assert.equal(await skill.locator('.skill-detail-sidebar').isVisible(), true)
+          }
+          await skill.getByRole('button', { name: '完成', exact: true }).click()
+        }
+      }
+      assert.deepEqual(pageErrors, [], `${mode}: runtime errors`)
+      results.push({ viewport, fivePages: true, allSettingsSections: true, usableReadingArea: true, reachableActions: true, horizontalOverflow: false, clippedDialogs: false })
+      await context.close()
+      continue
+    }
     await page.goto(`${origin}/knowledge/settings`)
-    await page.getByRole('button', { name: /模型供应商/ }).click()
+    await selectSettings('模型供应商')
     await page.getByRole('button', { name: '编辑', exact: true }).click()
     const providerDialog = page.getByRole('dialog', { name: '编辑模型供应商' })
     await providerDialog.waitFor()
@@ -360,16 +499,16 @@ try {
     await page.goto(`${origin}/knowledge/tasks`)
     const researchCard = page.locator('.research-task').filter({ has: page.getByRole('heading', { name: researchTask.title, exact: true }) })
     const taskDialog = page.getByRole('dialog', { name: '研究任务结果', exact: true })
-    await researchCard.getByRole('button', { name: '阶段与已保存成果', exact: true }).click()
+    await researchCard.getByRole('button', { name: '阶段与成果', exact: true }).click()
     await taskDialog.getByText('已保存 1 / 2 个主题', { exact: true }).waitFor()
     await taskDialog.getByText('研究目标、约束与验收条件', { exact: true }).click()
     await taskDialog.getByText('版本 2 · 30 条具体主张 · 32,000 字符', { exact: true }).waitFor()
-    await taskDialog.locator('.research-stages button').filter({ hasText: '综合结论与交叉核验' }).click()
+    await selectStage(taskDialog, '综合结论与交叉核验')
     await taskDialog.getByRole('heading', { name: '跨章节对照记录', exact: true }).waitFor()
     await taskDialog.getByText('不同版本和条件分别成立，不强行合并。', { exact: true }).waitFor()
     await taskDialog.getByRole('heading', { name: '跨章节对照记录', exact: true }).scrollIntoViewIfNeeded()
     await checkLayout('research-cross-review', taskDialog)
-    await taskDialog.locator('.research-stages button').filter({ hasText: '机制与公式' }).click()
+    await selectStage(taskDialog, '机制与公式')
     await taskDialog.getByText('报告尾部条件与反例完整保留。', { exact: false }).waitFor()
     assert.equal(await taskDialog.locator('.katex').count() > 0, true, 'saved formula is rendered')
     await taskDialog.getByRole('spinbutton', { name: '研究阶段历史版本' }).fill('1')
@@ -389,13 +528,13 @@ try {
     await taskDialog.getByText('尚缺反例，不把局部依据当全书结论', { exact: true }).waitFor()
     await checkLayout('research-stage-inspector', taskDialog)
     await taskDialog.getByRole('button', { name: '研究阶段', exact: true }).click()
-    await taskDialog.locator('.research-stages button').filter({ hasText: '完整报告' }).click()
+    await selectStage(taskDialog, '完整报告')
     await taskDialog.getByRole('button', { name: '保留正文的来源运行', exact: true }).waitFor()
     await taskDialog.getByText('依据变化；旧报告与原始引用保留', { exact: true }).waitFor()
     await checkLayout('research-retained-report', taskDialog)
-    await taskDialog.locator('.research-stages button').filter({ hasText: '引用与结构校验' }).click()
+    await selectStage(taskDialog, '引用与结构校验')
     await taskDialog.getByText('此阶段尚未保存完整成果。失败、排队和运行中的内容不会冒充已完成报告。', { exact: true }).waitFor()
-    await taskDialog.locator('.research-stages button').filter({ hasText: '演示交付' }).click()
+    await selectStage(taskDialog, '演示交付')
     await taskDialog.getByRole('button', { name: '本次阶段检查器', exact: true }).click()
     await taskDialog.getByRole('region', { name: '演示选材范围' }).waitFor()
     await taskDialog.getByText('71,000 字符', { exact: true }).waitFor()
@@ -405,7 +544,7 @@ try {
     state.researchHold = true
     await taskDialog.getByRole('button', { name: '恢复未完成阶段', exact: true }).click()
     await taskDialog.waitFor({ state: 'hidden' })
-    await researchCard.getByRole('button', { name: '阶段与已保存成果', exact: true }).click()
+    await researchCard.getByRole('button', { name: '阶段与成果', exact: true }).click()
     await taskDialog.getByText('已保存 1 / 2 个主题', { exact: true }).waitFor()
     await taskDialog.getByRole('button', { name: '研究报告', exact: true }).click()
     await taskDialog.getByText('报告尾部条件与反例完整保留。', { exact: false }).waitFor()
@@ -424,7 +563,7 @@ try {
     await taskDialog.getByRole('button', { name: '完成', exact: true }).click()
     await taskDialog.waitFor({ state: 'hidden' })
     const runningCard = page.locator('.research-task').filter({ has: page.getByRole('heading', { name: runningTask.title, exact: true }) })
-    await runningCard.getByRole('button', { name: '阶段与已保存成果', exact: true }).click()
+    await runningCard.getByRole('button', { name: '阶段与成果', exact: true }).click()
     await taskDialog.getByText('已保存 1 / 2 个主题', { exact: true }).waitFor()
     await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')) })
     const hiddenWorkspaceReads = state.workspaceReads.length
@@ -437,11 +576,11 @@ try {
     const closedWorkspaceReads = state.workspaceReads.length
     await page.waitForTimeout(2700)
     assert.equal(state.workspaceReads.length, closedWorkspaceReads, 'closing stages cancels its poll independently of the task list')
-    await runningCard.getByRole('button', { name: '阶段与已保存成果', exact: true }).click()
+    await runningCard.getByRole('button', { name: '阶段与成果', exact: true }).click()
     await taskDialog.getByText('已保存 1 / 2 个主题', { exact: true }).waitFor()
     state.stageDelay = 500
     const previousStageReads = state.stageReads.length
-    await taskDialog.locator('.research-stages button').filter({ hasText: '机制与公式' }).click()
+    await selectStage(taskDialog, '机制与公式')
     await page.waitForFunction(() => document.querySelector('.research-workspace [role="status"]')?.textContent.includes('所选阶段'))
     assert.ok(state.stageReads.length > previousStageReads)
     await taskDialog.getByRole('button', { name: '完成', exact: true }).click()

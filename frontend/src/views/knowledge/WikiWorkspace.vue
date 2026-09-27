@@ -8,7 +8,7 @@
       <el-button v-if="activeBase" :loading="syncing" :disabled="activeBase.lifecycle !== 'active' || !activeBase.source_available" @click="syncActive"><el-icon><Refresh /></el-icon>同步来源</el-button>
     </template>
 
-    <div class="wiki-toolbar knowledge-toolbar">
+    <div class="wiki-toolbar knowledge-toolbar" :class="{ 'is-reading': Boolean(selectedEntry) }">
       <el-select v-model="activeBaseId" class="knowledge-select is-responsive" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择一本书" @change="onBaseChanged">
         <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
       </el-select>
@@ -78,13 +78,13 @@
           </button>
           <header class="entry-detail-head">
             <div>
-              <span class="entry-type">{{ entryTypeLabel(selectedEntry.entry_type) }}</span>
+              <div class="entry-detail-kicker"><span class="entry-type">{{ entryTypeLabel(selectedEntry.entry_type) }}</span><span class="knowledge-status mobile-entity-status" :class="needsSourceReview(detail || selectedEntry) ? 'is-warning' : 'is-healthy'">{{ knowledgeStatusLabel(detail?.status || selectedEntry.status) }}</span></div>
               <h2>{{ selectedEntry.title }}</h2>
               <p>{{ selectedEntry.source_path || '数据库实体' }}</p>
             </div>
             <div class="entry-detail-actions">
               <el-button v-if="detail && detail.entry_type !== 'source_section' && activeBase?.lifecycle === 'active' && !needsSourceReview(detail)" circle title="调整实体" @click="openEntryEdit"><el-icon><Edit /></el-icon></el-button>
-              <span class="knowledge-status" :class="needsSourceReview(detail || selectedEntry) ? 'is-warning' : 'is-healthy'">{{ knowledgeStatusLabel(detail?.status || selectedEntry.status) }}</span>
+              <span class="knowledge-status desktop-entity-status" :class="needsSourceReview(detail || selectedEntry) ? 'is-warning' : 'is-healthy'">{{ knowledgeStatusLabel(detail?.status || selectedEntry.status) }}</span>
             </div>
           </header>
           <div v-if="detailLoading" class="detail-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
@@ -863,6 +863,7 @@ onBeforeUnmount(() => {
 .entry-detail-head h2 { margin: 6px 0 4px; overflow-wrap: anywhere; font-size: clamp(20px, 2vw, 26px); font-weight: 690; }
 .entry-detail-head p { overflow-wrap: anywhere; color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; }
 .entry-detail-actions { display: flex; align-items: center; gap: 9px; flex: none; }
+.mobile-entity-status { display: none; }
 .detail-loading { min-height: 300px; display: grid; place-content: center; color: var(--accent); font-size: 24px; }
 .detail-symbol { width: 62px; height: 62px; display: grid; place-items: center; border-radius: 20px; background: var(--accent-light); color: var(--accent); font-size: 27px; }
 .entity-meta-strip { display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 18px; }
@@ -1003,17 +1004,41 @@ onBeforeUnmount(() => {
   .graph-path-builder > div:first-of-type > span { display: none; }
   .wiki-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 46px; align-items: stretch; }
   .wiki-toolbar .knowledge-search { grid-column: 1 / -1; grid-row: 2; }
+  .wiki-toolbar.is-reading .knowledge-search { display: none; }
   .mobile-actions-button { grid-column: 2; grid-row: 1; width: 46px; min-height: 46px; display: grid; place-items: center; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-glass); color: var(--accent); font-size: 19px; }
-  .wiki-workspace { min-height: calc(100dvh - 230px); }
-  .entry-pane, .entry-detail { min-height: calc(100dvh - 230px); }
-  .entry-detail { padding: 16px; }
+  .wiki-workspace, .entry-pane, .entry-detail { min-height: 0; }
+  .entry-detail { padding: 14px; overflow: visible; }
+  .entry-pane-head { min-height: 0; padding: 12px 14px; }
+  .entry-pane-head > div:first-child strong { display: none; }
   .wiki-workspace.show-detail .entry-detail { animation: mobile-detail-in var(--motion-normal) var(--ease-spring-gentle) both; }
   .entry-list { max-height: none; }
-  .entry-detail-head { display: block; }
-  .entry-detail-head .knowledge-status { margin-top: 10px; }
+  .entry-detail-head { display: flex; gap: 8px; margin-bottom: 12px; padding-bottom: 12px; }
+  .entry-detail-head > div:first-child { flex: 1; }
+  .entry-detail-kicker { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+  .mobile-entity-status { display: inline-flex; }
+  .entry-detail-actions .desktop-entity-status { display: none; }
+  .entry-detail-actions { justify-content: flex-end; }
+  .entry-detail-actions .el-button { width: 44px; height: 44px; }
+  .entry-detail-head h2 { font-size: 21px; line-height: 1.45; }
+  .entry-row strong { white-space: normal; overflow-wrap: anywhere; font-size: 15px; }
+  .entry-summary { font-size: 13px; }
+  .entry-load-more, .mobile-back { min-height: 44px; }
+  .mobile-back { margin: 0 0 10px; padding: 8px 0; }
+  .entity-meta-strip { gap: 5px; margin: 0 0 16px; }
+  .entity-meta-strip span { max-width: 100%; overflow-wrap: anywhere; }
+  .entity-markdown :deep(> :first-child) { margin-top: 0; }
+  .structure-card { min-width: 0; overflow-wrap: anywhere; padding: 12px; }
+  .structure-card header, .structure-card footer { flex-wrap: wrap; }
+  .structure-card p, .citation-card p { font-size: 13px; line-height: 1.65; }
+  .graph-columns button { min-width: 0; min-height: 44px; }
+  .graph-columns button span { white-space: normal; overflow-wrap: anywhere; }
+  .review-diff pre { font-size: 12px; }
   .review-content { padding: 0 16px 12px; }
   .review-modal { max-height: calc(min(88dvh, 760px) - env(safe-area-inset-bottom)); }
   .entry-edit-modal, .graph-modal { max-height: calc(min(88dvh, 760px) - env(safe-area-inset-bottom)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wiki-workspace.show-detail .entry-detail { animation: none; }
 }
 @keyframes mobile-detail-in { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
 </style>

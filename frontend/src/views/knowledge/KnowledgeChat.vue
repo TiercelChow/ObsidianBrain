@@ -1,6 +1,12 @@
 <template>
   <KnowledgePageShell title="知识问答" subtitle="在单本书的证据边界内提问，答案与来源会持续保留">
     <div class="chat-layout">
+      <div class="chat-mobile-context">
+        <el-select v-model="activeBaseId" class="knowledge-select is-fluid" aria-label="当前问答知识库" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" :disabled="searching" placeholder="选择一本书" @change="changeKnowledgeBase">
+          <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
+        </el-select>
+        <button type="button" aria-label="问答历史与设置" @click="contextVisible = true"><el-icon><ChatLineSquare /></el-icon></button>
+      </div>
       <aside class="chat-context knowledge-surface">
         <span class="context-label">当前知识边界</span>
         <el-select
@@ -116,6 +122,7 @@
         </div>
 
         <form class="chat-composer" @submit.prevent="ask(draft)">
+          <button class="chat-short-context-button" type="button" aria-label="问答历史与设置" @click="contextVisible = true"><el-icon><ChatLineSquare /></el-icon></button>
           <textarea v-model="draft" :disabled="!activeBaseId" rows="1" placeholder="询问本书中的概念、章节或观点…" @compositionstart="composerIsComposing = true" @compositionend="finishComposerComposition" @keydown="handleComposerKeydown"></textarea>
           <button v-if="searching && runtimeReady" type="button" class="is-stop" aria-label="停止生成" @click="stopAnswer"><span class="stop-square"></span></button>
           <button v-else type="submit" :disabled="!activeBaseId || !draft.trim() || searching" aria-label="发送问题">
@@ -124,6 +131,30 @@
         </form>
       </section>
     </div>
+
+    <MotionModal v-model="contextVisible" aria-label="问答历史与设置">
+      <div class="knowledge-modal-card chat-context-sheet">
+        <header class="knowledge-modal-head"><h3>历史问答</h3><p>{{ activeBase?.book_name || '请先选择一本书' }}</p></header>
+        <div class="knowledge-modal-body">
+          <el-select v-model="activeBaseId" class="knowledge-select is-fluid" aria-label="当前问答知识库" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" :disabled="searching" placeholder="选择一本书" @change="changeKnowledgeBase">
+            <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
+          </el-select>
+          <button class="new-conversation-button" type="button" :disabled="!activeBaseId || searching" @click="contextVisible = false; newConversation()"><el-icon><Plus /></el-icon>新对话</button>
+          <section class="conversation-history" aria-label="手机端问答历史">
+            <div class="conversation-list">
+              <button v-for="conversation in conversations" :key="conversation.id" type="button" :class="{ active: conversation.id === activeConversationId }" :disabled="searching" @click="contextVisible = false; openConversation(conversation.id)">
+                <strong>{{ conversation.title }}</strong><span>{{ conversation.message_count }} 条消息 · {{ formatConversationTime(conversation.updated_at) }}</span>
+              </button>
+              <p v-if="historyLoading">正在恢复历史…</p>
+              <p v-else-if="!conversations.length">首次提问后，会话会自动保存在本地数据库。</p>
+            </div>
+          </section>
+          <div class="runtime-state"><span class="knowledge-status" :class="runtimeReady ? 'is-healthy' : 'is-warning'">{{ runtimeReady ? 'Harness 启动器可用' : '证据检索模式' }}</span><p>{{ runtimeMessage }}</p></div>
+          <p class="boundary-note"><el-icon><Lock /></el-icon>不会跨书检索，也不会直接改写原始文件。</p>
+        </div>
+        <footer class="knowledge-modal-actions"><el-button @click="contextVisible = false">关闭</el-button></footer>
+      </div>
+    </MotionModal>
 
     <MotionModal v-model="inspectorVisible" aria-label="问答运行检查器" size="wide">
       <div class="knowledge-modal-card qa-inspector-modal">
@@ -182,7 +213,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ArrowRight, ChatDotRound, Checked, Close, Loading, Lock, Plus, Top } from '@element-plus/icons-vue'
+import { ArrowRight, ChatDotRound, ChatLineSquare, Checked, Close, Loading, Lock, Plus, Top } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import KnowledgeAnswerMarkdown from '@/components/knowledge/KnowledgeAnswerMarkdown.vue'
@@ -226,6 +257,7 @@ const route = useRoute()
 const router = useRouter()
 const bases = ref<KnowledgeBaseSummary[]>([])
 const activeBaseId = ref('')
+const contextVisible = ref(false)
 const conversations = ref<KnowledgeConversationSummary[]>([])
 const activeConversationId = ref('')
 const draft = ref('')
@@ -632,6 +664,14 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.chat-mobile-context { display: none; }
+.new-conversation-button { min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 12px; color: var(--accent); background: var(--accent-light); font: inherit; cursor: pointer; }
+.new-conversation-button:disabled { opacity: .45; cursor: default; }
+.chat-context-sheet .conversation-list { display: grid; max-height: none; }
+.chat-context-sheet .conversation-list > button { width: 100%; min-height: 54px; padding: 10px 12px; }
+.chat-context-sheet .conversation-list strong { font-size: 14px; }
+.chat-context-sheet .conversation-list span, .chat-context-sheet .conversation-list > p { font-size: 12px; }
+.chat-context-sheet .runtime-state p, .chat-context-sheet .boundary-note { display: flex; font-size: 12px; }
 .chat-layout { min-width: 0; min-height: 590px; display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; }
 .answer-interruption { display: grid; gap: 5px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); color: var(--text-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .answer-interruption strong { font-weight: 600; }
@@ -701,6 +741,7 @@ onBeforeUnmount(() => {
 .chat-composer textarea { min-width: 0; flex: 1; min-height: 38px; max-height: 120px; padding: 8px 0; resize: none; border: 0; outline: none; background: transparent; color: var(--text-primary); font: inherit; line-height: 1.5; }
 .chat-composer button { width: 38px; height: 38px; display: grid; place-items: center; flex: none; border: 0; border-radius: 12px; background: var(--accent); color: white; cursor: pointer; }
 .chat-composer button:disabled { opacity: .35; cursor: default; }
+.chat-composer .chat-short-context-button { display: none; }
 .chat-composer button.is-stop { background: var(--text-primary); }
 .stop-square { width: 11px; height: 11px; border-radius: 3px; background: var(--bg-base); }
 .source-preview-modal, .qa-inspector-modal { width: 100%; max-height: calc(100dvh - 48px); display: flex; flex-direction: column; }
@@ -740,29 +781,37 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 768px) {
   .chat-layout { min-height: 0; flex: 1; display: flex; flex-direction: column; }
-  .chat-context { align-self: stretch; margin-bottom: 10px; padding: 13px; }
-  .context-label, .context-book, .boundary-note, .runtime-state p { display: none; }
-  .runtime-state { display: flex; align-items: center; }
-  .conversation-history { grid-row: 3; }
-  .conversation-history header > button span { display: none; }
-  .conversation-list { max-height: none; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
-  .conversation-list > button { width: 168px; flex: none; }
-  .conversation-list > p { min-width: 220px; }
+  .chat-context { display: none; }
+  .chat-mobile-context { min-width: 0; flex: none; display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: stretch; gap: 8px; margin-bottom: 10px; }
+  .chat-mobile-context > button { min-height: 44px; display: grid; place-items: center; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); color: var(--accent); font-size: 20px; cursor: pointer; }
   .chat-panel { min-height: 0; flex: 1; }
-  .message-list { min-height: 0; max-height: none; padding: 20px 12px; }
+  .message-list { min-height: 0; max-height: none; padding: 16px 12px; overscroll-behavior-y: contain; }
   .chat-welcome { min-height: 100%; }
   .message { max-width: 92%; }
   .evidence-grid { grid-template-columns: 1fr; }
   .chat-composer { flex: none; margin: 0 8px 8px; }
+  .chat-composer textarea { font-size: 16px; }
+  .chat-composer button { width: 44px; height: 44px; }
+  .save-answer { min-height: 44px; max-width: 100%; text-align: left; font-size: 12px; }
+  .message > p { font-size: 15px; }
+  .chat-welcome h2 { font-size: 19px; }
+  .chat-welcome > button { min-height: 44px; font-size: 13px; }
   .source-preview-modal, .qa-inspector-modal { width: 100%; max-height: calc(min(88dvh, 760px) - env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; }
   .source-preview-head { padding: 34px 16px 13px; }
   .source-preview-head h3 { font-size: 19px; }
+  .source-preview-head > button { width: 44px; height: 44px; }
   .source-preview-body { padding: 18px 16px; }
   .source-preview-modal .knowledge-modal-actions { padding: 10px 16px 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .chat-run-dots i { animation: none; opacity: .6; }
   .chat-run-label { animation: none; background: none; -webkit-text-fill-color: currentColor; }
+}
+@media (max-width: 768px) and (max-height: 500px) {
+  .chat-mobile-context { display: none; }
+  .chat-composer .chat-short-context-button { display: grid; background: var(--bg-glass-subtle); color: var(--accent); }
+  .chat-welcome { gap: 6px; }
+  .welcome-symbol { display: none; }
 }
 @media (prefers-contrast: more) {
   .chat-run-dots i { animation: none; opacity: 1; }

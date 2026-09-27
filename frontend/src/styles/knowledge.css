@@ -199,13 +199,18 @@
   .knowledge-heading { display: none !important; }
   .knowledge-tabs {
     width: 100%;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    flex: none;
     max-width: 100%;
-    margin: 0 0 14px;
+    margin: 0 0 10px;
     gap: 2px;
     padding: 3px;
     border-radius: 14px;
+    overflow: visible;
   }
-  .knowledge-tabs a { min-height: 44px; gap: 5px; padding: 0 9px; font-size: 12px; }
+  .knowledge-tabs a { min-width: 0; min-height: 44px; justify-content: center; gap: 4px; padding: 0 2px; font-size: 12px; }
+  .knowledge-tabs a .el-icon { display: none; }
   .knowledge-surface {
     border-radius: 18px;
     background: color-mix(in srgb, var(--bg-glass-strong) 90%, var(--bg-base));
@@ -215,10 +220,26 @@
   .knowledge-toolbar { width: 100%; }
   .knowledge-select.is-responsive { width: 100%; }
   .knowledge-search { min-height: 46px; }
+  .knowledge-page input, .knowledge-page textarea, .knowledge-page .el-input__inner,
+  .knowledge-modal-card input, .knowledge-modal-card textarea { font-size: 16px; }
+  .knowledge-page .el-select__wrapper { min-height: 44px; }
+  .knowledge-page .knowledge-status { max-width: 100%; overflow-wrap: anywhere; }
+  .knowledge-page .knowledge-status::before { flex: none; }
+  .knowledge-empty { min-height: 200px; padding: 20px 16px; }
   .knowledge-modal-card { max-height: calc(min(88dvh, 760px) - env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; }
-  .knowledge-modal-head { padding-top: 34px; }
-  .knowledge-modal-body { padding: 8px 16px 16px; }
+  .knowledge-modal-head { padding: 34px 16px 12px; }
+  .knowledge-modal-body { flex: 1 1 auto; align-content: start; padding: 8px 16px 16px; }
   .knowledge-modal-actions { padding: 12px 16px 16px; }
+  /* Use the drawer's visual viewport when a phone keyboard changes its height. */
+  .motion-modal .motion-modal__panel > .knowledge-modal-card {
+    max-height: min(88dvh, 760px, calc(var(--motion-viewport-height, 100dvh) - 24px - env(safe-area-inset-bottom)));
+  }
+  .knowledge-modal-actions .el-button { min-height: 44px; height: auto; max-width: 100%; white-space: normal; }
+  .knowledge-modal-card .el-select__wrapper { min-height: 44px; }
+  .knowledge-modal-card { backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .wiki-usage-picker .el-date-range-picker { width: min(620px, calc(100vw - 24px)); max-height: min(72dvh, 560px); overflow-y: auto; }
+  .wiki-usage-picker .el-date-range-picker__content { width: 100%; float: none; }
+  .wiki-usage-picker .el-date-range-picker__content.is-right { border-left: 0; border-top: 1px solid var(--border-faint); }
 }
 
 @media (prefers-reduced-transparency: reduce) {
