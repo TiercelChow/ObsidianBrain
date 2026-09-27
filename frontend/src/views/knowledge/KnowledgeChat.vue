@@ -7,7 +7,7 @@
         </el-select>
         <button type="button" aria-label="问答历史与设置" @click="contextVisible = true"><el-icon><ChatLineSquare /></el-icon></button>
       </div>
-      <aside class="chat-context knowledge-surface">
+      <aside class="chat-context knowledge-surface" data-glass="structural">
         <span class="context-label">当前知识边界</span>
         <el-select
           v-model="activeBaseId"
@@ -739,7 +739,7 @@ onBeforeUnmount(() => {
 .chat-composer { display: flex; align-items: flex-end; gap: 8px; margin: 0 16px 16px; padding: 9px 9px 9px 15px; border: 1px solid var(--border-subtle); border-radius: 18px; background: var(--bg-glass-strong); box-shadow: var(--shadow-md), var(--inset-highlight); }
 .chat-composer:focus-within { border-color: var(--accent-border); }
 .chat-composer textarea { min-width: 0; flex: 1; min-height: 38px; max-height: 120px; padding: 8px 0; resize: none; border: 0; outline: none; background: transparent; color: var(--text-primary); font: inherit; line-height: 1.5; }
-.chat-composer button { width: 38px; height: 38px; display: grid; place-items: center; flex: none; border: 0; border-radius: 12px; background: var(--accent); color: white; cursor: pointer; }
+.chat-composer button { width: 38px; height: 38px; display: grid; place-items: center; flex: none; border: 0; border-radius: 12px; cursor: pointer; }
 .chat-composer button:disabled { opacity: .35; cursor: default; }
 .chat-composer .chat-short-context-button { display: none; }
 .chat-composer button.is-stop { background: var(--text-primary); }

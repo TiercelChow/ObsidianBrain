@@ -305,8 +305,8 @@ onMounted(() => { void load() })
   justify-content: center;
   padding: 24px;
   background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(12px) saturate(150%);
-  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  backdrop-filter: var(--glass-scrim-filter);
+  -webkit-backdrop-filter: var(--glass-scrim-filter);
   animation: fade-in var(--duration-normal) var(--ease-out) both;
 }
 :root[data-theme="dark"] .ppm-overlay {
@@ -319,8 +319,8 @@ onMounted(() => { void load() })
   display: flex;
   flex-direction: column;
   background: var(--bg-glass-strong);
-  backdrop-filter: blur(32px) saturate(180%);
-  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  backdrop-filter: var(--glass-panel-filter);
+  -webkit-backdrop-filter: var(--glass-panel-filter);
   border: 1px solid var(--border-glass);
   border-radius: 18px;
   box-shadow: var(--shadow-lg), var(--inset-highlight);

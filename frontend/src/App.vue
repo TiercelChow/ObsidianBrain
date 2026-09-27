@@ -4,15 +4,6 @@
     class="app-shell"
     :class="{ 'mobile-focus': isMobile && mobileFocusMode, 'has-mobile-subnav': !!mobileSubnav?.items.length }"
   >
-    <!-- Ambient gradient orbs for liquid glass effect -->
-    <div class="ambient-bg">
-      <div class="orb orb-1"></div>
-      <div class="orb orb-2"></div>
-      <div class="orb orb-3"></div>
-    </div>
-    <!-- Subtle grain texture background -->
-    <div class="bg-grain"></div>
-
     <!-- Mobile root header: one title. Page-level actions occupy the right slot. -->
     <div v-if="isMobile && !mobileFocusMode" class="mobile-global-header" :class="{ 'header-scrolled': isScrolled }">
       <div class="mobile-header-spacer"></div>
@@ -227,16 +218,9 @@ code, pre, .code-block { font-family: var(--font-mono); }
   font-weight: 580 !important;
 }
 .header-actions .el-button--primary {
-  --el-button-bg-color: var(--accent);
-  --el-button-text-color: #fff;
-  --el-button-border-color: transparent;
-  --el-button-hover-bg-color: color-mix(in srgb, var(--accent) 86%, white);
-  --el-button-hover-text-color: #fff;
-  --el-button-hover-border-color: transparent;
-  --el-button-active-bg-color: var(--accent);
-  --el-button-active-text-color: #fff;
-  --el-button-active-border-color: transparent;
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 25%, transparent);
+  --el-button-text-color: var(--text-primary);
+  --el-button-hover-text-color: var(--text-primary);
+  --el-button-active-text-color: var(--text-primary);
 }
 
 /* ── Task attribute pills (shared by Tasks view + subtask drawer) ── */
@@ -292,13 +276,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
   --tap-target: 44px;
   --page-gutter: 40px;
   --bg-base: #f0f0f3;
-  --bg-glass: rgba(255, 255, 255, 0.45);
-  --bg-glass-strong: rgba(255, 255, 255, 0.65);
-  --bg-card: #f7f7f8;
-  --bg-glass-subtle: rgba(255, 255, 255, 0.3);
   --bg-hover: rgba(255, 255, 255, 0.4);
-  --border-glass: rgba(255, 255, 255, 0.7);
-  --border-subtle: rgba(255, 255, 255, 0.5);
   --border-faint: rgba(0, 0, 0, 0.05);
 
   --text-primary: #18181b;
@@ -319,11 +297,6 @@ code, pre, .code-block { font-family: var(--font-mono); }
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.08);
-  --inset-highlight: inset 0 1px 1px rgba(255, 255, 255, 0.6);
-  --glass-blur: 20px;
-  --glass-saturate: 180%;
-
-  --orb-opacity: 1;
 
   /* ── Design Tokens (Apple Design) ── */
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
@@ -346,13 +319,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
 /* ── Dark Theme — Deep Black ── */
 :root[data-theme="dark"] {
   --bg-base: #000000;
-  --bg-glass: rgba(20, 20, 25, 0.4);
-  --bg-glass-strong: rgba(25, 25, 30, 0.6);
-  --bg-card: #08080a;
-  --bg-glass-subtle: rgba(30, 30, 35, 0.25);
   --bg-hover: rgba(40, 40, 45, 0.4);
-  --border-glass: rgba(255, 255, 255, 0.08);
-  --border-subtle: rgba(255, 255, 255, 0.06);
   --border-faint: rgba(255, 255, 255, 0.04);
 
   --text-primary: #ffffff;
@@ -373,23 +340,13 @@ code, pre, .code-block { font-family: var(--font-mono); }
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15);
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.25);
-  --inset-highlight: inset 0 1px 1px rgba(255, 255, 255, 0.05);
-  --glass-blur: 24px;
-  --glass-saturate: 160%;
 
-  --orb-opacity: 0.35;
 }
 
 /* ── Eye-Care Theme — Soft Green ── */
 :root[data-theme="eye-care"] {
   --bg-base: #c5d5b8;
-  --bg-glass: rgba(180, 215, 165, 0.55);
-  --bg-glass-strong: rgba(165, 205, 150, 0.72);
-  --bg-card: #bcd6ae;
-  --bg-glass-subtle: rgba(150, 195, 135, 0.38);
   --bg-hover: rgba(135, 185, 120, 0.5);
-  --border-glass: rgba(100, 155, 85, 0.55);
-  --border-subtle: rgba(85, 140, 70, 0.42);
   --border-faint: rgba(30, 60, 20, 0.12);
 
   --text-primary: #152618;
@@ -410,38 +367,10 @@ code, pre, .code-block { font-family: var(--font-mono); }
   --shadow-sm: 0 1px 2px rgba(30, 60, 20, 0.08);
   --shadow-md: 0 2px 8px rgba(30, 60, 20, 0.1), 0 1px 2px rgba(30, 60, 20, 0.06);
   --shadow-lg: 0 8px 32px rgba(30, 60, 20, 0.12);
-  --inset-highlight: inset 0 1px 1px rgba(255, 255, 245, 0.6);
-  --glass-blur: 20px;
-  --glass-saturate: 180%;
 
-  --orb-opacity: 1;
 }
 
-/* ── Glass Card 全局覆盖 ── */
-.el-card,
-.stat-card, .module-card, .status-card, .tool-card,
-.stat-chip, .result-card, .recent-card,
-.repo-card, .mode-option, .radar-card,
-.insight-card, .config-card,
-.combo-result, .question-result, .counterpoint-result,
-.combo-result .concept-chip,
-.question-result .question-item,
-.counterpoint-result .counterpoint-item,
-.assessment {
-  background: var(--bg-glass) !important;
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
-  border: 1px solid var(--border-glass) !important;
-  box-shadow: var(--shadow-md), var(--inset-highlight) !important;
-}
-
-/* ── Glass Tag 全局覆盖 ── */
-.lang-tag, .tag, .stat-chip .stat-label {
-  background: var(--bg-glass-subtle) !important;
-  backdrop-filter: blur(8px) !important;
-  -webkit-backdrop-filter: blur(8px) !important;
-  border: 1px solid var(--border-subtle) !important;
-}
+/* Material palettes and surface weights are owned by styles/materials.css. */
 
 /* ── Element Plus overrides ── */
 .el-card {
@@ -635,8 +564,8 @@ code, pre, .code-block { font-family: var(--font-mono); }
   border-radius: 16px !important;
   border: 1px solid var(--border-glass) !important;
   background: var(--bg-glass-strong) !important;
-  backdrop-filter: blur(32px) saturate(200%) !important;
-  -webkit-backdrop-filter: blur(32px) saturate(200%) !important;
+  backdrop-filter: var(--glass-panel-filter) !important;
+  -webkit-backdrop-filter: var(--glass-panel-filter) !important;
   box-shadow: var(--shadow-lg), var(--shadow-sm), var(--inset-highlight) !important;
   padding: 14px 22px !important;
 }
@@ -686,15 +615,6 @@ code, pre, .code-block { font-family: var(--font-mono); }
   background: var(--bg-hover) !important;
   border-color: rgba(124, 124, 255, 0.3) !important;
   color: var(--text-primary) !important;
-}
-:root[data-theme="dark"] .el-button--primary {
-  background: var(--accent) !important;
-  border-color: var(--accent) !important;
-  color: #fff !important;
-}
-:root[data-theme="dark"] .el-button--primary:hover {
-  background: #6a6aff !important;
-  border-color: #6a6aff !important;
 }
 :root[data-theme="dark"] .el-button.is-disabled,
 :root[data-theme="dark"] .el-button.is-loading {
@@ -867,8 +787,8 @@ code, pre, .code-block { font-family: var(--font-mono); }
 }
 :root[data-theme="eye-care"] .el-overlay {
   background-color: rgba(30, 60, 20, 0.5) !important;
-  backdrop-filter: blur(4px) !important;
-  -webkit-backdrop-filter: blur(4px) !important;
+  backdrop-filter: var(--glass-scrim-filter) !important;
+  -webkit-backdrop-filter: var(--glass-scrim-filter) !important;
 }
 :root[data-theme="eye-care"] .el-popper {
   background: var(--bg-glass-strong) !important;
@@ -959,35 +879,6 @@ code, pre, .code-block { font-family: var(--font-mono); }
   --mobile-content-shift: 0px;
 }
 
-/* Ambient gradient mesh */
-.ambient-bg {
-  position: fixed;
-  inset: -10%;
-  pointer-events: none;
-  z-index: 0;
-  background:
-    radial-gradient(ellipse at 75% 15%, rgba(196, 181, 253, 0.25), transparent 55%),
-    radial-gradient(ellipse at 15% 85%, rgba(165, 243, 252, 0.2), transparent 55%),
-    radial-gradient(ellipse at 50% 50%, rgba(253, 230, 138, 0.12), transparent 50%);
-  animation: meshDrift 40s ease-in-out infinite alternate;
-}
-.orb { display: none; }
-@keyframes meshDrift {
-  0%   { transform: translate(0, 0) scale(1); }
-  50%  { transform: translate(-15px, 10px) scale(1.02); }
-  100% { transform: translate(10px, -8px) scale(0.99); }
-}
-
-/* Subtle noise texture */
-.bg-grain {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  opacity: 0.4;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
-}
-
 .app-container {
   height: 100vh;
   height: 100dvh;
@@ -1052,8 +943,8 @@ code, pre, .code-block { font-family: var(--font-mono); }
 }
 .mobile-global-header.header-scrolled {
   background: var(--bg-glass-strong);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: var(--glass-floating-filter);
+  -webkit-backdrop-filter: var(--glass-floating-filter);
   box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
 }
 
@@ -1079,8 +970,8 @@ code, pre, .code-block { font-family: var(--font-mono); }
   z-index: 1090;
   background: rgba(0, 0, 0, 0.3);
   opacity: 1;
-  backdrop-filter: blur(8px) saturate(90%);
-  -webkit-backdrop-filter: blur(8px) saturate(90%);
+  backdrop-filter: var(--glass-scrim-filter);
+  -webkit-backdrop-filter: var(--glass-scrim-filter);
   touch-action: none;
 }
 
@@ -1097,6 +988,10 @@ code, pre, .code-block { font-family: var(--font-mono); }
 }
 
 .has-mobile-subnav { --mobile-navigation-height: calc(var(--mobile-dock-height) + var(--mobile-sub-dock-height) + 8px); }
+
+@media (min-width: 769px) and (prefers-reduced-motion: reduce) {
+  .app-aside { transition-property: box-shadow; }
+}
 
 .app-main.mobile-full {
   padding: 16px max(12px, var(--safe-right)) calc(var(--mobile-navigation-height) + max(8px, var(--safe-bottom)) + 12px) max(12px, var(--safe-left));
@@ -1167,3 +1062,5 @@ code, pre, .code-block { font-family: var(--font-mono); }
   }
 }
 </style>
+
+<style src="./styles/materials.css"></style>

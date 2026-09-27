@@ -1,15 +1,12 @@
 <template>
   <div class="sidebar" :class="{ collapsed: isCollapsed }">
-    <span v-if="expandedOnMobile" class="mobile-sheet-handle" aria-hidden="true"></span>
+    <span class="mobile-sheet-handle" aria-hidden="true"></span>
     <!-- Logo -->
     <div class="logo-section">
       <img class="logo-mark" src="/favicon.svg" alt="" aria-hidden="true" />
-      <transition name="logo-text">
-        <span v-show="!isCollapsed" class="logo-name">ObsidianBrain</span>
-      </transition>
-      <strong v-if="expandedOnMobile" class="mobile-sheet-title">全部功能</strong>
+      <span class="logo-name" :aria-hidden="isCollapsed ? true : undefined">ObsidianBrain</span>
+      <strong class="mobile-sheet-title">全部功能</strong>
       <button
-        v-if="expandedOnMobile"
         type="button"
         class="mobile-sidebar-close"
         aria-label="关闭全部模块"
@@ -18,7 +15,7 @@
     </div>
 
     <!-- Navigation -->
-    <nav class="nav-list">
+    <nav id="app-navigation" ref="navListRef" class="nav-list" aria-label="主导航">
       <span
         v-if="activeIndicator.visible"
         class="nav-active-indicator"
@@ -26,7 +23,7 @@
         :style="activeIndicatorStyle"
       ></span>
       <div v-for="group in navGroups" :key="group.label" class="nav-group">
-        <span v-show="!isCollapsed" class="nav-group-label">{{ group.label }}</span>
+        <span class="nav-group-label" :aria-hidden="isCollapsed ? true : undefined">{{ group.label }}</span>
         <router-link
           v-for="item in group.items"
           :key="item.path"
@@ -35,31 +32,29 @@
           :class="{ active: isActive(item.path) }"
           :aria-current="isActive(item.path) ? 'page' : undefined"
           :data-nav-path="item.path"
+          :aria-label="item.label"
+          :title="isCollapsed ? item.label : undefined"
         >
           <el-icon :size="18" class="nav-icon"><component :is="item.icon" /></el-icon>
-          <transition name="nav-label">
-            <span v-show="!isCollapsed" class="nav-label">{{ item.label }}</span>
-          </transition>
+          <span class="nav-label" :aria-hidden="isCollapsed ? true : undefined">{{ item.label }}</span>
         </router-link>
       </div>
     </nav>
 
     <!-- Collapse Toggle -->
     <div class="sidebar-footer">
-      <button class="collapse-btn" type="button" :aria-label="isCollapsed ? '展开导航' : '收起导航'" @click="appStore.toggleSidebar()">
+      <button class="collapse-btn" type="button" :aria-label="isCollapsed ? '展开导航' : '收起导航'" :aria-expanded="!isCollapsed" aria-controls="app-navigation" @click="appStore.toggleSidebar()">
         <el-icon :size="16">
           <component :is="isCollapsed ? Expand : Fold" />
         </el-icon>
-        <transition name="nav-label">
-          <span v-show="!isCollapsed">收起</span>
-        </transition>
+        <span class="nav-label" :aria-hidden="isCollapsed ? true : undefined">收起</span>
       </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import {
@@ -83,6 +78,7 @@ const route = useRoute()
 const appStore = useAppStore()
 const props = defineProps<{ expandedOnMobile?: boolean }>()
 const isCollapsed = computed(() => appStore.sidebarCollapsed && !props.expandedOnMobile)
+const navListRef = ref<HTMLElement | null>(null)
 const activeIndicator = reactive({ top: 0, height: 0, visible: false })
 const activeIndicatorStyle = computed(() => ({
   height: `${activeIndicator.height}px`,
@@ -91,8 +87,8 @@ const activeIndicatorStyle = computed(() => ({
 
 function updateActiveIndicator() {
   nextTick(() => {
-    const active = document.querySelector('.nav-list .nav-item.active') as HTMLElement | null
-    const list = active?.closest<HTMLElement>('.nav-list')
+    const list = navListRef.value
+    const active = list?.querySelector<HTMLElement>('.nav-item.active')
     if (!active || !list) {
       activeIndicator.visible = false
       return
@@ -157,44 +153,35 @@ function isActive(path: string) {
 
 <style scoped>
 .sidebar {
+  /* 72px rail - 24px padding - 1px outer edge, identical in both states. */
+  --sidebar-icon-track: 47px;
   height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--bg-glass);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: var(--glass-structural-filter);
+  -webkit-backdrop-filter: var(--glass-structural-filter);
   border-right: 1px solid var(--border-glass);
   box-shadow: inset -1px 0 0 var(--border-faint);
   padding: 0 12px;
-  transition: padding var(--duration-slow) var(--ease-spring);
-}
-
-.sidebar.collapsed {
-  padding: 0 8px;
 }
 
 /* ── Logo ── */
 .logo-section {
   height: 56px;
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--sidebar-icon-track) minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
-  padding: 0 8px;
+  padding: 0;
   margin-bottom: 8px;
   flex-shrink: 0;
-  transition: padding var(--duration-slow) var(--ease-spring),
-              justify-content var(--duration-slow) var(--ease-spring);
-}
-
-.sidebar.collapsed .logo-section {
-  padding: 0;
-  justify-content: center;
 }
 
 .logo-mark {
   width: 32px;
   height: 32px;
   display: block;
+  justify-self: center;
   flex-shrink: 0;
   border-radius: 9px;
   object-fit: cover;
@@ -219,12 +206,17 @@ function isActive(path: string) {
   flex-direction: column;
   gap: 2px;
   overflow-y: auto;
+  overflow-x: hidden;
   position: relative;
 }
 
 .nav-group { display: flex; flex-direction: column; gap: 2px; }
 .nav-group + .nav-group { margin-top: 8px; }
 .nav-group-label {
+  height: 28px;
+  flex: none;
+  display: flex;
+  align-items: center;
   padding: 6px 12px 4px;
   color: var(--text-faint);
   font-size: 10px;
@@ -249,10 +241,11 @@ function isActive(path: string) {
 }
 
 .nav-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--sidebar-icon-track) minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
+  min-height: 40px;
+  padding: 8px 0;
   border-radius: 12px;
   text-decoration: none;
   color: var(--text-muted);
@@ -261,16 +254,9 @@ function isActive(path: string) {
   cursor: pointer;
   position: relative;
   z-index: 1;
-  transition: padding var(--motion-slow) var(--ease-spring-gentle),
-              gap var(--motion-slow) var(--ease-spring-gentle),
-              color var(--motion-fast) var(--ease-emphasized),
+  transform-origin: calc(var(--sidebar-icon-track) / 2) 50%;
+  transition: color var(--motion-fast) var(--ease-emphasized),
               transform var(--motion-instant) var(--ease-emphasized);
-}
-
-.sidebar.collapsed .nav-item {
-  justify-content: center;
-  padding: 10px 0;
-  gap: 0;
 }
 
 .nav-item:hover {
@@ -285,13 +271,10 @@ function isActive(path: string) {
 }
 
 .nav-icon {
+  justify-self: center;
   flex-shrink: 0;
   opacity: 0.6;
-  transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-slow) var(--ease-spring);
-}
-
-.sidebar.collapsed .nav-icon {
-  transform: scale(1.1);
+  transition: opacity var(--motion-fast) var(--ease-emphasized);
 }
 
 .nav-item:hover .nav-icon,
@@ -300,6 +283,10 @@ function isActive(path: string) {
 }
 
 .nav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-inline-end: 8px;
   white-space: nowrap;
 }
 
@@ -311,64 +298,47 @@ function isActive(path: string) {
 }
 
 .collapse-btn {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--sidebar-icon-track) minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  min-height: 44px;
   width: 100%;
-  padding: 8px 12px;
+  padding: 8px 0;
   border: none;
   border-radius: 12px;
   background: transparent;
   color: var(--text-faint);
   font-size: 13px;
+  text-align: left;
   cursor: pointer;
-  transition: padding var(--motion-slow) var(--ease-spring-gentle),
-              gap var(--motion-slow) var(--ease-spring-gentle),
-              color var(--motion-fast) var(--ease-emphasized),
+  transform-origin: calc(var(--sidebar-icon-track) / 2) 50%;
+  transition: color var(--motion-fast) var(--ease-emphasized),
               background-color var(--motion-fast) var(--ease-emphasized),
               transform var(--motion-instant) var(--ease-emphasized);
 }
 
-.sidebar.collapsed .collapse-btn {
-  justify-content: center;
-  padding: 8px 0;
-  gap: 0;
-}
+.collapse-btn > .el-icon { justify-self: center; }
 
 .collapse-btn:hover {
   background: var(--bg-glass);
   color: var(--text-tertiary);
 }
 
-/* ── Transitions ── */
-.logo-text-enter-active {
-  transition: opacity 0.25s var(--ease-out) 0.15s, transform var(--duration-normal) var(--ease-spring) 0.15s;
-}
-.logo-text-leave-active {
-  transition: opacity 0.12s var(--ease-out), transform 0.12s var(--ease-out);
-}
-.logo-text-enter-from {
-  opacity: 0;
-  transform: translateX(-8px);
-}
-.logo-text-leave-to {
-  opacity: 0;
-  transform: translateX(-4px);
-}
-
-.nav-label-enter-active {
-  transition: opacity var(--duration-fast) var(--ease-out) 0.1s, transform 0.25s var(--ease-spring) 0.1s;
-}
-.nav-label-leave-active {
-  transition: opacity 0.1s var(--ease-out), transform 0.1s var(--ease-out);
-}
-.nav-label-enter-from {
-  opacity: 0;
-  transform: translateX(-6px);
-}
-.nav-label-leave-to {
-  opacity: 0;
-  transform: translateX(-3px);
+/* Keep grid participants mounted: label fading never re-centers the icons. */
+@media (min-width: 769px) {
+  .logo-name, .nav-label, .nav-group-label {
+    transition: opacity var(--motion-fast) var(--ease-emphasized),
+                visibility 0s;
+  }
+  .sidebar.collapsed .logo-name,
+  .sidebar.collapsed .nav-label,
+  .sidebar.collapsed .nav-group-label {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity var(--motion-instant) var(--ease-emphasized),
+                visibility 0s var(--motion-instant);
+  }
 }
 
 /* ── Mobile ── */
@@ -382,8 +352,8 @@ function isActive(path: string) {
     border-radius: inherit;
     box-shadow: none;
     background: var(--bg-glass-strong);
-    backdrop-filter: blur(32px) saturate(200%);
-    -webkit-backdrop-filter: blur(32px) saturate(200%);
+    backdrop-filter: var(--glass-structural-filter);
+    -webkit-backdrop-filter: var(--glass-structural-filter);
   }
   .mobile-sheet-handle {
     position: absolute;
@@ -397,7 +367,7 @@ function isActive(path: string) {
     opacity: .45;
     transform: translateX(-50%);
   }
-  .logo-section { height: 54px; margin-bottom: 2px; padding-inline: 4px; }
+  .logo-section { height: 54px; display: flex; margin-bottom: 2px; padding-inline: 4px; }
   .logo-mark, .logo-name { display: none !important; }
   .mobile-sheet-title { display: block; color: var(--text-primary); font-size: 19px; font-weight: 700; letter-spacing: -.02em; }
   .mobile-sidebar-close {
@@ -428,6 +398,7 @@ function isActive(path: string) {
   }
   .nav-group-label { grid-column: 1 / -1; padding: 2px 4px 0; }
   .nav-item {
+    display: flex;
     min-width: 0;
     min-height: 70px;
     flex-direction: column;
@@ -440,11 +411,15 @@ function isActive(path: string) {
     font-size: 12px;
     font-weight: 600;
     text-align: center;
+    transform-origin: center;
   }
   .nav-item.active { background: color-mix(in srgb, var(--accent) 11%, var(--bg-glass)); border-color: var(--accent-border); color: var(--accent); }
   .nav-icon { font-size: 22px; opacity: .85; }
-  .nav-label { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-label { width: 100%; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .nav-group + .nav-group { margin-top: 0; }
   .nav-group-label { font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .logo-name, .nav-label, .nav-group-label { transition-delay: 0s; }
 }
 </style>

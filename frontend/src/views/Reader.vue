@@ -20,7 +20,7 @@
 
     <!-- Compact trigger bar — always visible; the view switch leads it like
          the Tasks toolbar, reading controls join in read view. -->
-    <div class="reader-topbar glass-surface">
+    <div class="reader-topbar glass-surface" data-glass-rim>
       <div class="view-switch" aria-label="视图切换">
         <span class="switch-indicator" :class="{ read: viewMode === 'read' }"></span>
         <button type="button" :class="{ active: viewMode === 'shelf' }" @click="changeView('shelf')">书架</button>
@@ -117,7 +117,7 @@
     <!-- Body: 3 panes -->
     <div v-show="viewMode === 'read'" ref="readerBodyRef" class="reader-body">
       <!-- Left: file tree -->
-      <aside class="pane pane-left">
+      <aside class="pane pane-left" data-glass="structural">
         <div class="pane-title-bar">
           <span class="pane-title-text">文件</span>
           <button v-if="tree.length" class="pane-title-btn" title="刷新目录" @click="refreshTree">
@@ -172,7 +172,7 @@
       </main>
 
       <!-- Right: TOC -->
-      <aside class="pane pane-right">
+      <aside class="pane pane-right" data-glass="structural">
         <div class="pane-title">目录</div>
         <div class="pane-scroll">
           <div v-if="!toc.length" class="pane-hint">无目录</div>
@@ -208,6 +208,7 @@
     <div
       v-if="viewMode === 'read' && mobileToolbarState.rendered"
       class="reader-mobile-toolbar"
+      data-glass-rim
       :class="{
         'is-visible': mobileToolbarState.visible,
         'is-pinned': mobileToolbarState.pinned,
@@ -1412,7 +1413,7 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 /* Fullscreen reading mode — immersive: hide app chrome (title/input), keep file
-   tree + TOC. The article's H1 sticks to the top with a frosted glass bar. */
+   tree + TOC. The article's H1 sticks to the top with a shared glass bar. */
 .reader-page:fullscreen {
   position: relative;
   isolation: isolate;
@@ -1422,27 +1423,6 @@ onBeforeUnmount(() => {
   border-radius: 0;
   overflow: hidden;
   cursor: default;
-}
-.reader-page:fullscreen::before {
-  content: '';
-  position: absolute;
-  inset: -10%;
-  pointer-events: none;
-  z-index: 0;
-  background:
-    radial-gradient(ellipse at 75% 15%, rgba(196, 181, 253, 0.25), transparent 55%),
-    radial-gradient(ellipse at 15% 85%, rgba(165, 243, 252, 0.2), transparent 55%),
-    radial-gradient(ellipse at 50% 50%, rgba(253, 230, 138, 0.12), transparent 50%);
-  opacity: var(--orb-opacity, 1);
-}
-:root[data-theme="eye-care"] .reader-page:fullscreen::before {
-  background:
-    radial-gradient(ellipse at 75% 15%, rgba(120, 180, 100, 0.25), transparent 55%),
-    radial-gradient(ellipse at 15% 85%, rgba(160, 200, 140, 0.2), transparent 55%),
-    radial-gradient(ellipse at 50% 50%, rgba(200, 220, 170, 0.12), transparent 50%);
-}
-:root[data-theme="dark"] .reader-page:fullscreen::before {
-  opacity: 0.35;
 }
 .reader-page:fullscreen.fs-ui-hidden { cursor: none; }
 .reader-page:fullscreen .reader-body { position: relative; z-index: 1; }
@@ -1461,10 +1441,10 @@ onBeforeUnmount(() => {
 /* The glass uses the same outer width as .markdown-body. Its layered, static
    highlights imply refraction without adding a perpetual paint animation. */
 .reader-page:fullscreen .markdown-body :deep(h1:first-of-type) {
-  --title-glass-fill: color-mix(in srgb, var(--bg-glass-strong) 68%, transparent);
-  --title-glass-edge: color-mix(in srgb, var(--border-glass) 74%, white 26%);
-  --title-glass-glint: rgba(255, 255, 255, 0.5);
-  --title-glass-shadow: rgba(28, 31, 45, 0.12);
+  --title-glass-fill: var(--glass-floating-fill);
+  --title-glass-edge: var(--glass-edge);
+  --title-glass-glint: var(--glass-rim-light);
+  --title-glass-shadow: var(--glass-shadow);
   position: sticky;
   top: 0;
   z-index: 10;
@@ -1477,39 +1457,13 @@ onBeforeUnmount(() => {
   color: var(--text-primary);
   font-weight: 680;
   letter-spacing: -0.025em;
-  background:
-    radial-gradient(120% 180% at 8% -90%, var(--title-glass-glint), transparent 58%),
-    linear-gradient(112deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 38% 72%, rgba(255, 255, 255, 0.12)),
-    var(--title-glass-fill);
+  background: var(--glass-sheen), var(--title-glass-fill);
   border: 1px solid var(--title-glass-edge);
   border-radius: 18px;
-  backdrop-filter: blur(24px) saturate(175%) contrast(1.04) brightness(1.02);
-  -webkit-backdrop-filter: blur(24px) saturate(175%) contrast(1.04) brightness(1.02);
-  box-shadow:
-    inset 0 1px 0 var(--title-glass-glint),
-    inset 0 -1px 0 color-mix(in srgb, var(--accent) 10%, transparent),
-    0 10px 32px var(--title-glass-shadow),
-    0 1px 2px rgba(0, 0, 0, 0.04);
+  backdrop-filter: var(--glass-floating-filter);
+  -webkit-backdrop-filter: var(--glass-floating-filter);
+  box-shadow: var(--glass-floating-shadow);
   text-shadow: 0 1px 0 color-mix(in srgb, var(--bg-base) 46%, transparent);
-}
-:root[data-theme="dark"] .reader-page:fullscreen .markdown-body :deep(h1:first-of-type) {
-  --title-glass-fill: color-mix(in srgb, var(--bg-glass-strong) 78%, transparent);
-  --title-glass-edge: rgba(255, 255, 255, 0.13);
-  --title-glass-glint: rgba(255, 255, 255, 0.17);
-  --title-glass-shadow: rgba(0, 0, 0, 0.38);
-  background:
-    radial-gradient(120% 180% at 8% -90%, rgba(255, 255, 255, 0.16), transparent 58%),
-    linear-gradient(112deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent 42% 74%, rgba(255, 255, 255, 0.045)),
-    var(--title-glass-fill);
-  backdrop-filter: blur(26px) saturate(150%) contrast(1.08) brightness(0.86);
-  -webkit-backdrop-filter: blur(26px) saturate(150%) contrast(1.08) brightness(0.86);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
-}
-:root[data-theme="eye-care"] .reader-page:fullscreen .markdown-body :deep(h1:first-of-type) {
-  --title-glass-fill: color-mix(in srgb, var(--bg-glass-strong) 76%, transparent);
-  --title-glass-edge: rgba(230, 255, 222, 0.44);
-  --title-glass-glint: rgba(245, 255, 240, 0.4);
-  --title-glass-shadow: rgba(40, 78, 34, 0.14);
 }
 /* Desktop fullscreen: wider document, more breathing room. */
 @media (min-width: 769px) {
@@ -1557,8 +1511,8 @@ onBeforeUnmount(() => {
   width: 42px; height: 42px; border-radius: 50%;
   border: 1px solid var(--border-glass);
   background: var(--bg-glass);
-  backdrop-filter: blur(12px) saturate(150%);
-  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  backdrop-filter: var(--glass-floating-filter);
+  -webkit-backdrop-filter: var(--glass-floating-filter);
   color: var(--text-secondary);
   display: flex; align-items: center; justify-content: center;
   cursor: pointer;
@@ -1574,19 +1528,15 @@ onBeforeUnmount(() => {
 /* Match the native fullscreen backdrop to the reading surface, preventing a
    black flash while the browser hands the element to/from the top layer. */
 .reader-page::backdrop {
-  background:
-    radial-gradient(ellipse at 75% 15%, rgba(196, 181, 253, 0.25), transparent 55%),
-    radial-gradient(ellipse at 15% 85%, rgba(165, 243, 252, 0.2), transparent 55%),
-    radial-gradient(ellipse at 50% 50%, rgba(253, 230, 138, 0.12), transparent 50%),
-    var(--bg-base);
+  background: var(--bg-base);
 }
 /* ── Top bar — glass container like the Tasks toolbar ── */
 .glass-surface {
   background: var(--bg-glass);
   border: 1px solid var(--border-glass);
   box-shadow: var(--shadow-sm), var(--inset-highlight);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: var(--glass-content-filter);
+  -webkit-backdrop-filter: var(--glass-content-filter);
 }
 .reader-topbar {
   display: flex;
@@ -1661,8 +1611,8 @@ onBeforeUnmount(() => {
   min-height: 40px; padding: 0 14px; border-radius: 12px;
   border: 1px solid var(--border-glass);
   background: var(--bg-glass);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: var(--glass-floating-filter);
+  -webkit-backdrop-filter: var(--glass-floating-filter);
   color: var(--text-muted); font-size: 14px;
   cursor: pointer; text-align: left;
   transition: color var(--motion-fast) var(--ease-emphasized),
@@ -1703,16 +1653,16 @@ onBeforeUnmount(() => {
   display: flex; align-items: flex-start; justify-content: center;
   padding-top: 15vh;
   background: rgba(0, 0, 0, 0.15);
-  backdrop-filter: blur(12px) saturate(150%);
-  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  backdrop-filter: var(--glass-scrim-filter);
+  -webkit-backdrop-filter: var(--glass-scrim-filter);
 }
 :root[data-theme="dark"] .path-overlay { background: rgba(0, 0, 0, 0.35); }
 .path-card {
   width: 720px; max-width: calc(100vw - 32px);
   display: flex; flex-direction: column;
   background: var(--bg-glass-strong);
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: var(--glass-panel-filter);
+  -webkit-backdrop-filter: var(--glass-panel-filter);
   border: 1px solid var(--border-glass);
   border-radius: 20px;
   box-shadow: var(--shadow-lg), var(--inset-highlight);
@@ -1736,8 +1686,8 @@ onBeforeUnmount(() => {
 .pane {
   display: flex; flex-direction: column;
   background: var(--bg-glass);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: var(--glass-content-filter);
+  -webkit-backdrop-filter: var(--glass-content-filter);
   border: 1px solid var(--border-glass);
   border-radius: 18px;
   box-shadow: var(--shadow-md), var(--inset-highlight);
@@ -1776,8 +1726,8 @@ onBeforeUnmount(() => {
   z-index: 9999;
   padding: 10px 24px; border-radius: 12px;
   font-size: 14px; font-weight: 500;
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: var(--glass-floating-filter);
+  -webkit-backdrop-filter: var(--glass-floating-filter);
   box-shadow: var(--shadow-lg);
   pointer-events: none;
 }
@@ -1837,7 +1787,7 @@ onBeforeUnmount(() => {
   z-index: 6; max-width: calc(100% - 32px);
   padding: 8px 16px; border-radius: 10px;
   background: var(--bg-glass-strong);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: var(--glass-floating-filter); -webkit-backdrop-filter: var(--glass-floating-filter);
   border: 1px solid rgba(248, 113, 113, 0.3);
   color: #f87171; font-size: 13px;
 }
@@ -1925,12 +1875,9 @@ onBeforeUnmount(() => {
     padding: 0 12px;
     border: 0;
     border-radius: 13px;
-    background: var(--accent);
-    color: white;
     font: inherit;
     font-size: 14px;
     font-weight: 650;
-    box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 24%, transparent);
   }
   .reader-shelf-add:active { transform: scale(.96); }
   .reader-file-search-trigger,
@@ -1965,8 +1912,8 @@ onBeforeUnmount(() => {
     border: 1px solid var(--border-glass);
     border-radius: 18px;
     background: var(--bg-glass-strong);
-    backdrop-filter: blur(22px) saturate(180%);
-    -webkit-backdrop-filter: blur(22px) saturate(180%);
+    backdrop-filter: var(--glass-floating-filter);
+    -webkit-backdrop-filter: var(--glass-floating-filter);
     box-shadow: var(--shadow-lg), var(--inset-highlight);
     max-width: calc(100vw - 20px);
     overflow: hidden;
@@ -2112,8 +2059,8 @@ onBeforeUnmount(() => {
 /* Glass styling for the drawers — matches the app's liquid-glass surfaces. */
 .el-drawer {
   background: var(--bg-glass-strong);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: var(--glass-panel-filter);
+  -webkit-backdrop-filter: var(--glass-panel-filter);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18), var(--inset-highlight);
 }
 :root[data-theme="dark"] .el-drawer {
@@ -2122,8 +2069,8 @@ onBeforeUnmount(() => {
 /* Frosted overlay (only the drawer's overlay, not dialogs). */
 .el-overlay:has(.el-drawer) {
   background-color: rgba(0, 0, 0, 0.18);
-  backdrop-filter: blur(6px) saturate(140%);
-  -webkit-backdrop-filter: blur(6px) saturate(140%);
+  backdrop-filter: var(--glass-scrim-filter);
+  -webkit-backdrop-filter: var(--glass-scrim-filter);
 }
 :root[data-theme="dark"] .el-overlay:has(.el-drawer) {
   background-color: rgba(0, 0, 0, 0.4);

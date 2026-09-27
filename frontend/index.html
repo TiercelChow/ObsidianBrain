@@ -11,14 +11,14 @@
   <body>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
-    <!-- Glass overrides using CSS variables (works for both light and dark themes) -->
+    <!-- Control geometry; optical recipes are shared with src/styles/materials.css. -->
     <style>
       /* ── Glass Input ── */
       .el-input__wrapper {
         border-radius: 12px !important;
         background: var(--bg-glass-subtle) !important;
-        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
-        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
+        backdrop-filter: var(--glass-control-filter) !important;
+        -webkit-backdrop-filter: var(--glass-control-filter) !important;
         box-shadow: 0 0 0 1px var(--border-glass) inset, var(--shadow-sm) !important;
         transition: background-color 0.25s ease, box-shadow 0.25s ease !important;
       }
@@ -45,8 +45,8 @@
       .el-select__wrapper {
         border-radius: 10px !important;
         background: var(--bg-glass-subtle) !important;
-        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
-        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
+        backdrop-filter: var(--glass-control-filter) !important;
+        -webkit-backdrop-filter: var(--glass-control-filter) !important;
         box-shadow: 0 0 0 1px var(--border-glass) inset !important;
       }
       .el-select__placeholder { color: var(--text-faint) !important; }
@@ -57,8 +57,8 @@
       .el-range-editor {
         border-radius: 12px !important;
         background: var(--bg-glass-subtle) !important;
-        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
-        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
+        backdrop-filter: var(--glass-control-filter) !important;
+        -webkit-backdrop-filter: var(--glass-control-filter) !important;
         border: 1px solid var(--border-glass) !important;
       }
       .el-range-input { color: var(--text-primary) !important; }
@@ -69,8 +69,8 @@
       .el-dialog {
         border-radius: 20px !important;
         background: var(--bg-glass-strong) !important;
-        backdrop-filter: blur(calc(var(--glass-blur) + 20px)) saturate(var(--glass-saturate)) !important;
-        -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 20px)) saturate(var(--glass-saturate)) !important;
+        backdrop-filter: var(--glass-panel-filter) !important;
+        -webkit-backdrop-filter: var(--glass-panel-filter) !important;
         border: 1px solid var(--border-glass) !important;
         box-shadow: 0 12px 48px rgba(0,0,0,0.1), 0 4px 16px rgba(0,0,0,0.05), var(--inset-highlight) !important;
         overflow: hidden;
@@ -91,8 +91,8 @@
       .concept-chip, .question-item, .counterpoint-item,
       .assessment {
         background: var(--bg-glass) !important;
-        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
-        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)) !important;
+        backdrop-filter: var(--glass-content-filter) !important;
+        -webkit-backdrop-filter: var(--glass-content-filter) !important;
         border: 1px solid var(--border-glass) !important;
         box-shadow: var(--shadow-md), var(--inset-highlight) !important;
       }
@@ -100,8 +100,8 @@
       /* ── Glass Tag ── */
       .lang-tag, .tag {
         background: var(--bg-glass-subtle) !important;
-        backdrop-filter: blur(var(--glass-blur)) !important;
-        -webkit-backdrop-filter: blur(var(--glass-blur)) !important;
+        backdrop-filter: var(--glass-control-filter) !important;
+        -webkit-backdrop-filter: var(--glass-control-filter) !important;
         border: 1px solid var(--border-subtle) !important;
         color: var(--text-tertiary) !important;
       }
@@ -117,12 +117,6 @@
         border-color: var(--accent-border) !important;
         color: var(--text-primary) !important;
       }
-      .el-button--primary {
-        background: var(--accent) !important;
-        border-color: var(--accent) !important;
-        color: #fff !important;
-      }
-
       /* ── el-tag ── */
       .el-tag {
         background: var(--bg-glass-subtle) !important;
@@ -168,8 +162,8 @@
       .el-popper {
         background: var(--bg-glass-strong) !important;
         border: 1px solid var(--border-glass) !important;
-        backdrop-filter: blur(20px) !important;
-        -webkit-backdrop-filter: blur(20px) !important;
+        backdrop-filter: var(--glass-panel-filter) !important;
+        -webkit-backdrop-filter: var(--glass-panel-filter) !important;
       }
       .el-select-dropdown__item { color: var(--text-secondary) !important; }
       .el-select-dropdown__item.hover,
@@ -181,8 +175,8 @@
         border-radius: 20px !important;
         border: 1px solid var(--border-glass) !important;
         background: var(--bg-glass-strong) !important;
-        backdrop-filter: blur(calc(var(--glass-blur) + 20px)) saturate(var(--glass-saturate)) !important;
-        -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 20px)) saturate(var(--glass-saturate)) !important;
+        backdrop-filter: var(--glass-panel-filter) !important;
+        -webkit-backdrop-filter: var(--glass-panel-filter) !important;
         box-shadow: 0 12px 48px rgba(0,0,0,0.1), 0 4px 16px rgba(0,0,0,0.05), var(--inset-highlight) !important;
         overflow: hidden;
       }

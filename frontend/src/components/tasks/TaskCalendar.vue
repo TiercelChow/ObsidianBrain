@@ -324,8 +324,8 @@ onUnmounted(() => {
   background: var(--bg-glass);
   border: 1px solid var(--border-glass);
   box-shadow: var(--shadow-sm), var(--inset-highlight);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: var(--glass-content-filter);
+  -webkit-backdrop-filter: var(--glass-content-filter);
 }
 .task-calendar { border-radius: 24px; padding: 20px; overflow: hidden; display: flex; flex-direction: column; height: calc(100dvh - 208px); }
 .calendar-header { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }

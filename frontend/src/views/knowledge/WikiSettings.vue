@@ -9,7 +9,7 @@
         <el-option label="配置文档 · 提示词与规则" value="documents" />
         <el-option label="Skills · 可配置能力" value="skills" />
       </el-select>
-      <aside class="settings-nav knowledge-surface">
+      <aside class="settings-nav knowledge-surface" data-glass="structural">
         <button :class="{ active: section === 'runtime' }" @click="section = 'runtime'"><el-icon><Cpu /></el-icon><span><strong>Agent Runtime</strong><small>执行器与模型</small></span></button>
         <button :class="{ active: section === 'providers' }" @click="section = 'providers'"><el-icon><Connection /></el-icon><span><strong>模型供应商</strong><small>路由与 API Key</small></span></button>
         <button :class="{ active: section === 'usage' }" @click="section = 'usage'"><el-icon><DataAnalysis /></el-icon><span><strong>Token 用量</strong><small>调用趋势与来源</small></span></button>
@@ -39,6 +39,8 @@
                 placement="bottom-start"
                 :offset="0"
                 :fit-input-width="true"
+                aria-label="第三方模型供应商"
+                :title="selectedProvider(item.profile) ? `${selectedProvider(item.profile)!.display_name} · ${selectedProvider(item.profile)!.model}` : '不使用，走 Harness 默认'"
                 placeholder="不使用，走 Harness 默认"
                 clearable
                 @change="delete runtimeVerification[item.profile.id]"
@@ -93,7 +95,7 @@
             <div><span>运行可观测性</span><h2>Token 用量</h2><p>按时间与调用方查看输入、输出和调用趋势。</p></div>
             <div class="usage-filters">
               <el-date-picker v-model="usageDateRange" type="daterange" value-format="YYYY-MM-DD" format="YYYY/MM/DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :clearable="false" unlink-panels popper-class="glass-picker wiki-usage-picker" @change="loadUsage" />
-              <el-select v-model="usageCaller" class="knowledge-select is-compact" popper-class="system-select-popper system-toolbar-popper" placement="bottom-start" :offset="0" :fit-input-width="true" @change="loadUsage">
+              <el-select v-model="usageCaller" class="knowledge-select is-fluid" placeholder="全部调用方" aria-label="Token 用量调用方" popper-class="system-select-popper system-toolbar-popper" placement="bottom-start" :offset="0" :fit-input-width="true" @change="loadUsage">
                 <el-option label="全部调用方" value="" />
                 <el-option label="知识问答" value="knowledge_qa" />
                 <el-option label="研究任务" value="knowledge_task" />
@@ -137,7 +139,7 @@
           <header class="settings-section-head split protection-head">
             <div><span>本地数据安全</span><h2>数据保护</h2><p>快照使用 SQLite Online Backup，能够一致地包含 WAL 中尚未合并的写入。</p></div>
             <div class="protection-actions">
-              <input ref="backupUploadInput" class="visually-hidden" type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3" @change="selectRestoreUpload" />
+              <input ref="backupUploadInput" hidden type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3" @change="selectRestoreUpload" />
               <el-button @click="backupUploadInput?.click()"><el-icon><UploadFilled /></el-icon>上传恢复</el-button>
               <el-button type="primary" :loading="creatingBackup" @click="createBackup"><el-icon><Plus /></el-icon>立即备份</el-button>
             </div>
@@ -190,7 +192,7 @@
             <div><span>能力扩展</span><h2>Skills</h2><p>指令保存在 SQLite；当前开发阶段仅保留最新内容，启用范围严格绑定当前书籍。</p></div>
             <div class="skills-actions">
               <el-select v-model="activeBaseId" class="knowledge-select is-compact is-responsive" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库" @change="loadSkills"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" /></el-select>
-              <input ref="skillArchiveInput" class="visually-hidden" type="file" accept=".zip,application/zip" @change="importSkillArchive" />
+              <input ref="skillArchiveInput" hidden type="file" accept=".zip,application/zip" @change="importSkillArchive" />
               <el-button :loading="importingSkill" @click="skillArchiveInput?.click()"><el-icon><UploadFilled /></el-icon>导入 ZIP</el-button>
               <el-button type="primary" @click="openSkillEditor()"><el-icon><Plus /></el-icon>新增 Skill</el-button>
             </div>
@@ -282,7 +284,7 @@
         <div v-if="skillDetailLoading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
         <button v-if="skillDetail && !skillDetailLoading" class="mobile-skill-metadata-toggle" type="button" :aria-expanded="skillMetadataExpanded" @click="skillMetadataExpanded = !skillMetadataExpanded">{{ skillMetadataExpanded ? '收起权限与版本说明' : '权限、版本与来源说明' }}<el-icon><ArrowDown /></el-icon></button>
         <div v-if="skillDetail && !skillDetailLoading" class="skill-detail-layout" :class="{ 'show-metadata': skillMetadataExpanded }">
-          <aside class="skill-detail-sidebar">
+          <aside class="skill-detail-sidebar" data-glass="structural">
             <section class="skill-detail-summary">
               <span>{{ skillDetail.skill.slug }}</span>
               <strong>{{ skillDetail.skill.name }}</strong>
@@ -303,9 +305,9 @@
           </aside>
           <section class="skill-detail-content">
             <nav class="skill-file-tabs" aria-label="Skill 文件">
-              <button v-for="file in activeSkillVersion?.files || []" :key="file.relative_path" type="button" :class="{ active: file.relative_path === activeSkillFilePath }" @click="activeSkillFilePath = file.relative_path">{{ file.relative_path }}</button>
+              <button v-for="file in activeSkillVersion?.files || []" :key="file.relative_path" type="button" class="skill-file-button" data-glass-action :class="{ active: file.relative_path === activeSkillFilePath }" :aria-pressed="file.relative_path === activeSkillFilePath" :title="file.relative_path" @click="activeSkillFilePath = file.relative_path"><el-icon><Document /></el-icon><span>{{ file.relative_path }}</span></button>
             </nav>
-            <header v-if="activeSkillFile"><div><strong>{{ activeSkillFile.relative_path }}</strong><span>{{ activeSkillFile.media_type }} · {{ formatBytes(activeSkillFile.size_bytes) }}</span></div><code>{{ activeSkillFile.content_hash }}</code></header>
+            <header v-if="activeSkillFile"><div><strong :title="activeSkillFile.relative_path">{{ activeSkillFile.relative_path }}</strong><span>{{ activeSkillFile.media_type }} · {{ formatBytes(activeSkillFile.size_bytes) }}</span></div><code :title="activeSkillFile.content_hash">{{ activeSkillFile.content_hash }}</code></header>
             <div v-if="activeSkillVersion" class="skill-version-audit">
               <section>
                 <strong>版本说明</strong>
@@ -1188,7 +1190,8 @@ onMounted(initialize)
 .settings-nav small { color: var(--text-faint); font-size: 10px; }
 .settings-main { min-width: 0; container-type: inline-size; padding: clamp(16px, 1.8vw, 24px); }
 .settings-section-head { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border-faint); }
-.settings-section-head.split { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.settings-section-head.split { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.settings-section-head > div { min-width: 0; max-width: 100%; }
 .settings-section-head span { color: var(--accent); font-size: 10px; font-weight: 720; letter-spacing: .08em; }
 .settings-section-head h2 { margin: 5px 0 4px; font-size: 20px; font-weight: 680; }
 .settings-section-head p { color: var(--text-muted); font-size: 12px; }
@@ -1203,8 +1206,12 @@ onMounted(initialize)
 .runtime-message.is-verified { background: color-mix(in srgb, #34c759 11%, transparent); color: #248a3d; }
 .runtime-card label { display: grid; gap: 6px; }
 .runtime-card label > span { color: var(--text-muted); font-size: 11px; }
-.provider-mode { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 13px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); }
-.provider-mode > div { display: grid; gap: 2px; }
+.provider-mode { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; padding: 11px 13px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); }
+.provider-mode > div { min-width: 0; display: grid; gap: 2px; }
+.provider-mode .knowledge-select { min-width: 0; width: 100%; max-width: 100%; }
+.provider-mode :deep(.el-select__wrapper), .usage-filters :deep(.el-select__wrapper) { min-width: 0; }
+.provider-mode :deep(.el-select__selection), .usage-filters :deep(.el-select__selection) { min-width: 0; }
+.provider-mode :deep(.el-select__selected-item) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .provider-mode strong { font-size: 12px; }
 .provider-mode span { color: var(--text-faint); font-size: 10px; }
 .provider-fields { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 14px; border: 1px solid var(--accent-border); border-radius: 14px; background: var(--accent-light); }
@@ -1232,8 +1239,10 @@ onMounted(initialize)
 .runtime-actions { display: flex; align-items: center; justify-content: space-between; }
 .runtime-actions > div { display: flex; gap: 8px; }
 .usage-head { align-items: flex-start !important; }
-.usage-filters { width: min(100%, 520px); display: grid; grid-template-columns: minmax(250px, 1fr) 170px; gap: 8px; }
-.usage-filters :deep(.el-date-editor) { min-width: 0; width: 100%; max-width: 100%; min-height: 40px; border-radius: 12px; background: var(--bg-glass-subtle); box-shadow: inset 0 0 0 1px var(--border-faint); }
+.usage-filters { --usage-control-height: 40px; min-width: 0; flex: 0 1 520px; width: min(100%, 520px); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 170px); gap: 8px; }
+.usage-filters .knowledge-select { min-width: 0; width: 100%; max-width: 100%; }
+.usage-filters :deep(.el-select__wrapper), .usage-filters :deep(.el-date-editor) { min-height: var(--usage-control-height); }
+.usage-filters :deep(.el-date-editor) { min-width: 0; width: 100%; max-width: 100%; border-radius: 12px; background: var(--bg-glass-subtle); box-shadow: inset 0 0 0 1px var(--border-faint); }
 .usage-dashboard { display: grid; gap: 13px; }
 .usage-disclosure { display: flex; align-items: flex-start; gap: 9px; padding: 11px 13px; border: 1px solid var(--border-faint); border-radius: 13px; background: var(--bg-glass-subtle); color: var(--text-muted); font-size: 11px; line-height: 1.55; }
 .usage-disclosure .el-icon { flex: none; margin-top: 2px; color: var(--accent); font-size: 15px; }
@@ -1342,12 +1351,15 @@ onMounted(initialize)
 .skill-detail-versions button:hover, .skill-detail-versions button.active { border-color: var(--accent-border); background: var(--accent-light); color: var(--accent); }
 .skill-detail-versions small { color: var(--text-faint); font-size: 10px; }
 .skill-detail-content { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
-.skill-file-tabs { display: flex; gap: 5px; overflow-x: auto; padding: 10px 12px; border-bottom: 1px solid var(--border-faint); }
-.skill-file-tabs button { min-height: 36px; padding: 0 9px; border: 1px solid var(--border-faint); border-radius: 9px; background: transparent; color: var(--text-muted); font: inherit; font-family: var(--font-mono); font-size: 10px; white-space: nowrap; cursor: pointer; }
-.skill-file-tabs button.active { border-color: var(--accent-border); background: var(--accent-light); color: var(--accent); }
+.skill-file-tabs { min-width: 0; flex: none; display: flex; flex-wrap: wrap; gap: 7px; padding: 12px; border-bottom: 1px solid var(--border-faint); }
+.skill-file-tabs button { min-width: 0; max-width: 100%; min-height: 38px; display: inline-flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid var(--border-faint); border-radius: 11px; background: transparent; color: var(--text-muted); font: inherit; font-family: var(--font-mono); font-size: 11px; cursor: pointer; transition: background var(--motion-fast), border-color var(--motion-fast); }
+.skill-file-tabs button .el-icon { flex: none; font-size: 15px; }
+.skill-file-tabs button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.skill-file-tabs button:active { transform: scale(.98); }
 .skill-detail-content > header { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border-faint); }
-.skill-detail-content > header div { min-width: 0; display: grid; gap: 2px; }
-.skill-detail-content > header strong { color: var(--text-primary); font-size: 12px; }
+.skill-detail-content > header div { min-width: 0; flex: 1; display: grid; gap: 2px; }
+.skill-detail-content > header strong { overflow: hidden; color: var(--text-primary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.skill-detail-content > header code { flex: none; max-width: 12ch; }
 .skill-detail-content > header span, .skill-detail-content > header code { overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .skill-version-audit { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border-faint); background: color-mix(in srgb, var(--bg-base) 42%, transparent); }
 .skill-version-audit section:last-child:nth-child(odd) { grid-column: 1 / -1; }
@@ -1432,6 +1444,7 @@ onMounted(initialize)
   .skill-card header h3, .skill-card header code { overflow-wrap: anywhere; white-space: normal; }
   .settings-section-head.split { display: grid; }
   .runtime-title { flex-wrap: wrap; }
+  .runtime-title > div:nth-child(2) { flex: 1 1 calc(100% - 44px); }
   .runtime-title .knowledge-status { margin-left: 44px; }
   .runtime-actions { align-items: stretch; flex-direction: column; gap: 12px; }
   .runtime-actions > div { display: grid; grid-template-columns: 1fr; gap: 7px; }
@@ -1439,7 +1452,7 @@ onMounted(initialize)
   .provider-fields { grid-template-columns: 1fr; }
   .provider-fields .is-wide { grid-column: auto; }
   .document-actions { align-items: stretch; flex-direction: column; }
-  .usage-filters { width: 100%; grid-template-columns: 1fr; }
+  .usage-filters { --usage-control-height: 44px; width: 100%; grid-template-columns: 1fr; }
   .usage-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .usage-bars { height: 190px; }
   .usage-chart-card, .usage-callers { padding: 13px; }
@@ -1468,11 +1481,10 @@ onMounted(initialize)
   .skill-detail-versions h4 { grid-column: 1 / -1; }
   .skill-detail-content { overflow: visible; }
   .skill-detail-content > pre { min-height: 0; max-height: none; padding: 14px; font-size: 13px; }
-  .skill-file-tabs { flex-wrap: nowrap; overflow-x: auto; }
-  .skill-file-tabs button { flex: none; min-height: 44px; }
+  .skill-file-tabs { flex-wrap: wrap; }
+  .skill-file-tabs button { min-height: 44px; }
   .skill-detail-content > header { flex-wrap: wrap; gap: 6px; }
   .skill-detail-content > header > div { min-width: 0; }
-  .skill-detail-content > header strong { overflow-wrap: anywhere; white-space: normal; }
 }
 @media (prefers-reduced-motion: reduce) {
   .usage-bar-column > i { animation: none; }

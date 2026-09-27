@@ -195,8 +195,8 @@ watch(
    dark frosted scrim + spring scale-in (panel glass comes from index.html). */
 .el-overlay.path-picker-overlay {
   background-color: rgba(0, 0, 0, 0.45) !important;
-  backdrop-filter: blur(12px) saturate(150%) !important;
-  -webkit-backdrop-filter: blur(12px) saturate(150%) !important;
+  backdrop-filter: var(--glass-scrim-filter) !important;
+  -webkit-backdrop-filter: var(--glass-scrim-filter) !important;
 }
 
 .dialog-fade-enter-from .path-picker-dialog,

@@ -189,8 +189,8 @@ onBeforeUnmount(() => {
   overflow: hidden auto;
   overscroll-behavior: contain;
   background: var(--bg-glass-strong);
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: var(--glass-panel-filter);
+  -webkit-backdrop-filter: var(--glass-panel-filter);
   border: 1px solid var(--border-glass);
   box-shadow: var(--shadow-lg), var(--inset-highlight);
   transform: translate3d(var(--motion-drawer-x), 0, 0);

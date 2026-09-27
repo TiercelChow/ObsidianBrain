@@ -13,7 +13,7 @@
     </button>
 
     <!-- Toolbar -->
-    <div class="mv-toolbar">
+    <div class="mv-toolbar" data-glass="floating">
       <span class="mv-title">{{ title }}</span>
       <span class="mv-zoom-label">{{ zoomPct }}%</span>
       <div class="mv-actions">
@@ -170,13 +170,10 @@ onBeforeUnmount(() => {
   z-index: 3000;
   display: flex;
   flex-direction: column;
-  background: rgba(255, 255, 255, 0.45);
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  background: var(--bg-base);
+  backdrop-filter: var(--glass-content-filter);
+  -webkit-backdrop-filter: var(--glass-content-filter);
   animation: mv-fade 0.2s ease;
-}
-:root[data-theme="dark"] .mermaid-viewer {
-  background: rgba(20, 20, 24, 0.45);
 }
 @keyframes mv-fade {
   from { opacity: 0; }
@@ -273,8 +270,8 @@ onBeforeUnmount(() => {
     border: 1px solid var(--border-glass);
     border-radius: 50%;
     background: var(--bg-glass-strong);
-    backdrop-filter: blur(22px) saturate(180%);
-    -webkit-backdrop-filter: blur(22px) saturate(180%);
+    backdrop-filter: var(--glass-floating-filter);
+    -webkit-backdrop-filter: var(--glass-floating-filter);
     box-shadow: var(--shadow-md), var(--inset-highlight);
     color: var(--text-primary);
     font-size: 19px;

@@ -133,8 +133,8 @@ select:focus-visible,
   border-top-color: color-mix(in srgb, var(--border-glass) 42%, transparent) !important;
   background: var(--bg-glass-strong) !important;
   box-shadow: var(--shadow-lg), var(--inset-highlight) !important;
-  backdrop-filter: blur(30px) saturate(1.65) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(1.65) !important;
+  backdrop-filter: var(--glass-panel-filter) !important;
+  -webkit-backdrop-filter: var(--glass-panel-filter) !important;
 }
 .system-select-popper.el-popper[data-popper-placement^='top'] {
   border-radius: 14px 14px 0 0 !important;

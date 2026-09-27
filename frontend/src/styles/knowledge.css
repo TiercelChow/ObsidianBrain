@@ -91,8 +91,8 @@
   border-radius: 20px;
   background: var(--bg-glass);
   box-shadow: var(--shadow-md), var(--inset-highlight);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: var(--glass-content-filter);
+  -webkit-backdrop-filter: var(--glass-content-filter);
 }
 .knowledge-toolbar {
   display: flex;
@@ -175,8 +175,8 @@
   border-radius: 22px;
   background: var(--bg-glass-strong);
   box-shadow: var(--shadow-lg), var(--inset-highlight);
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: var(--glass-panel-filter);
+  -webkit-backdrop-filter: var(--glass-panel-filter);
 }
 .knowledge-modal-head { min-width: 0; flex: none; padding: 24px 24px 14px; }
 .knowledge-modal-head:has(> .knowledge-status) { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }

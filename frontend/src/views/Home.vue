@@ -311,7 +311,7 @@ onMounted(() => { loadAll() })
 }
 .stat-icon {
   width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
-  background: var(--bg-glass-subtle); backdrop-filter: blur(8px);
+  background: var(--bg-glass-subtle); backdrop-filter: var(--glass-content-filter);
   border: 1px solid var(--border-subtle);
   border-radius: 14px; flex-shrink: 0;
 }
@@ -406,8 +406,8 @@ onMounted(() => { loadAll() })
     margin: 8px -16px -16px;
     padding: 10px 16px calc(10px + var(--safe-bottom));
     background: var(--bg-glass-strong);
-    backdrop-filter: blur(18px) saturate(170%);
-    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    backdrop-filter: var(--glass-floating-filter);
+    -webkit-backdrop-filter: var(--glass-floating-filter);
     border-top: 1px solid var(--border-glass);
   }
   .config-actions :deep(.el-button) { flex: 1; }

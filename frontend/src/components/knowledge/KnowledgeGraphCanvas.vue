@@ -218,7 +218,7 @@ line.is-highlighted { stroke: var(--accent); stroke-width: 3.5; filter: url(#kno
 .graph-node:hover .node-core, .graph-node:focus-visible .node-core { transform: scale(1.08); transform-box: fill-box; transform-origin: center; }
 .graph-node.is-selected .node-core, .graph-node.is-on-path .node-core { fill: var(--accent); stroke: color-mix(in srgb, var(--accent) 60%, white); stroke-width: 2.5; filter: url(#knowledge-graph-glow); }
 .graph-node.is-selected, .graph-node.is-on-path { color: white; }
-.canvas-notice, .canvas-hint { position: absolute; bottom: 11px; padding: 6px 9px; border: 1px solid var(--border-faint); border-radius: 9px; background: color-mix(in srgb, var(--bg-surface) 82%, transparent); backdrop-filter: blur(16px) saturate(1.2); color: var(--text-faint); font-size: 9px; pointer-events: none; }
+.canvas-notice, .canvas-hint { position: absolute; bottom: 11px; padding: 6px 9px; border: 1px solid var(--border-faint); border-radius: 9px; background: color-mix(in srgb, var(--bg-surface) 82%, transparent); backdrop-filter: var(--glass-floating-filter); color: var(--text-faint); font-size: 9px; pointer-events: none; }
 .canvas-notice { left: 11px; color: var(--accent); }
 .canvas-hint { right: 11px; }
 @media (max-width: 768px) { .graph-canvas-shell { display: none; } }

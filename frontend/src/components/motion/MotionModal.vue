@@ -165,8 +165,8 @@ onBeforeUnmount(() => {
   justify-content: center;
   padding: 24px;
   background: color-mix(in srgb, #000 22%, transparent);
-  backdrop-filter: blur(8px) saturate(0.92);
-  -webkit-backdrop-filter: blur(8px) saturate(0.92);
+  backdrop-filter: var(--glass-scrim-filter);
+  -webkit-backdrop-filter: var(--glass-scrim-filter);
 }
 .motion-modal__panel {
   position: relative;

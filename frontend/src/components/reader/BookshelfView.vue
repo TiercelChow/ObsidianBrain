@@ -626,8 +626,8 @@ async function confirmRemove(b: ReaderBook) {
    做弹窗遮罩）。 */
 .el-overlay.book-form-overlay {
   background-color: rgba(0, 0, 0, 0.45) !important;
-  backdrop-filter: blur(12px) saturate(150%) !important;
-  -webkit-backdrop-filter: blur(12px) saturate(150%) !important;
+  backdrop-filter: var(--glass-scrim-filter) !important;
+  -webkit-backdrop-filter: var(--glass-scrim-filter) !important;
 }
 /* 深色/护眼主题的遮罩底色由 App.vue 的主题规则接管（优先级更高）。 */
 

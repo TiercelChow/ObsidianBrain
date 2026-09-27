@@ -8,7 +8,7 @@
       <button type="button" class="page-create" @click="openCreate()"><span aria-hidden="true">＋</span>新建</button>
     </header>
 
-    <section class="task-toolbar glass-surface">
+    <section class="task-toolbar glass-surface" data-glass-rim>
       <div class="view-switch" aria-label="视图切换">
         <span class="switch-indicator" :class="viewMode"></span>
         <button type="button" :class="{ active: viewMode === 'tasks' }" @click="changeView('tasks')">任务</button>
@@ -67,7 +67,7 @@
     </Transition>
 
     <div v-if="viewMode === 'tasks'" class="task-workspace" :class="{ 'detail-open': !!store.selectedTaskId, 'list-collapsed': !!detail && listCollapsed }">
-      <aside class="task-list-panel glass-surface">
+      <aside class="task-list-panel glass-surface" data-glass="structural">
         <div class="list-controls" :aria-hidden="listCollapsed" :inert="listCollapsed ? true : undefined">
         <div class="panel-heading">
           <div>
@@ -972,16 +972,13 @@ onMounted(async () => {
   padding: 0 16px;
   border: 0;
   border-radius: 13px;
-  background: var(--accent);
-  color: white;
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 25%, transparent);
   font: inherit;
   font-size: 14px;
   font-weight: 620;
   cursor: pointer;
 }
 .page-create:active { transform: scale(.965); }
-.glass-surface { background: var(--bg-glass); border: 1px solid var(--border-glass); box-shadow: var(--shadow-sm), var(--inset-highlight); backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate)); }
+.glass-surface { background: var(--bg-glass); border: 1px solid var(--border-glass); box-shadow: var(--shadow-sm), var(--inset-highlight); backdrop-filter: var(--glass-content-filter); -webkit-backdrop-filter: var(--glass-content-filter); }
 .task-toolbar { min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 8px 10px; margin-bottom: 14px; border-radius: 18px; }
 .view-switch { position: relative; display: grid; grid-template-columns: 1fr 1fr; width: 174px; padding: 3px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 5%, transparent); isolation: isolate; }
 .switch-indicator { position: absolute; inset: 3px auto 3px 3px; width: calc(50% - 3px); border-radius: 10px; background: var(--bg-glass-strong); box-shadow: var(--shadow-sm), var(--inset-highlight); transition: transform var(--motion-normal) var(--ease-spring-gentle); z-index: -1; }
@@ -1026,7 +1023,7 @@ onMounted(async () => {
 .rail-items::-webkit-scrollbar { display: none; }
 .rail-task { position: relative; background: color-mix(in srgb, var(--text-primary) 4%, transparent); font-weight: 650; }
 .rail-task:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
-.rail-task.selected { background: var(--accent); color: white; box-shadow: 0 7px 18px color-mix(in srgb, var(--accent) 25%, transparent); }
+.rail-task.selected { background: var(--glass-action-sheen), var(--glass-action-fill); color: var(--text-primary); box-shadow: var(--glass-action-shadow); }
 .rail-task i { position: absolute; right: 5px; bottom: 5px; width: 7px; height: 7px; border: 2px solid var(--bg-glass-strong); border-radius: 50%; background: var(--text-faint); }
 .rail-task i.status-in_progress { background: var(--accent); }.rail-task i.status-blocked { background: #ff9500; }.rail-task i.status-completed { background: #34c759; }
 .panel-heading-actions { display: flex !important; align-items: center !important; gap: 2px !important; }
@@ -1103,7 +1100,7 @@ onMounted(async () => {
 .detail-title-group p { max-width: 720px; margin: 8px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 .detail-actions { display: flex; gap: 6px; flex: none; }
 .detail-actions button { min-height: 38px; padding: 0 11px; border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--bg-glass); color: var(--text-secondary); cursor: pointer; }
-.detail-actions .primary-action { background: var(--accent); color: white; border-color: transparent; font-weight: 600; padding-inline: 16px; }
+.detail-actions .primary-action { font-weight: 600; padding-inline: 16px; }
 .detail-actions .archive-action { color: var(--text-muted); }
 .detail-actions .edit-action { display: grid; place-items: center; min-width: 38px; width: 38px; padding: 0; background: var(--bg-glass-strong); font-size: 16px; }
 .detail-context { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 12px 0 0; }
@@ -1170,10 +1167,9 @@ onMounted(async () => {
 .child-status { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }.child-status.status-in_progress { background: var(--accent); }.child-status.status-blocked { background: #ff9500; }.child-status.status-completed { background: #34c759; }
 .child-dialog-actions { display: grid; grid-template-columns: 1fr 1.25fr; gap: 9px; padding: 14px 26px 24px; border-top: 1px solid var(--border-subtle); }
 .child-dialog-actions button { min-height: 44px; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); color: var(--text-secondary); font: inherit; font-weight: 600; cursor: pointer; }
-.child-dialog-actions .primary { border-color: transparent; background: var(--accent); color: white; box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 22%, transparent); }
 .detail-loading { height: 100%; display: flex; align-items: center; justify-content: center; gap: 5px; }.detail-loading span { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite alternate; }.detail-loading span:nth-child(2) { animation-delay: .15s; }.detail-loading span:nth-child(3) { animation-delay: .3s; }
 @keyframes pulse { to { opacity: .25; transform: translateY(-4px); } }
-.task-sheet { max-height: calc(100dvh - 48px); display: flex; flex-direction: column; border-radius: 24px; border: 1px solid var(--border-glass); background: var(--bg-glass-strong); box-shadow: var(--shadow-lg), var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, .03); backdrop-filter: blur(40px) saturate(200%); -webkit-backdrop-filter: blur(40px) saturate(200%); overflow: hidden; }
+.task-sheet { max-height: calc(100dvh - 48px); display: flex; flex-direction: column; border-radius: 24px; border: 1px solid var(--border-glass); background: var(--bg-glass-strong); box-shadow: var(--shadow-lg), var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, .03); backdrop-filter: var(--glass-panel-filter); -webkit-backdrop-filter: var(--glass-panel-filter); overflow: hidden; }
 .sheet-header { display: flex; align-items: center; justify-content: space-between; padding: 28px 28px 16px; }.sheet-header span { color: var(--text-faint); font-size: 10px; letter-spacing: .08em; }.sheet-header h3 { margin: 4px 0 0; font-size: 18px; font-weight: 700; }.sheet-target { margin: 3px 0 0; color: var(--text-secondary); font-size: 12px; }.sheet-header button { width: 38px; height: 38px; border: 0; border-radius: 12px; background: var(--bg-glass); color: var(--text-muted); font-size: 23px; cursor: pointer; transition: background var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-instant) ease; }.sheet-header button:hover { background: var(--bg-hover); color: var(--text-primary); }.sheet-header button:active { transform: scale(.94); }
 .sheet-body { overflow-y: auto; padding: 4px 28px 10px; }.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }.field { display: grid; gap: 7px; }.field.full { grid-column: 1 / -1; }.field > span:first-child { color: var(--text-muted); font-size: 11px; font-weight: 570; }.field input { height: 44px; padding: 0 11px; }.field textarea { resize: vertical; padding: 10px 11px; line-height: 1.5; }.field input:focus, .field textarea:focus { border-color: color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: var(--focus-ring); }
 .field :deep(.el-select), .field :deep(.el-date-editor) { width: 100%; }
@@ -1181,7 +1177,7 @@ onMounted(async () => {
 .task-date-input :deep(.el-input__wrapper) { width: 100%; box-sizing: border-box; }
 .kind-segment { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 5%, transparent); }.kind-segment button { height: 38px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); cursor: pointer; }.kind-segment button.active { background: var(--bg-glass-strong); box-shadow: var(--shadow-sm); color: var(--text-primary); font-weight: 600; }
 .range-field { display: grid; grid-template-columns: 1fr 48px; align-items: center; gap: 12px; }.range-field input { width: 100%; padding: 0; accent-color: var(--accent); }.range-field output { color: var(--accent); font-weight: 650; text-align: right; }.check-field { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--text-muted); font-size: 12px; cursor: pointer; }.check-field input { appearance: none; -webkit-appearance: none; position: relative; width: 20px; height: 20px; flex: none; margin: 0; border: 1px solid color-mix(in srgb, var(--text-muted) 42%, transparent); border-radius: 6px; background: var(--bg-glass); box-shadow: var(--inset-highlight); cursor: pointer; transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease, transform var(--motion-instant) ease, box-shadow var(--motion-fast) ease; }.check-field input::after { content: ''; position: absolute; left: 6px; top: 3px; width: 5px; height: 9px; border: solid white; border-width: 0 2px 2px 0; opacity: 0; transform: rotate(45deg) scale(.65); transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--ease-spring-gentle); }.check-field input:checked { border-color: var(--accent); background: var(--accent); box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 24%, transparent), var(--inset-highlight); }.check-field input:checked::after { opacity: 1; transform: rotate(45deg) scale(1); }.check-field input:focus-visible { outline: 0; box-shadow: var(--focus-ring); }.check-field:active input { transform: scale(.92); }.sheet-hint { margin: 0; color: var(--text-faint); font-size: 11px; }
-.sheet-footer { display: grid; grid-template-columns: 1fr 1.4fr; gap: 9px; padding: 16px 28px 28px; }.sheet-footer button { height: 44px; border-radius: 13px; font-weight: 620; cursor: pointer; }.sheet-footer .cancel { border: 1px solid var(--border-subtle); background: var(--bg-glass); color: var(--text-secondary); }.sheet-footer .archive-from-edit { border: 1px solid color-mix(in srgb, #ff3b30 24%, var(--border-subtle)); background: color-mix(in srgb, #ff3b30 6%, var(--bg-glass)); color: #ff3b30; }.sheet-footer .confirm { border: 0; background: var(--accent); color: white; box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 22%, transparent); }.sheet-footer .confirm:disabled { opacity: .55; }
+.sheet-footer { display: grid; grid-template-columns: 1fr 1.4fr; gap: 9px; padding: 16px 28px 28px; }.sheet-footer button { height: 44px; border-radius: 13px; font-weight: 620; cursor: pointer; }.sheet-footer .cancel { border: 1px solid var(--border-subtle); background: var(--bg-glass); color: var(--text-secondary); }.sheet-footer .archive-from-edit { border: 1px solid color-mix(in srgb, #ff3b30 24%, var(--border-subtle)); background: color-mix(in srgb, #ff3b30 6%, var(--bg-glass)); color: #ff3b30; }.sheet-footer .confirm { border: 0; }.sheet-footer .confirm:disabled { opacity: .55; }
 
 .field input:focus, .field textarea:focus { box-shadow: none; }
 .check-field input:focus-visible { border-color: var(--accent); box-shadow: var(--inset-highlight); }
@@ -1229,8 +1225,8 @@ onMounted(async () => {
   border-radius: 24px;
   background: var(--bg-glass-strong);
   box-shadow: var(--shadow-lg), var(--shadow-sm), var(--inset-highlight);
-  backdrop-filter: blur(40px) saturate(190%);
-  -webkit-backdrop-filter: blur(40px) saturate(190%);
+  backdrop-filter: var(--glass-panel-filter);
+  -webkit-backdrop-filter: var(--glass-panel-filter);
 }
 .archive-dialog-icon {
   width: 48px;
@@ -1251,7 +1247,7 @@ onMounted(async () => {
 .archive-dialog-actions { display: grid; grid-template-columns: 1fr 1.35fr; gap: 9px; margin-top: 24px; }
 .archive-dialog-actions button { min-height: 44px; border-radius: 13px; font: inherit; font-weight: 620; cursor: pointer; }
 .archive-dialog-actions .cancel { border: 1px solid var(--border-subtle); background: var(--bg-glass); color: var(--text-secondary); }
-.archive-dialog-actions .confirm { border: 0; background: var(--accent); color: white; box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 22%, transparent); }
+.archive-dialog-actions .confirm { border: 0; }
 .archive-dialog-actions .confirm:disabled { opacity: .55; cursor: wait; }
 
 :global(.task-date-popper.el-popper) { z-index: 2501 !important; }
@@ -1346,8 +1342,8 @@ onMounted(async () => {
     padding: 0 12px;
     border-bottom: 1px solid var(--border-subtle);
     background: color-mix(in srgb, var(--bg-glass-strong) 94%, transparent);
-    backdrop-filter: blur(18px) saturate(170%);
-    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    backdrop-filter: var(--glass-floating-filter);
+    -webkit-backdrop-filter: var(--glass-floating-filter);
   }
   .mobile-detail-nav button { min-height: 44px; border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 600; }
   .mobile-detail-nav > button:first-child { justify-self: start; }
@@ -1392,8 +1388,8 @@ onMounted(async () => {
     padding: 10px 12px max(10px, var(--safe-bottom));
     border-top: 1px solid var(--border-glass);
     background: color-mix(in srgb, var(--bg-glass-strong) 94%, transparent);
-    backdrop-filter: blur(18px) saturate(170%);
-    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    backdrop-filter: var(--glass-floating-filter);
+    -webkit-backdrop-filter: var(--glass-floating-filter);
   }
   .mobile-context-actions button {
     min-height: 46px;
@@ -1404,7 +1400,6 @@ onMounted(async () => {
     font: inherit;
     font-weight: 620;
   }
-  .mobile-context-actions .primary { border-color: transparent; background: var(--accent); color: white; }
   .mobile-context-actions .complete-shortcut { grid-column: 1 / -1; }
   .child-task-dialog { width: 100vw; max-height: min(92dvh, 820px); border-radius: 24px 24px 0 0; border-bottom: 0; }
   .child-dialog-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; padding: 36px 16px 14px; }

@@ -21,7 +21,7 @@
       <!-- Toolbar -->
       <div class="toolbar">
         <div class="toolbar-row">
-        <div class="search-box glass-surface">
+        <div class="search-box glass-surface" data-glass-rim>
           <el-icon class="search-icon"><Search /></el-icon>
           <input
             v-model="searchQuery"
@@ -138,7 +138,7 @@
         </button>
       </Transition>
       <!-- Left Timeline Nav -->
-      <aside class="time-nav" v-if="timelineMonths.length > 0">
+      <aside class="time-nav" data-glass="structural" v-if="timelineMonths.length > 0">
         <div class="time-nav-inner">
           <div v-for="month in timelineMonths" :key="month.key" class="month-group">
             <div class="month-label">{{ month.label }}</div>
@@ -994,8 +994,8 @@ onMounted(() => { loadMemos() })
 /* ── Glass Surfaces ── */
 .glass-surface {
   background: var(--bg-glass);
-  backdrop-filter: blur(12px) saturate(180%);
-  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  backdrop-filter: var(--glass-content-filter);
+  -webkit-backdrop-filter: var(--glass-content-filter);
   border: 1px solid var(--border-glass);
   box-shadow:
     var(--shadow-sm),
@@ -1004,8 +1004,8 @@ onMounted(() => { loadMemos() })
 }
 .glass-surface-heavy {
   background: var(--bg-glass-strong);
-  backdrop-filter: blur(40px) saturate(200%);
-  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  backdrop-filter: var(--glass-panel-filter);
+  -webkit-backdrop-filter: var(--glass-panel-filter);
   border: 1px solid var(--border-glass);
   box-shadow:
     var(--shadow-lg),
@@ -1014,8 +1014,8 @@ onMounted(() => { loadMemos() })
 }
 .glass-chip {
   background: var(--bg-glass-subtle);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: var(--glass-control-filter);
+  -webkit-backdrop-filter: var(--glass-control-filter);
   border: 1px solid var(--border-subtle);
 }
 
@@ -1028,8 +1028,8 @@ onMounted(() => { loadMemos() })
   border-radius: 14px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-hover);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  backdrop-filter: var(--glass-control-filter);
+  -webkit-backdrop-filter: var(--glass-control-filter);
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 500;
@@ -1054,25 +1054,13 @@ onMounted(() => { loadMemos() })
   opacity: 0.5;
   pointer-events: none;
 }
-.glass-btn.primary {
-  background: rgba(24, 24, 27, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-color: var(--border-faint);
-  color: #fff;
-}
-.glass-btn.primary:hover {
-  background: rgba(24, 24, 27, 0.95);
-  box-shadow: 0 4px 20px rgba(24, 24, 27, 0.2);
-}
-
 .glass-icon-btn {
   width: 32px; height: 32px;
   border-radius: 10px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-glass-subtle);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: var(--glass-control-filter);
+  -webkit-backdrop-filter: var(--glass-control-filter);
   color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
@@ -1110,8 +1098,8 @@ onMounted(() => { loadMemos() })
   border: 1px solid var(--border-subtle);
   border-radius: 14px;
   background: var(--bg-glass-subtle);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: var(--glass-control-filter);
+  -webkit-backdrop-filter: var(--glass-control-filter);
   padding: 14px 16px;
   font-size: 14px;
   font-family: inherit;
@@ -1220,11 +1208,11 @@ onMounted(() => { loadMemos() })
   background: var(--bg-glass-subtle);
 }
 .chip.active {
-  color: #fff;
-  background: rgba(24, 24, 27, 0.8);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  box-shadow: 0 2px 8px rgba(24, 24, 27, 0.15);
+  color: var(--text-primary);
+  background: var(--glass-action-sheen), var(--glass-action-fill);
+  backdrop-filter: var(--glass-control-filter);
+  -webkit-backdrop-filter: var(--glass-control-filter);
+  box-shadow: var(--glass-action-shadow);
 }
 
 /* ── Date Picker (scoped) ── */
@@ -1246,8 +1234,8 @@ onMounted(() => { loadMemos() })
   border-radius: 14px !important;
   border: 1px solid var(--border-subtle) !important;
   background: var(--bg-glass-subtle) !important;
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  backdrop-filter: var(--glass-control-filter);
+  -webkit-backdrop-filter: var(--glass-control-filter);
   box-shadow: var(--shadow-sm), var(--inset-highlight) !important;
   height: 40px !important;
   padding: 0 12px !important;
@@ -2081,8 +2069,8 @@ onMounted(() => { loadMemos() })
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: var(--glass-scrim-filter);
+  -webkit-backdrop-filter: var(--glass-scrim-filter);
 }
 .viewer-close {
   position: absolute;
@@ -2160,8 +2148,8 @@ onMounted(() => { loadMemos() })
   width: 40px; height: 40px; border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: var(--glass-floating-filter);
+  -webkit-backdrop-filter: var(--glass-floating-filter);
   color: rgba(255, 255, 255, 0.8);
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
@@ -2176,8 +2164,8 @@ onMounted(() => { loadMemos() })
   padding: 4px 14px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: var(--glass-floating-filter);
+  -webkit-backdrop-filter: var(--glass-floating-filter);
 }
 
 /* Viewer transitions */
@@ -2247,8 +2235,8 @@ onMounted(() => { loadMemos() })
     padding: 8px;
     border-radius: 16px;
     background: var(--bg-glass-strong);
-    backdrop-filter: blur(18px) saturate(170%);
-    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    backdrop-filter: var(--glass-floating-filter);
+    -webkit-backdrop-filter: var(--glass-floating-filter);
     border: 1px solid var(--border-glass);
   }
   .search-box { max-width: 100%; min-width: 0; }
@@ -2328,10 +2316,7 @@ onMounted(() => { loadMemos() })
     padding: 0;
     border: 0;
     border-radius: 13px;
-    background: var(--accent);
-    color: white;
     font-size: 20px;
-    box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 24%, transparent);
   }
   .mobile-compose-action:active { transform: scale(.94); }
   .mobile-filter-summary {
@@ -2371,7 +2356,6 @@ onMounted(() => { loadMemos() })
   }
   .preset-chips { width: 100%; }
   .chip { min-height: 40px; display: inline-flex; align-items: center; }
-  .chip.active { background: var(--accent); }
   .date-range-picker :deep(.el-date-editor) { min-height: var(--tap-target); }
 
   /* Reading density follows the app's body type instead of shrinking on phones. */
@@ -2434,8 +2418,8 @@ onMounted(() => { loadMemos() })
     background: var(--bg-glass-strong);
     color: var(--text-secondary);
     box-shadow: var(--shadow-lg);
-    backdrop-filter: blur(18px) saturate(170%);
-    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    backdrop-filter: var(--glass-floating-filter);
+    -webkit-backdrop-filter: var(--glass-floating-filter);
     transform: translateX(-50%);
     white-space: nowrap;
   }

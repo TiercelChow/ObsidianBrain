@@ -36,7 +36,7 @@
     </div>
 
     <section v-else class="wiki-workspace" :class="{ 'show-detail': Boolean(selectedEntry) }">
-      <aside class="entry-pane knowledge-surface">
+      <aside class="entry-pane knowledge-surface" data-glass="structural">
         <div class="entry-pane-head">
           <div>
             <strong>{{ activeBase?.book_name }}</strong>

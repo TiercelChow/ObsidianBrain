@@ -1,0 +1,413 @@
+/* Shared optical materials. Paint only: no layout, gesture or animation ownership.
+   Legacy names are adapters, so lazy pages cannot invent another glass palette.
+   !important bridges their existing scoped paint rules, never their geometry. */
+:root,
+:root[data-theme] {
+  --glass-floating-filter: blur(10px) saturate(135%) contrast(1.02);
+  --glass-panel-filter: blur(16px) saturate(120%);
+  --glass-structural-filter: blur(12px) saturate(120%);
+  --glass-content-filter: none;
+  --glass-control-filter: none;
+  --glass-scrim-filter: blur(4px) saturate(95%);
+  --glass-sheen: linear-gradient(150deg, rgba(255, 255, 255, .025), transparent 18% 82%, rgba(0, 0, 0, .015));
+  --glass-media-fill: rgba(36, 38, 44, .64);
+  --glass-media-label: #f7f7fa;
+  --glass-media-edge: rgba(255, 255, 255, .24);
+  --glass-inner-edge: inset 0 1px 0 var(--glass-rim-light), inset 1px 0 0 var(--glass-rim-side), inset 0 -1px 0 var(--glass-rim-bottom), inset -1px 0 0 var(--glass-rim-shadow);
+  --glass-floating-shadow: var(--glass-inner-edge), inset 0 0 8px var(--glass-inner-light), 0 8px 24px var(--glass-shadow), 0 1px 3px var(--glass-contact-shadow);
+  --glass-panel-shadow: var(--glass-inner-edge), 0 20px 56px var(--glass-shadow), 0 4px 12px var(--glass-contact-shadow);
+  --glass-content-shadow: inset 0 1px 0 var(--glass-content-edge), 0 2px 8px var(--glass-contact-shadow);
+  --glass-label: color-mix(in srgb, var(--text-primary) 72%, var(--glass-solid));
+  --glass-action-fill: color-mix(in srgb, var(--text-primary) 6%, var(--glass-floating-fill));
+  --glass-action-hover: color-mix(in srgb, var(--text-primary) 10%, var(--glass-floating-fill));
+  --glass-action-pressed: color-mix(in srgb, var(--text-primary) 14%, var(--glass-floating-fill));
+  --glass-action-sheen: linear-gradient(155deg, color-mix(in srgb, var(--glass-rim-light) 16%, transparent), transparent 36% 74%, color-mix(in srgb, var(--glass-rim-shadow) 18%, transparent));
+  --glass-action-edge: color-mix(in srgb, var(--text-primary) 16%, var(--glass-edge));
+  --glass-action-shadow: var(--glass-inner-edge), 0 3px 10px var(--glass-contact-shadow);
+  --glass-action-label: var(--text-primary);
+  /* Public compatibility tokens; bg-primary was previously undefined. */
+  --bg-glass: var(--glass-floating-fill);
+  --bg-glass-strong: var(--glass-panel-fill);
+  --bg-glass-subtle: var(--glass-control-fill);
+  --bg-primary: var(--glass-solid);
+  --bg-card: var(--glass-solid);
+  --border-glass: var(--glass-edge);
+  --border-subtle: var(--glass-edge-soft);
+  --glass-blur: 10px;
+  --glass-saturate: 135%;
+  --inset-highlight: var(--glass-inner-edge);
+}
+:root,
+:root[data-theme="light"] {
+  --glass-floating-fill: rgba(255, 255, 255, .26);
+  --glass-panel-fill: rgba(250, 250, 253, .78);
+  --glass-structural-fill: rgba(247, 248, 252, .44);
+  --glass-content-fill: rgba(247, 248, 251, .60);
+  --glass-control-fill: rgba(255, 255, 255, .14);
+  --glass-scrim-fill: rgba(12, 14, 22, .25);
+  --glass-solid: #f7f7fa;
+  --glass-edge: rgba(255, 255, 255, .54);
+  --glass-edge-soft: rgba(117, 122, 145, .15);
+  --glass-rim-light: rgba(255, 255, 255, .74);
+  --glass-rim-side: rgba(255, 255, 255, .32);
+  --glass-rim-bottom: rgba(255, 255, 255, .42);
+  --glass-rim-shadow: rgba(80, 86, 108, .14);
+  --glass-inner-light: rgba(255, 255, 255, .025);
+  --glass-content-edge: rgba(255, 255, 255, .36);
+  --glass-shadow: rgba(35, 40, 63, .13);
+  --glass-contact-shadow: rgba(35, 40, 63, .045);
+  --glass-danger-label: #b8322b;
+  --glass-warning-label: #865600;
+  --glass-success-label: #24723e;
+}
+:root[data-theme="dark"] {
+  --glass-floating-fill: rgba(48, 49, 55, .42);
+  --glass-panel-fill: rgba(31, 32, 38, .86);
+  --glass-structural-fill: rgba(32, 33, 40, .52);
+  --glass-content-fill: rgba(23, 24, 30, .72);
+  --glass-control-fill: rgba(255, 255, 255, .04);
+  --glass-scrim-fill: rgba(0, 0, 0, .48);
+  --glass-solid: #202127;
+  --glass-edge: rgba(255, 255, 255, .18);
+  --glass-edge-soft: rgba(255, 255, 255, .10);
+  --glass-rim-light: rgba(255, 255, 255, .48);
+  --glass-rim-side: rgba(255, 255, 255, .19);
+  --glass-rim-bottom: rgba(255, 255, 255, .28);
+  --glass-rim-shadow: rgba(0, 0, 0, .28);
+  --glass-inner-light: rgba(255, 255, 255, .025);
+  --glass-content-edge: rgba(255, 255, 255, .085);
+  --glass-shadow: rgba(0, 0, 0, .32);
+  --glass-contact-shadow: rgba(0, 0, 0, .18);
+  --glass-danger-label: #ff9188;
+  --glass-warning-label: #ecc277;
+  --glass-success-label: #78d69a;
+}
+:root[data-theme="eye-care"] {
+  --glass-floating-fill: rgba(224, 241, 212, .28);
+  --glass-panel-fill: rgba(210, 229, 197, .84);
+  --glass-structural-fill: rgba(214, 232, 201, .50);
+  --glass-content-fill: rgba(214, 231, 202, .64);
+  --glass-control-fill: rgba(240, 251, 229, .12);
+  --glass-scrim-fill: rgba(19, 35, 20, .28);
+  --glass-solid: #d2e3c6;
+  --glass-edge: rgba(245, 255, 232, .49);
+  --glass-edge-soft: rgba(54, 83, 40, .18);
+  --glass-rim-light: rgba(250, 255, 242, .64);
+  --glass-rim-side: rgba(245, 255, 232, .35);
+  --glass-rim-bottom: rgba(245, 255, 232, .51);
+  --glass-rim-shadow: rgba(40, 66, 28, .18);
+  --glass-inner-light: rgba(248, 255, 233, .025);
+  --glass-content-edge: rgba(245, 255, 232, .38);
+  --glass-shadow: rgba(30, 58, 22, .15);
+  --glass-contact-shadow: rgba(30, 58, 22, .055);
+  --glass-danger-label: #a72e25;
+  --glass-warning-label: #755400;
+  --glass-success-label: #275e32;
+}
+
+/* Content is a calm reading plane, never a stack of filtered glass cards. */
+:root[data-theme] :is(
+  .liquid-glass, [data-glass], .glass-surface, .glass-surface-heavy, .glass-panel, .knowledge-surface,
+  .el-card, .stat-card, .module-card, .status-card, .tool-card, .stat-chip,
+  .result-card, .recent-card, .repo-card, .mode-option, .radar-card, .insight-card,
+  .config-card, .combo-result, .question-result, .counterpoint-result,
+  .assessment, .pane, .knowledge-search, .knowledge-tabs, .chat-composer, .dock-glass,
+  .reader-topbar, .task-toolbar, .search-box, .shelf-search, .task-search,
+  .mobile-filter-summary, .reader-selection-menu,
+  .path-trigger, .reader-toast, .error-banner, .undo-snackbar, .published-notice,
+  .mobile-detail-nav, .canvas-notice, .canvas-hint, .mv-mobile-close,
+  .viewer-close, .viewer-nav, .viewer-zoom-btn, .viewer-counter,
+  .reader-mobile-toolbar, .mobile-context-actions, .fs-fab, .sidebar,
+  :where(.mobile-global-header.header-scrolled), .knowledge-modal-card, .task-sheet,
+  .archive-dialog, .child-task-dialog, .path-card, .ppm-panel,
+  .motion-drawer__panel, .el-dialog, .el-drawer, .el-popper, .glass-picker, .el-message
+) {
+  --material-fill: var(--glass-content-fill);
+  --material-sheen: none;
+  --material-filter: none;
+  --material-shadow: var(--glass-content-shadow);
+  --material-border: var(--glass-edge-soft);
+  background: var(--material-sheen), var(--material-fill) !important;
+  backdrop-filter: var(--material-filter) !important;
+  -webkit-backdrop-filter: var(--material-filter) !important;
+  border-color: var(--material-border) !important;
+  box-shadow: var(--material-shadow) !important;
+}
+/* Floating chrome: transparent center, curved bright rim and contact shadow. */
+:root[data-theme] :is(
+  [data-glass="floating"], .dock-glass, .reader-mobile-toolbar, .fs-fab,
+  .path-trigger, .reader-toast, .error-banner, .undo-snackbar, .published-notice,
+  .mobile-detail-nav, .canvas-notice, .canvas-hint, .mv-mobile-close,
+  .mobile-context-actions, .reader-topbar, .task-toolbar, .search-box,
+  .shelf-search, .task-search, .knowledge-search, .knowledge-tabs, .chat-composer,
+  .mobile-filter-summary, .reader-selection-menu, :where(.mobile-global-header.header-scrolled)
+) {
+  --material-fill: var(--glass-floating-fill);
+  --material-sheen: var(--glass-sheen);
+  --material-filter: var(--glass-floating-filter);
+  --material-shadow: var(--glass-floating-shadow);
+  --material-border: var(--glass-edge);
+}
+/* Structural layers are heavier, with no bright spot across their body. */
+:root[data-theme] :is([data-glass="structural"], .sidebar) {
+  --material-fill: var(--glass-structural-fill);
+  --material-sheen: var(--glass-sheen);
+  --material-filter: var(--glass-structural-filter);
+  --material-shadow: var(--glass-inner-edge);
+}
+/* Panels and attached menus prioritize readable text over transparency. */
+:root[data-theme] :is(
+  [data-glass="panel"], .glass-surface-heavy, .knowledge-modal-card,
+  .task-sheet, .archive-dialog, .child-task-dialog, .path-card, .ppm-panel,
+  .motion-drawer__panel, .el-dialog, .el-drawer, .el-popper,
+  .system-select-popper, .glass-picker, .el-message
+) {
+  --material-fill: var(--glass-panel-fill);
+  --material-filter: var(--glass-panel-filter);
+  --material-shadow: var(--glass-panel-shadow);
+  --material-border: var(--glass-edge);
+}
+/* Nested controls use tint, not a second backdrop sampling pass. */
+:root[data-theme] :is(
+  .el-input__wrapper, .el-select__wrapper, .el-range-editor, .el-textarea__inner,
+  .glass-textarea, .glass-chip, .glass-icon-btn, .glass-btn,
+  .lang-tag, .tag, .stat-chip .stat-label, .concept-chip, .question-item, .counterpoint-item
+) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+/* Actions share optical paint, including former solid-blue primary buttons.
+   The host pane supplies backdrop sampling: no expensive filter per button. */
+:root[data-theme] :where(
+  [data-glass-action], .el-button:not(.is-text):not(.is-link), .glass-btn, .glass-icon-btn,
+  button.primary, button.primary-action, button.confirm, .page-create,
+  .reader-shelf-add, .mobile-compose-action, .mobile-create-task, .chat-composer button,
+  .new-conversation-button, .task-action, .artifact-main-row > a,
+  .skill-file-tabs button, .document-tabs button
+) {
+  --control-fill: var(--glass-control-fill);
+  --control-sheen: var(--glass-sheen);
+  --control-label: var(--text-secondary);
+  --control-border: var(--glass-edge-soft);
+  --control-shadow: var(--glass-inner-edge);
+}
+/* Keep legacy paint bridged strongly; keep defaults weak so variants can win. */
+:root[data-theme] :is(
+  [data-glass-action], .el-button:not(.is-text):not(.is-link), .glass-btn, .glass-icon-btn,
+  button.primary, button.primary-action, button.confirm, .page-create,
+  .reader-shelf-add, .mobile-compose-action, .mobile-create-task, .chat-composer button,
+  .new-conversation-button, .task-action, .artifact-main-row > a,
+  .skill-file-tabs button, .document-tabs button
+) {
+  background: var(--control-sheen), var(--control-fill) !important;
+  color: var(--control-label) !important;
+  border-color: var(--control-border) !important;
+  box-shadow: var(--control-shadow) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+/* Weight, contrast and the edge distinguish the primary action, not blue fill. */
+:root[data-theme] :is(
+  [data-glass-action="primary"], .el-button--primary:not(.is-text):not(.is-link),
+  .glass-btn.primary, button.primary, button.primary-action, button.confirm,
+  .page-create, .reader-shelf-add, .mobile-compose-action, .mobile-create-task,
+  .chat-composer button:not(.chat-short-context-button), .artifact-main-row > a
+) {
+  --control-fill: var(--glass-action-fill);
+  --control-sheen: var(--glass-action-sheen);
+  --control-label: var(--glass-action-label);
+  --control-border: var(--glass-action-edge);
+  --control-shadow: var(--glass-action-shadow);
+  font-weight: 650;
+}
+:root[data-theme] :is(.el-button--danger, [data-glass-action="danger"], .task-action.is-cancel) {
+  --control-label: var(--glass-danger-label);
+  --control-fill: color-mix(in srgb, var(--el-color-danger) 7%, var(--glass-control-fill));
+  --control-border: color-mix(in srgb, var(--el-color-danger) 24%, var(--glass-edge-soft));
+}
+:root[data-theme] .el-button--success { --control-label: var(--glass-success-label); }
+:root[data-theme] .el-button--warning { --control-label: var(--glass-warning-label); }
+:root[data-theme] :is(
+  [data-glass-action], .el-button:not(.is-text):not(.is-link), .glass-btn, .glass-icon-btn,
+  button.primary, button.primary-action, button.confirm, .page-create,
+  .reader-shelf-add, .mobile-compose-action, .mobile-create-task, .chat-composer button,
+  .new-conversation-button, .task-action, .artifact-main-row > a,
+  .skill-file-tabs button, .document-tabs button
+):not(:disabled):not(.is-disabled):not(.is-loading) {
+  &:hover { --control-fill: var(--glass-action-hover); --control-border: var(--glass-action-edge); }
+  &:active { --control-fill: var(--glass-action-pressed); }
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+}
+:root[data-theme] :is(
+  [data-glass-action], .el-button:not(.is-text):not(.is-link), .glass-btn, .glass-icon-btn,
+  button.primary, button.primary-action, button.confirm, .page-create,
+  .reader-shelf-add, .mobile-compose-action, .mobile-create-task, .chat-composer button,
+  .new-conversation-button, .task-action
+):is(:disabled, .is-disabled) { opacity: .45; cursor: not-allowed; }
+:root[data-theme] :is(.skill-file-tabs button, .document-tabs button).active {
+  --control-fill: var(--glass-action-fill);
+  --control-sheen: var(--glass-action-sheen);
+  --control-label: var(--glass-action-label);
+  --control-border: var(--glass-action-edge);
+  --control-shadow: var(--glass-action-shadow);
+  font-weight: 650;
+}
+/* A sidebar inside an already filtered modal uses only tint and an inner edge. */
+:root[data-theme] :is(.knowledge-modal-card, .motion-drawer__panel) [data-glass="structural"] {
+  --material-fill: var(--glass-control-fill);
+  --material-filter: none;
+  --material-shadow: var(--glass-inner-edge);
+}
+:root[data-theme] :is(.task-toolbar .task-search, .reader-topbar .shelf-search) {
+  --material-fill: var(--glass-control-fill);
+  --material-filter: none;
+  --material-shadow: inset 0 1px 0 var(--glass-content-edge);
+  --material-border: var(--glass-edge-soft);
+}
+/* Media overlays always have a dark control plane, even in a light theme. */
+:root[data-theme] :is(.viewer-close, .viewer-nav, .viewer-zoom-btn, .viewer-counter) {
+  --material-fill: var(--glass-media-fill);
+  --material-sheen: var(--glass-sheen);
+  --material-filter: var(--glass-floating-filter);
+  --material-shadow: var(--glass-floating-shadow);
+  --material-border: var(--glass-media-edge);
+  color: var(--glass-media-label);
+}
+/* A scrim dims the page; it is not another bright glass surface. */
+:root[data-theme] :is(.el-overlay, .motion-modal, .motion-drawer__scrim, .mobile-overlay, .path-overlay, .ppm-overlay) {
+  background: var(--glass-scrim-fill) !important;
+  backdrop-filter: var(--glass-scrim-filter) !important;
+  -webkit-backdrop-filter: var(--glass-scrim-filter) !important;
+}
+:root[data-theme] .image-viewer-overlay {
+  background: rgba(0, 0, 0, .72);
+  backdrop-filter: var(--glass-scrim-filter);
+  -webkit-backdrop-filter: var(--glass-scrim-filter);
+}
+@media (max-width: 768px) {
+  /* The configuration footer is sticky; desktop actions stay on the open plane. */
+  :root[data-theme] .config-actions {
+    background: var(--glass-sheen), var(--glass-floating-fill);
+    backdrop-filter: var(--glass-floating-filter);
+    -webkit-backdrop-filter: var(--glass-floating-filter);
+    border-color: var(--glass-edge);
+    box-shadow: var(--glass-floating-shadow);
+  }
+  /* Timeline has separate search / add / filter pills, not a second glass slab. */
+  :root[data-theme] .timeline-page .toolbar-row {
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
+  }
+}
+:root[data-theme] :is(.knowledge-search, .search-box, .task-search, .shelf-search):focus-within {
+  --material-border: var(--accent-border);
+}
+:root[data-theme] .mode-option.active {
+  --material-border: var(--accent-border);
+  --material-fill: color-mix(in srgb, var(--accent) 8%, var(--glass-content-fill));
+}
+:root[data-theme] .mobile-filter-summary.active {
+  --material-border: var(--accent-border);
+  --material-fill: color-mix(in srgb, var(--accent) 12%, var(--glass-floating-fill));
+}
+:root[data-theme] .reader-toast.success {
+  --material-border: color-mix(in srgb, #34c759 32%, var(--glass-edge));
+  --material-fill: color-mix(in srgb, #34c759 12%, var(--glass-floating-fill));
+}
+:root[data-theme] :is(.reader-toast.error, .error-banner) {
+  --material-border: color-mix(in srgb, #ff453a 32%, var(--glass-edge));
+  --material-fill: color-mix(in srgb, #ff453a 12%, var(--glass-floating-fill));
+}
+:root[data-theme] :is(.mobile-dock-item, .mobile-sub-dock-item, .knowledge-tabs a):not(.active):not(.router-link-exact-active) {
+  color: var(--glass-label);
+}
+/* Fullscreen reading remains one unfiltered document, not a translucent pane. */
+:root[data-theme] .reader-page:fullscreen .pane-center {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+/* Opt-in only: hosts are positioned and do not already own ::before.
+   No copied backdrop, no displacement texture, no hit-area or text overlay. */
+:where(.task-toolbar, .reader-topbar, .search-box)[data-glass-rim] { position: relative; }
+@supports ((mask-composite: exclude) or (-webkit-mask-composite: xor)) {
+  [data-glass-rim]::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    padding: 1px;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(135deg, var(--glass-rim-light) 0%, var(--glass-rim-side) 22%, transparent 42% 56%, var(--glass-rim-bottom) 78%, var(--glass-rim-shadow) 100%);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+  }
+}
+/* Solid values propagate through aliases and surface roles, including lazy pages. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root[data-theme] {
+    --glass-floating-fill: var(--glass-solid);
+    --glass-panel-fill: var(--glass-solid);
+    --glass-structural-fill: var(--glass-solid);
+    --glass-content-fill: var(--glass-solid);
+    --glass-control-fill: var(--glass-solid);
+    --glass-floating-filter: none;
+    --glass-panel-filter: none;
+    --glass-structural-filter: none;
+    --glass-scrim-filter: none;
+    --glass-media-fill: #202127;
+  }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root[data-theme] {
+    --glass-floating-fill: var(--glass-solid);
+    --glass-panel-fill: var(--glass-solid);
+    --glass-structural-fill: var(--glass-solid);
+    --glass-content-fill: var(--glass-solid);
+    --glass-control-fill: var(--glass-solid);
+    --glass-floating-filter: none;
+    --glass-panel-filter: none;
+    --glass-structural-filter: none;
+    --glass-scrim-filter: none;
+    --glass-media-fill: #202127;
+    --glass-sheen: linear-gradient(transparent, transparent);
+    --glass-action-sheen: linear-gradient(transparent, transparent);
+  }
+  [data-glass-rim]::before { display: none; }
+}
+@media (prefers-contrast: more) {
+  :root[data-theme] { --glass-edge: var(--text-muted); --glass-edge-soft: var(--text-muted); }
+}
+@media (forced-colors: active) {
+  :root[data-theme] {
+    --glass-solid: Canvas;
+    --glass-floating-fill: Canvas;
+    --glass-panel-fill: Canvas;
+    --glass-structural-fill: Canvas;
+    --glass-content-fill: Canvas;
+    --glass-control-fill: Canvas;
+    --glass-floating-filter: none;
+    --glass-panel-filter: none;
+    --glass-structural-filter: none;
+    --glass-scrim-filter: none;
+    --glass-media-fill: Canvas;
+    --glass-media-label: CanvasText;
+    --glass-media-edge: CanvasText;
+    --glass-edge: CanvasText;
+    --glass-edge-soft: CanvasText;
+    --glass-action-fill: ButtonFace;
+    --glass-action-hover: ButtonFace;
+    --glass-action-pressed: ButtonFace;
+    --glass-action-label: ButtonText;
+    --glass-action-edge: ButtonText;
+    --glass-action-sheen: linear-gradient(transparent, transparent);
+    --glass-danger-label: ButtonText;
+    --glass-warning-label: ButtonText;
+    --glass-success-label: ButtonText;
+  }
+  [data-glass-rim]::before { display: none; }
+}

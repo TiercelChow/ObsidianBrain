@@ -27,8 +27,8 @@ defineEmits<{ undo: [] }>()
   border: 1px solid var(--border-glass);
   border-radius: 17px;
   background: var(--bg-glass-strong);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: var(--glass-floating-filter);
+  -webkit-backdrop-filter: var(--glass-floating-filter);
   box-shadow: var(--shadow-lg), var(--inset-highlight);
   color: var(--text-secondary);
   font-size: 14px;
