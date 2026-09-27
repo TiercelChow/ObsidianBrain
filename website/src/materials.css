@@ -1,0 +1,136 @@
+/* CSS-only shared optics: no application runtime, data or API dependency. */
+@import '../../frontend/src/styles/materials.css';
+
+.header-inner { position: relative; }
+
+/* Information lives on clear planes, not individually blurred panes. */
+html[data-theme] :is(
+  .principle-card, .feature-card, .guide-card, .app-window, .showcase-stage,
+  .showcase-ui, .architecture, .command-shelf, .final-cta,
+  .manual-content .glass-card, .manual-content .glass-panel,
+  .manual-content .tab-card, .manual-content .config-item, .manual-content .explore-card,
+  .manual-content .insight-card, .manual-content .task-kind-grid article, .diagram
+) {
+  background: var(--glass-content-fill) !important;
+  border-color: var(--glass-edge-soft) !important;
+  box-shadow: var(--glass-content-shadow) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html[data-theme] .feature-card:hover {
+  border-color: var(--glass-edge) !important;
+  box-shadow: var(--glass-inner-edge), 0 8px 24px var(--glass-shadow) !important;
+}
+
+/* The product illustration retains hierarchy without nested backdrop sampling. */
+html[data-theme] .mock-sidebar {
+  background: var(--glass-structural-fill);
+  box-shadow: var(--glass-inner-edge);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html[data-theme] :is(.memo-card, .task-tree > div, .knowledge-demo-sources article, .settings-group) {
+  background: var(--glass-control-fill);
+  border-color: var(--glass-edge-soft);
+  box-shadow: var(--glass-inner-edge);
+}
+
+/* Neutral optical actions; emphasis is an edge and material weight, not blue paint. */
+html[data-theme] :is(.button, .theme-toggle, .github-button, .menu-toggle, .showcase-tabs button) {
+  background: var(--glass-sheen), var(--glass-control-fill);
+  color: var(--text-secondary);
+  border-color: var(--glass-edge-soft);
+  box-shadow: var(--glass-action-shadow);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html[data-theme] :is(.button-primary, .showcase-tabs button[aria-selected='true']) {
+  background: var(--glass-action-sheen), var(--glass-action-fill);
+  color: var(--glass-action-label);
+  border-color: var(--glass-action-edge);
+  box-shadow: var(--glass-action-shadow);
+}
+html[data-theme] :is(.button, .theme-toggle, .github-button, .menu-toggle, .showcase-tabs button):hover {
+  background: var(--glass-action-sheen), var(--glass-action-hover);
+}
+html[data-theme] :is(.button, .theme-toggle, .github-button, .menu-toggle, .showcase-tabs button):active {
+  background: var(--glass-action-sheen), var(--glass-action-pressed);
+}
+html[data-theme] :is(.button, .theme-toggle, .github-button, .menu-toggle, .showcase-tabs button):focus-visible {
+  outline: 2px solid var(--text-muted);
+  outline-offset: 3px;
+}
+html[data-theme] .knowledge-demo-question {
+  background: var(--glass-action-sheen), var(--glass-action-fill);
+  color: var(--text-primary);
+  box-shadow: var(--glass-action-shadow);
+}
+
+html[data-theme] .docs-sidebar {
+  padding: .75rem;
+  border: 1px solid var(--glass-edge-soft);
+  border-radius: 1.15rem;
+  scrollbar-gutter: stable;
+}
+html[data-theme] [data-chapter-link][aria-current='location'] {
+  background: var(--glass-action-sheen), var(--glass-action-fill);
+  box-shadow: var(--glass-inner-edge);
+}
+html[data-theme] .handbook-cover {
+  position: relative;
+  background: var(--glass-sheen), var(--glass-structural-fill);
+  color: var(--text-primary);
+  border: 1px solid var(--glass-edge);
+  border-left: .5rem solid var(--glass-rim-shadow);
+  box-shadow: var(--glass-panel-shadow);
+}
+.handbook-cover > span, .handbook-cover > svg { color: var(--accent-strong); }
+
+@media (max-width: 820px) {
+  /* A filtered parent is a backdrop root. Flatten it while its menu floats
+     outside the header, so the menu can actually sample the document beneath. */
+  html[data-theme] .header-inner:has(.site-nav[data-open='true']) {
+    --material-fill: var(--glass-panel-fill);
+    --material-filter: none;
+  }
+  html[data-theme] .site-nav {
+    background: var(--glass-sheen), var(--glass-panel-fill);
+    border-color: var(--glass-edge);
+    box-shadow: var(--glass-panel-shadow);
+    backdrop-filter: var(--glass-panel-filter);
+    -webkit-backdrop-filter: var(--glass-panel-filter);
+  }
+}
+html[data-theme] .mobile-chapters[open] {
+  --material-fill: var(--glass-panel-fill);
+  --material-filter: var(--glass-panel-filter);
+  --material-shadow: var(--glass-panel-shadow);
+}
+
+/* Static Pages remains readable and navigable when scripts are disabled. */
+html:not(.js) :is(.theme-toggle, .menu-toggle) { display: none; }
+@media (max-width: 820px) {
+  html:not(.js) .site-header { position: relative; }
+  html:not(.js) .site-nav {
+    position: static;
+    grid-column: 1 / -1;
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    background: none;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media print {
+  html[data-theme] :is(.feature-card, .guide-card, .diagram, .glass-card, .glass-panel, .handbook-cover) {
+    background: white !important;
+    border-color: #777 !important;
+    color: black !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}

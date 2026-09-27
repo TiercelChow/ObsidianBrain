@@ -52,7 +52,6 @@
 .gateway-chapters svg { color: var(--accent); }
 .gateway-copy .gateway-note { margin: .8rem 0 0; font-size: .75rem; color: var(--text-muted); }
 .home-page .final-cta { min-height: 24rem; box-shadow: none; }
-.home-page .cta-orb { display: none; }
 
 @media (max-width: 900px) {
   .home-page .hero { gap: 2.5rem; }

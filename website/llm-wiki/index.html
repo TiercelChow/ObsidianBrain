@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN" class="manual-document">
+<html lang="zh-CN" class="manual-document" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -23,7 +23,7 @@
       <marker id="dg-arrow-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" style="fill: var(--accent-strong)" /></marker>
     </svg>
     <header class="site-header">
-      <div class="header-inner">
+      <div class="header-inner" data-glass="floating" data-glass-rim>
         <a class="brand" href="../" aria-label="ObsidianBrain 首页"><img class="brand-mark" src="../favicon.svg" alt="" width="32" height="32" /><span>ObsidianBrain</span></a>
         <nav class="site-nav" id="site-navigation" aria-label="主要导航" data-navigation>
           <a href="../#tour">产品体验</a><a href="../#features">功能</a><a href="../#quick-start">开始使用</a><a href="../manual/">使用手册</a><a href="./" aria-current="page">LLM Wiki</a><a href="../#privacy">本地与隐私</a>
@@ -41,7 +41,7 @@
         <div class="docs-title-row"><div><span class="section-label">OBSIDIANBRAIN / LLM WIKI ARCHITECTURE</span><h1>LLM Wiki 架构剖析</h1></div><img src="../favicon.svg" width="72" height="72" alt="" /></div>
         <p class="docs-lead">从原书到知识，再从知识到答案与研究成果。书籍知识库、Wiki 工作台、知识问答和研究任务共享一套<strong>可追溯、可检查、可恢复</strong>的数据底座：按问题分配资源，按实际读取登记证据，按阶段保存成果，而不是把所有问题塞进相同的检索数量和输出预算。</p>
       </header>
-      <details class="mobile-chapters">
+      <details class="mobile-chapters" data-glass="floating" data-glass-rim>
         <summary>浏览章节 <span data-current-chapter>总览</span><svg aria-hidden="true"><use href="#icon-chevron" /></svg></summary>
         <nav aria-label="手机章节目录">
           <a href="#overview" data-chapter-link><span>00</span>总览与分工</a>
@@ -58,7 +58,7 @@
         </nav>
       </details>
       <div class="docs-layout">
-        <aside class="docs-sidebar">
+        <aside class="docs-sidebar" data-glass="structural">
           <span class="docs-nav-label">阅读目录</span>
           <nav aria-label="章节目录">
             <a href="#overview" data-chapter-link><span>00</span>总览与分工</a>

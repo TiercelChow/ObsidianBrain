@@ -1,4 +1,5 @@
 import './style.css'
+import './materials.css'
 
 const root = document.documentElement
 const themeButton = document.querySelector('[data-theme-toggle]')
