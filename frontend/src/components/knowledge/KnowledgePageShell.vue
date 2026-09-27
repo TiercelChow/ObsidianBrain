@@ -21,6 +21,8 @@
 
 <script setup lang="ts">
 import { ChatDotRound, Collection, Operation, Setting, Tickets } from '@element-plus/icons-vue'
+import { useRoute } from 'vue-router'
+import { useMobileSubnav } from '@/composables/useMobileSubnav'
 
 defineProps<{ title: string; subtitle: string }>()
 
@@ -31,4 +33,10 @@ const tabs = [
   { path: '/knowledge/tasks', label: '研究任务', icon: Operation },
   { path: '/knowledge/settings', label: '配置', icon: Setting },
 ]
+
+const route = useRoute()
+useMobileSubnav(() => ({
+  label: '书籍知识功能',
+  items: tabs.map(item => ({ id: item.path, label: item.label, compactLabel: item.path === '/knowledge/tasks' ? '研究' : undefined, to: item.path, active: route.path === item.path })),
+}))
 </script>

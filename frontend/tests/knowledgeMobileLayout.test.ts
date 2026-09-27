@@ -4,9 +4,12 @@ import test from 'node:test'
 
 const source = (path: string) => readFile(new URL(`../src/${path}`, import.meta.url), 'utf8')
 
-test('phone Wiki navigation fits all five destinations without hidden tabs', async () => {
-  const css = await source('styles/knowledge.css')
-  assert.match(css, /\.knowledge-tabs\s*\{[^}]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/)
+test('phone Wiki navigation uses the shared five-destination sub-dock without duplicate tabs', async () => {
+  const [css, shell, dock] = await Promise.all([source('styles/knowledge.css'), source('components/knowledge/KnowledgePageShell.vue'), source('components/MobileDock.vue')])
+  assert.match(css, /@media \(max-width: 768px\)[\s\S]*\.knowledge-tabs\s*\{\s*display:\s*none/)
+  assert.match(shell, /useMobileSubnav\(/)
+  assert.equal((shell.match(/path: '\/knowledge[^']*'/g) || []).length, 5)
+  assert.match(dock, /\.mobile-sub-dock-item\s*\{[^}]*min-height:\s*44px/)
   assert.match(css, /\.knowledge-page[^}]*\.el-input__inner[^}]*font-size:\s*16px/s)
 })
 

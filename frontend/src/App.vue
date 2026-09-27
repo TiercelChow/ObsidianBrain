@@ -1,7 +1,8 @@
 <template>
   <div
+    ref="appShellRef"
     class="app-shell"
-    :class="{ 'mobile-focus': isMobile && mobileFocusMode }"
+    :class="{ 'mobile-focus': isMobile && mobileFocusMode, 'has-mobile-subnav': !!mobileSubnav?.items.length }"
   >
     <!-- Ambient gradient orbs for liquid glass effect -->
     <div class="ambient-bg">
@@ -63,42 +64,15 @@
       </el-main>
     </el-container>
 
-    <nav v-if="isMobile && !mobileFocusMode" class="mobile-dock" aria-label="主要导航">
-      <router-link
-        :to="{ path: '/reader', query: { view: 'shelf' } }"
-        class="mobile-dock-item"
-        :class="{ active: mobileNavSection === 'reader' }"
-        :aria-current="mobileNavSection === 'reader' ? 'page' : undefined"
-      >
-        <el-icon><Files /></el-icon><span>阅境轩</span>
-      </router-link>
-      <router-link
-        to="/timeline"
-        class="mobile-dock-item"
-        :class="{ active: mobileNavSection === 'timeline' }"
-        :aria-current="mobileNavSection === 'timeline' ? 'page' : undefined"
-      >
-        <el-icon><Calendar /></el-icon><span>时光机</span>
-      </router-link>
-      <router-link
-        :to="{ path: '/tasks', query: { view: 'tasks' } }"
-        class="mobile-dock-item"
-        :class="{ active: mobileNavSection === 'tasks' }"
-        :aria-current="mobileNavSection === 'tasks' ? 'page' : undefined"
-      >
-        <el-icon><Finished /></el-icon><span>任务中枢</span>
-      </router-link>
-      <button
-        type="button"
-        class="mobile-dock-item"
-        :class="{ active: mobileNavSection === 'more' || mobileSidebarVisible }"
-        :aria-expanded="mobileSidebarVisible"
-        aria-label="全部模块"
-        @click="openMobileSidebar"
-      >
-        <el-icon><Grid /></el-icon><span>全部</span>
-      </button>
-    </nav>
+    <MobileDock
+      v-if="isMobile && !mobileFocusMode && !dockKeyboardOpen"
+      :progress="dockProgress"
+      :section="mobileNavSection"
+      :sidebar-visible="mobileSidebarVisible"
+      :subnav="mobileSubnav"
+      @expand="expandDock"
+      @open-modules="openMobileSidebar"
+    />
   </div>
 </template>
 
@@ -106,11 +80,13 @@
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from './stores/app'
-import { Calendar, Files, Finished, Grid } from '@element-plus/icons-vue'
 import Sidebar from './components/Sidebar.vue'
+import MobileDock from './components/MobileDock.vue'
 import { isPhoneViewport, shouldLockMobileReaderOuterScroll } from './utils/mobileLayoutPolicy'
 import { getMobileNavSection, isMobileFocusRoute } from './utils/mobileNavigationPolicy'
 import { useModalEnvironment } from './composables/useModalEnvironment'
+import { provideMobileSubnav } from './composables/useMobileSubnav'
+import { useMobileDockMotion } from './composables/useMobileDockMotion'
 
 const route = useRoute()
 const appStore = useAppStore()
@@ -119,12 +95,19 @@ watch(() => route.path, () => appStore.handleScroll(0))
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
 const currentTitle = computed(() => (route.meta?.title as string) || '')
 const appAsideRef = ref<HTMLElement | null>(null)
+const appShellRef = ref<HTMLElement | null>(null)
+const mobileSubnav = provideMobileSubnav()
 
 // Mobile detection
 const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => isPhoneViewport(windowWidth.value))
 const mobileFocusMode = computed(() => isMobileFocusRoute(route.path, route.query))
 const mobileNavSection = computed(() => getMobileNavSection(route.path))
+const { progress: dockProgress, keyboardOpen: dockKeyboardOpen, expand: expandDock } = useMobileDockMotion(
+  appShellRef,
+  () => isMobile.value && !mobileFocusMode.value,
+  () => route.path,
+)
 const lockMobileReaderOuterScroll = computed(() => (
   shouldLockMobileReaderOuterScroll(windowWidth.value, route.path)
 ))
@@ -304,6 +287,8 @@ code, pre, .code-block { font-family: var(--font-mono); }
   --safe-left: env(safe-area-inset-left, 0px);
   --mobile-header-height: 56px;
   --mobile-dock-height: 62px;
+  --mobile-sub-dock-height: 50px;
+  --mobile-navigation-height: var(--mobile-dock-height);
   --tap-target: 44px;
   --page-gutter: 40px;
   --bg-base: #f0f0f3;
@@ -1088,62 +1073,6 @@ code, pre, .code-block { font-family: var(--font-mono); }
   flex-shrink: 0;
 }
 
-.mobile-dock {
-  position: fixed;
-  z-index: 1005;
-  left: max(8px, var(--safe-left));
-  right: max(8px, var(--safe-right));
-  bottom: max(8px, var(--safe-bottom));
-  height: var(--mobile-dock-height);
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  align-items: stretch;
-  padding: 5px;
-  border: 1px solid var(--border-glass);
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--bg-glass-strong) 92%, transparent);
-  backdrop-filter: blur(18px) saturate(170%);
-  -webkit-backdrop-filter: blur(18px) saturate(170%);
-  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.12), var(--inset-highlight);
-}
-
-.mobile-dock-item {
-  position: relative;
-  min-width: 0;
-  min-height: 52px;
-  border: 0;
-  border-radius: 15px;
-  background: transparent;
-  color: var(--text-muted);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  text-decoration: none;
-  font: inherit;
-  font-size: 10px;
-  font-weight: 570;
-  line-height: 1.15;
-  letter-spacing: 0.01em;
-  transition: color var(--motion-fast) var(--ease-emphasized),
-              background-color var(--motion-fast) var(--ease-emphasized),
-              transform var(--motion-instant) var(--ease-emphasized);
-}
-
-.mobile-dock-item .el-icon {
-  font-size: 21px;
-  transition: transform var(--motion-normal) var(--ease-spring-gentle);
-}
-
-.mobile-dock-item.active {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 11%, transparent);
-}
-
-.mobile-dock-item.active .el-icon { transform: translateY(-1px); }
-.mobile-dock-item:active { transform: scale(0.95); }
-
 .mobile-overlay {
   position: fixed;
   inset: 0;
@@ -1167,8 +1096,10 @@ code, pre, .code-block { font-family: var(--font-mono); }
               box-shadow var(--motion-normal) var(--ease-emphasized);
 }
 
+.has-mobile-subnav { --mobile-navigation-height: calc(var(--mobile-dock-height) + var(--mobile-sub-dock-height) + 8px); }
+
 .app-main.mobile-full {
-  padding: 16px max(12px, var(--safe-right)) calc(var(--mobile-dock-height) + var(--safe-bottom) + 20px) max(12px, var(--safe-left));
+  padding: 16px max(12px, var(--safe-right)) calc(var(--mobile-navigation-height) + max(8px, var(--safe-bottom)) + 12px) max(12px, var(--safe-left));
   padding-top: calc(var(--mobile-header-height) + var(--safe-top) + 8px);
   overflow-x: hidden;
   width: 100%;

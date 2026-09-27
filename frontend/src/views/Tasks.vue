@@ -535,6 +535,7 @@ import {
 } from '@/api/tasks'
 import { useAppStore } from '@/stores/app'
 import { useTasksStore } from '@/stores/tasks'
+import { useMobileSubnav } from '@/composables/useMobileSubnav'
 import {
   buildMonthGrid,
   formatTaskDateRange,
@@ -554,6 +555,12 @@ const router = useRouter()
 const store = useTasksStore()
 const appStore = useAppStore()
 const viewMode = ref<ViewMode>(route.query.view === 'calendar' ? 'calendar' : 'tasks')
+useMobileSubnav(() => ({
+  label: '任务视图切换',
+  items: (['tasks', 'calendar'] as const).map(mode => ({
+    id: mode, label: mode === 'tasks' ? '任务' : '日历', active: viewMode.value === mode, select: () => changeView(mode),
+  })),
+}))
 const searchQuery = ref('')
 const kindFilter = ref<'all' | TaskKind>('all')
 const statusFilter = ref<'active' | 'all' | TaskStatus>('active')
@@ -714,19 +721,27 @@ function closeMobileDetail() {
   void router.replace({ query })
 }
 
-function changeView(mode: ViewMode) {
+function applyView(mode: ViewMode) {
+  if (viewMode.value === mode) return
   viewMode.value = mode
-  const query = { ...route.query }
-  query.view = mode
   if (mode === 'calendar') {
-    delete query.task
     store.clearSelection()
     drawerNodeId.value = null
     listCollapsed.value = false
     void loadCalendar()
   }
+}
+
+function changeView(mode: ViewMode) {
+  applyView(mode)
+  const query = { ...route.query }
+  query.view = mode
+  if (mode === 'calendar') delete query.task
   void router.replace({ query })
 }
+
+// Root Dock links and browser navigation can change query without remounting.
+watch(() => route.query.view, view => applyView(view === 'calendar' ? 'calendar' : 'tasks'))
 
 function shiftCalendar(months: number) {
   calendarAnchor.value = shiftMonth(calendarAnchor.value, months)
@@ -1250,7 +1265,7 @@ onMounted(async () => {
 @media (max-width: 768px) {
   .page-create { display: none; }
   .tasks-page.view-tasks {
-    height: calc(100dvh - var(--mobile-header-height) - var(--mobile-dock-height) - var(--safe-top) - var(--safe-bottom) - 36px);
+    height: calc(100dvh - var(--mobile-header-height) - var(--mobile-navigation-height) - var(--safe-top) - max(8px, var(--safe-bottom)) - 20px);
   }
   .tasks-page.mobile-focused {
     height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 16px);
@@ -1262,7 +1277,7 @@ onMounted(async () => {
   }
   .task-toolbar {
     display: grid;
-    grid-template-columns: 116px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
     min-height: 0;
     padding: 7px;
@@ -1276,10 +1291,10 @@ onMounted(async () => {
     min-height: var(--tap-target);
   }
   .task-search input { font-size: 16px; }
-  .task-toolbar .view-switch { grid-column: 1; grid-row: 2; width: 116px; }
+  .task-toolbar .view-switch { display: none; }
   .view-switch button { min-height: 38px; }
   .mobile-filter-toggle {
-    grid-column: 2;
+    grid-column: 1;
     grid-row: 2;
     min-width: 0;
     min-height: 44px;

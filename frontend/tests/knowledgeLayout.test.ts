@@ -91,7 +91,7 @@ test('mobile Wiki chat keeps its composer above the global dock', async () => {
     source('src/views/knowledge/KnowledgeChat.vue'),
   ])
 
-  assert.match(shared, /\.app-main \.route-stage:has\(\.chat-layout\)\s*\{[^}]*height:\s*calc\(100dvh[^}]*var\(--mobile-dock-height\)/)
+  assert.match(shared, /\.app-main \.route-stage:has\(\.chat-layout\)\s*\{[^}]*height:\s*calc\(100dvh[^}]*var\(--mobile-navigation-height\)/)
   assert.match(shared, /\.knowledge-page:has\(\.chat-layout\)\s+\.knowledge-content\s*\{[^}]*flex:\s*1/)
   assert.match(chat, /\.chat-panel\s*\{[^}]*min-height:\s*0;[^}]*flex:\s*1/)
   assert.match(chat, /\.chat-composer\s*\{[^}]*flex:\s*none/)

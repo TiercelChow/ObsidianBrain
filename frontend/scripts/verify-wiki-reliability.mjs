@@ -4,6 +4,7 @@
  * If Playwright is installed locally, the environment override is unnecessary.
  * Optional SCREENSHOT_DIR selects the generated-artifact directory.
  * WIKI_MOBILE_LAYOUT_ONLY=1 checks all five pages and settings sections at 320/390/667/1440px.
+ * MOBILE_DOCK_ONLY=1 exercises navigation gestures against these isolated fixtures.
  */
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir } from 'node:fs/promises'
@@ -15,6 +16,7 @@ import { createServer, loadConfigFromFile } from 'vite'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const startedAt = Date.now()
 const mobileLayoutOnly = process.env.WIKI_MOBILE_LAYOUT_ONLY === '1'
+const dockOnly = process.env.MOBILE_DOCK_ONLY === '1'
 const frontendRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const screenshotDir = process.env.SCREENSHOT_DIR || await mkdtemp(join(tmpdir(), 'wiki-reliability-'))
 await mkdir(screenshotDir, { recursive: true })
@@ -80,7 +82,7 @@ const mockApi = {
     server.middlewares.use(async (request, response, next) => {
       if (!request.url?.startsWith('/v1')) return next()
       // Every /v1 request terminates here. There is no real backend proxy.
-      if (request.url === '/v1/health') return json(response, { status: 'healthy', version: 'mock', components: {} })
+      if (request.url === '/v1/health') return json(response, { status: 'healthy', version: 'mock', components: {}, uptime_seconds: 10, tools_count: 0, vault: { path: '/mock/no-real-vault', exists: false, watching: false } })
       let body = ''
       for await (const chunk of request) body += chunk
       const payload = body ? JSON.parse(body) : {}
@@ -134,7 +136,13 @@ const mockApi = {
           if (state.reviewRetries.length && ++state.reviewRetryReportReads >= 2) Object.assign(report, { id: 'mock-new-review-report', status: 'running', error: null })
           return json(response, success(tool, { report }))
         }
-        case 'list_book_knowledge_bases': return json(response, success(tool, { items: [{ book: { id: base.book_id, kind: 'folder', name: base.book_name, path: base.book_path }, knowledge_base: base }] }))
+        case 'list_book_knowledge_bases': return json(response, success(tool, { items: Array.from({ length: dockOnly ? 8 : 1 }, (_, index) => ({ book: { id: index ? `${base.book_id}-${index}` : base.book_id, kind: 'folder', name: base.book_name, path: base.book_path }, knowledge_base: { ...base, id: index ? `${base.id}-${index}` : base.id } })) }))
+        case 'list_tasks': return json(response, success(tool, { tasks: [], next_cursor: null }))
+        case 'get_task_calendar': return json(response, success(tool, []))
+        case 'get_memory_stats': return json(response, success(tool, { total_chunks: 0, total_notes: 0, tags: [] }))
+        case 'get_memo_stats': return json(response, success(tool, { total_memos: 0 }))
+        case 'list_code_repos': return json(response, success(tool, { repos: [] }))
+        case 'get_config': return json(response, success(tool, { vault: { path: '/mock/no-real-vault', name: 'mock' }, obsidian: { enabled: false, url: '', api_key: '' }, llm: { provider: 'mock', model: 'mock', api_key: '', api_key_env: 'MOCK', base_url: '', max_tokens: 1000, temperature: .5 } }))
         case 'get_book_wiki_settings': return json(response, success(tool, runtimeSettings()))
         case 'list_wiki_skills': return json(response, success(tool, { skills: mobileLayoutOnly ? [layoutSkill] : [] }))
         case 'get_wiki_skill_detail': return json(response, success(tool, { skill: layoutSkill, current_version_id: 'mock-skill-v1', versions: [{ id: 'mock-skill-v1', revision: 1, release_state: 'published', content_hash: 'a'.repeat(64), changelog: '完整的版本与来源说明', created_at: timestamp, files: [{ relative_path: 'SKILL.md', content_text: layoutSkill.instructions, content_hash: 'a'.repeat(64), media_type: 'text/markdown', size_bytes: 2048 }] }] }))
@@ -185,9 +193,9 @@ try {
   const origin = `http://127.0.0.1:${address.port}`
   // Use the Chromium channel's headless mode, not the separately installed headless-shell package.
   browser = await chromium.launch({ headless: true, channel: 'chromium' })
-  const viewports = mobileLayoutOnly ? [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 667, height: 375 }, { width: 1440, height: 1000 }] : [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]
+  const viewports = mobileLayoutOnly || dockOnly ? [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 667, height: 375 }, { width: 1440, height: 1000 }] : [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]
   for (const viewport of viewports) {
-    const mode = mobileLayoutOnly ? `${viewport.width}x${viewport.height}` : viewport.width > 768 ? 'desktop' : 'phone'
+    const mode = mobileLayoutOnly || dockOnly ? `${viewport.width}x${viewport.height}` : viewport.width > 768 ? 'desktop' : 'phone'
     const phone = viewport.width <= 768
     state.chatAttempts = 0
     state.chatRequests = []
@@ -203,7 +211,7 @@ try {
     state.reviewRetries = []
     state.reviewRetryReportReads = 0
     state.researchStatus = 'failed'; state.researchQueuePolls = 0; state.researchHold = false; state.researchExecutions = []; state.workspaceReads = []; state.stageReads = []; state.stageDelay = 0
-    const context = await browser.newContext({ viewport, reducedMotion: 'reduce' })
+    const context = await browser.newContext({ viewport, hasTouch: phone, reducedMotion: dockOnly ? 'no-preference' : 'reduce' })
     await context.route('**/*', route => {
       const url = route.request().url()
       if (url.startsWith('blob:') || url.startsWith('data:') || new URL(url).origin === origin) return route.continue()
@@ -232,10 +240,141 @@ try {
       if (phone && await dialog.locator('.research-stage-directory').getAttribute('open') === null) await dialog.locator('.research-stage-directory > summary').click()
       await dialog.locator('.research-stages button').filter({ hasText: title }).click()
     }
+    if (dockOnly) {
+      await page.goto(`${origin}/knowledge`)
+      await page.locator('.book-wiki-card').first().waitFor()
+      if (!phone) {
+        assert.equal(await page.locator('.mobile-navigation').count(), 0)
+        assert.equal(await page.locator('.knowledge-tabs a').count(), 5)
+        await checkLayout('dock-desktop-unchanged')
+        results.push({ viewport, desktopUnchanged: true })
+        await context.close()
+        continue
+      }
+      const dock = page.locator('.mobile-navigation')
+      await dock.waitFor()
+      assert.equal(await page.locator('.mobile-sub-dock a').count(), 5)
+      const main = page.locator('.app-main')
+      const padding = await main.evaluate(element => getComputedStyle(element).paddingBottom)
+      await main.evaluate(element => { element.scrollTop = 500 })
+      await page.waitForTimeout(200)
+      assert.equal(await dock.getAttribute('data-progress'), '0', 'programmatic scroll never contracts navigation')
+      const touch = await context.newCDPSession(page)
+      const startY = Math.min(viewport.height - 145, 230)
+      async function drag(start, end, finish = true, x = 80) {
+        await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y: start }] })
+        for (let step = 1; step <= 8; step++) {
+          await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: start + (end - start) * step / 8 }] })
+          await page.waitForTimeout(22)
+        }
+        if (finish) await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      }
+      await drag(startY, startY + 130)
+      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 100)
+      const orb = await page.locator('.mobile-dock-orb').boundingBox()
+      const sub = await page.locator('.mobile-sub-dock').boundingBox()
+      assert.ok(orb.width >= 44 && orb.height >= 44 && Math.abs(orb.width - orb.height) < 2, 'compact main dock is a tappable circle')
+      assert.ok(sub.x + sub.width <= orb.x - 4 && Math.abs(sub.y + sub.height / 2 - (orb.y + orb.height / 2)) < 4, 'sub-navigation sinks left of the orb without overlap')
+      for (const item of await page.locator('.mobile-sub-dock a').all()) {
+        const box = await item.boundingBox()
+        assert.ok(box.width >= 44 && box.height >= 44, 'compact sub-navigation preserves touch targets')
+        assert.ok(await item.evaluate(element => element.scrollWidth <= element.clientWidth), 'compact labels never truncate')
+      }
+      assert.equal(await main.evaluate(element => getComputedStyle(element).paddingBottom), padding, 'scroll morph does not resize content')
+      assert.equal(await page.getByRole('navigation', { name: '主要导航', exact: true }).count(), 0, 'contracted links are not exposed to assistive technology')
+      await checkLayout('dock-compact')
+      await page.getByRole('button', { name: '展开主要导航', exact: true }).click()
+      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 0)
+      await checkLayout('dock-expanded')
+      await drag(startY, startY + 60, false)
+      const partial = Number(await dock.getAttribute('data-progress'))
+      assert.ok(partial > 0 && partial < 100, `gesture tracks partial movement ${partial}`)
+      // Reverse before releasing: no queued animation or old target may win.
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 80, y: startY - 50 }] })
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 0)
+      await page.locator('.mobile-sub-dock a').filter({ hasText: '问答' }).click()
+      await page.locator('.chat-composer textarea').waitFor()
+      assert.equal(await dock.getAttribute('data-progress'), '0', 'route changes expand navigation')
+      const composer = await page.locator('.chat-composer').boundingBox()
+      const upperDock = await page.locator('.mobile-sub-dock').boundingBox()
+      assert.ok(composer.y + composer.height < upperDock.y + 1, 'composer remains above both docks')
+      await page.getByRole('button', { name: '问答历史与设置' }).filter({ visible: true }).click()
+      assert.equal(await dock.getAttribute('data-progress'), '0', 'opening sheets does not contract navigation')
+      await page.getByRole('dialog', { name: '问答历史与设置' }).getByRole('button', { name: '新对话', exact: true }).click()
+      const input = page.locator('.chat-composer textarea')
+      await input.fill('仅使用隔离 Mock 返回的长回答')
+      await page.getByRole('button', { name: '发送问题', exact: true }).click()
+      await page.getByRole('button', { name: '停止生成', exact: true }).waitFor({ state: 'hidden' })
+      await page.waitForTimeout(400)
+      assert.equal(await dock.getAttribute('data-progress'), '0', 'streaming and answer auto-follow do not collapse navigation')
+      const messages = page.locator('.message-list')
+      const messageBox = await messages.boundingBox()
+      await messages.evaluate(element => { element.scrollTop = element.scrollHeight })
+      await page.waitForTimeout(160)
+      const nestedStart = messageBox.y + 20
+      await drag(nestedStart, nestedStart + Math.min(120, messageBox.height - 30))
+      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 100)
+      await page.getByRole('button', { name: '展开主要导航', exact: true }).click()
+      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 0)
+      if (viewport.height > 500) {
+        await input.focus()
+        await page.evaluate(() => {
+          Object.defineProperty(window.visualViewport, 'height', { value: window.innerHeight - 260, configurable: true })
+          window.visualViewport.dispatchEvent(new Event('resize'))
+        })
+        await dock.waitFor({ state: 'hidden' })
+        await page.evaluate(() => { delete window.visualViewport.height; window.visualViewport.dispatchEvent(new Event('resize')) })
+        await dock.waitFor()
+      }
+      await page.goto(`${origin}/tasks`)
+      await page.locator('.mobile-sub-dock').getByRole('button', { name: '日历', exact: true }).click()
+      await page.waitForURL('**/tasks?view=calendar')
+      await page.locator('.task-calendar').waitFor()
+      await page.locator('.mobile-dock-links').getByRole('link', { name: '任务中枢', exact: true }).click()
+      await page.waitForURL('**/tasks?view=tasks')
+      assert.equal(await page.locator('.task-calendar').count(), 0, 'root navigation keeps the local view in sync')
+      await page.goto(`${origin}/inspiration`)
+      await page.locator('.mobile-sub-dock').getByRole('button', { name: '对立观点', exact: true }).click()
+      await page.locator('.note-selector').waitFor()
+      assert.equal(await page.locator('.mobile-sub-dock button[aria-pressed="true"]').textContent().then(text => text.trim()), '对立观点')
+      await page.getByRole('button', { name: '全部模块', exact: true }).click()
+      await page.getByRole('dialog', { name: '全部功能', exact: true }).waitFor()
+      await page.locator('.mobile-overlay').click({ position: { x: 20, y: 20 } })
+      await page.locator('.app-aside.mobile-open').waitFor({ state: 'hidden' })
+      // Wiki registration is released on a single-level page, including transitions.
+      await page.getByRole('button', { name: '全部模块', exact: true }).click()
+      await page.getByRole('dialog', { name: '全部功能', exact: true }).getByRole('link', { name: '首页', exact: true }).click()
+      await page.waitForURL(`${origin}/`)
+      await page.waitForTimeout(350)
+      assert.equal(await page.locator('.mobile-sub-dock').count(), 0)
+      await page.locator('.config-card').first().waitFor()
+      await main.evaluate(element => { element.scrollTop = 500 })
+      await page.waitForTimeout(160)
+      // Start on the page gutter, not an editable configuration input.
+      await drag(startY, startY + 130, true, 16)
+      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 100)
+      await page.getByRole('button', { name: '展开主要导航', exact: true }).press('Enter')
+      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 0)
+      await page.waitForFunction(() => document.activeElement?.matches('.mobile-dock-item.active'))
+      await checkLayout('dock-single-level')
+      await page.goto(`${origin}/knowledge`)
+      await main.evaluate(element => { element.scrollTop = 500 })
+      await page.waitForTimeout(200)
+      await page.emulateMedia({ reducedMotion: 'reduce' })
+      await drag(startY, startY + 110)
+      await page.waitForFunction(() => Number(document.querySelector('.mobile-navigation')?.getAttribute('data-progress')) === 100)
+      await page.getByRole('button', { name: '展开主要导航', exact: true }).click()
+      assert.equal(await dock.getAttribute('data-progress'), '0', 'reduced-motion expansion is immediate')
+      assert.deepEqual(pageErrors, [])
+      results.push({ viewport, continuousGesture: true, interruption: true, stableContent: true, compactTargets: true, nestedScroll: true, autoScrollIgnored: true, keyboardHidden: viewport.height > 500, routeRegistration: true, singleLevel: true, keyboardNavigation: true, reducedMotion: true })
+      await context.close()
+      continue
+    }
     if (mobileLayoutOnly) {
       await page.goto(`${origin}/knowledge`)
       await page.locator('.book-wiki-card').waitFor()
-      const tabs = await page.locator('.knowledge-tabs a').all()
+      const tabs = await page.locator(phone ? '.mobile-sub-dock a' : '.knowledge-tabs a').all()
       assert.equal(tabs.length, 5)
       for (const tab of tabs) {
         const box = await tab.boundingBox()
@@ -274,7 +413,7 @@ try {
         const body = await page.locator('.message-list').boundingBox()
         const chat = await page.locator('.chat-layout').boundingBox()
         const composer = await page.locator('.chat-composer').boundingBox()
-        const dock = await page.locator('.mobile-dock').boundingBox()
+        const dock = await page.locator('.mobile-sub-dock').boundingBox()
         assert.ok(body.height >= Math.min(220, chat.height * .5), `usable answer area ${JSON.stringify({ body, chat })}`)
         assert.ok(composer.y + composer.height <= dock.y, 'composer is not behind the dock')
         assert.ok(await page.locator('.chat-composer textarea').evaluate(input => Number.parseFloat(getComputedStyle(input).fontSize)) >= 16, 'composer avoids mobile input zoom')

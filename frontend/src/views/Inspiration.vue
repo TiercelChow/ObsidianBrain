@@ -26,6 +26,7 @@
         <div class="mode-desc">{{ mode.desc }}</div>
       </div>
     </div>
+    <p class="mobile-mode-description">{{ modes.find(mode => mode.value === selectedMode)?.desc }}</p>
 
     <!-- 笔记选择（反向提问/对立观点需要） -->
     <div class="note-selector" v-if="selectedMode !== 'concept_combo'">
@@ -180,6 +181,7 @@ import { ref } from 'vue'
 import { getInspiration } from '@/api'
 import { Refresh, Document, MagicStick } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { useMobileSubnav } from '@/composables/useMobileSubnav'
 
 const selectedMode = ref('concept_combo')
 const notePath = ref('')
@@ -192,6 +194,10 @@ const modes = [
   { value: 'reverse_question', label: '反向提问', icon: '❓', desc: '对你的一篇笔记生成深层问题' },
   { value: 'counterpoint', label: '对立观点', icon: '⚔️', desc: '对笔记生成反方观点和逻辑漏洞' },
 ]
+useMobileSubnav(() => ({
+  label: '灵感模式',
+  items: modes.map(mode => ({ id: mode.value, label: mode.label, compactLabel: mode.value === 'concept_combo' ? '概念组合' : mode.label, active: selectedMode.value === mode.value, select: () => { selectedMode.value = mode.value } })),
+}))
 
 async function generateInspiration() {
   if (selectedMode.value === 'counterpoint' && !notePath.value) {
@@ -234,6 +240,7 @@ function loadHistory() {
   min-height: 100%;
   max-width: 100%;
 }
+.mobile-mode-description { display: none; }
 .inspiration-page .mode-option {
   animation: fade-in var(--duration-normal) var(--ease-out) both;
 }
@@ -326,16 +333,9 @@ function loadHistory() {
 
 @media (max-width: 768px) {
   .mode-selector {
-    display: flex;
-    gap: 8px;
-    margin-inline: -2px;
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
+    display: none;
   }
-  .mode-selector::-webkit-scrollbar { display: none; }
-  .mode-option { flex: 0 0 min(78vw, 260px); padding: 14px; scroll-snap-align: start; text-align: left; }
-  .mode-icon { float: left; margin: 0 10px 0 0; }
+  .mobile-mode-description { display: block; margin-bottom: 16px; color: var(--text-muted); font-size: 14px; }
   .result-card { padding: 16px; }
   .note-selector { flex-direction: column; gap: 10px; }
   .note-selector :deep(.el-button), .action-bar :deep(.el-button) { width: 100%; }
