@@ -46,6 +46,9 @@ clap = { version = "4", features = ["derive"] }
 rust-embed = "8"
 mime_guess = "2"
 
+[dev-dependencies]
+wiremock = "0.6"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

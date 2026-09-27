@@ -610,22 +610,146 @@ impl ObsidianClient {
     }
 }
 
-/// URL-encode a vault file path (encode `/` as `%2F` for path segments).
+/// Encode each vault path segment while preserving directory separators.
+/// Obsidian routes nested files using literal `/`; `%2F` produces a 404.
 fn encode_path(path: &str) -> String {
-    urlencoding::encode(path).to_string()
+    path.split('/')
+        .map(urlencoding::encode)
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{body_bytes, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
-    fn test_encode_path() {
-        assert_eq!(encode_path("folder/note.md"), "folder%2Fnote.md");
+    fn test_encode_path_preserves_nested_directories() {
+        assert_eq!(encode_path("folder/note.md"), "folder/note.md");
+        assert_eq!(
+            encode_path("Timeline/images/2026-06-28-002854-0.jpg"),
+            "Timeline/images/2026-06-28-002854-0.jpg"
+        );
+    }
+
+    #[test]
+    fn test_encode_path_encodes_unicode_and_reserved_characters() {
         assert_eq!(
             encode_path("中文笔记.md"),
             "%E4%B8%AD%E6%96%87%E7%AC%94%E8%AE%B0.md"
         );
+        assert_eq!(
+            encode_path("Timeline/照片/a #?%2F+&.jpg"),
+            "Timeline/%E7%85%A7%E7%89%87/a%20%23%3F%252F%2B%26.jpg"
+        );
+    }
+
+    #[test]
+    fn test_encode_path_preserves_directory_boundaries() {
+        assert_eq!(encode_path(""), "");
+        assert_eq!(encode_path("note.md"), "note.md");
+        assert_eq!(encode_path("/Timeline/images/"), "/Timeline/images/");
+    }
+
+    fn mock_client(server: &MockServer) -> ObsidianClient {
+        ObsidianClient::new(&ObsidianApiConfig {
+            enabled: true,
+            url: server.uri(),
+            api_key: Some("test-key".to_string()),
+        })
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_read_binary_nested_image_returns_original_bytes() {
+        let server = MockServer::start().await;
+        let client = mock_client(&server);
+        let original = vec![0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9];
+        for (vault_path, request_path) in [
+            (
+                "Timeline/images/photo.jpg",
+                "/vault/Timeline/images/photo.jpg",
+            ),
+            (
+                "Timeline/照片/a #?%2F+&.jpg",
+                "/vault/Timeline/%E7%85%A7%E7%89%87/a%20%23%3F%252F%2B%26.jpg",
+            ),
+        ] {
+            Mock::given(method("GET"))
+                .and(path(request_path))
+                .and(header("authorization", "Bearer test-key"))
+                .and(header("accept", "application/octet-stream"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .insert_header("content-type", "image/jpeg")
+                        .set_body_bytes(original.clone()),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let (bytes, content_type) = client.read_binary(vault_path).await.unwrap();
+            assert_eq!(bytes, original);
+            assert_eq!(content_type, "image/jpeg");
+        }
+        let requests = server.received_requests().await.unwrap();
+        assert!(requests.iter().all(|request| request.url.query().is_none()));
+    }
+
+    #[tokio::test]
+    async fn test_read_binary_missing_image_returns_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/vault/Timeline/images/missing.jpg"))
+            .respond_with(ResponseTemplate::new(404))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let error = mock_client(&server)
+            .read_binary("Timeline/images/missing.jpg")
+            .await
+            .unwrap_err();
+        assert!(matches!(error, BrainError::FetchError { detail, .. } if detail.contains("404")));
+    }
+
+    #[tokio::test]
+    async fn test_write_binary_nested_image_uses_same_path_as_read() {
+        let server = MockServer::start().await;
+        let client = mock_client(&server);
+        let original = vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+        let request_path = "/vault/Timeline/images/photo%20%231.png";
+        Mock::given(method("PUT"))
+            .and(path(request_path))
+            .and(header("content-type", "image/png"))
+            .and(body_bytes(original.clone()))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(request_path))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "image/png")
+                    .set_body_bytes(original.clone()),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        client
+            .write_binary("Timeline/images/photo #1.png", &original, "image/png")
+            .await
+            .unwrap();
+        let (bytes, content_type) = client
+            .read_binary("Timeline/images/photo #1.png")
+            .await
+            .unwrap();
+        assert_eq!(bytes, original);
+        assert_eq!(content_type, "image/png");
     }
 
     #[test]

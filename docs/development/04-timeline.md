@@ -434,6 +434,8 @@ pub async fn search_memos(&self, query: MemoQuery) -> Result<Vec<Memo>, BrainErr
 
 ## 7. 错误处理
 
+图片原图通过 `GET /v1/vault/images/*path` 代理读取 Obsidian，缩略图优先读取本地缓存；缩略图可见不代表原图读取正常。共用的 Obsidian 客户端按路径段编码中文、空格、`#`、`?`、`%` 等字符，保留 `/` 目录分隔符及目录末尾斜线，禁止把整条路径编码为包含 `%2F` 的单个段。
+
 | 错误场景 | 处理方式 |
 |---|---|
 | Timeline 文件夹不存在 | 自动创建 |
