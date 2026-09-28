@@ -3890,6 +3890,7 @@ fn agent_tools_for_task_type(task_type: &str) -> Vec<&'static str> {
             "knowledge_get_entry",
             "knowledge_get_research_baseline",
             "knowledge_get_research_section",
+            "knowledge_get_research_manifest",
             "knowledge_get_neighbors",
             "knowledge_report_progress",
             "knowledge_get_run_budget",

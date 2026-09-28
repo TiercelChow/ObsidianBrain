@@ -15,6 +15,7 @@ pub const AGENT_KNOWLEDGE_TOOLS: &[&str] = &[
     "knowledge_get_entry",
     "knowledge_get_research_baseline",
     "knowledge_get_research_section",
+    "knowledge_get_research_manifest",
     "knowledge_get_neighbors",
     "knowledge_propose_changes",
     "knowledge_create_task",
@@ -123,6 +124,7 @@ pub fn agent_knowledge_tool_schemas() -> Vec<Value> {
             object_schema(json!({"entry_id":{"type":"string"},"offset_chars":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000},"metadata_offset":{"type":"integer","minimum":0},"source_basis_index":{"type":"integer","minimum":0}}), &["entry_id"]),
         ),
         tool_schema("knowledge_get_research_section", "仅在本任务综合阶段分页读取已保存章节；旧编号不是本轮证据，核对当前实体/原文后才能获得S引用", object_schema(json!({"question_id":{"type":"string","minLength":1,"maxLength":80},"offset_chars":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000}}), &["question_id"])),
+        tool_schema("knowledge_get_research_manifest", "仅在本任务综合阶段分页读取保存的发现矩阵和引用对象；可用 question_id 定向读取单章，按 offset_chars 连续补读，旧编号不是本轮证据", object_schema(json!({"question_id":{"type":"string","minLength":1,"maxLength":80},"offset_chars":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000}}), &[])),
         tool_schema(
             "knowledge_get_neighbors",
             "读取一个授权知识条目的关系邻居",
@@ -373,6 +375,26 @@ pub fn call_agent_knowledge_tool(
                 args.max_chars.unwrap_or(12000),
             )
         }
+        "knowledge_get_research_manifest" => {
+            let args: ResearchManifestArgs = parse_arguments(arguments)?;
+            let run = store.get_agent_run(&grant.run_id)?;
+            if run.input["research_stage_key"] != "synthesis" {
+                return Err(BrainError::KnowledgeValidation(
+                    "仅综合阶段可读取本任务的完整发现矩阵".into(),
+                ));
+            }
+            let task_id = run.input["knowledge_task_id"].as_str().ok_or_else(|| {
+                BrainError::KnowledgeValidation("综合矩阵读取缺少当前任务范围".into())
+            })?;
+            let task = store.get_task(task_id)?;
+            require_scope(&grant, &task.knowledge_base_id)?;
+            store.read_research_manifest_page(
+                task_id,
+                args.question_id.as_deref(),
+                args.offset_chars.unwrap_or(0),
+                args.max_chars.unwrap_or(12_000),
+            )
+        }
         "knowledge_get_research_baseline" => {
             let args: ResearchBaselineArgs = parse_arguments(arguments)?;
             let run = store.get_agent_run(&grant.run_id)?;
@@ -614,6 +636,14 @@ struct ResearchBaselineArgs {
 #[serde(deny_unknown_fields)]
 struct ResearchSectionArgs {
     question_id: String,
+    offset_chars: Option<usize>,
+    max_chars: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResearchManifestArgs {
+    question_id: Option<String>,
     offset_chars: Option<usize>,
     max_chars: Option<usize>,
 }

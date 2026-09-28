@@ -601,6 +601,42 @@ impl BookWikiStore {
         })
     }
 
+    pub(crate) fn read_research_manifest_page(
+        &self,
+        task: &str,
+        question_id: Option<&str>,
+        offset: usize,
+        max_chars: usize,
+    ) -> Result<Value, BrainError> {
+        let manifest = self.research_integration_manifest(task)?;
+        let scoped = if let Some(question_id) = question_id {
+            let section = manifest["sections"]
+                .as_array()
+                .and_then(|sections| {
+                    sections
+                        .iter()
+                        .find(|section| section["question_id"] == question_id)
+                })
+                .ok_or_else(|| invalid("只能读取当前任务已规划的综合章节矩阵"))?;
+            json!({"section":section,"notice":manifest["notice"]})
+        } else {
+            manifest
+        };
+        let raw = scoped.to_string();
+        let total = raw.chars().count();
+        let offset = offset.min(total);
+        let length = max_chars.clamp(1, 12_000);
+        Ok(json!({
+            "content_json": raw.chars().skip(offset).take(length).collect::<String>(),
+            "offset_chars": offset,
+            "total_chars": total,
+            "has_more": offset.saturating_add(length) < total,
+            "manifest_hash": stable_id("research-integration-manifest", &raw),
+            "question_id": question_id,
+            "notice": "这是保存章节的综合输入而非本轮原始证据；分页可能切开 JSON 字段，需用连续 offset_chars 读取完整内容，旧编号不能作为本轮引用。",
+        }))
+    }
+
     pub(crate) fn read_research_section_page(
         &self,
         task: &str,
@@ -1510,6 +1546,27 @@ mod tests {
         let manifest = store.research_integration_manifest(&task).unwrap();
         assert_eq!(manifest["sections"].as_array().unwrap().len(), 2);
         assert!(!manifest.to_string().contains("[S1]"));
+        let manifest_page = store
+            .read_research_manifest_page(&task, Some("mechanism"), 0, 12)
+            .unwrap();
+        assert_eq!(manifest_page["has_more"], true);
+        assert_eq!(manifest_page["offset_chars"], 0);
+        let manifest_end = store
+            .read_research_manifest_page(
+                &task,
+                Some("mechanism"),
+                manifest_page["total_chars"].as_u64().unwrap() as usize,
+                12,
+            )
+            .unwrap();
+        assert_eq!(manifest_end["has_more"], false);
+        assert_eq!(
+            manifest_end["manifest_hash"],
+            manifest_page["manifest_hash"]
+        );
+        assert!(store
+            .read_research_manifest_page(&task, Some("not-planned"), 0, 12)
+            .is_err());
         let page = store
             .read_research_section_page(&task, "mechanism", 0, 12000)
             .unwrap();
@@ -1522,7 +1579,10 @@ mod tests {
             .issue_agent_run_capability(
                 &run,
                 std::slice::from_ref(&base),
-                &["knowledge_get_research_section".into()],
+                &[
+                    "knowledge_get_research_section".into(),
+                    "knowledge_get_research_manifest".into(),
+                ],
                 300,
             )
             .unwrap();
@@ -1535,6 +1595,44 @@ mod tests {
         )
         .unwrap();
         assert_eq!(read["has_more"], true);
+        let full_matrix_page = tool(
+            &store,
+            &capability.token,
+            "knowledge_get_research_manifest",
+            json!({"question_id":"mechanism","max_chars":10}),
+        )
+        .unwrap();
+        assert_eq!(full_matrix_page["has_more"], true);
+        assert!(tool(
+            &store,
+            &capability.token,
+            "knowledge_get_research_manifest",
+            json!({"task_id":"spoofed"})
+        )
+        .is_err());
+        let section_run = store
+            .start_agent_run(
+                &base,
+                "deepseek_harness",
+                "knowledge_task_research",
+                &json!({"knowledge_task_id":task,"research_stage_key":"section:mechanism"}),
+            )
+            .unwrap();
+        let section_capability = store
+            .issue_agent_run_capability(
+                &section_run.id,
+                std::slice::from_ref(&base),
+                &["knowledge_get_research_manifest".into()],
+                300,
+            )
+            .unwrap();
+        assert!(tool(
+            &store,
+            &section_capability.token,
+            "knowledge_get_research_manifest",
+            json!({"question_id":"mechanism"})
+        )
+        .is_err());
         assert!(tool(
             &store,
             &capability.token,

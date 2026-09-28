@@ -6,7 +6,7 @@ use crate::infra::book_wiki_store::validate_research_plan;
 use crate::models::book_wiki::{
     ResearchPlan, ResearchQuestion, ResearchSectionOutput, ResearchSynthesisOutput,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 
 const MAX_PHASE_OUTPUT_EXPANSIONS: usize = 2;
 const MAX_PHASE_FORMAT_REPAIRS: usize = 1;
@@ -40,14 +40,112 @@ fn parse_phase<T: serde::de::DeserializeOwned>(answer: &str) -> Result<T, BrainE
     })
 }
 
-fn validate_new_research_plan(plan: &ResearchPlan) -> Result<(), BrainError> {
+fn validate_new_research_plan(
+    plan: &ResearchPlan,
+    profile: &RuntimeProfile,
+) -> Result<(), BrainError> {
     validate_research_plan(plan)?;
     if plan.report_title.is_none() {
         return Err(BrainError::KnowledgeValidation(
             "研究规划缺少面向读者的材料标题 report_title".into(),
         ));
     }
+    for (index, question) in plan.questions.iter().enumerate() {
+        let Some(capacity) = ResearchResources::declared_section_output_capacity(
+            profile,
+            question.required_evidence.len(),
+        ) else {
+            continue;
+        };
+        let estimate = question.expected_output_tokens.ok_or_else(|| {
+            BrainError::KnowledgeValidation(format!(
+                "questions[{index}].expected_output_tokens 缺失：供应商已声明单次输出上限，必须估计本主题必要正文篇幅，以便按容量拆分"
+            ))
+        })?;
+        if estimate > capacity.visible_body_ceiling_tokens {
+            return Err(BrainError::KnowledgeValidation(format!(
+                "questions[{index}].expected_output_tokens={estimate} 超过当前单次输出可规划的正文上限 {}（有效输出上限 {}，JSON/发现结构预留 {}，推理规划余量 {}）；请拆分主题或减少同一阶段的证据要求，不能删掉必需论证。若单项也无法容纳，请调整供应商输出上限或推理策略",
+                capacity.visible_body_ceiling_tokens,
+                capacity.effective_output_cap_tokens,
+                capacity.structure_tokens,
+                capacity.reasoning_margin_tokens,
+            )));
+        }
+    }
     Ok(())
+}
+
+/// Keep all section identities in the synthesis prompt. Long findings remain
+/// available from the run-scoped paged manifest tool, never silently dropped.
+fn project_integration_manifest(manifest: &Value, token_budget: u64) -> Result<Value, BrainError> {
+    let full = manifest.to_string();
+    if estimated_tokens(&full) <= token_budget {
+        return Ok(manifest.clone());
+    }
+    let sections = manifest["sections"]
+        .as_array()
+        .ok_or_else(|| BrainError::Internal("研究综合矩阵缺少章节列表".into()))?;
+    let finding_count = sections
+        .iter()
+        .map(|section| section["findings"].as_array().map_or(0, Vec::len))
+        .sum::<usize>();
+    let mut projected = json!({
+        "sections": sections.iter().map(|section| json!({
+            "question_id": section["question_id"],
+            "revision": section["revision"],
+            "finding_count": section["findings"].as_array().map_or(0, Vec::len),
+            "saved_reference_count": section["saved_reference_objects"].as_array().map_or(0, Vec::len),
+            "findings": [],
+        })).collect::<Vec<_>>(),
+        "complete": false,
+        "omitted_summary_count": sections.len(),
+        "omitted_finding_count": finding_count,
+        "full_manifest_characters": full.chars().count(),
+        "notice": "这是容量内投影，不是完整发现矩阵；遗漏的章节摘要、发现与引用对象需用 knowledge_get_research_manifest 分页读取。旧章节编号不是本轮已读证据。",
+    });
+    if estimated_tokens(&projected.to_string()) > token_budget {
+        return Err(BrainError::KnowledgeValidation("(research_integration_hard_limit) 全部章节身份与版本也无法放入综合输入；请提高真实上下文容量或拆分研究，已完成章节保留".into()));
+    }
+    for (index, section) in sections.iter().enumerate() {
+        for field in ["title", "summary"] {
+            let mut candidate = projected.clone();
+            candidate["sections"][index][field] = section[field].clone();
+            if field == "summary" {
+                candidate["omitted_summary_count"] = json!(projected["omitted_summary_count"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    .saturating_sub(1));
+            }
+            if estimated_tokens(&candidate.to_string()) <= token_budget {
+                projected = candidate;
+            }
+        }
+    }
+    // A short, bounded preview helps the synthesis agent decide which full pages
+    // to inspect. The full matrix is retrievable; this is never called complete.
+    for finding_index in 0..2 {
+        for (section_index, section) in sections.iter().enumerate() {
+            let Some(finding) = section["findings"]
+                .as_array()
+                .and_then(|all| all.get(finding_index))
+            else {
+                continue;
+            };
+            let mut candidate = projected.clone();
+            candidate["sections"][section_index]["findings"]
+                .as_array_mut()
+                .ok_or_else(|| BrainError::Internal("研究综合投影发现列表损坏".into()))?
+                .push(finding.clone());
+            candidate["omitted_finding_count"] = json!(projected["omitted_finding_count"]
+                .as_u64()
+                .unwrap_or(0)
+                .saturating_sub(1));
+            if estimated_tokens(&candidate.to_string()) <= token_budget {
+                projected = candidate;
+            }
+        }
+    }
+    Ok(projected)
 }
 
 fn phase_contract(phase: &str) -> serde_json::Value {
@@ -83,8 +181,29 @@ impl BookWikiService {
             prompt.push('\n');
         }
         prompt.push_str("</research_configuration>\n\n");
-        prompt.push_str(&format!("<phase_capacity>\n{}\n</phase_capacity>\n规划 depth 只选 brief、standard、deep，章节 finding.status 只选 supported、partial、missing、conflict。expected_output_tokens 是每个主题的必要篇幅估计（可为 null，1至262144为安全边界），不是必须输出的长度；依据目标、复杂度、完整公式/论证需求估计。实际请求仍受模型容量和供应商输出硬限，估计过大的主题应合理拆分，不能删去关键条件以求短。容量若未知，只是应用护栏，不冒充真实模型上限。\n",json!({"capacity_tokens":phase.resources.capacity_tokens,"capacity_basis":phase.resources.capacity_basis,"phase_output_tokens":phase.resources.output_tokens})));
+        let declared_cap = phase
+            .profile
+            .provider_config
+            .as_ref()
+            .and_then(|provider| provider.max_output_tokens);
+        let one_requirement = ResearchResources::declared_section_output_capacity(phase.profile, 1);
+        let current_requirements = phase
+            .payload
+            .get("question")
+            .and_then(|question| question.get("required_evidence"))
+            .and_then(|required| required.as_array())
+            .map_or(1, Vec::len);
+        let current_section = (phase.phase == "section")
+            .then(|| {
+                ResearchResources::declared_section_output_capacity(
+                    phase.profile,
+                    current_requirements,
+                )
+            })
+            .flatten();
+        prompt.push_str(&format!("<phase_capacity>\n{}\n</phase_capacity>\n阶段输出受模型容量和供应商单次输出能力约束；未知容量是应用护栏，不冒充真实模型上限。\n",json!({"capacity_tokens":phase.resources.capacity_tokens,"capacity_basis":phase.resources.capacity_basis,"phase_output_tokens":phase.resources.output_tokens,"declared_max_output_tokens":declared_cap,"section_output_capacity_one_requirement":one_requirement,"section_output_capacity_current":current_section})));
         if phase.phase == "plan" {
+            prompt.push_str("规划 depth 只选 brief、standard、deep。expected_output_tokens 是每个主题的必要正文篇幅估计（1至262144为安全边界），不是必须凑齐的长度；依据目标、复杂度、完整公式/论证需求估计。供应商声明单次最大输出时，每个主题必须填写估计值，不可为 null；章节至少预留 1024 token JSON/发现结构，每多一项 required_evidence 再预留 768 token，并按当前推理策略保留规划余量；正文估计不可超过剩余空间。超过时按独立可研究的主题拆分，不能删除关键论证来求短。没有声明输出上限时可用 null，不能把 1M 上下文当作输出能力。\n");
             prompt.push_str("本阶段只确定业务目标、约束、验收条件、术语与报告主题；这不是隐藏思维链。report_title 是面向读者的完整材料标题，应概括论题和材料用途，使用单行陈述式标题而非直接照搬用户提问；goal 仍是内部研究目标。主题数量按实际问题规模确定，1至24是安全边界而非必须凑满，不固定两到四个。每个子问题的 question 是内部取证问题，title 用面向读者的章节标题，写成材料中的论题而非“什么是/如何/为什么”的问答标题；不同标题应形成递进或对照，不机械重复任务原话。可通过只读工具浏览编译知识、查找具体核验对象，不在本阶段编造研究结论。review 必须在子问题中明确待核验的真实条目与具体主张；refresh 必须明确真实基线条目与待比较的依据。找不到基线则把它列为具体缺口，不编造旧版变化。返回规划，不生成长报告或幻灯片。\n");
             if phase.task.brief.confirmed {
                 prompt.push_str(&format!(
@@ -94,7 +213,9 @@ impl BookWikiService {
                 ));
             }
         } else if phase.phase == "synthesis" {
-            prompt.push_str("本阶段综合全部已保存主题，回答整体目标，不再逐章重复研究。integration_manifest 含每个主题的完整发现、限制与实际版本；这些是待核验的章节成果，不是本轮原始证据。按需用 knowledge_get_research_section 分页查看完整章节，has_more 时继续；旧章节引用已中性化，不能直接复制为本轮S引用。关键事实需通过当前实体/原文工具取得本轮编号。逐项对照全部主题的目标覆盖、术语、比较维度、适用条件/版本、同源重复、反例和矛盾；不得以术语统一抹平条件差异。section_checks 必须覆盖全部主题且精确对应版本；对照判断只是模型自报，不能冒充独立事实证明。明显冲突保留双方依据和条件，未知列出缺口，不强行得出一致结论。证据不足可输出 partial/missing；supported/conflict 仍必须有本轮实际已读引用。使用预算/覆盖/扩展工具按缺口补查，不固定top-k。question_index 按本阶段预算工具的 required_evidence 列表填写。禁止生成幻灯片、删去原报告章节或伪装历史对象核验。\n");
+            prompt.push_str("综合 finding.status 只选 supported、partial、missing、conflict。\n");
+            prompt.push_str("phase_scope.synthesis_output_adaptation 是按逐章对照结构和模型单次输出能力计算的本阶段篇幅规划。allocated_body_tokens 小于 requested_body_tokens 时，只压缩综合段落的重复表述，不删 section_checks、不省略关键冲突或条件；完整章节和证据仍在工作区，不能声称短综合替代了全部研究。\n");
+            prompt.push_str("本阶段综合全部已保存主题，回答整体目标，不再逐章重复研究。integration_manifest 是完整矩阵，或标有 complete=false 的容量内投影；投影仍列出全部主题身份和版本，但未预载的摘要、发现与引用对象并非不存在。需要这些信息时用 knowledge_get_research_manifest 按 question_id 定向读取有关章节，或不指定 question_id 浏览全部；按 offset_chars 分页，has_more 时继续。按需用 knowledge_get_research_section 分页查看完整章节。未核查的部分不能自报已证实一致。这些章节成果是待核验输入，不是本轮原始证据；旧章节引用已中性化，不能直接复制为本轮S引用。关键事实需通过当前实体/原文工具取得本轮编号。逐项对照全部主题的目标覆盖、术语、比较维度、适用条件/版本、同源重复、反例和矛盾；不得以术语统一抹平条件差异。section_checks 必须覆盖全部主题且精确对应版本；对照判断只是模型自报，不能冒充独立事实证明。明显冲突保留双方依据和条件，未知列出缺口，不强行得出一致结论。证据不足可输出 partial/missing；supported/conflict 仍必须有本轮实际已读引用。使用预算/覆盖/扩展工具按缺口补查，不固定top-k。question_index 按本阶段预算工具的 required_evidence 列表填写。禁止生成幻灯片、删去原报告章节或伪装历史对象核验。\n");
             if phase.task.brief.confirmed {
                 match phase.task.brief.purpose.as_str() {
                     "decision" => prompt.push_str("本综合将作为报告开篇的执行摘要：先给当前证据可支持的判断和判据，再说明关键取舍、适用条件与会改变判断的证据缺口。不要把各章节摘要简单堆叠，也不要把条件性建议写成无条件定论。\n"),
@@ -103,6 +224,7 @@ impl BookWikiService {
                 }
             }
         } else {
+            prompt.push_str("章节 finding.status 只选 supported、partial、missing、conflict。当前阶段容量中的章节正文上限是规划估计，不能为满足字数而省略必要条件；若证据或容量不足，应保留有界结论并具体说明缺口。\n");
             prompt.push_str("只完成当前明确主题，完整呈现论证、条件和反例；其他主题由独立阶段保存。研究深度、召回和输出随问题决定，不固定 top-k。优先读取编译知识；必要时核对原文。使用 knowledge_get_run_budget、knowledge_request_budget_extension 与 knowledge_report_evidence_coverage 按缺口扩展（question_index 对应预算工具中的要求）。连续补查无新依据则停止，诚实交付缺口。统一 plan.terminology，但不能为统一用词抹去条件差异。presentation 任务此阶段仍保存完整研究章节，禁止提前压成幻灯片要点。每项 finding 的引用只来自本阶段真实已读编号；上阶段编号不能直接沿用。\n");
         }
         if phase.phase != "synthesis" {
@@ -308,7 +430,11 @@ impl BookWikiService {
         catalog_size: usize,
         previous_run: Option<&str>,
     ) -> Result<ResearchResources, BrainError> {
-        let resources = ResearchResources::new(profile, Some(plan), Some(question), catalog_size);
+        let mut resources =
+            ResearchResources::new(profile, Some(plan), Some(question), catalog_size);
+        if question.id == "_synthesis" {
+            resources.fit_synthesis_output(profile, plan.questions.len())?;
+        }
         let Some(run) = previous_run
             .map(|id| self.store.get_agent_run(id))
             .transpose()?
@@ -346,7 +472,7 @@ impl BookWikiService {
         } else {
             self.persist_model_research_phase(ResearchPhase{task,profile:&profile,key:"plan".into(),phase:"plan",payload:json!({"goal":task.title,"description":task.description,"task_type":task.task_type}),resources:ResearchResources::new(&profile,None,None,catalog.len()),evidence:vec![]},|claim,run,answer| {
                 let plan:ResearchPlan=parse_phase(answer)?;
-                validate_new_research_plan(&plan)?;
+                validate_new_research_plan(&plan, &profile)?;
                 if task.brief.confirmed && plan.depth != task.brief.depth {
                     return Err(BrainError::KnowledgeValidation(format!("研究规划 depth={} 与用户确认的 {} 不一致",plan.depth,task.brief.depth)));
                 }
@@ -409,7 +535,7 @@ impl BookWikiService {
             .store
             .get_research_stage_content(&task.id, "synthesis", None)?;
         if synthesis.stage.status != "completed" {
-            let question = ResearchQuestion {
+            let mut question = ResearchQuestion {
                 id: "_synthesis".into(),
                 title: "综合结论与交叉核验".into(),
                 question: plan.goal.clone(),
@@ -429,14 +555,42 @@ impl BookWikiService {
                 catalog.len(),
                 synthesis.stage.run_id.as_deref(),
             )?;
-            self.persist_model_research_phase(ResearchPhase {
-                task, profile:&profile, key:"synthesis".into(), phase:"synthesis",
-                payload:json!({"plan":{"goal":plan.goal,"report_title":plan.report_title,"constraints":plan.constraints,"acceptance":plan.acceptance,"depth":plan.depth,"terminology":plan.terminology},"question":question,"integration_manifest":self.store.research_integration_manifest(&task.id)?}),
-                resources, evidence:vec![],
-            }, |claim,run,answer| {
-                let output:ResearchSynthesisOutput=parse_phase(answer)?;
-                self.store.save_research_synthesis(claim,run,&output)
-            }).await?;
+            let requested_body_tokens = question.expected_output_tokens.unwrap_or(0);
+            question.expected_output_tokens = Some(resources.content_output_tokens);
+            let mut payload = json!({"plan":{"goal":plan.goal,"report_title":plan.report_title,"constraints":plan.constraints,"acceptance":plan.acceptance,"depth":plan.depth,"terminology":plan.terminology},"question":question,"synthesis_output_adaptation":{"requested_body_tokens":requested_body_tokens,"allocated_body_tokens":resources.content_output_tokens,"structure_tokens":resources.structure_output_tokens,"reasoning_tokens":resources.reasoning_output_tokens,"request_output_tokens":resources.output_tokens,"section_count":plan.questions.len()},"integration_manifest":{"sections":[]}});
+            let skeleton = ResearchPhase {
+                task,
+                profile: &profile,
+                key: "synthesis".into(),
+                phase: "synthesis",
+                payload: payload.clone(),
+                resources: resources.clone(),
+                evidence: vec![],
+            };
+            let (base_prompt, _) = self.research_phase_prompt(&skeleton)?;
+            let manifest_budget = resources
+                .prompt_token_limit
+                .saturating_sub(estimated_tokens(&base_prompt))
+                .saturating_sub(2048);
+            let manifest = self.store.research_integration_manifest(&task.id)?;
+            payload["integration_manifest"] =
+                project_integration_manifest(&manifest, manifest_budget)?;
+            self.persist_model_research_phase(
+                ResearchPhase {
+                    task,
+                    profile: &profile,
+                    key: "synthesis".into(),
+                    phase: "synthesis",
+                    payload,
+                    resources,
+                    evidence: vec![],
+                },
+                |claim, run, answer| {
+                    let output: ResearchSynthesisOutput = parse_phase(answer)?;
+                    self.store.save_research_synthesis(claim, run, &output)
+                },
+            )
+            .await?;
         }
         let mut report = self
             .store
@@ -491,10 +645,12 @@ mod tests {
         assert_eq!(phase_contract("plan")["report_title"], "面向读者的材料标题");
         let plan: ResearchPlan = parse_phase(&phase_contract("plan").to_string()).unwrap();
         validate_research_plan(&plan).unwrap();
-        validate_new_research_plan(&plan).unwrap();
+        let (_dir, service, _task, _) = plan_repair_fixture(false);
+        let profile = service.active_runtime_profile().unwrap();
+        validate_new_research_plan(&plan, &profile).unwrap();
         let mut missing_title = plan.clone();
         missing_title.report_title = None;
-        assert!(validate_new_research_plan(&missing_title).is_err());
+        assert!(validate_new_research_plan(&missing_title, &profile).is_err());
         assert!(parse_phase::<ResearchPlan>(&format!("{} {{}}", phase_contract("plan"))).is_err());
         assert!(parse_phase::<ResearchPlan>("{}").is_err());
         assert!(parse_phase::<ResearchSectionOutput>("{\"content_md\":\"正文\"}").is_err());
@@ -590,6 +746,163 @@ mod tests {
             resources: ResearchResources::new(profile, None, None, 0),
             evidence: Vec::new(),
         }
+    }
+
+    #[test]
+    fn test_new_plan_splits_sections_that_cannot_fit_declared_output_cap() {
+        let (_dir, service, task, _) = plan_repair_fixture(false);
+        let mut profile = service.active_runtime_profile().unwrap();
+        profile.provider_config = Some(
+            service
+                .store
+                .save_model_provider_profile(
+                    "bounded-research",
+                    "小输出模型",
+                    "openai-completions",
+                    "https://example.com/v1",
+                    "test-model",
+                    "environment",
+                    "TEST_RESEARCH_KEY",
+                    false,
+                    true,
+                    Some(1_048_576),
+                    Some(4_096),
+                    "auto",
+                    0,
+                )
+                .unwrap(),
+        );
+        let prompt = service
+            .research_phase_prompt(&plan_phase(&task, &profile))
+            .unwrap()
+            .0;
+        assert!(prompt.contains("\"declared_max_output_tokens\":4096"));
+        assert!(prompt.contains("\"reasoning_margin_tokens\":1024"));
+
+        let mut plan: ResearchPlan = parse_phase(&phase_contract("plan").to_string()).unwrap();
+        plan.questions[0].required_evidence = vec!["机制".into(), "限制".into(), "反例".into()];
+        plan.questions[0].expected_output_tokens = Some(3_000);
+        let error = validate_new_research_plan(&plan, &profile).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("questions[0].expected_output_tokens"));
+        assert!(error.to_string().contains("拆分"));
+
+        plan.questions[0].expected_output_tokens = None;
+        assert!(validate_new_research_plan(&plan, &profile).is_err());
+        plan.questions[0].expected_output_tokens = Some(500);
+        validate_new_research_plan(&plan, &profile).unwrap();
+
+        let mut many_topics = plan.clone();
+        many_topics.questions = (0..24)
+            .map(|index| {
+                let mut question = plan.questions[0].clone();
+                question.id = format!("q{index}");
+                question
+            })
+            .collect();
+        let synthesis = ResearchQuestion {
+            id: "_synthesis".into(),
+            title: "综合".into(),
+            question: many_topics.goal.clone(),
+            required_evidence: vec!["覆盖".into(), "条件".into(), "反例".into(), "缺口".into()],
+            expected_output_tokens: Some(14_336),
+            target_entry_ids: vec![],
+        };
+        assert!(service
+            .research_phase_resources(&profile, &many_topics, &synthesis, 0, None)
+            .unwrap_err()
+            .to_string()
+            .contains("research_synthesis_output_hard_limit"));
+    }
+
+    #[test]
+    fn test_integration_projection_keeps_every_section_and_discloses_omissions() {
+        let manifest = json!({"sections":(0..24).map(|index|json!({
+            "question_id":format!("q{index}"),"title":format!("第 {index} 章"),"revision":1,
+            "summary":"完整章节概述。".repeat(400),
+            "findings":(0..8).map(|finding|json!({"finding":format!("发现 {finding} {}","证据".repeat(500)),"status":"partial","limitations":["尚需核验"],"saved_reference_indices":[]})).collect::<Vec<_>>(),
+            "saved_reference_objects":[]
+        })).collect::<Vec<_>>(),"notice":"完整矩阵"});
+        let projected = project_integration_manifest(&manifest, 4_000).unwrap();
+        assert!(estimated_tokens(&projected.to_string()) <= 4_000);
+        let sections = projected["sections"].as_array().unwrap();
+        assert_eq!(sections.len(), 24);
+        assert_eq!(sections[23]["question_id"], "q23");
+        assert_eq!(projected["complete"], false);
+        assert!(projected["omitted_finding_count"].as_u64().unwrap() > 0);
+        assert!(project_integration_manifest(&manifest, 1).is_err());
+        assert!(project_integration_manifest(&manifest, 1_000_000).unwrap() == manifest);
+    }
+
+    struct OutputAwarePlanRuntime {
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl AgentRuntime for OutputAwarePlanRuntime {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            let mut calls = self.calls.lock().unwrap();
+            calls.push(request.prompt);
+            let mut answer = phase_contract("plan");
+            answer["questions"][0]["required_evidence"] = json!(["机制", "限制", "反例"]);
+            answer["questions"][0]["expected_output_tokens"] =
+                json!(if calls.len() == 1 { 3_000 } else { 500 });
+            Ok(answer.to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_declared_output_cap_repairs_oversized_plan_before_persisting() {
+        let (_dir, original, task, _) = plan_repair_fixture(false);
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let service = BookWikiService::new(
+            original.store.clone(),
+            Arc::new(OutputAwarePlanRuntime {
+                calls: calls.clone(),
+            }),
+        );
+        let mut profile = service.active_runtime_profile().unwrap();
+        profile.provider_config = Some(
+            service
+                .store
+                .save_model_provider_profile(
+                    "bounded-repair",
+                    "小输出模型",
+                    "openai-completions",
+                    "https://example.com/v1",
+                    "test-model",
+                    "environment",
+                    "PATH",
+                    false,
+                    true,
+                    Some(1_048_576),
+                    Some(4_096),
+                    "auto",
+                    0,
+                )
+                .unwrap(),
+        );
+        let plan = service
+            .persist_model_research_phase(plan_phase(&task, &profile), |claim, run, answer| {
+                let plan: ResearchPlan = parse_phase(answer)?;
+                validate_new_research_plan(&plan, &profile)?;
+                service.store.save_research_plan(claim, run, &plan)?;
+                Ok(plan)
+            })
+            .await
+            .unwrap();
+        assert_eq!(plan.questions[0].expected_output_tokens, Some(500));
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[1].contains("questions[0].expected_output_tokens=3000"));
+        assert!(service
+            .store
+            .get_research_workspace(&task.id)
+            .unwrap()
+            .unwrap()
+            .plan
+            .is_some());
     }
 
     #[test]
@@ -1014,7 +1327,7 @@ mod tests {
                 .prompt
                 .contains("<research_phase>plan</research_phase>")
             {
-                return Ok(json!({"goal":"机制与反例","report_title":"机制与反例研究","constraints":["保留完整公式"],"acceptance":["明确未覆盖事项"],"depth":"deep","terminology":["缓存机制"],"questions":[{"id":"mechanism","title":"机制","question":"机制是什么","required_evidence":["完整公式"]},{"id":"boundary","title":"反例","question":"适用条件与反例是什么","required_evidence":["条件和反例"]}]}).to_string());
+                return Ok(json!({"goal":"机制与反例","report_title":"机制与反例研究","constraints":["保留完整公式"],"acceptance":["明确未覆盖事项"],"depth":"deep","terminology":["缓存机制"],"questions":[{"id":"mechanism","title":"机制","question":"机制是什么","required_evidence":["完整公式"],"expected_output_tokens":768},{"id":"boundary","title":"反例","question":"适用条件与反例是什么","required_evidence":["条件和反例"],"expected_output_tokens":768}]}).to_string());
             }
             if request
                 .prompt

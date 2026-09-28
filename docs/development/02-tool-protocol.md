@@ -2637,3 +2637,5 @@ http-body-util = "0.1"
 原生研究工具 `knowledge_get_research_baseline`：必填 `entry_id`；可选非负 `offset_chars`、`metadata_offset`、`source_basis_index` 及 1–12000 的 `max_chars`。服务端从当前能力令牌的 Run 确定 task_id 和 section 的 question_id，拒绝自行指定任务/问题、跨书或未冻结对象。分页返回旧版正文、主张和来源元数据；source_basis_index 可读取指定旧版原文。has_more/metadata_has_more 表示还有输入，不静默忽略后段。它占用真实工具/负载预算，但不分配当前证据 S 编号；只能作为核验/刷新对照，不自动认证当前事实，也不扩大网络或写权限。
 
 原生研究工具 `knowledge_get_research_section`：必填 `question_id`；可选非负 `offset_chars`、1–12000 的 `max_chars`。仅当前任务的 synthesis Run 可以读取其已规划并完整保存的章节；task_id 由服务端确定，未知字段/其他任务/未完成章节拒绝。分页偏移以中性化后的业务正文为准，旧 S 标签改为“旧章节引用，非本轮证据”，保留原始证据对象与版本线索。章节成果不是新事实，不分配当前 S；关键事实必须回读当前实体/原文。调用与负载受同一 Run 的能力令牌、租约及自适应预算约束。
+
+原生研究工具 `knowledge_get_research_manifest`：可选 `question_id`（当前任务真实子问题 ID）、非负 `offset_chars`、1–12000 的 `max_chars`。仅当前任务的 synthesis Run 可调用；不指定子问题时读取完整发现矩阵，指定时只读取该章。返回分页 JSON 文本、总字符数、`has_more` 和作用域内容哈希；分页可能切开 JSON 字段，须连续补读且核对哈希。它用于补齐初始提示中显式标记的矩阵投影，不分配本轮 S 编号，不能把旧章节引用当作当前证据；任务身份和同书范围从能力令牌解析，不能由调用方伪造。

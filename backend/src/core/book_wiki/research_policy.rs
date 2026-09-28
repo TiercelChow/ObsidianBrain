@@ -20,7 +20,43 @@ pub(super) struct ResearchResources {
     pub policy: AdaptiveBudgetPolicy,
 }
 
+#[derive(Clone, Copy, Debug, Serialize)]
+pub(super) struct SectionOutputCapacity {
+    pub effective_output_cap_tokens: u32,
+    pub structure_tokens: u32,
+    pub reasoning_margin_tokens: u32,
+    pub visible_body_ceiling_tokens: u32,
+}
+
 impl ResearchResources {
+    /// A planning bound only when the provider explicitly declares a single
+    /// response output limit. Context capacity alone is not an output promise.
+    pub fn declared_section_output_capacity(
+        profile: &RuntimeProfile,
+        evidence_requirements: usize,
+    ) -> Option<SectionOutputCapacity> {
+        let provider = profile.provider_config.as_ref()?;
+        let declared_cap = provider.max_output_tokens?;
+        let cap = output_limit(provider.context_window, Some(declared_cap));
+        let structure = 1024u32.saturating_add(
+            768u32.saturating_mul(evidence_requirements.max(1).saturating_sub(1) as u32),
+        );
+        // This is a conservative planning margin, not claimed model usage.
+        // The full dynamic reasoning headroom remains a request preference;
+        // a hard output cap can still force a smaller actual allocation.
+        let reasoning = if provider.reasoning_policy == "off" {
+            0
+        } else {
+            (cap / 4).min(8192)
+        };
+        Some(SectionOutputCapacity {
+            effective_output_cap_tokens: cap,
+            structure_tokens: structure,
+            reasoning_margin_tokens: reasoning,
+            visible_body_ceiling_tokens: cap.saturating_sub(structure.saturating_add(reasoning)),
+        })
+    }
+
     pub fn new(
         profile: &RuntimeProfile,
         plan: Option<&ResearchPlan>,
@@ -62,7 +98,7 @@ impl ResearchResources {
                 });
         let structure_output_tokens =
             1024 + 768 * qa.subquestions.len().max(1).saturating_sub(1) as u32;
-        let reasoning_output_tokens = if profile
+        let preferred_reasoning_tokens = if profile
             .provider_config
             .as_ref()
             .is_some_and(|provider| provider.reasoning_policy == "off")
@@ -73,6 +109,10 @@ impl ResearchResources {
             // This is request headroom, never measured usage or a length target.
             content_output_tokens.saturating_mul(2).clamp(8192, 65536)
         };
+        let reasoning_output_tokens = preferred_reasoning_tokens.min(
+            output_limit(context, output_cap)
+                .saturating_sub(content_output_tokens.saturating_add(structure_output_tokens)),
+        );
         // QaResources adds the per-requirement structural reserve itself.
         qa.expected_output_tokens = Some(
             content_output_tokens
@@ -112,6 +152,62 @@ impl ResearchResources {
             initial_entry_target: resources.initial_entry_target,
             policy,
         }
+    }
+
+    /// The final synthesis has one required `section_check` per saved chapter.
+    /// Unlike ordinary sections, its structural cost follows chapter count,
+    /// not the four evidence-coverage categories used by the tool budget.
+    pub fn fit_synthesis_output(
+        &mut self,
+        profile: &RuntimeProfile,
+        section_count: usize,
+    ) -> Result<(), BrainError> {
+        let sections = u32::try_from(section_count.max(1)).map_err(|_| {
+            BrainError::KnowledgeValidation("研究主题数量超出综合输出预算的安全范围".into())
+        })?;
+        let context = profile
+            .provider_config
+            .as_ref()
+            .and_then(|provider| provider.context_window);
+        let declared_output = profile
+            .provider_config
+            .as_ref()
+            .and_then(|provider| provider.max_output_tokens);
+        let cap = output_limit(context, declared_output);
+        let structure = 512u32.saturating_add(sections.saturating_mul(128));
+        let minimum_body = 512u32.saturating_add(sections.saturating_mul(64));
+        let reasoning_off = profile
+            .provider_config
+            .as_ref()
+            .is_some_and(|provider| provider.reasoning_policy == "off");
+        let reasoning_margin = if reasoning_off {
+            0
+        } else {
+            (cap / 4).min(8192)
+        };
+        let body_room = cap.saturating_sub(structure.saturating_add(reasoning_margin));
+        if body_room < minimum_body {
+            return Err(BrainError::KnowledgeValidation(format!(
+                "(research_synthesis_output_hard_limit) {} 个研究主题的综合至少需要约 {} token 正文、{} token JSON/逐章对照结构与 {} token 推理规划余量，但当前单次有效输出上限仅 {}；已完成章节保留。请提高供应商最大输出、调整推理策略或把研究范围拆成独立任务，不能发送注定截断的同预算请求",
+                sections, minimum_body, structure, reasoning_margin, cap,
+            )));
+        }
+        let body = self.content_output_tokens.min(body_room);
+        let preferred_reasoning = if reasoning_off {
+            0
+        } else {
+            body.saturating_mul(2).clamp(8192, 65536)
+        };
+        let reasoning = preferred_reasoning.min(cap.saturating_sub(body.saturating_add(structure)));
+        let output = body.saturating_add(structure).saturating_add(reasoning);
+        self.content_output_tokens = body;
+        self.structure_output_tokens = structure;
+        self.reasoning_output_tokens = reasoning;
+        self.output_tokens = output;
+        self.policy.max_output_tokens = Some(output);
+        let available = self.capacity_tokens.saturating_sub(u64::from(output));
+        self.prompt_token_limit = available.saturating_sub(available / 3).saturating_sub(1024);
+        Ok(())
     }
 
     pub fn check_prompt(&self, prompt: &str) -> Result<(), BrainError> {
@@ -203,6 +299,122 @@ mod tests {
     use super::*;
     use crate::infra::{book_wiki_store::BookWikiStore, sqlite_store::SqliteStore};
     use std::sync::Arc;
+
+    #[test]
+    fn test_synthesis_output_budget_adapts_to_section_count_or_fails_before_model_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BookWikiStore::new(Arc::new(
+            SqliteStore::new(&dir.path().join("synthesis-output.db")).unwrap(),
+        ));
+        let mut profile = store.list_runtime_profiles().unwrap().remove(0);
+        let mut provider = store
+            .save_model_provider_profile(
+                "synthesis-output",
+                "小输出模型",
+                "openai-completions",
+                "https://example.com/v1",
+                "test-model",
+                "environment",
+                "TEST_RESEARCH_KEY",
+                false,
+                true,
+                Some(32_768),
+                Some(2_048),
+                "off",
+                0,
+            )
+            .unwrap();
+        profile.provider_config = Some(provider.clone());
+        let question = ResearchQuestion {
+            id: "_synthesis".into(),
+            title: "综合".into(),
+            question: "综合所有研究章节".into(),
+            required_evidence: vec!["覆盖".into(), "条件".into(), "反例".into(), "缺口".into()],
+            expected_output_tokens: Some(3_072),
+            target_entry_ids: vec![],
+        };
+        let mut small = ResearchResources::new(&profile, None, Some(&question), 0);
+        small.fit_synthesis_output(&profile, 2).unwrap();
+        assert_eq!(small.structure_output_tokens, 768);
+        assert_eq!(small.content_output_tokens, 1_280);
+        assert_eq!(small.output_tokens, 2_048);
+        assert_eq!(small.reasoning_output_tokens, 0);
+
+        provider.max_output_tokens = Some(4_096);
+        provider.reasoning_policy = "auto".into();
+        profile.provider_config = Some(provider.clone());
+        let mut many = ResearchResources::new(&profile, None, Some(&question), 0);
+        assert!(many
+            .fit_synthesis_output(&profile, 24)
+            .unwrap_err()
+            .to_string()
+            .contains("research_synthesis_output_hard_limit"));
+
+        provider.max_output_tokens = Some(65_536);
+        profile.provider_config = Some(provider);
+        let mut large = ResearchResources::new(&profile, None, Some(&question), 0);
+        large.fit_synthesis_output(&profile, 24).unwrap();
+        assert!(large.output_tokens < 65_536);
+        assert!(large.content_output_tokens >= 3_072);
+    }
+
+    #[test]
+    fn test_declared_section_capacity_separates_context_from_output_and_reasoning_policy() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BookWikiStore::new(Arc::new(
+            SqliteStore::new(&dir.path().join("declared-output.db")).unwrap(),
+        ));
+        let mut profile = store.list_runtime_profiles().unwrap().remove(0);
+        assert!(ResearchResources::declared_section_output_capacity(&profile, 3).is_none());
+        let mut provider = store
+            .save_model_provider_profile(
+                "small-output",
+                "小输出模型",
+                "openai-completions",
+                "https://example.com/v1",
+                "test-model",
+                "environment",
+                "TEST_RESEARCH_KEY",
+                false,
+                true,
+                Some(1_048_576),
+                Some(4_096),
+                "auto",
+                0,
+            )
+            .unwrap();
+        profile.provider_config = Some(provider.clone());
+        let limited = ResearchResources::declared_section_output_capacity(&profile, 3).unwrap();
+        assert_eq!(limited.effective_output_cap_tokens, 4_096);
+        assert_eq!(limited.structure_tokens, 2_560);
+        assert_eq!(limited.reasoning_margin_tokens, 1_024);
+        assert_eq!(limited.visible_body_ceiling_tokens, 512);
+        let question = ResearchQuestion {
+            id: "small".into(),
+            title: "有界主题".into(),
+            question: "分析机制与边界".into(),
+            required_evidence: vec!["机制".into(), "边界".into(), "反例".into()],
+            expected_output_tokens: Some(500),
+            target_entry_ids: vec![],
+        };
+        let resources = ResearchResources::new(&profile, None, Some(&question), 0);
+        assert_eq!(resources.output_tokens, 4_096);
+        assert_eq!(resources.content_output_tokens, 500);
+        assert_eq!(resources.structure_output_tokens, 2_560);
+        assert_eq!(resources.reasoning_output_tokens, 1_036);
+
+        provider.reasoning_policy = "off".into();
+        profile.provider_config = Some(provider.clone());
+        assert_eq!(
+            ResearchResources::declared_section_output_capacity(&profile, 3)
+                .unwrap()
+                .visible_body_ceiling_tokens,
+            1_536
+        );
+        provider.max_output_tokens = None;
+        profile.provider_config = Some(provider);
+        assert!(ResearchResources::declared_section_output_capacity(&profile, 3).is_none());
+    }
 
     #[test]
     fn test_research_expected_body_includes_json_and_reasoning_headroom_under_one_million_default()
