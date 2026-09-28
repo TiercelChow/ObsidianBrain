@@ -7893,6 +7893,7 @@ fn validate_agent_event_type(value: &str) -> Result<(), BrainError> {
             | "run.usage"
             | "run.usage_cost"
             | "run.budget_changed"
+            | "run.output_budget_expanded"
             | "run.budget_limited"
             | "run.evidence_coverage"
             | "run.runtime_completed"

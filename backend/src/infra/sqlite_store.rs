@@ -305,7 +305,16 @@ const MIGRATIONS: &[Migration] = &[
         description: "lease fenced research deliverable checkpoints",
         sql: include_str!("../../migrations/051_research_stage_checkpoints.sql"),
     },
+    Migration {
+        version: 52,
+        description: "upgrade deployed research stages to allow synthesis without losing history",
+        sql: include_str!("../../migrations/052_research_synthesis_stage_constraint.sql"),
+    },
 ];
+
+#[cfg(test)]
+#[path = "sqlite_store_research_tests.rs"]
+mod research_migration_tests;
 
 fn seed_detailed_ingest_skill(conn: &Connection) -> Result<(), BrainError> {
     seed_builtin_skill_file(

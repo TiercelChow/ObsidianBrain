@@ -1,5 +1,6 @@
 //! Business resource policy. Harness still owns reasoning and the tool loop.
 
+use crate::models::agent_budget::{context_capacity, output_limit};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -118,19 +119,55 @@ pub(super) struct QaResources {
 }
 
 impl QaResources {
+    pub fn with_reasoning_headroom(
+        mut self,
+        context: Option<u32>,
+        cap: Option<u32>,
+        reasoning_policy: &str,
+    ) -> Self {
+        if reasoning_policy == "off" {
+            return self;
+        }
+        // The planner estimates visible answer length. Harness may consume
+        // output tokens while reasoning before emitting any answer text.
+        let reserve = self.output_tokens.saturating_mul(2).clamp(8192, 65536);
+        let output = self
+            .output_tokens
+            .saturating_add(reserve)
+            .min(output_limit(context, cap));
+        if output > self.output_tokens {
+            let previous = self.output_tokens;
+            self.output_tokens = output;
+            let available = context_capacity(context).saturating_sub(u64::from(output));
+            self.tool_reserve_tokens = (available / 3).max(1);
+            self.prompt_tokens = available
+                .saturating_sub(self.tool_reserve_tokens)
+                .saturating_sub(1024);
+            self.soft_retrieval_tokens = self
+                .tool_reserve_tokens
+                .min(u64::from(self.soft_tool_calls) * 2500);
+            self.hard_retrieval_tokens = self.soft_retrieval_tokens.saturating_mul(4);
+            self.timeout_seconds = self
+                .timeout_seconds
+                .saturating_add(output.saturating_sub(previous) / 128)
+                .min(600);
+        }
+        self
+    }
+
     pub fn for_resume(
         mut self,
         previous_output: u32,
         context: Option<u32>,
         cap: Option<u32>,
     ) -> Self {
-        let capacity = u64::from(context.unwrap_or(32_768)).min(1_048_576);
+        let capacity = context_capacity(context);
+        self.context_capacity_known |= context.is_some();
+        let previous = self.output_tokens;
         self.output_tokens = self
             .output_tokens
             .max(previous_output.saturating_mul(2))
-            .min(cap.unwrap_or(u32::MAX))
-            .min((capacity / 3) as u32)
-            .max(1);
+            .min(output_limit(context, cap));
         let available = capacity.saturating_sub(u64::from(self.output_tokens));
         self.tool_reserve_tokens = available / 3;
         self.prompt_tokens = available
@@ -140,6 +177,10 @@ impl QaResources {
             .tool_reserve_tokens
             .min(u64::from(self.soft_tool_calls) * 2500);
         self.hard_retrieval_tokens = self.soft_retrieval_tokens.saturating_mul(4);
+        self.timeout_seconds = self
+            .timeout_seconds
+            .saturating_add(self.output_tokens.saturating_sub(previous) / 128)
+            .min(600);
         self
     }
     pub fn new(
@@ -150,7 +191,7 @@ impl QaResources {
     ) -> Self {
         // Unknown capacity is intentionally an application request guard, not
         // a fabricated claim about the model. Known large contexts are usable.
-        let capacity = u64::from(context.unwrap_or(32_768)).min(1_048_576);
+        let capacity = context_capacity(context);
         let weight: u32 = match plan.depth.as_str() {
             "brief" => 1,
             "detailed" => 3,
@@ -172,10 +213,7 @@ impl QaResources {
                 _ => 4096,
             })
             .saturating_add(768 * questions.saturating_sub(1));
-        let output_tokens = desired
-            .min(output_cap.unwrap_or(u32::MAX))
-            .min((capacity / 4) as u32)
-            .max(1);
+        let output_tokens = desired.min(output_limit(context, output_cap)).max(1);
         let available = capacity.saturating_sub(u64::from(output_tokens));
         let tool_reserve_tokens = (available / 3).max(1);
         let prompt_tokens = available
@@ -215,6 +253,50 @@ impl QaResources {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_qa_reasoning_headroom_is_separate_from_answer_length_and_respects_model_cap() {
+        let mut plan = QaPlan::fallback("解释机制");
+        plan.expected_output_tokens = Some(7000);
+        let base = QaResources::new(&plan, None, None, 14);
+        assert_eq!(base.output_tokens, 7000);
+        let reasoning = base.clone().with_reasoning_headroom(None, None, "auto");
+        assert_eq!(reasoning.output_tokens, 21_000);
+        assert!(reasoning.prompt_tokens < base.prompt_tokens);
+        assert_eq!(
+            base.clone()
+                .with_reasoning_headroom(None, None, "off")
+                .output_tokens,
+            7000
+        );
+        assert_eq!(
+            base.with_reasoning_headroom(Some(65_536), Some(12_000), "auto")
+                .output_tokens,
+            12_000
+        );
+    }
+
+    #[test]
+    fn test_unknown_context_allows_large_answers_and_resume_without_a_fixed_fraction_cap() {
+        let mut plan = QaPlan::fallback("详细研究");
+        plan.expected_output_tokens = Some(120_000);
+        let budget = QaResources::new(&plan, None, None, 100);
+        assert_eq!(budget.output_tokens, 120_000);
+        assert!(!budget.context_capacity_known);
+        assert!(budget.prompt_tokens > 100_000);
+        let resumed = budget.for_resume(120_000, Some(1_048_576), Some(500_000));
+        assert_eq!(resumed.output_tokens, 240_000);
+        let mut medium = plan;
+        medium.expected_output_tokens = Some(20_000);
+        let budget = QaResources::new(&medium, Some(65_536), Some(40_000), 100);
+        assert_eq!(budget.output_tokens, 20_000);
+        assert_eq!(
+            budget
+                .for_resume(20_000, Some(65_536), Some(40_000))
+                .output_tokens,
+            40_000
+        );
+    }
 
     #[test]
     fn test_broad_question_has_larger_but_bounded_budget() {

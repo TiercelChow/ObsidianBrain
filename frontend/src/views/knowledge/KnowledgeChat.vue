@@ -96,6 +96,7 @@
                 <strong>{{ message.interruption.notice }}</strong>
                 <span v-if="message.interruption.kind !== 'cancelled'">{{ message.interruption.detail }}</span>
                 <button v-if="message.interruption.kind === 'truncated' && message.runId && message.originalQuestion && message.content" type="button" :disabled="searching || !runtimeReady" @click="ask(message.originalQuestion, message)">继续完成完整答案</button>
+                <button v-else-if="message.interruption.kind === 'truncated' && message.originalQuestion && !message.content" type="button" :disabled="searching || !runtimeReady" @click="ask(message.originalQuestion)">重新提问</button>
               </div>
               <button v-if="message.role === 'assistant' && message.runId && message.id !== streamingMessageId" type="button" class="save-answer" @click="inspectRun(message.runId)">查看本轮目标与取证预算</button>
               <button v-if="message.role === 'assistant' && message.runId && !message.interruption && message.id !== streamingMessageId" class="save-answer" type="button" :disabled="savingRunId === message.runId" @click="saveAnswer(message)">
@@ -305,6 +306,7 @@ function setActivity(phase: string) {
 
 function labelForRuntimePhase(message: string): string | null {
   if (/理解追问|编译知识目录/.test(message)) return '正在理解问题与选择知识'
+  if (/扩容|重试/.test(message)) return '正在调整输出预算'
   if (/结束|校验/.test(message)) return '正在整理回答'
   if (/启动|连接|会话/.test(message)) return '正在连接模型'
   if (/请求|等待|分析|思考/.test(message)) return '正在分析书内证据'

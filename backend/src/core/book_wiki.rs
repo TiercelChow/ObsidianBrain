@@ -70,6 +70,7 @@ const SKILL_BENCHMARK_TIMEOUT: Duration = Duration::from_secs(180);
 const SKILL_BENCHMARK_MAX_OUTPUT_TOKENS: u32 = 4_096;
 const QA_SELECTION_TIMEOUT: Duration = Duration::from_secs(90);
 const QA_SELECTION_MAX_OUTPUT_TOKENS: u32 = 2_048;
+const MAX_QA_EMPTY_OUTPUT_EXPANSIONS: usize = 2;
 const RESEARCH_TASK_TIMEOUT: Duration = Duration::from_secs(600);
 const PRESENTATION_PLAN_TIMEOUT: Duration = Duration::from_secs(180);
 const PRESENTATION_PLAN_MAX_OUTPUT_TOKENS: u32 = 6_144;
@@ -120,6 +121,11 @@ struct RuntimeInvocation<'a> {
     native_skills: Vec<WikiSkill>,
     events: Option<tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
     cancel: tokio::sync::watch::Receiver<bool>,
+}
+
+struct AuditedRunObservers<'a> {
+    stream: Option<&'a tokio::sync::mpsc::UnboundedSender<KnowledgeChatStreamEvent>>,
+    started_run_id: Option<&'a mut String>,
 }
 
 struct ActiveRunCancellation {
@@ -492,6 +498,11 @@ impl BookWikiService {
             .provider_config
             .as_ref()
             .and_then(|p| p.max_output_tokens);
+        let reasoning_policy = profile
+            .provider_config
+            .as_ref()
+            .map(|provider| provider.reasoning_policy.as_str())
+            .unwrap_or("auto");
         let direct = matches!(
             question,
             "你好" | "谢谢" | "谢谢你" | "hello" | "hi" | "thanks"
@@ -504,7 +515,12 @@ impl BookWikiService {
         let mut plan = QaPlan::fallback(question);
         plan.constraints = memory.constraints.clone();
         let mut resources = QaResources::new(&plan, context_window, output_cap, catalog.len());
-        let catalog_prompt_tokens = u64::from(context_window.unwrap_or(32_768)).min(1_048_576) / 2;
+        if !direct {
+            resources =
+                resources.with_reasoning_headroom(context_window, output_cap, reasoning_policy);
+        }
+        let catalog_prompt_tokens =
+            crate::models::agent_budget::context_capacity(context_window) / 2;
         let mut selection = QaSelection {
             standalone_question: question.into(),
             candidate_ids: vec![],
@@ -604,7 +620,12 @@ impl BookWikiService {
                         }
                         next_memory = parsed.memory_update;
                         resources =
-                            QaResources::new(&plan, context_window, output_cap, catalog.len());
+                            QaResources::new(&plan, context_window, output_cap, catalog.len())
+                                .with_reasoning_headroom(
+                                    context_window,
+                                    output_cap,
+                                    reasoning_policy,
+                                );
                     }
                     candidate_batches.push(part.candidate_ids);
                     // A pure conversational/rewrite intent does not need to
@@ -687,75 +708,141 @@ impl BookWikiService {
         if let Some((_, previous_output)) = resume.as_ref() {
             resources = resources.for_resume(*previous_output, context_window, output_cap);
         }
-        let (mut prompt, evidence_ids) = build_adaptive_knowledge_prompt(
-            &base.book_name,
-            question,
-            &selection,
-            &history,
-            &documents,
-            &skills,
-            &details,
-            &plan,
-            &memory,
-            &resources,
-            catalog_seen,
-            catalog.len(),
-        )?;
-        if let Some((draft, _)) = resume.as_ref() {
-            let spare = resources
-                .prompt_tokens
-                .saturating_sub(estimated_tokens(&prompt))
-                .saturating_sub(128);
-            let fragment =
-                prefix_with_token_budget(draft, spare.min(resources.prompt_tokens / 8), 6_000);
-            prompt.push_str("<incomplete_draft>用户明确要求恢复上一轮截断。以下只是未完成的草稿，不是证据；旧引用已移除。请重新核对本轮已读资料，输出一份完整答案，而不是单独续写尾巴；不要把上轮局部文本当成全书结论：\n");
-            prompt.push_str(&fragment);
-            prompt.push_str("\n</incomplete_draft>\n");
-        }
-        let evidence = details
-            .iter()
-            .filter(|d| evidence_ids.contains(&d.entry.id))
-            .map(|d| d.entry.clone())
-            .collect::<Vec<_>>();
-        if let Some(sender) = stream {
-            sender
-                .send(KnowledgeChatStreamEvent::Evidence {
-                    evidence: evidence.clone(),
-                })
-                .map_err(|_| BrainError::KnowledgeValidation("问答流已由客户端关闭".into()))?;
-        }
-        let policy = AdaptiveBudgetPolicy {
-            initial_prompt_tokens: estimated_tokens(&prompt),
-            soft_tool_calls: resources.soft_tool_calls,
-            hard_tool_calls: resources.hard_tool_calls,
-            soft_retrieval_tokens: resources.soft_retrieval_tokens,
-            hard_retrieval_tokens: resources.hard_retrieval_tokens,
-            context_window,
-            max_output_tokens: Some(resources.output_tokens),
-            timeout_seconds: resources.timeout_seconds,
-            subquestions: plan.subquestions.clone(),
-        };
         let planning_stats = serde_json::json!({
             "catalog_total":catalog.len(),"catalog_seen":catalog_seen,
             "estimated_payload_tokens":planning_payload,"token_limit":resources.planning_token_limit,
             "elapsed_ms":started.elapsed().as_millis(),"time_limit_seconds":resources.planning_seconds,
             "stop_reason":planning_stop,
         });
-        let input = serde_json::json!({
-            "question":question,"standalone_question":selection.standalone_question,
-            "answer_mode":selection.answer_mode.as_str(),"conversation_id":conversation_id,
-            "evidence_entry_ids":evidence_ids,"skill_ids":skills.iter().map(|s|&s.id).collect::<Vec<_>>(),
-            "model":profile.model,"qa_plan":plan,"conversation_memory":memory,
-            "qa_resources":resources,"planning_stats":planning_stats,"adaptive_budget":policy,
-            "request_max_output_tokens":resources.output_tokens,"request_timeout_seconds":resources.timeout_seconds,
-            "resume_run_id":resume_run_id,
-            "selected_candidate_ids":selection.candidate_ids,
-            "planning_run_ids":planning_run_ids,
-        });
-        let (run_id, answer) = self
-            .run_audited(base_id, "knowledge_qa", &input, &profile, prompt, stream)
-            .await?;
-        let evidence = collect_run_entry_evidence(&self.store, base_id, &run_id, &evidence)?;
+        let mut effective_context_window = context_window;
+        let mut output_expansions = 0;
+        let mut retry_parent_run_id = None;
+        let (run_id, answer, evidence) = loop {
+            let (mut prompt, evidence_ids) = build_adaptive_knowledge_prompt(
+                &base.book_name,
+                question,
+                &selection,
+                &history,
+                &documents,
+                &skills,
+                &details,
+                &plan,
+                &memory,
+                &resources,
+                catalog_seen,
+                catalog.len(),
+            )?;
+            if let Some((draft, _)) = resume.as_ref() {
+                let spare = resources
+                    .prompt_tokens
+                    .saturating_sub(estimated_tokens(&prompt))
+                    .saturating_sub(128);
+                let fragment =
+                    prefix_with_token_budget(draft, spare.min(resources.prompt_tokens / 8), 6_000);
+                prompt.push_str("<incomplete_draft>用户明确要求恢复上一轮截断。以下只是未完成的草稿，不是证据；旧引用已移除。请重新核对本轮已读资料，输出一份完整答案，而不是单独续写尾巴；不要把上轮局部文本当成全书结论：\n");
+                prompt.push_str(&fragment);
+                prompt.push_str("\n</incomplete_draft>\n");
+            }
+            let evidence = details
+                .iter()
+                .filter(|d| evidence_ids.contains(&d.entry.id))
+                .map(|d| d.entry.clone())
+                .collect::<Vec<_>>();
+            if let Some(sender) = stream {
+                sender
+                    .send(KnowledgeChatStreamEvent::Evidence {
+                        evidence: evidence.clone(),
+                    })
+                    .map_err(|_| BrainError::KnowledgeValidation("问答流已由客户端关闭".into()))?;
+            }
+            let policy = AdaptiveBudgetPolicy {
+                initial_prompt_tokens: estimated_tokens(&prompt),
+                soft_tool_calls: resources.soft_tool_calls,
+                hard_tool_calls: resources.hard_tool_calls,
+                soft_retrieval_tokens: resources.soft_retrieval_tokens,
+                hard_retrieval_tokens: resources.hard_retrieval_tokens,
+                context_window: effective_context_window,
+                max_output_tokens: Some(resources.output_tokens),
+                timeout_seconds: resources.timeout_seconds,
+                subquestions: plan.subquestions.clone(),
+            };
+            let input = serde_json::json!({
+                "question":question,"standalone_question":selection.standalone_question,
+                "answer_mode":selection.answer_mode.as_str(),"conversation_id":conversation_id,
+                "evidence_entry_ids":evidence_ids,"skill_ids":skills.iter().map(|s|&s.id).collect::<Vec<_>>(),
+                "model":profile.model,"qa_plan":plan,"conversation_memory":memory,
+                "qa_resources":resources,"planning_stats":planning_stats,"adaptive_budget":policy,
+                "request_max_output_tokens":resources.output_tokens,"request_timeout_seconds":resources.timeout_seconds,
+                "resume_run_id":resume_run_id,"qa_retry_parent_run_id":retry_parent_run_id,
+                "output_expansion_attempt":output_expansions,
+                "selected_candidate_ids":selection.candidate_ids,
+                "planning_run_ids":planning_run_ids,
+            });
+            let mut attempted_run_id = String::new();
+            match self
+                .run_audited_with_started(
+                    base_id,
+                    "knowledge_qa",
+                    &input,
+                    &profile,
+                    prompt,
+                    AuditedRunObservers {
+                        stream,
+                        started_run_id: Some(&mut attempted_run_id),
+                    },
+                )
+                .await
+            {
+                Ok((run_id, answer)) => {
+                    let evidence =
+                        collect_run_entry_evidence(&self.store, base_id, &run_id, &evidence)?;
+                    break (run_id, answer, evidence);
+                }
+                Err(error)
+                    if is_qa_empty_output_truncation(&error)
+                        && output_expansions < MAX_QA_EMPTY_OUTPUT_EXPANSIONS
+                        && !attempted_run_id.is_empty()
+                        && !stream.is_some_and(|sender| sender.is_closed()) =>
+                {
+                    if let Some(size) = self
+                        .store
+                        .get_adaptive_run_budget(&attempted_run_id)?
+                        .and_then(|budget| budget.observed_context_window)
+                    {
+                        let observed = size.min(u64::from(u32::MAX)) as u32;
+                        effective_context_window = Some(
+                            context_window.map_or(observed, |configured| configured.min(observed)),
+                        );
+                    }
+                    let expanded = resources.clone().for_resume(
+                        resources.output_tokens,
+                        effective_context_window,
+                        output_cap,
+                    );
+                    if expanded.output_tokens <= resources.output_tokens {
+                        return Err(error);
+                    }
+                    if let Some(sender) = stream {
+                        sender
+                            .send(KnowledgeChatStreamEvent::Phase {
+                                run_id: attempted_run_id.clone(),
+                                message: format!(
+                                    "本轮没有收到正文，正在扩容输出预算并重试（{}/{})",
+                                    output_expansions + 1,
+                                    MAX_QA_EMPTY_OUTPUT_EXPANSIONS
+                                ),
+                            })
+                            .map_err(|_| {
+                                BrainError::KnowledgeValidation("问答流已由客户端关闭".into())
+                            })?;
+                    }
+                    retry_parent_run_id = Some(attempted_run_id);
+                    resources = expanded;
+                    output_expansions += 1;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         if let Some(sender) = stream {
             sender
                 .send(KnowledgeChatStreamEvent::Evidence {
@@ -1655,6 +1742,33 @@ impl BookWikiService {
         prompt: String,
         stream: Option<&tokio::sync::mpsc::UnboundedSender<KnowledgeChatStreamEvent>>,
     ) -> Result<(String, String), BrainError> {
+        self.run_audited_with_started(
+            base_id,
+            task_type,
+            input,
+            profile,
+            prompt,
+            AuditedRunObservers {
+                stream,
+                started_run_id: None,
+            },
+        )
+        .await
+    }
+
+    async fn run_audited_with_started(
+        &self,
+        base_id: &str,
+        task_type: &str,
+        input: &serde_json::Value,
+        profile: &RuntimeProfile,
+        prompt: String,
+        observers: AuditedRunObservers<'_>,
+    ) -> Result<(String, String), BrainError> {
+        let AuditedRunObservers {
+            stream,
+            started_run_id,
+        } = observers;
         let allowed_tools = allowed_agent_tools(task_type, input);
         let prompt = if allowed_tools.is_empty() {
             prompt
@@ -1665,6 +1779,10 @@ impl BookWikiService {
         let run = self
             .store
             .start_agent_run(base_id, "deepseek_harness", task_type, input)?;
+        if let Some(started_run_id) = started_run_id {
+            started_run_id.clear();
+            started_run_id.push_str(&run.id);
+        }
         if task_type == "knowledge_qa"
             || (task_type.starts_with("knowledge_task_")
                 && task_type != "knowledge_task_presentation_plan")
@@ -1734,6 +1852,21 @@ impl BookWikiService {
             .filter(|value| *value > 0)
             .map(|value| Duration::from_secs(value.min(600)))
             .or_else(|| runtime_timeout_for_task(task_type));
+        if let Some(attempt) = input
+            .get("output_expansion_attempt")
+            .and_then(serde_json::Value::as_u64)
+            .filter(|attempt| *attempt > 0)
+        {
+            let message = if task_type == "knowledge_qa" {
+                format!(
+                    "上一轮未返回正文，问答第 {attempt} 次输出扩容至 {} tokens；重新生成完整回答",
+                    input["request_max_output_tokens"]
+                )
+            } else {
+                format!("当前阶段第 {attempt} 次输出扩容，申请 {} tokens；之前部分结果保留，重新生成完整合同",input["request_max_output_tokens"])
+            };
+            self.store.append_agent_run_event(&run.id,"run.output_budget_expanded",Some("budget"),&message,&serde_json::json!({"expansion_attempt":attempt,"research_retry_parent_run_id":input["research_retry_parent_run_id"],"qa_retry_parent_run_id":input["qa_retry_parent_run_id"],"next_output_tokens":input["request_max_output_tokens"]}))?;
+        }
         if (task_type == "knowledge_qa" || task_type.starts_with("knowledge_task_"))
             && !allowed_tools.is_empty()
         {
@@ -1849,7 +1982,7 @@ impl BookWikiService {
             .collect::<Vec<_>>();
         let mut evidence_refs = serde_json::Map::new();
         evidence_refs.insert("runtime_budget".into(), serde_json::json!({
-            "context_window":profile.provider_config.as_ref().and_then(|p|p.context_window),
+            "context_window":input.pointer("/adaptive_budget/context_window").and_then(serde_json::Value::as_u64).or_else(||profile.provider_config.as_ref().and_then(|p|p.context_window).map(u64::from)),
             "max_output_tokens":profile.provider_config.as_ref().and_then(|p|p.max_output_tokens),
             "reasoning_policy":profile.provider_config.as_ref().map(|p|p.reasoning_policy.as_str()).unwrap_or("auto"),
             "effective_max_output_tokens":effective_output_cap(profile,runtime_max_output_tokens_for_invocation(task_type,input)),
@@ -1874,6 +2007,8 @@ impl BookWikiService {
             "adaptive_budget",
             "conversation_memory",
             "resume_run_id",
+            "qa_retry_parent_run_id",
+            "output_expansion_attempt",
             "selected_candidate_ids",
             "planning_run_ids",
             "compile_step",
@@ -1885,6 +2020,8 @@ impl BookWikiService {
             "topic_title",
             "research_stage_key",
             "research_resources",
+            "research_retry_parent_run_id",
+            "format_repair_attempt",
             "research_plan",
             "research_question",
             "presentation_materialization",
@@ -3167,6 +3304,13 @@ fn is_recoverable_empty_answer(error: &BrainError) -> bool {
     matches!(error, BrainError::LlmApiError { provider, detail }
         if provider == "deepseek_harness"
             && (detail.contains("空回答") || detail.contains("未返回正文")))
+}
+
+fn is_qa_empty_output_truncation(error: &BrainError) -> bool {
+    matches!(error, BrainError::LlmApiError { provider, detail }
+        if provider == "deepseek_harness"
+            && detail.contains("未返回正文")
+            && detail.contains("stop_reason=max_tokens"))
 }
 
 fn semantic_retry_input(input: &serde_json::Value, error: &BrainError) -> serde_json::Value {

@@ -254,11 +254,11 @@
           <el-input v-model="providerDraft.model" placeholder="模型 ID，例如：glm-5.2" />
           <section class="provider-capabilities">
             <header><strong>模型能力</strong><span>按供应商实际限制填写；未知时留空，不推测容量。</span></header>
-            <label><span>上下文容量（tokens）</span><el-input v-model="contextWindowInput" inputmode="numeric" placeholder="未声明，继承 Harness 配置" /></label>
-            <label><span>最大输出（tokens）</span><el-input v-model="maxOutputInput" inputmode="numeric" placeholder="未声明，继承 Harness 配置" /></label>
+            <label><span>上下文容量（tokens）</span><el-input v-model="contextWindowInput" inputmode="numeric" placeholder="留空使用 1M 应用默认值" /></label>
+            <label><span>最大输出（tokens）</span><el-input v-model="maxOutputInput" inputmode="numeric" placeholder="留空按阶段动态分配" /></label>
             <label class="is-wide"><span>推理策略</span><el-select v-model="providerDraft.reasoning_policy" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option v-for="policy in modelReasoningPolicies" :key="policy" :label="reasoningPolicyLabel(policy)" :value="policy" /></el-select></label>
             <p v-if="capabilityError" class="capability-error is-wide" role="alert">{{ capabilityError }}</p>
-            <p v-else class="is-wide">输出上限、推理策略分别设置；能力声明不是本轮已消耗的预算。</p>
+            <p v-else class="is-wide">未声明上下文时，问答与研究使用 1M 应用默认值，Runtime 上报容量后按实际值校验；不表示所有模型都支持 1M。最大输出与上下文不同，研究按正文、JSON 和推理分别预留，截断后仅扩容当前阶段；填写的供应商上限始终优先。</p>
           </section>
           <el-select v-model="providerDraft.credential_source" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true">
             <el-option label="系统凭据库（页面填写 API Key）" value="keychain" />

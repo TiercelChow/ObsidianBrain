@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
+pub mod agent_budget;
 pub mod book_wiki;
 pub mod memory;
 pub mod note;

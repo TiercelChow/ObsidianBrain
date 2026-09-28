@@ -11,14 +11,17 @@ export function interruptedKnowledgeAnswer(displayedText: string, receivedText: 
   const credentials = /secure storage|凭据|keychain|User canceled the operation|permission denied|401|403/i.test(detail)
   const truncated = /max_tokens|max_turn_requests|max_output|token.{0,12}(limit|上限)|输出.{0,12}(截断|上限)/i.test(detail)
   const kind: KnowledgeInterruptionKind = cancelled ? 'cancelled' : credentials ? 'credentials' : truncated ? 'truncated' : 'failed'
+  const content = receivedText || displayedText
   const notice = kind === 'cancelled'
     ? '已停止生成，内容可能不完整。'
     : kind === 'credentials'
       ? '本次凭据授权未完成，内容可能不完整。检查供应商凭据后可以再次尝试。'
       : kind === 'truncated'
-        ? '本次输出达到运行上限，内容不完整。可继续完成完整答案，或缩小问题范围后重新提问。'
+        ? content
+          ? '本次输出达到运行上限，内容不完整。可继续完成完整答案，或缩小问题范围后重新提问。'
+          : '本次输出达到运行上限且没有收到正文。请核对模型最大输出与推理策略，或缩小问题范围后重新提问。'
         : '本次回答未完成，已有内容已保留。下一次提问会再次尝试连接模型。'
-  return { content: receivedText || displayedText, kind, notice, detail }
+  return { content, kind, notice, detail }
 }
 
 export const modelReasoningPolicies = ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const

@@ -59,3 +59,21 @@ test('presentation diagnostics expose whole-report projection without fabricatin
   assert.equal(result.research.capacityKnown, null)
   assert.equal(adaptiveKnowledgeDiagnostics({}, []).presentation.mode, '')
 })
+
+test('research output headroom is estimated and expansion events do not reset evidence budget state', () => {
+  const result = adaptiveKnowledgeDiagnostics({
+    research_resources: { capacity_tokens: 65536, capacity_basis: 'observed_runtime_capacity', content_output_tokens: 3000, structure_output_tokens: 2560, reasoning_output_tokens: 8192, output_tokens: 27504 },
+  }, [
+    { event_type: 'run.budget_changed', payload: { used_tool_calls: 5, soft_tool_calls: 20, policy: { hard_tool_calls: 80 } } },
+    { event_type: 'run.output_budget_expanded', message: '输出截断，扩大当前阶段', payload: { previous_output_tokens: 13752, next_output_tokens: 27504 } },
+  ])
+  assert.equal(result.research.capacityKnown, true)
+  assert.equal(result.research.contentTokens, 3000)
+  assert.equal(result.research.structureTokens, 2560)
+  assert.equal(result.research.reasoningTokens, 8192)
+  assert.equal(result.research.outputTokens, 27504)
+  assert.equal(result.budget.used, 5)
+  assert.deepEqual(result.expansions, ['输出截断，扩大当前阶段'])
+  const legacy = adaptiveKnowledgeDiagnostics({}, [])
+  assert.equal(legacy.research.reasoningTokens, null)
+})

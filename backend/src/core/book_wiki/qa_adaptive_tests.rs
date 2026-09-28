@@ -322,8 +322,8 @@ async fn test_truncated_answer_explicit_resume_replans_and_returns_complete_fres
                         .unwrap();
                 }
                 return Err(BrainError::LlmApiError {
-                    provider: "mock".into(),
-                    detail: "max_tokens".into(),
+                    provider: "deepseek_harness".into(),
+                    detail: "DeepSeek Harness 达到输出 token 上限，已生成正文保留为部分结果 (stop_reason=max_tokens)".into(),
                 });
             }
             self.inner.prompt(request).await
@@ -379,5 +379,164 @@ async fn test_truncated_answer_explicit_resume_replans_and_returns_complete_fres
             .unwrap()
             .len()
             > 10
+    );
+}
+
+#[tokio::test]
+async fn test_qa_empty_max_tokens_stops_after_two_expansions_or_hard_cap() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct AlwaysEmpty {
+        answers: AtomicUsize,
+        expected_output_tokens: u32,
+    }
+    #[async_trait]
+    impl AgentRuntime for AlwaysEmpty {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            if request.prompt.contains("只读检索规划器") {
+                return Ok(serde_json::json!({
+                    "standalone_question":"全书",
+                    "candidate_ids":[],
+                    "answer_mode":"book_lookup",
+                    "plan":{"goal":"全书","constraints":[],"subquestions":["机制"],"depth":"comprehensive","scope":"whole_book","expected_output_tokens":self.expected_output_tokens},
+                    "memory_update":{"objective":"全书","constraints":[],"unresolved_questions":[],"entity_ids":[]}
+                }).to_string());
+            }
+            self.answers.fetch_add(1, Ordering::SeqCst);
+            Err(BrainError::LlmApiError {
+                provider: "deepseek_harness".into(),
+                detail: "DeepSeek Harness 达到输出 token 上限且未返回正文 (stop_reason=max_tokens)"
+                    .into(),
+            })
+        }
+    }
+    for (expected_output_tokens, calls) in [(262_144, 1), (4096, 3)] {
+        let (store, _dir, base) = fixture();
+        let runtime = Arc::new(AlwaysEmpty {
+            answers: AtomicUsize::new(0),
+            expected_output_tokens,
+        });
+        let service = BookWikiService::new(store.clone(), runtime.clone());
+        let error = service
+            .ask(&base, "全面分析全书机制", None)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("stop_reason=max_tokens"));
+        assert_eq!(runtime.answers.load(Ordering::SeqCst), calls);
+        assert!(store.list_conversations(&base, 10).unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn test_qa_empty_max_tokens_expands_only_answer_run_and_keeps_failed_run() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct EmptyThenAnswer {
+        planner: AdaptiveFixtureRuntime,
+        answers: AtomicUsize,
+    }
+    #[async_trait]
+    impl AgentRuntime for EmptyThenAnswer {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            self.planner.prompt(request).await
+        }
+        async fn prompt_with_events(
+            &self,
+            request: AgentPromptRequest,
+            events: Option<tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+            _cancel: tokio::sync::watch::Receiver<bool>,
+        ) -> Result<String, BrainError> {
+            if request.prompt.contains("只读检索规划器") {
+                return self.planner.prompt(request).await;
+            }
+            if self.answers.fetch_add(1, Ordering::SeqCst) == 0 {
+                if let Some(events) = events {
+                    events
+                        .send(AgentRuntimeEvent::UsageContext {
+                            used: 8192,
+                            size: 131_072,
+                        })
+                        .unwrap();
+                    events
+                        .send(AgentRuntimeEvent::Completed {
+                            stop_reason: "max_tokens".into(),
+                            complete: false,
+                        })
+                        .unwrap();
+                }
+                return Err(BrainError::LlmApiError {
+                    provider: "deepseek_harness".into(),
+                    detail:
+                        "DeepSeek Harness 达到输出 token 上限且未返回正文 (stop_reason=max_tokens)"
+                            .into(),
+                });
+            }
+            Ok("本轮综合结论。[S1]".into())
+        }
+    }
+    let (store, _dir, base) = fixture();
+    let runtime = Arc::new(EmptyThenAnswer {
+        planner: AdaptiveFixtureRuntime {
+            requests: Arc::new(Mutex::new(vec![])),
+        },
+        answers: AtomicUsize::new(0),
+    });
+    let service = BookWikiService::new(store.clone(), runtime.clone());
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let answer = service
+        .ask_streaming(&base, "全面分析全书的机制和边界", None, events)
+        .await
+        .unwrap();
+    assert_eq!(runtime.answers.load(Ordering::SeqCst), 2);
+    let stream_events = std::iter::from_fn(|| receiver.try_recv().ok()).collect::<Vec<_>>();
+    assert!(stream_events.iter().any(|event| {
+        matches!(event, KnowledgeChatStreamEvent::Phase { message, .. } if message.contains("扩容输出预算"))
+    }));
+    let answer_runs = stream_events
+        .into_iter()
+        .filter_map(|event| match event {
+            KnowledgeChatStreamEvent::RunStarted { run_id } => Some(run_id),
+            _ => None,
+        })
+        .filter(|id| store.get_agent_run(id).unwrap().task_type == "knowledge_qa")
+        .collect::<Vec<_>>();
+    assert_eq!(answer_runs.len(), 2);
+    let failed = store.get_agent_run(&answer_runs[0]).unwrap();
+    let completed = store.get_agent_run(&answer_runs[1]).unwrap();
+    assert_eq!(failed.status, "failed");
+    assert_eq!(completed.status, "completed");
+    assert_eq!(answer.run_id, completed.id);
+    assert!(
+        completed.input["request_max_output_tokens"]
+            .as_u64()
+            .unwrap()
+            > failed.input["request_max_output_tokens"].as_u64().unwrap()
+    );
+    assert_eq!(completed.input["output_expansion_attempt"], 1);
+    assert_eq!(completed.input["qa_retry_parent_run_id"], failed.id);
+    assert_eq!(
+        completed.input["adaptive_budget"]["context_window"],
+        131_072
+    );
+    assert_eq!(
+        completed.input["qa_resources"]["context_capacity_known"],
+        true
+    );
+    assert_eq!(
+        store
+            .get_agent_run_inspection(&completed.id)
+            .unwrap()
+            .snapshot
+            .unwrap()
+            .evidence_refs["runtime_budget"]["context_window"],
+        131_072
+    );
+    assert!(store
+        .list_agent_run_events(&completed.id)
+        .unwrap()
+        .iter()
+        .any(|event| event.event_type == "run.output_budget_expanded"));
+    assert_eq!(answer.answer, "本轮综合结论。[S1]");
+    assert_eq!(
+        store.list_conversations(&base, 10).unwrap()[0].message_count,
+        2
     );
 }

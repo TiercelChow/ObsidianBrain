@@ -263,7 +263,7 @@ pub struct ResearchQuestion {
     pub title: String,
     pub question: String,
     pub required_evidence: Vec<String>,
-    /// Planner's per-topic estimate, subject to provider and context hard caps.
+    /// Final-content estimate, not the request cap including JSON and reasoning.
     #[serde(default)]
     pub expected_output_tokens: Option<u32>,
     /// Stable compiled objects selected by planning for review/refresh.

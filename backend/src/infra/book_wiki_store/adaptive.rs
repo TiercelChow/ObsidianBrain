@@ -8,6 +8,7 @@ use std::collections::HashSet;
 
 use super::{insert_agent_run_event, BookWikiStore};
 use crate::error::BrainError;
+use crate::models::agent_budget::context_capacity;
 
 const MANAGEMENT_CALL_LIMIT: u32 = 128;
 const EXTENSION_LIMIT: u32 = 3;
@@ -350,7 +351,7 @@ fn validate_policy(policy: &AdaptiveBudgetPolicy) -> Result<(), BrainError> {
             "自适应预算必须有合理正数、软上限不超过硬上限及有效子问题",
         ));
     }
-    let initial_capacity = u64::from(policy.context_window.unwrap_or(32768)).min(1_048_576);
+    let initial_capacity = context_capacity(policy.context_window);
     if policy
         .initial_prompt_tokens
         .saturating_add(u64::from(policy.max_output_tokens.unwrap_or(0)))
@@ -366,11 +367,11 @@ fn check_context(state: &AdaptiveRunBudget, extra: u64) -> Result<(), BrainError
         state.policy.context_window.map(u64::from),
         state.observed_context_window,
     ) {
-        (Some(a), Some(b)) => a.min(b).min(1_048_576),
-        (Some(a), None) | (None, Some(a)) => a.min(1_048_576),
+        (Some(a), Some(b)) => a.min(b),
+        (Some(a), None) | (None, Some(a)) => a,
         // An application guard, never a fabricated model capability. A real
         // ACP capacity/occupancy observation replaces the unknown fallback.
-        (None, None) => 32768,
+        (None, None) => context_capacity(None),
     };
     let usage = state
         .observed_context_tokens
@@ -510,6 +511,25 @@ mod tests {
     use crate::models::book_wiki::ReaderBook;
     use serde_json::json;
     use std::sync::Arc;
+
+    #[test]
+    fn test_unknown_context_budget_supports_large_input_but_observed_capacity_is_authoritative() {
+        let (store, _dir, _, run) = fixture();
+        let mut limits = policy();
+        limits.context_window = None;
+        limits.initial_prompt_tokens = 100_000;
+        limits.max_output_tokens = Some(32_768);
+        limits.soft_retrieval_tokens = 100_000;
+        limits.hard_retrieval_tokens = 400_000;
+        store.init_adaptive_run_budget(&run, &limits).unwrap();
+        assert!(store.record_adaptive_tool_payload(&run, 50_000).is_ok());
+        store
+            .observe_adaptive_context(&run, 60_000, 65_536)
+            .unwrap();
+        assert!(store.record_adaptive_tool_payload(&run, 100).is_err());
+        store.observe_adaptive_context(&run, 1000, 65_536).unwrap();
+        assert!(store.record_adaptive_tool_payload(&run, 100).is_ok());
+    }
 
     fn fixture() -> (BookWikiStore, tempfile::TempDir, String, String) {
         let dir = tempfile::tempdir().unwrap();
@@ -771,7 +791,7 @@ mod tests {
         let (store, _dir, _base, run) = fixture();
         let mut initial = policy();
         initial.context_window = None;
-        initial.initial_prompt_tokens = 31500;
+        initial.initial_prompt_tokens = context_capacity(None) - 1200;
         initial.hard_retrieval_tokens = 2000;
         store.init_adaptive_run_budget(&run, &initial).unwrap();
         assert!(store

@@ -8,6 +8,13 @@ use crate::models::book_wiki::{
 };
 use serde_json::json;
 
+const MAX_PHASE_OUTPUT_EXPANSIONS: usize = 2;
+const MAX_PHASE_FORMAT_REPAIRS: usize = 1;
+
+fn is_output_truncation(error: &BrainError) -> bool {
+    matches!(error, BrainError::LlmApiError {provider,detail} if provider=="deepseek_harness" && detail.contains("stop_reason=max_tokens"))
+}
+
 struct ResearchPhase<'a> {
     task: &'a KnowledgeTask,
     profile: &'a RuntimeProfile,
@@ -77,7 +84,7 @@ impl BookWikiService {
         if phase.phase != "synthesis" {
             prompt.push_str("review/refresh 在规划中用 target_entry_ids 选择通过工具找到的真实编译条目，不能捏造ID或把章节兜底当作知识实体。章节阶段用 knowledge_get_research_baseline 分页读取已冻结的正文、具体主张和旧版来源，has_more/metadata_has_more 时补读。旧版输入不是当前证据，不可用它生成S引用；再读当前知识/原文完成对照。每个选定条目必须有对应 finding.baseline_entry_id，核验具体主张同时填 baseline_claim_id。review 明确原主张、支持/反驳依据、适用条件及缺口；refresh 明确旧版判断、当前判断、变化原因、未变和缺口，不虚构版本变化。不曾找到基线时只能输出 partial/missing。\n");
         }
-        prompt.push_str(&format!("<phase_output_contract>\n{}\n</phase_output_contract>\n只输出单个完整 JSON 对象；不输出围栏、前后解释、第二个对象、占位符或隐藏思考。上方是字段合同示意，必须替换示例值；枚举只选一个合法值。当前阶段合同优先于通用 Skill 的默认最终报告格式。\n",phase_contract(phase.phase)));
+        prompt.push_str(&format!("<phase_output_contract>\n{}\n</phase_output_contract>\n只输出单个完整 JSON 对象；不输出围栏、前后解释、第二个对象、占位符或隐藏思考。上方是字段合同示意，必须替换示例值；枚举只选一个合法值。阶段由 research_phase 标签确定，不增加 kind、phase、type 等合同外字段，也不包装外层对象。当前阶段合同优先于通用 Skill 的默认最终报告格式。\n",phase_contract(phase.phase)));
         let mut evidence_ids = Vec::new();
         let spare = phase
             .resources
@@ -116,15 +123,20 @@ impl BookWikiService {
 
     async fn persist_model_research_phase<T, F>(
         &self,
-        phase: ResearchPhase<'_>,
+        mut phase: ResearchPhase<'_>,
         persist: F,
     ) -> Result<T, BrainError>
     where
         F: Fn(&ResearchStageClaim, &str, &str) -> Result<T, BrainError>,
     {
-        let (prompt, evidence_ids) = self.research_phase_prompt(&phase)?;
         let mut repair = None;
-        for retry in 0..=1 {
+        let mut format_repairs = 0;
+        let mut output_expansions = 0;
+        let mut retry_parent_run_id = None;
+        for retry in 0..=MAX_PHASE_OUTPUT_EXPANSIONS + MAX_PHASE_FORMAT_REPAIRS {
+            // Rebuild capacity and seed metadata for the actual request; a
+            // larger output allowance must not keep stale prompt budgets.
+            let (prompt, evidence_ids) = self.research_phase_prompt(&phase)?;
             let claim = self
                 .store
                 .claim_research_stage(&phase.task.id, &phase.key)?;
@@ -138,6 +150,7 @@ impl BookWikiService {
             let input = json!({"knowledge_task_id":phase.task.id,"research_stage_key":phase.key,"research_claim_id":claim.claim_id,"research_claim_attempt":claim.attempt,
                 "research_resources":phase.resources,"research_plan":phase.payload.get("plan"),"research_question":phase.payload.get("question"),
                 "evidence_entry_ids":evidence_ids,"skill_ids":skills,"model":phase.profile.model,"retry":retry,
+                "output_expansion_attempt":output_expansions,"format_repair_attempt":format_repairs,"research_retry_parent_run_id":retry_parent_run_id,
                 "request_max_output_tokens":phase.resources.output_tokens,"request_timeout_seconds":phase.resources.policy.timeout_seconds,"adaptive_budget":phase.resources.policy,
                 "external_research":{"enabled":phase.task.external_research_enabled && phase.phase!="plan","domains":phase.task.external_domains,"request_limit":phase.task.external_request_limit}});
             let invocation_prompt = if let Some((error, previous)) = &repair {
@@ -150,6 +163,7 @@ impl BookWikiService {
                     .fail_research_stage(&claim, &error.to_string(), false)?;
                 return Err(error);
             }
+            let invocation_tokens = estimated_tokens(&invocation_prompt);
             let invocation = self
                 .run_audited(
                     &phase.task.knowledge_base_id,
@@ -163,27 +177,72 @@ impl BookWikiService {
             let (run, answer) = match invocation {
                 Ok(value) => value,
                 Err(error) => {
-                    let cancelled = self.store.get_task(&phase.task.id)?.cancel_requested;
-                    let _ = self
+                    let cancelled = match self.store.get_task(&phase.task.id) {
+                        Ok(task) => task.cancel_requested,
+                        Err(_) => return Err(error),
+                    };
+                    let recorded_failure =
+                        self.store
+                            .fail_research_stage(&claim, &error.to_string(), cancelled);
+                    if cancelled || recorded_failure.is_err() || !is_output_truncation(&error) {
+                        return Err(error);
+                    }
+                    if output_expansions >= MAX_PHASE_OUTPUT_EXPANSIONS {
+                        return Err(BrainError::KnowledgeValidation(format!("(research_output_retry_exhausted) 当前研究阶段已独立扩容 {MAX_PHASE_OUTPUT_EXPANSIONS} 次仍未完成；部分输出和已完成章节保留，请调整模型最大输出/推理策略或拆分主题后恢复。原错误：{error}")));
+                    }
+                    let previous = phase.resources.output_tokens;
+                    retry_parent_run_id = self
                         .store
-                        .fail_research_stage(&claim, &error.to_string(), cancelled);
-                    return Err(error);
+                        .get_research_stage_content(&phase.task.id, &phase.key, None)?
+                        .stage
+                        .run_id;
+                    let mut resources = phase.resources.clone();
+                    if let Some(run_id) = &retry_parent_run_id {
+                        if let Some(size) = self
+                            .store
+                            .get_adaptive_run_budget(run_id)?
+                            .and_then(|budget| budget.observed_context_window)
+                        {
+                            resources.observe_capacity(size);
+                        }
+                    }
+                    let mut expanded =
+                        resources.expand_output_after_truncation(phase.profile, previous)?;
+                    expanded.fit_expansion_to_input(invocation_tokens, previous)?;
+                    if let Some(run_id) = &retry_parent_run_id {
+                        self.store.append_agent_run_event(run_id,"run.output_budget_expanded",Some("budget"),&format!("当前阶段输出截断，预算从 {previous} 扩至 {} tokens；仅重做本阶段",expanded.output_tokens),&json!({"research_stage_key":phase.key,"previous_output_tokens":previous,"next_output_tokens":expanded.output_tokens,"expansion_attempt":output_expansions+1,"max_expansions":MAX_PHASE_OUTPUT_EXPANSIONS}))?;
+                    }
+                    phase.resources = expanded;
+                    output_expansions += 1;
+                    continue;
                 }
             };
             match persist(&claim, &run, &answer) {
                 Ok(value) => return Ok(value),
                 Err(error) => {
-                    let cancelled = self.store.get_task(&phase.task.id)?.cancel_requested;
-                    let _ = self
-                        .store
-                        .fail_research_stage(&claim, &error.to_string(), cancelled);
-                    if retry == 1 || cancelled {
+                    let cancelled = match self.store.get_task(&phase.task.id) {
+                        Ok(task) => task.cancel_requested,
+                        Err(_) => return Err(error),
+                    };
+                    let recorded_failure =
+                        self.store
+                            .fail_research_stage(&claim, &error.to_string(), cancelled);
+                    // Only the model's contract can be repaired by the model.
+                    // Storage/runtime errors must not corrupt a valid answer or
+                    // hide the original failure. A lost stage claim cannot retry.
+                    if format_repairs >= MAX_PHASE_FORMAT_REPAIRS
+                        || cancelled
+                        || !matches!(error, BrainError::KnowledgeValidation(_))
+                        || recorded_failure.is_err()
+                    {
                         return Err(error);
                     }
                     repair = Some((
                         error.to_string(),
                         answer.chars().take(4000).collect::<String>(),
                     ));
+                    retry_parent_run_id = Some(run);
+                    format_repairs += 1;
                 }
             }
         }
@@ -421,6 +480,454 @@ mod tests {
         synthesis_failure_pending: Arc<Mutex<bool>>,
     }
 
+    struct PlanRepairRuntime {
+        calls: Arc<Mutex<Vec<String>>>,
+        invalid_first_answer: bool,
+    }
+
+    #[async_trait]
+    impl AgentRuntime for PlanRepairRuntime {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            let mut calls = self.calls.lock().unwrap();
+            calls.push(request.prompt);
+            let mut answer = phase_contract("plan");
+            if self.invalid_first_answer && calls.len() == 1 {
+                answer["kind"] = json!("plan");
+            }
+            Ok(answer.to_string())
+        }
+    }
+
+    fn plan_repair_fixture(
+        invalid_first_answer: bool,
+    ) -> (
+        tempfile::TempDir,
+        BookWikiService,
+        KnowledgeTask,
+        Arc<Mutex<Vec<String>>>,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BookWikiStore::new(Arc::new(
+            SqliteStore::new(&dir.path().join("phase-repair.db")).unwrap(),
+        ));
+        store
+            .save_reader_books(&[ReaderBook {
+                id: "repair".into(),
+                path: dir.path().display().to_string(),
+                kind: BookKind::Folder,
+                name: "研究修复边界".into(),
+                description: String::new(),
+                category: String::new(),
+                added_at: 1,
+                progress: None,
+            }])
+            .unwrap();
+        let base = store.initialize_base("repair").unwrap();
+        let task = store
+            .create_task(&base.id, "研究机制", "明确边界", "research")
+            .unwrap();
+        let task = store.start_task_execution(&task.id).unwrap();
+        store.ensure_research_workspace(&task.id).unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let service = BookWikiService::new(
+            store,
+            Arc::new(PlanRepairRuntime {
+                calls: calls.clone(),
+                invalid_first_answer,
+            }),
+        );
+        (dir, service, task, calls)
+    }
+
+    fn plan_phase<'a>(task: &'a KnowledgeTask, profile: &'a RuntimeProfile) -> ResearchPhase<'a> {
+        ResearchPhase {
+            task,
+            profile,
+            key: "plan".into(),
+            phase: "plan",
+            payload: json!({"request":task.description}),
+            resources: ResearchResources::new(profile, None, None, 0),
+            evidence: Vec::new(),
+        }
+    }
+
+    struct ExpandingResearchRuntime {
+        calls: Arc<Mutex<Vec<(String, u32)>>>,
+        truncations: usize,
+        format_first: bool,
+        cancel_task: Option<(BookWikiStore, String)>,
+    }
+
+    #[async_trait]
+    impl AgentRuntime for ExpandingResearchRuntime {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            let phase = request
+                .prompt
+                .split_once("<research_phase>")
+                .unwrap()
+                .1
+                .split_once("</research_phase>")
+                .unwrap()
+                .0;
+            let scope: serde_json::Value = serde_json::from_str(
+                request
+                    .prompt
+                    .split_once("<phase_scope>\n")
+                    .unwrap()
+                    .1
+                    .split_once("\n</phase_scope>")
+                    .unwrap()
+                    .0,
+            )
+            .unwrap();
+            let capacity: serde_json::Value = serde_json::from_str(
+                request
+                    .prompt
+                    .split_once("<phase_capacity>\n")
+                    .unwrap()
+                    .1
+                    .split_once("\n</phase_capacity>")
+                    .unwrap()
+                    .0,
+            )
+            .unwrap();
+            let key = if phase == "section" {
+                scope["question"]["id"].as_str().unwrap()
+            } else {
+                phase
+            };
+            let occurrence = {
+                let mut calls = self.calls.lock().unwrap();
+                calls.push((
+                    key.into(),
+                    capacity["phase_output_tokens"].as_u64().unwrap() as u32,
+                ));
+                calls.iter().filter(|(stage, _)| stage == key).count()
+            };
+            if let Some((store, task)) = &self.cancel_task {
+                store.request_task_cancel(task)?;
+            }
+            if self.format_first && occurrence == 1 {
+                let mut answer = phase_contract("plan");
+                answer["kind"] = json!("plan");
+                return Ok(answer.to_string());
+            }
+            if occurrence - usize::from(self.format_first) <= self.truncations {
+                return Err(BrainError::LlmApiError {
+                    provider: "deepseek_harness".into(),
+                    detail: "模拟输出截断 (stop_reason=max_tokens)".into(),
+                });
+            }
+            if phase == "plan" {
+                let mut answer = phase_contract("plan");
+                answer["questions"] = json!((0..3).map(|index|json!({"id":format!("q{index}"),"title":"机制与缺口","question":"机制及限制是什么","required_evidence":["机制","限制","反例"],"expected_output_tokens":3000})).collect::<Vec<_>>());
+                return Ok(answer.to_string());
+            }
+            if phase == "synthesis" {
+                return Ok(synthesis_answer(&request.prompt));
+            }
+            Ok(json!({"summary":"有界章节成果","content_md":"已保存当前主题，保留条件与缺口。","findings":[{"finding":"需要补充独立证据","status":"partial","citation_indices":[],"limitations":["未核验全部条件"]}]}).to_string())
+        }
+
+        async fn prompt_with_events(
+            &self,
+            request: AgentPromptRequest,
+            events: Option<tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+            _cancel: tokio::sync::watch::Receiver<bool>,
+        ) -> Result<String, BrainError> {
+            let result = self.prompt(request).await;
+            if result.is_err() {
+                if let Some(events) = events {
+                    let _ = events.send(AgentRuntimeEvent::TextDelta {
+                        delta: "{\"summary\":\"已输出部分内容\",".into(),
+                    });
+                    let _ = events.send(AgentRuntimeEvent::Completed {
+                        stop_reason: "max_tokens".into(),
+                        complete: false,
+                    });
+                }
+            }
+            result
+        }
+    }
+
+    #[tokio::test]
+    async fn test_all_research_phases_expand_independently_without_spending_task_retries() {
+        let (dir, original, task, _) = plan_repair_fixture(false);
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let store = original.store.clone();
+        // Reproduce a task which has already exhausted its global queue retries.
+        rusqlite::Connection::open(dir.path().join("phase-repair.db"))
+            .unwrap()
+            .execute(
+                "UPDATE knowledge_tasks SET attempt_count=max_attempts WHERE id=?1",
+                [&task.id],
+            )
+            .unwrap();
+        let service = BookWikiService::new(
+            store.clone(),
+            Arc::new(ExpandingResearchRuntime {
+                calls: calls.clone(),
+                truncations: 2,
+                format_first: false,
+                cancel_task: None,
+            }),
+        );
+        let (_, report, _) = service.execute_research_workflow(&task).await.unwrap();
+        assert!(report.contains("已保存当前主题"));
+        let workspace = store.get_research_workspace(&task.id).unwrap().unwrap();
+        assert!(workspace
+            .stages
+            .iter()
+            .all(|stage| stage.status == "completed"));
+        for stage in workspace
+            .stages
+            .iter()
+            .filter(|stage| matches!(stage.kind.as_str(), "plan" | "section" | "synthesis"))
+        {
+            let run_id = stage.run_id.as_deref().unwrap();
+            assert_eq!(
+                store.get_agent_run(run_id).unwrap().input["output_expansion_attempt"],
+                2
+            );
+            assert!(store
+                .list_agent_run_events(run_id)
+                .unwrap()
+                .iter()
+                .any(|event| event.event_type == "run.output_budget_expanded"));
+            assert_eq!(
+                store
+                    .get_agent_run_inspection(run_id)
+                    .unwrap()
+                    .snapshot
+                    .unwrap()
+                    .evidence_refs["output_expansion_attempt"],
+                2
+            );
+        }
+        let conn = rusqlite::Connection::open(dir.path().join("phase-repair.db")).unwrap();
+        let unchanged: bool = conn
+            .query_row(
+                "SELECT attempt_count=max_attempts FROM knowledge_tasks WHERE id=?1",
+                [&task.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(unchanged);
+        let calls = calls.lock().unwrap();
+        for key in ["plan", "q0", "q1", "q2", "synthesis"] {
+            let budgets = calls
+                .iter()
+                .filter(|(stage, _)| stage == key)
+                .map(|(_, budget)| *budget)
+                .collect::<Vec<_>>();
+            assert_eq!(budgets.len(), 3);
+            assert!(budgets[1] >= budgets[0] * 2);
+            assert!(budgets[2] >= budgets[1] * 2);
+        }
+        let mut statement = conn
+            .prepare("SELECT id FROM agent_runs WHERE status='failed'")
+            .unwrap();
+        let failed = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(failed.len(), 10);
+        for id in failed {
+            let run = store.get_agent_run(&id).unwrap();
+            assert_eq!(run.output.as_ref().unwrap()["stop_reason"], "max_tokens");
+            assert!(run.output.as_ref().unwrap()["partial_answer"]
+                .as_str()
+                .unwrap()
+                .contains("已输出部分内容"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_research_format_repair_and_token_expansion_have_independent_allowances() {
+        let (_dir, original, task, _) = plan_repair_fixture(false);
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let service = BookWikiService::new(
+            original.store.clone(),
+            Arc::new(ExpandingResearchRuntime {
+                calls: calls.clone(),
+                truncations: 2,
+                format_first: true,
+                cancel_task: None,
+            }),
+        );
+        let profile = service.active_runtime_profile().unwrap();
+        service
+            .persist_model_research_phase(plan_phase(&task, &profile), |claim, run, answer| {
+                let plan: ResearchPlan = parse_phase(answer)?;
+                service.store.save_research_plan(claim, run, &plan)
+            })
+            .await
+            .unwrap();
+        assert_eq!(calls.lock().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_research_repeated_truncation_is_bounded_and_cancel_never_expands() {
+        for cancelled in [false, true] {
+            let (_dir, original, task, _) = plan_repair_fixture(false);
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            let store = original.store.clone();
+            let service = BookWikiService::new(
+                store.clone(),
+                Arc::new(ExpandingResearchRuntime {
+                    calls: calls.clone(),
+                    truncations: 10,
+                    format_first: false,
+                    cancel_task: cancelled.then(|| (store.clone(), task.id.clone())),
+                }),
+            );
+            let profile = service.active_runtime_profile().unwrap();
+            let result: Result<(), BrainError> = service
+                .persist_model_research_phase(plan_phase(&task, &profile), |_, _, _| Ok(()))
+                .await;
+            assert!(result.is_err());
+            assert_eq!(calls.lock().unwrap().len(), if cancelled { 1 } else { 3 });
+            if !cancelled {
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("research_output_retry_exhausted"));
+            }
+            assert!(store
+                .get_research_workspace(&task.id)
+                .unwrap()
+                .unwrap()
+                .plan
+                .is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_research_phase_storage_failure_returns_original_error_without_model_repair() {
+        let (_dir, service, task, calls) = plan_repair_fixture(false);
+        let profile = service.active_runtime_profile().unwrap();
+        let result: Result<(), BrainError> = service
+            .persist_model_research_phase(plan_phase(&task, &profile), |_, _, answer| {
+                let plan: ResearchPlan = parse_phase(answer)?;
+                validate_research_plan(&plan)?;
+                Err(BrainError::Internal(
+                    "SQLite CHECK constraint failed: kind".into(),
+                ))
+            })
+            .await;
+        assert!(
+            matches!(result, Err(BrainError::Internal(ref message)) if message.contains("SQLite CHECK"))
+        );
+        assert_eq!(
+            calls.lock().unwrap().len(),
+            1,
+            "数据库错误不能要求模型改写合法 JSON"
+        );
+        let workspace = service
+            .store
+            .get_research_workspace(&task.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(workspace.stages[0].status, "failed");
+        assert!(workspace.stages[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("SQLite CHECK"));
+    }
+
+    #[tokio::test]
+    async fn test_research_phase_unknown_kind_repairs_once_and_persists_strict_contract() {
+        let (_dir, service, task, calls) = plan_repair_fixture(true);
+        let profile = service.active_runtime_profile().unwrap();
+        let plan = service
+            .persist_model_research_phase(plan_phase(&task, &profile), |claim, run, answer| {
+                let plan: ResearchPlan = parse_phase(answer)?;
+                validate_research_plan(&plan)?;
+                service.store.save_research_plan(claim, run, &plan)?;
+                Ok(plan)
+            })
+            .await
+            .unwrap();
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert!(!calls[0].contains("<phase_repair_context>"));
+        assert!(calls[1].contains("unknown field `kind`"));
+        let workspace = service
+            .store
+            .get_research_workspace(&task.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(workspace.plan.unwrap(), plan);
+        assert_eq!(workspace.stages[0].status, "completed");
+        assert!(workspace
+            .stages
+            .iter()
+            .any(|stage| stage.kind == "synthesis"));
+    }
+
+    #[tokio::test]
+    async fn test_research_phase_contract_repair_stops_after_second_validation_failure() {
+        let (_dir, service, task, calls) = plan_repair_fixture(false);
+        let profile = service.active_runtime_profile().unwrap();
+        let result: Result<(), BrainError> = service
+            .persist_model_research_phase(plan_phase(&task, &profile), |_, _, _| {
+                Err(BrainError::KnowledgeValidation(
+                    "具体字段仍不符合合同".into(),
+                ))
+            })
+            .await;
+        assert!(
+            matches!(result, Err(BrainError::KnowledgeValidation(ref message)) if message == "具体字段仍不符合合同")
+        );
+        assert_eq!(calls.lock().unwrap().len(), 2);
+        let workspace = service
+            .store
+            .get_research_workspace(&task.id)
+            .unwrap()
+            .unwrap();
+        assert!(workspace.plan.is_none());
+        assert_eq!(workspace.stages[0].status, "failed");
+    }
+
+    #[tokio::test]
+    async fn test_research_phase_cancel_or_lost_lease_never_repairs_or_masks_original_error() {
+        for cancelled in [false, true] {
+            let (_dir, service, task, calls) = plan_repair_fixture(false);
+            let profile = service.active_runtime_profile().unwrap();
+            let result: Result<(), BrainError> = service
+                .persist_model_research_phase(plan_phase(&task, &profile), |_, _, _| {
+                    if cancelled {
+                        service.store.request_task_cancel(&task.id)?;
+                    } else {
+                        // A stopped task has no live lease; its old worker cannot
+                        // mark the phase failed or claim another model attempt.
+                        service
+                            .store
+                            .fail_task_execution(&task.id, "执行器已停止")?;
+                    }
+                    Err(BrainError::KnowledgeValidation("保留最初字段错误".into()))
+                })
+                .await;
+            assert!(
+                matches!(result, Err(BrainError::KnowledgeValidation(ref message)) if message == "保留最初字段错误")
+            );
+            assert_eq!(calls.lock().unwrap().len(), 1);
+            let workspace = service
+                .store
+                .get_research_workspace(&task.id)
+                .unwrap()
+                .unwrap();
+            assert!(workspace.plan.is_none());
+            assert_eq!(
+                workspace.stages[0].status,
+                if cancelled { "cancelled" } else { "running" }
+            );
+        }
+    }
+
     fn synthesis_answer(prompt: &str) -> String {
         let raw = prompt
             .split_once("<phase_scope>\n")
@@ -541,6 +1048,36 @@ mod tests {
         let store = BookWikiStore::new(Arc::new(
             SqliteStore::new(&dir.path().join("long-ppt.db")).unwrap(),
         ));
+        // Exercise projection using an explicitly small model, rather than
+        // relying on the old 32K default for every unknown provider.
+        let provider = store
+            .save_model_provider_profile(
+                "projection-model",
+                "小容量投影测试",
+                "openai-completions",
+                "https://example.com/v1",
+                "projection-test",
+                "keychain",
+                "",
+                true,
+                true,
+                Some(32768),
+                Some(16384),
+                "off",
+                0,
+            )
+            .unwrap();
+        let profile = store.list_runtime_profiles().unwrap().remove(0);
+        store
+            .save_runtime_profile(
+                &profile.id,
+                &profile.executable,
+                &provider.model,
+                Some(&provider.provider_id),
+                true,
+                profile.revision,
+            )
+            .unwrap();
         store
             .save_reader_books(&[ReaderBook {
                 id: "book".into(),
@@ -553,7 +1090,15 @@ mod tests {
                 progress: None,
             }])
             .unwrap();
+        use crate::infra::credential_store::{
+            tests::MemoryProviderCredentialStore, ProviderCredentialStore,
+        };
+        let credentials = Arc::new(MemoryProviderCredentialStore::default());
+        credentials
+            .set(&provider.provider_id, "fixture-only")
+            .unwrap();
         let service = BookWikiService::new(store.clone(), Arc::new(LongReportRuntime))
+            .with_credential_store(credentials)
             .with_artifact_root(dir.path().join("artifacts"));
         let base = service.initialize_and_sync("book").unwrap().knowledge_base;
         let task = store

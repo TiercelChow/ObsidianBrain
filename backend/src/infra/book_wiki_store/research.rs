@@ -1056,7 +1056,7 @@ impl BookWikiStore {
             let report:Option<String>=conn.query_row("SELECT content_md FROM knowledge_research_stages WHERE task_id=?1 AND stage_key='report' AND content_md<>''",[task],|row|row.get(0)).optional()?;
             let reason=error.chars().take(2000).collect::<String>();
             let summary=if let Some(report)=report {format!("> [!warning] 后续交付未完成，完整研究报告和已保存阶段仍保留。\n> 原因：{reason}\n\n{report}")} else {format!("执行未完成：{reason}；已保存阶段保留，重试从未完成阶段恢复。")};
-            let retry=!cancelled && retry_count<max_attempts && !["(research_output_hard_limit)","(research_input_hard_limit)"].iter().any(|marker|error.contains(marker));
+            let retry=!cancelled && retry_count<max_attempts && !["(research_output_hard_limit)","(research_input_hard_limit)","(research_output_retry_exhausted)"].iter().any(|marker|error.contains(marker));
             let status=if cancelled {"cancelled"} else if retry {"queued"} else {"failed"};
             let delay=5_i64.saturating_mul(2_i64.saturating_pow((retry_count-1).clamp(0,8) as u32)).min(300);
             let next=retry.then(||(now+chrono::Duration::seconds(delay)).to_rfc3339());
@@ -1128,6 +1128,21 @@ mod tests {
             .unwrap();
         store.start_task_execution(&task.id).unwrap();
         (store, dir, base.id, task.id)
+    }
+
+    #[test]
+    fn test_exhausted_phase_output_stops_queue_retry_but_allows_explicit_resume() {
+        let (store, _dir, _base, task) = fixture();
+        let epoch = store.research_attempt(&task).unwrap();
+        store
+            .fail_research_task(
+                &task,
+                epoch,
+                "(research_output_retry_exhausted) 当前阶段扩容已耗尽",
+            )
+            .unwrap();
+        assert_eq!(store.get_task(&task).unwrap().status, "failed");
+        assert_eq!(store.queue_task_execution(&task).unwrap().status, "queued");
     }
     fn plan() -> ResearchPlan {
         ResearchPlan {

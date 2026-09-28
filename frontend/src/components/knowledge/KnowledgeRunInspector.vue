@@ -12,10 +12,13 @@
       <div class="adaptive-metrics">
         <div v-if="diagnostics.planning.total != null"><small>已浏览编译目录</small><strong>{{ format(diagnostics.planning.seen) }} / {{ format(diagnostics.planning.total) }}</strong></div>
         <div v-if="diagnostics.research.initialTarget != null"><small>初始候选目标 · 非实际覆盖</small><strong>{{ format(diagnostics.research.initialTarget) }}</strong></div>
-        <div v-if="diagnostics.research.capacity != null"><small>{{ diagnostics.research.capacityKnown ? '配置声明的模型容量' : '未知模型容量 · 应用护栏' }}</small><strong>{{ format(diagnostics.research.capacity) }} tokens</strong></div>
+        <div v-if="diagnostics.research.capacity != null"><small>{{ diagnostics.research.capacityBasis === 'observed_runtime_capacity' ? 'Runtime 上报的模型容量' : diagnostics.research.capacityKnown ? '配置声明的模型容量' : '未知模型容量 · 应用默认值' }}</small><strong>{{ format(diagnostics.research.capacity) }} tokens</strong></div>
         <div><small>工具调用 · 当前软限 / 硬限</small><strong>{{ format(diagnostics.budget.used) }} · {{ format(diagnostics.budget.soft) }} / {{ format(diagnostics.budget.hard) }}</strong></div>
         <div><small>工具返回负载估算 · 硬上限</small><strong>{{ format(diagnostics.budget.tokens) }} / {{ format(diagnostics.budget.hardTokens) }}</strong><small>数据取证软限：{{ format(diagnostics.budget.softTokens) }}</small></div>
-        <div><small>本轮输出 / 声明上下文</small><strong>{{ format(runtime.budget.effective_max_output_tokens) }} / {{ format(runtime.budget.context_window) }} tokens</strong></div>
+        <div><small>本轮输出 / 有效上下文</small><strong>{{ format(runtime.budget.effective_max_output_tokens) }} / {{ format(runtime.budget.context_window) }} tokens</strong></div>
+        <div v-if="diagnostics.research.contentTokens != null"><small>正文篇幅估计 · 非目标长度</small><strong>{{ format(diagnostics.research.contentTokens) }} tokens</strong></div>
+        <div v-if="diagnostics.research.structureTokens != null"><small>JSON 结构基础预留</small><strong>{{ format(diagnostics.research.structureTokens) }} tokens</strong></div>
+        <div v-if="diagnostics.research.reasoningTokens != null"><small>推理基础预留 · 非实测用量</small><strong>{{ format(diagnostics.research.reasoningTokens) }} tokens</strong></div>
         <div v-if="diagnostics.planning.secondsLimit != null"><small>规划耗时 / 上限</small><strong>{{ diagnostics.planning.elapsedMs == null ? '—' : `${(diagnostics.planning.elapsedMs / 1000).toFixed(1)} 秒` }} / {{ format(diagnostics.planning.secondsLimit) }} 秒</strong></div>
         <div v-if="diagnostics.research.secondsLimit != null"><small>研究阶段执行上限 · 非已用时</small><strong>{{ format(diagnostics.research.secondsLimit) }} 秒</strong></div>
       </div>

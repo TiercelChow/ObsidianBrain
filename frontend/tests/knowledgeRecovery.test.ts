@@ -10,6 +10,14 @@ test('an interrupted provider-batched answer retains all received text, not only
   assert.match(recovered.notice, /不完整/)
 })
 
+test('an empty max-token answer explains retry exhaustion without pretending a draft exists', () => {
+  const interrupted = interruptedKnowledgeAnswer('', '', new Error('DeepSeek Harness 达到输出 token 上限且未返回正文 (stop_reason=max_tokens)'))
+  assert.equal(interrupted.content, '')
+  assert.equal(interrupted.kind, 'truncated')
+  assert.match(interrupted.notice, /没有收到正文/)
+  assert.doesNotMatch(interrupted.notice, /继续完成完整答案/)
+})
+
 test('a transient failure never switches the next available Runtime request into evidence-only mode', () => {
   const failed = interruptedKnowledgeAnswer('', '', new Error('连接超时'))
   assert.equal(failed.kind, 'failed')
