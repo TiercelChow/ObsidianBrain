@@ -228,6 +228,23 @@ export interface KnowledgeGraphSnapshot {
   truncated: boolean
 }
 
+export interface ResearchBrief {
+  confirmed: boolean
+  audience: 'general' | 'specialist' | 'beginner' | 'self'
+  purpose: 'understand' | 'decision' | 'teach' | 'reference'
+  tone: 'analytical' | 'technical' | 'narrative' | 'concise'
+  depth: 'brief' | 'standard' | 'deep'
+  presentation_theme: 'editorial' | 'midnight' | 'sage'
+  emphasis: string
+}
+
+export interface ResearchPreflight {
+  summary: string
+  recommended: ResearchBrief
+  focus_decisions: Array<'audience' | 'purpose' | 'tone' | 'depth' | 'presentation_theme'>
+  cautions: string[]
+}
+
 export interface KnowledgeTask {
   id: string
   knowledge_base_id: string
@@ -245,6 +262,7 @@ export interface KnowledgeTask {
   external_domains: string[]
   external_request_limit: number
   external_requests_used: number
+  brief: ResearchBrief
   created_at: string
   updated_at: string
 }
@@ -1073,6 +1091,7 @@ export function createKnowledgeTask(input: {
   externalResearchEnabled?: boolean
   externalDomains?: string[]
   externalRequestLimit?: number
+  brief?: ResearchBrief
 }) {
   return callTool('create_knowledge_task', {
     knowledge_base_id: input.knowledgeBaseId,
@@ -1083,7 +1102,24 @@ export function createKnowledgeTask(input: {
     external_research_enabled: input.externalResearchEnabled ?? false,
     external_domains: input.externalDomains ?? [],
     external_request_limit: input.externalRequestLimit ?? 0,
+    ...(input.brief ? { brief: input.brief } : {}),
   }) as unknown as Promise<ToolEnvelope<KnowledgeTask>>
+}
+
+export function previewKnowledgeTaskBrief(input: {
+  knowledgeBaseId: string
+  title: string
+  description: string
+  taskType: KnowledgeTask['task_type']
+  deliverableType: KnowledgeTask['deliverable_type']
+}) {
+  return callTool('preview_knowledge_task_brief', {
+    knowledge_base_id: input.knowledgeBaseId,
+    title: input.title,
+    description: input.description,
+    task_type: input.taskType,
+    deliverable_type: input.deliverableType,
+  }) as unknown as Promise<ToolEnvelope<ResearchPreflight>>
 }
 
 export function executeKnowledgeTask(taskId: string) {

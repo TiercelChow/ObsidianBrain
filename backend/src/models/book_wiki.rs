@@ -252,8 +252,135 @@ pub struct KnowledgeTask {
     pub external_domains: Vec<String>,
     pub external_request_limit: i64,
     pub external_requests_used: i64,
+    pub brief: ResearchBrief,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// User-confirmed editorial contract; it is task input, not model evidence.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct ResearchBrief {
+    pub confirmed: bool,
+    pub audience: String,
+    pub purpose: String,
+    pub tone: String,
+    pub depth: String,
+    pub presentation_theme: String,
+    pub emphasis: String,
+}
+
+impl Default for ResearchBrief {
+    fn default() -> Self {
+        Self {
+            confirmed: false,
+            audience: "general".into(),
+            purpose: "understand".into(),
+            tone: "analytical".into(),
+            depth: "standard".into(),
+            presentation_theme: "editorial".into(),
+            emphasis: String::new(),
+        }
+    }
+}
+
+impl ResearchBrief {
+    pub fn validate(&self) -> Result<(), String> {
+        for (name, value, allowed) in [
+            (
+                "受众",
+                self.audience.as_str(),
+                &["general", "specialist", "beginner", "self"] as &[&str],
+            ),
+            (
+                "用途",
+                self.purpose.as_str(),
+                &["understand", "decision", "teach", "reference"],
+            ),
+            (
+                "表述",
+                self.tone.as_str(),
+                &["analytical", "technical", "narrative", "concise"],
+            ),
+            ("深度", self.depth.as_str(), &["brief", "standard", "deep"]),
+            (
+                "演示主题",
+                self.presentation_theme.as_str(),
+                &["editorial", "midnight", "sage"],
+            ),
+        ] {
+            if !allowed.contains(&value) {
+                return Err(format!("未知的研究{name}偏好"));
+            }
+        }
+        if self.emphasis.chars().count() > 500 {
+            return Err("研究强调事项不能超过 500 个字符".into());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ResearchPreflight {
+    pub summary: String,
+    pub recommended: ResearchBrief,
+    /// A ranked subset of audience, purpose, tone, depth, presentation_theme.
+    pub focus_decisions: Vec<String>,
+    pub cautions: Vec<String>,
+}
+
+impl ResearchPreflight {
+    pub fn validate(&self, deliverable_type: &str) -> Result<(), String> {
+        self.recommended.validate()?;
+        if self.summary.trim().is_empty() || self.summary.chars().count() > 600 {
+            return Err("研究预分析摘要长度不合适".into());
+        }
+        if self.focus_decisions.is_empty() || self.focus_decisions.len() > 4 {
+            return Err("研究预分析必须指出一至四个决策点".into());
+        }
+        let mut seen = std::collections::HashSet::new();
+        for field in &self.focus_decisions {
+            if !matches!(
+                field.as_str(),
+                "audience" | "purpose" | "tone" | "depth" | "presentation_theme"
+            ) || (field == "presentation_theme" && deliverable_type != "presentation")
+                || !seen.insert(field)
+            {
+                return Err("研究预分析包含无效或重复决策点".into());
+            }
+        }
+        if self.cautions.len() > 3 || self.cautions.iter().any(|v| v.chars().count() > 160) {
+            return Err("研究预分析提示超出长度限制".into());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod research_brief_tests {
+    use super::ResearchBrief;
+
+    #[test]
+    fn test_research_brief_rejects_unknown_presentation_theme() {
+        let mut brief = ResearchBrief::default();
+        brief.presentation_theme = "neon".into();
+        assert!(brief.validate().is_err());
+    }
+
+    #[test]
+    fn test_research_brief_accepts_bounded_user_preferences() {
+        let brief = ResearchBrief {
+            confirmed: true,
+            audience: "specialist".into(),
+            purpose: "decision".into(),
+            tone: "technical".into(),
+            depth: "deep".into(),
+            presentation_theme: "midnight".into(),
+            emphasis: "优先比较方案的适用边界".into(),
+        };
+        assert!(brief.validate().is_ok());
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

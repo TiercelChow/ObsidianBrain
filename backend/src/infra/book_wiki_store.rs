@@ -17,10 +17,11 @@ use crate::models::book_wiki::{
     KnowledgeEntryDetail, KnowledgeEntryPage, KnowledgeEntrySummary, KnowledgeEntryVersionSummary,
     KnowledgeGraphOverview, KnowledgeGraphPath, KnowledgeGraphRelation, KnowledgeGraphSnapshot,
     KnowledgeHealthIssue, KnowledgeHealthReport, KnowledgeMessage, KnowledgeRelationSummary,
-    KnowledgeTask, ModelProviderProfile, ReaderBook, RuntimeProfile, SourceDocumentSummary,
-    SourceSpanSnapshot, WikiSkill, WikiSkillBenchmarkCase, WikiSkillBenchmarkCaseResult,
-    WikiSkillBenchmarkRun, WikiSkillDetail, WikiSkillEvaluationFinding, WikiSkillEvaluationRun,
-    WikiSkillFile, WikiSkillOrigin, WikiSkillVersion, MARKDOWN_EXTRACTION_VERSION,
+    KnowledgeTask, ModelProviderProfile, ReaderBook, ResearchBrief, RuntimeProfile,
+    SourceDocumentSummary, SourceSpanSnapshot, WikiSkill, WikiSkillBenchmarkCase,
+    WikiSkillBenchmarkCaseResult, WikiSkillBenchmarkRun, WikiSkillDetail,
+    WikiSkillEvaluationFinding, WikiSkillEvaluationRun, WikiSkillFile, WikiSkillOrigin,
+    WikiSkillVersion, MARKDOWN_EXTRACTION_VERSION,
 };
 
 const LEGACY_BOOKS_KEY: &str = "reader_books";
@@ -3980,7 +3981,7 @@ impl BookWikiStore {
                         kt.artifact_state, kt.knowledge_change_state, kt.cancel_requested,
                         kt.external_research_enabled, kt.external_domains_json,
                         kt.external_request_limit, kt.external_requests_used,
-                        kt.created_at, kt.updated_at
+                        kt.created_at, kt.updated_at, kt.brief_json
                  FROM knowledge_tasks kt
                  JOIN knowledge_bases kb ON kb.id = kt.knowledge_base_id
                  JOIN reader_books b ON b.id = kb.book_id
@@ -4034,6 +4035,33 @@ impl BookWikiStore {
         external_domains: &[String],
         external_request_limit: i64,
     ) -> Result<KnowledgeTask, BrainError> {
+        self.create_task_with_brief(
+            base_id,
+            title,
+            description,
+            task_type,
+            deliverable_type,
+            external_research_enabled,
+            external_domains,
+            external_request_limit,
+            &ResearchBrief::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_task_with_brief(
+        &self,
+        base_id: &str,
+        title: &str,
+        description: &str,
+        task_type: &str,
+        deliverable_type: &str,
+        external_research_enabled: bool,
+        external_domains: &[String],
+        external_request_limit: i64,
+        brief: &ResearchBrief,
+    ) -> Result<KnowledgeTask, BrainError> {
+        brief.validate().map_err(BrainError::KnowledgeValidation)?;
         let title = title.trim();
         let description = description.trim();
         if title.is_empty() {
@@ -4086,6 +4114,8 @@ impl BookWikiStore {
         };
         let external_domains_json = serde_json::to_string(&external_domains)
             .map_err(|error| BrainError::Internal(format!("外部研究域名序列化失败: {error}")))?;
+        let brief_json = serde_json::to_string(brief)
+            .map_err(|error| BrainError::Internal(format!("研究简报序列化失败: {error}")))?;
         self.get_active_base(base_id)?;
         let id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
@@ -4095,10 +4125,10 @@ impl BookWikiStore {
                  (id, knowledge_base_id, title, description, task_type, status,
                   deliverable_type, artifact_state, external_research_enabled,
                   external_domains_json, external_request_limit, external_requests_used,
-                  created_at, updated_at)
+                  created_at, updated_at, brief_json)
                  VALUES (?1, ?2, ?3, ?4, ?5, 'draft', ?6,
                          CASE WHEN ?6 = 'presentation' THEN 'pending' ELSE 'not_requested' END,
-                         ?7, ?8, ?9, 0, ?10, ?10)",
+                         ?7, ?8, ?9, 0, ?10, ?10, ?11)",
                 params![
                     id,
                     base_id,
@@ -4110,6 +4140,7 @@ impl BookWikiStore {
                     external_domains_json,
                     external_request_limit,
                     now,
+                    brief_json,
                 ],
             )?;
             Ok(())
@@ -4128,7 +4159,7 @@ impl BookWikiStore {
                         kt.artifact_state, kt.knowledge_change_state, kt.cancel_requested,
                         kt.external_research_enabled, kt.external_domains_json,
                         kt.external_request_limit, kt.external_requests_used,
-                        kt.created_at, kt.updated_at
+                        kt.created_at, kt.updated_at, kt.brief_json
                  FROM knowledge_tasks kt
                  JOIN knowledge_bases kb ON kb.id = kt.knowledge_base_id
                  JOIN reader_books b ON b.id = kb.book_id
@@ -7383,6 +7414,10 @@ fn map_knowledge_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<KnowledgeTask
     let external_domains = serde_json::from_str(&raw_domains).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(13, rusqlite::types::Type::Text, Box::new(error))
     })?;
+    let raw_brief = row.get::<_, String>(18)?;
+    let brief = serde_json::from_str(&raw_brief).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(18, rusqlite::types::Type::Text, Box::new(error))
+    })?;
     Ok(KnowledgeTask {
         id: row.get(0)?,
         knowledge_base_id: row.get(1)?,
@@ -7400,6 +7435,7 @@ fn map_knowledge_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<KnowledgeTask
         external_domains,
         external_request_limit: row.get(14)?,
         external_requests_used: row.get(15)?,
+        brief,
         created_at: row.get(16)?,
         updated_at: row.get(17)?,
     })
@@ -10960,6 +10996,39 @@ mod tests {
     }
 
     #[test]
+    fn test_create_knowledge_task_persists_user_confirmed_brief() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-brief", "/tmp/book-brief")])
+            .unwrap();
+        let base = store.initialize_base("book-brief").unwrap();
+        let brief = ResearchBrief {
+            confirmed: true,
+            audience: "specialist".into(),
+            purpose: "decision".into(),
+            tone: "technical".into(),
+            depth: "deep".into(),
+            presentation_theme: "midnight".into(),
+            emphasis: "保留反例".into(),
+        };
+        let task = store
+            .create_task_with_brief(
+                &base.id,
+                "比较两种机制",
+                "",
+                "research",
+                "presentation",
+                false,
+                &[],
+                0,
+                &brief,
+            )
+            .unwrap();
+        assert_eq!(store.get_task(&task.id).unwrap().brief, brief);
+        assert_eq!(store.list_tasks(Some(&base.id)).unwrap()[0].brief, brief);
+    }
+
+    #[test]
     fn test_model_provider_request_accepts_declared_model_capabilities() {
         let request = serde_json::from_value::<crate::models::book_wiki::SaveModelProviderRequest>(
             serde_json::json!({
@@ -11373,6 +11442,7 @@ mod tests {
                  ALTER TABLE llm_provider_profiles DROP COLUMN max_output_tokens;
                  ALTER TABLE llm_provider_profiles DROP COLUMN context_window;
                  ALTER TABLE llm_provider_profiles DROP COLUMN reasoning_policy;
+                 ALTER TABLE knowledge_tasks DROP COLUMN brief_json;
                  DELETE FROM _migrations WHERE version >= 40;",
                 )
                 .map_err(Into::into)

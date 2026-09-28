@@ -479,7 +479,7 @@ async function ask(question: string, recovery?: ChatMessage) {
   try {
     if (knowledgeRuntimeMode(runtimeReady.value) === 'runtime') {
       askController = new AbortController()
-      const textBuffer = createStreamedTextBuffer(chunk => { assistantMessage.content += chunk })
+      let textBuffer = createStreamedTextBuffer(chunk => { assistantMessage.content += chunk })
       activeTextBuffer = textBuffer
       let answerEvidenceDelivered = false
       const result = await streamBookKnowledge(
@@ -492,6 +492,13 @@ async function ask(question: string, recovery?: ChatMessage) {
             assistantMessage.evidence = event.evidence
           } else if (event.type === 'run_started') {
             if (answerEvidenceDelivered) {
+              if (receivedText) {
+                textBuffer.cancel()
+                assistantMessage.content = ''
+                receivedText = ''
+                textBuffer = createStreamedTextBuffer(chunk => { assistantMessage.content += chunk })
+                activeTextBuffer = textBuffer
+              }
               assistantMessage.runId = event.run_id
               setActivity('正在连接模型')
             }

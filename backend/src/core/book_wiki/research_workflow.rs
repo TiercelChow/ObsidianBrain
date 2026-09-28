@@ -76,6 +76,13 @@ impl BookWikiService {
         prompt.push_str(&format!("<phase_capacity>\n{}\n</phase_capacity>\n规划 depth 只选 brief、standard、deep，章节 finding.status 只选 supported、partial、missing、conflict。expected_output_tokens 是每个主题的必要篇幅估计（可为 null，1至262144为安全边界），不是必须输出的长度；依据目标、复杂度、完整公式/论证需求估计。实际请求仍受模型容量和供应商输出硬限，估计过大的主题应合理拆分，不能删去关键条件以求短。容量若未知，只是应用护栏，不冒充真实模型上限。\n",json!({"capacity_tokens":phase.resources.capacity_tokens,"capacity_basis":phase.resources.capacity_basis,"phase_output_tokens":phase.resources.output_tokens})));
         if phase.phase == "plan" {
             prompt.push_str("本阶段只确定业务目标、约束、验收条件、术语与报告主题；这不是隐藏思维链。主题数量按实际问题规模确定，1至24是安全边界而非必须凑满，不固定两到四个。可通过只读工具浏览编译知识、查找具体核验对象，不在本阶段编造研究结论。review 必须在子问题中明确待核验的真实条目与具体主张；refresh 必须明确真实基线条目与待比较的依据。找不到基线则把它列为具体缺口，不编造旧版变化。返回规划，不生成长报告或幻灯片。\n");
+            if phase.task.brief.confirmed {
+                prompt.push_str(&format!(
+                    "用户已确认研究简报：plan.depth 必须为 {}；acceptance 需要体现受众 {}、用途 {} 和特别强调事项（{}），同时不把视觉主题当作证据要求。\n",
+                    phase.task.brief.depth, phase.task.brief.audience, phase.task.brief.purpose,
+                    if phase.task.brief.emphasis.trim().is_empty() { "无" } else { phase.task.brief.emphasis.as_str() },
+                ));
+            }
         } else if phase.phase == "synthesis" {
             prompt.push_str("本阶段综合全部已保存主题，回答整体目标，不再逐章重复研究。integration_manifest 含每个主题的完整发现、限制与实际版本；这些是待核验的章节成果，不是本轮原始证据。按需用 knowledge_get_research_section 分页查看完整章节，has_more 时继续；旧章节引用已中性化，不能直接复制为本轮S引用。关键事实需通过当前实体/原文工具取得本轮编号。逐项对照全部主题的目标覆盖、术语、比较维度、适用条件/版本、同源重复、反例和矛盾；不得以术语统一抹平条件差异。section_checks 必须覆盖全部主题且精确对应版本；对照判断只是模型自报，不能冒充独立事实证明。明显冲突保留双方依据和条件，未知列出缺口，不强行得出一致结论。证据不足可输出 partial/missing；supported/conflict 仍必须有本轮实际已读引用。使用预算/覆盖/扩展工具按缺口补查，不固定top-k。question_index 按本阶段预算工具的 required_evidence 列表填写。禁止生成幻灯片、删去原报告章节或伪装历史对象核验。\n");
         } else {
@@ -85,6 +92,15 @@ impl BookWikiService {
             prompt.push_str("review/refresh 在规划中用 target_entry_ids 选择通过工具找到的真实编译条目，不能捏造ID或把章节兜底当作知识实体。章节阶段用 knowledge_get_research_baseline 分页读取已冻结的正文、具体主张和旧版来源，has_more/metadata_has_more 时补读。旧版输入不是当前证据，不可用它生成S引用；再读当前知识/原文完成对照。每个选定条目必须有对应 finding.baseline_entry_id，核验具体主张同时填 baseline_claim_id。review 明确原主张、支持/反驳依据、适用条件及缺口；refresh 明确旧版判断、当前判断、变化原因、未变和缺口，不虚构版本变化。不曾找到基线时只能输出 partial/missing。\n");
         }
         prompt.push_str(&format!("<phase_output_contract>\n{}\n</phase_output_contract>\n只输出单个完整 JSON 对象；不输出围栏、前后解释、第二个对象、占位符或隐藏思考。上方是字段合同示意，必须替换示例值；枚举只选一个合法值。阶段由 research_phase 标签确定，不增加 kind、phase、type 等合同外字段，也不包装外层对象。当前阶段合同优先于通用 Skill 的默认最终报告格式。\n",phase_contract(phase.phase)));
+        if phase.task.brief.confirmed && phase.phase != "plan" {
+            prompt.push_str(&format!(
+                "content_md 是面向 {}、用于 {} 的独立阅读材料，采用 {} 的表达方式；不要以‘用户问了什么、我回答什么’作为章节骨架，不写空泛的开场白或重复结论。预期深度为 {}，但篇幅服从证据与问题复杂度。\n",
+                phase.task.brief.audience,
+                phase.task.brief.purpose,
+                phase.task.brief.tone,
+                phase.task.brief.depth,
+            ));
+        }
         let mut evidence_ids = Vec::new();
         let spare = phase
             .resources
@@ -314,6 +330,9 @@ impl BookWikiService {
             self.persist_model_research_phase(ResearchPhase{task,profile:&profile,key:"plan".into(),phase:"plan",payload:json!({"goal":task.title,"description":task.description,"task_type":task.task_type}),resources:ResearchResources::new(&profile,None,None,catalog.len()),evidence:vec![]},|claim,run,answer| {
                 let plan:ResearchPlan=parse_phase(answer)?;
                 validate_research_plan(&plan)?;
+                if task.brief.confirmed && plan.depth != task.brief.depth {
+                    return Err(BrainError::KnowledgeValidation(format!("研究规划 depth={} 与用户确认的 {} 不一致",plan.depth,task.brief.depth)));
+                }
                 self.store.save_research_plan(claim,run,&plan)?;
                 Ok(plan)
             }).await?
@@ -1196,7 +1215,7 @@ mod tests {
                 .status,
             "failed"
         );
-        store.request_task_cancel(&task.id).unwrap();
+        assert_eq!(store.get_task(&task.id).unwrap().status, "failed");
         let result = service.execute_task(&task.id).await.unwrap();
         assert_eq!(result.task.status, "completed");
         assert_eq!(calls.lock().unwrap().len(), 5);
@@ -1323,7 +1342,7 @@ mod tests {
                 .status,
             "failed"
         );
-        store.request_task_cancel(&task.id).unwrap();
+        assert_eq!(store.get_task(&task.id).unwrap().status, "failed");
         let result = service.execute_task(&task.id).await.unwrap();
         assert_eq!(result.task.status, "completed");
         let prompts = calls.lock().unwrap();

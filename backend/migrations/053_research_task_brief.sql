@@ -1,0 +1,1 @@
+ALTER TABLE knowledge_tasks ADD COLUMN brief_json TEXT NOT NULL DEFAULT '{"confirmed":false,"audience":"general","purpose":"understand","tone":"analytical","depth":"standard","presentation_theme":"editorial","emphasis":""}';

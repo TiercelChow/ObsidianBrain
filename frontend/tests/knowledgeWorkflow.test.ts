@@ -21,10 +21,12 @@ test('knowledge chat persists conversations and restores their cited messages', 
   assert.match(chat, /streamBookKnowledge/)
   assert.match(chat, /event\.type === 'text_delta'/)
   assert.match(chat, /let answerEvidenceDelivered = false/)
-  assert.match(chat, /if \(answerEvidenceDelivered\) \{\s*assistantMessage\.runId = event\.run_id/)
+  assert.match(chat, /if \(answerEvidenceDelivered\) \{/)
+  assert.match(chat, /assistantMessage\.runId = event\.run_id/)
   assert.match(chat, /正在理解问题与选择知识/)
   assert.match(chat, /const assistantMessage = messages\.value\[assistantIndex\]/)
   assert.match(chat, /createStreamedTextBuffer/)
+  assert.match(chat, /if \(receivedText\) \{\s*textBuffer\.cancel\(\)\s*assistantMessage\.content = ''\s*receivedText = ''/)
   assert.match(chat, /await textBuffer\.drain\(\)/)
   assert.match(chat.split('function newConversation')[1]?.split('function replaceChatQuery')[0] ?? '', /followOutput\.value = true/)
   assert.match(chat.split('async function openConversation')[1]?.split('async function changeKnowledgeBase')[0] ?? '', /followOutput\.value = true/)
@@ -54,6 +56,19 @@ test('research inspector distinguishes native skills and lists evidence actually
   assert.match(tasks, /实际读取的证据/)
   assert.match(tasks, /activeInspection\.evidence/)
   assert.match(api, /evidence: Array<\{/)
+})
+
+test('research creation confirms an analyzed brief before persisting or running', async () => {
+  const [tasks, api] = await Promise.all([
+    source('src/views/knowledge/KnowledgeTasks.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+  assert.match(tasks, /previewKnowledgeTaskBrief\(draft\)/)
+  assert.match(tasks, /createStep\.value = 'preferences'/)
+  assert.match(tasks, /brief: \{ \.\.\.brief, confirmed: true \}/)
+  assert.match(tasks, /requestId !== briefPreviewRequestId \|\| !createVisible\.value/)
+  assert.match(api, /preview_knowledge_task_brief/)
+  assert.match(api, /brief: input\.brief/)
 })
 
 test('knowledge chat previews numbered sources before an explicit workspace navigation', async () => {

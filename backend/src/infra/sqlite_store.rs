@@ -310,6 +310,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "upgrade deployed research stages to allow synthesis without losing history",
         sql: include_str!("../../migrations/052_research_synthesis_stage_constraint.sql"),
     },
+    Migration {
+        version: 53,
+        description: "user confirmed research task briefs",
+        sql: include_str!("../../migrations/053_research_task_brief.sql"),
+    },
 ];
 
 #[cfg(test)]
@@ -2028,7 +2033,7 @@ mod tests {
         let db_path = dir.path().join("citation-skill-upgrade.db");
         let store = SqliteStore::new(&db_path).unwrap();
         store.with_connection(|conn| {
-            conn.execute_batch("DROP TABLE source_span_structures; DROP TABLE agent_run_adaptive_budgets; DROP TABLE knowledge_conversation_memories;")?;
+            conn.execute_batch("DROP TABLE source_span_structures; DROP TABLE agent_run_adaptive_budgets; DROP TABLE knowledge_conversation_memories; ALTER TABLE knowledge_tasks DROP COLUMN brief_json;")?;
             conn.execute("DELETE FROM _migrations WHERE version >= 42", [])?;
             conn.execute("UPDATE skill_files SET content_text='old stock citation rules', content_hash='old' WHERE skill_version_id='skill-version-book-query-v3'", [])?;
             conn.execute("UPDATE skill_versions SET content_hash='old' WHERE id='skill-version-book-query-v3'", [])?;

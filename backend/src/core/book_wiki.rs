@@ -37,7 +37,7 @@ use sha2::{Digest, Sha256};
 use crate::core::agent_tool_gateway::AGENT_EXTERNAL_RESEARCH_TOOL;
 use crate::core::presentation::{
     build_presentation_quality_report, parse_presentation_spec, render_pptx, validate_pptx,
-    validate_presentation_spec,
+    validate_presentation_spec, PresentationSpec, PresentationTheme,
 };
 use crate::error::BrainError;
 use crate::infra::book_wiki_store::{
@@ -50,9 +50,9 @@ use crate::infra::deepseek_harness::{AgentPromptRequest, AgentRuntime, AgentRunt
 use crate::models::book_wiki::{
     AgentTokenUsage, ConfigDocument, KnowledgeAnswer, KnowledgeBaseSummary, KnowledgeChangeSet,
     KnowledgeEntryDetail, KnowledgeEntrySummary, KnowledgeMessage, KnowledgeTask,
-    KnowledgeTaskExecution, ModelProviderProfile, RuntimeProfile, RuntimeVerification,
-    SaveModelProviderRequest, SemanticCompileResult, SourceSpanSnapshot, WikiSkill,
-    WikiSkillBenchmarkCase, WikiSkillBenchmarkCaseResult, WikiSkillBenchmarkRun,
+    KnowledgeTaskExecution, ModelProviderProfile, ResearchPreflight, RuntimeProfile,
+    RuntimeVerification, SaveModelProviderRequest, SemanticCompileResult, SourceSpanSnapshot,
+    WikiSkill, WikiSkillBenchmarkCase, WikiSkillBenchmarkCaseResult, WikiSkillBenchmarkRun,
     MARKDOWN_EXTRACTION_VERSION,
 };
 
@@ -70,10 +70,13 @@ const SKILL_BENCHMARK_TIMEOUT: Duration = Duration::from_secs(180);
 const SKILL_BENCHMARK_MAX_OUTPUT_TOKENS: u32 = 4_096;
 const QA_SELECTION_TIMEOUT: Duration = Duration::from_secs(90);
 const QA_SELECTION_MAX_OUTPUT_TOKENS: u32 = 2_048;
-const MAX_QA_EMPTY_OUTPUT_EXPANSIONS: usize = 2;
+const MAX_QA_OUTPUT_EXPANSIONS: usize = 2;
+const MAX_QA_TRANSIENT_RETRIES: usize = 1;
 const RESEARCH_TASK_TIMEOUT: Duration = Duration::from_secs(600);
 const PRESENTATION_PLAN_TIMEOUT: Duration = Duration::from_secs(180);
 const PRESENTATION_PLAN_MAX_OUTPUT_TOKENS: u32 = 6_144;
+const RESEARCH_PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(75);
+const RESEARCH_PREFLIGHT_MAX_OUTPUT_TOKENS: u32 = 8_192;
 const SEMANTIC_COMPILE_PROTOCOL_REVISION: &str = "semantic-contract-v5-knowledge-body";
 const AGENT_CAPABILITY_MIN_TTL_SECONDS: i64 = 300;
 const AGENT_CAPABILITY_TTL_BUFFER_SECONDS: i64 = 60;
@@ -290,6 +293,56 @@ impl BookWikiService {
 
     pub fn store(&self) -> &BookWikiStore {
         &self.store
+    }
+
+    pub async fn preview_research_brief(
+        &self,
+        base_id: &str,
+        title: &str,
+        description: &str,
+        task_type: &str,
+        deliverable_type: &str,
+    ) -> Result<ResearchPreflight, BrainError> {
+        let title = title.trim();
+        if title.is_empty() || title.chars().count() > 200 || description.chars().count() > 4_000 {
+            return Err(BrainError::KnowledgeValidation(
+                "研究目标为空或超出长度限制".into(),
+            ));
+        }
+        if !matches!(task_type, "research" | "refresh" | "review")
+            || !matches!(deliverable_type, "report" | "presentation")
+        {
+            return Err(BrainError::KnowledgeValidation(
+                "研究类型或交付形式无效".into(),
+            ));
+        }
+        let base = self.store.get_active_base(base_id)?;
+        let profile = self.active_runtime_profile()?;
+        let prompt = format!(
+            "你是研究任务的启动顾问，只分析用户希望获得什么材料，不研究书籍内容，不查找证据，也不代替用户决定。\n\
+             书籍：{}\n任务类型：{task_type}\n交付形式：{deliverable_type}\n标题：{title}\n补充说明：{description}\n\n\
+             判断哪些编辑决策最影响最终成果，只返回一个完整 JSON 对象：\n\
+             {{\"summary\":\"用一句话复述预期成果，不声称已完成研究\",\"recommended\":{{\"confirmed\":false,\"audience\":\"general\",\"purpose\":\"understand\",\"tone\":\"analytical\",\"depth\":\"standard\",\"presentation_theme\":\"editorial\",\"emphasis\":\"\"}},\"focus_decisions\":[\"audience\",\"purpose\",\"tone\"],\"cautions\":[\"需要用户确认的范围歧义\"]}}\n\
+             audience 只能为 general/specialist/beginner/self；purpose 只能为 understand/decision/teach/reference；tone 只能为 analytical/technical/narrative/concise；depth 只能为 brief/standard/deep；presentation_theme 只能为 editorial/midnight/sage。\n\
+             focus_decisions 按重要性选 1 至 4 个字段，不能重复；仅演示文稿可选 presentation_theme。所有字段必须齐全，未知信息保持保守默认。cautions 最多 3 条，只指出实际歧义，不制造决策。不得增加字段或输出解释、代码围栏。",
+            base.book_name,
+        );
+        let input = serde_json::json!({
+            "title":title,"task_type":task_type,"deliverable_type":deliverable_type,
+            "model":profile.model,"request_max_output_tokens":RESEARCH_PREFLIGHT_MAX_OUTPUT_TOKENS,
+            "request_timeout_seconds":RESEARCH_PREFLIGHT_TIMEOUT.as_secs(),
+        });
+        let (_, answer) = self
+            .run_audited(
+                base_id,
+                "research_preflight",
+                &input,
+                &profile,
+                prompt,
+                None,
+            )
+            .await?;
+        parse_research_preflight(&answer, deliverable_type)
     }
 
     pub async fn save_model_provider(
@@ -716,7 +769,9 @@ impl BookWikiService {
         });
         let mut effective_context_window = context_window;
         let mut output_expansions = 0;
+        let mut transient_retries = 0;
         let mut retry_parent_run_id = None;
+        let mut draft_for_retry = resume.clone();
         let (run_id, answer, evidence) = loop {
             let (mut prompt, evidence_ids) = build_adaptive_knowledge_prompt(
                 &base.book_name,
@@ -732,14 +787,14 @@ impl BookWikiService {
                 catalog_seen,
                 catalog.len(),
             )?;
-            if let Some((draft, _)) = resume.as_ref() {
+            if let Some((draft, _)) = draft_for_retry.as_ref() {
                 let spare = resources
                     .prompt_tokens
                     .saturating_sub(estimated_tokens(&prompt))
                     .saturating_sub(128);
                 let fragment =
                     prefix_with_token_budget(draft, spare.min(resources.prompt_tokens / 8), 6_000);
-                prompt.push_str("<incomplete_draft>用户明确要求恢复上一轮截断。以下只是未完成的草稿，不是证据；旧引用已移除。请重新核对本轮已读资料，输出一份完整答案，而不是单独续写尾巴；不要把上轮局部文本当成全书结论：\n");
+                prompt.push_str("<incomplete_draft>上一轮输出截断，正在恢复。以下只是未完成的草稿，不是证据；旧引用已移除。请重新核对本轮已读资料，输出一份完整答案，而不是单独续写尾巴；不要把上轮局部文本当成全书结论：\n");
                 prompt.push_str(&fragment);
                 prompt.push_str("\n</incomplete_draft>\n");
             }
@@ -775,6 +830,7 @@ impl BookWikiService {
                 "request_max_output_tokens":resources.output_tokens,"request_timeout_seconds":resources.timeout_seconds,
                 "resume_run_id":resume_run_id,"qa_retry_parent_run_id":retry_parent_run_id,
                 "output_expansion_attempt":output_expansions,
+                "transient_retry_attempt":transient_retries,
                 "selected_candidate_ids":selection.candidate_ids,
                 "planning_run_ids":planning_run_ids,
             });
@@ -799,11 +855,22 @@ impl BookWikiService {
                     break (run_id, answer, evidence);
                 }
                 Err(error)
-                    if is_qa_empty_output_truncation(&error)
-                        && output_expansions < MAX_QA_EMPTY_OUTPUT_EXPANSIONS
+                    if is_qa_output_truncation(&error)
+                        && output_expansions < MAX_QA_OUTPUT_EXPANSIONS
                         && !attempted_run_id.is_empty()
                         && !stream.is_some_and(|sender| sender.is_closed()) =>
                 {
+                    let partial = if is_qa_partial_output_truncation(&error) {
+                        Some(validated_qa_resume(
+                            &self.store,
+                            base_id,
+                            question,
+                            conversation_id,
+                            &attempted_run_id,
+                        )?)
+                    } else {
+                        None
+                    };
                     if let Some(size) = self
                         .store
                         .get_adaptive_run_budget(&attempted_run_id)?
@@ -827,9 +894,14 @@ impl BookWikiService {
                             .send(KnowledgeChatStreamEvent::Phase {
                                 run_id: attempted_run_id.clone(),
                                 message: format!(
-                                    "本轮没有收到正文，正在扩容输出预算并重试（{}/{})",
+                                    "本轮{}，正在扩容输出预算并重新生成完整回答（{}/{})",
+                                    if partial.is_some() {
+                                        "输出被截断"
+                                    } else {
+                                        "没有收到正文"
+                                    },
                                     output_expansions + 1,
-                                    MAX_QA_EMPTY_OUTPUT_EXPANSIONS
+                                    MAX_QA_OUTPUT_EXPANSIONS
                                 ),
                             })
                             .map_err(|_| {
@@ -837,8 +909,41 @@ impl BookWikiService {
                             })?;
                     }
                     retry_parent_run_id = Some(attempted_run_id);
+                    draft_for_retry = partial;
                     resources = expanded;
                     output_expansions += 1;
+                }
+                Err(error)
+                    if is_retryable_harness_failure(&error)
+                        && transient_retries < MAX_QA_TRANSIENT_RETRIES
+                        && !attempted_run_id.is_empty()
+                        && !stream.is_some_and(|sender| sender.is_closed()) =>
+                {
+                    if let Some(sender) = stream {
+                        sender
+                            .send(KnowledgeChatStreamEvent::Phase {
+                                run_id: attempted_run_id.clone(),
+                                message: "本轮运行暂时未完成，将保留检索结果并重试回答阶段".into(),
+                            })
+                            .map_err(|_| {
+                                BrainError::KnowledgeValidation("问答流已由客户端关闭".into())
+                            })?;
+                    }
+                    retry_parent_run_id = Some(attempted_run_id);
+                    transient_retries += 1;
+                    if let Some(sender) = stream {
+                        tokio::select! {
+                            () = tokio::time::sleep(Duration::from_secs(2)) => {},
+                            () = sender.closed() => return Err(BrainError::KnowledgeValidation("问答流已由客户端关闭".into())),
+                        }
+                    } else {
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                    }
+                    if stream.is_some_and(|sender| sender.is_closed()) {
+                        return Err(BrainError::KnowledgeValidation(
+                            "问答流已由客户端关闭".into(),
+                        ));
+                    }
                 }
                 Err(error) => return Err(error),
             }
@@ -1388,10 +1493,12 @@ impl BookWikiService {
         }
         }.await;
         if let Err(error) = &execution {
-            if let Err(store_error) =
-                self.store
-                    .fail_research_task(&task_id, attempt, &error.to_string())
-            {
+            if let Err(store_error) = self.store.fail_research_task(
+                &task_id,
+                attempt,
+                &error.to_string(),
+                is_retryable_harness_failure(error),
+            ) {
                 tracing::warn!(task_id=%task_id,error=%store_error,"任务尝试失效，未覆盖新的执行状态");
             }
         }
@@ -1532,7 +1639,7 @@ impl BookWikiService {
                     None,
                 )
                 .await?;
-            let (plan_run_id, spec) = match parse_presentation_spec(&answer, evidence.len()) {
+            let (plan_run_id, spec) = match parse_task_presentation_spec(&answer, evidence.len(), task) {
                 Ok(spec) => (first_plan_run_id, spec),
                 Err(first_error) => {
                     self.store
@@ -1565,7 +1672,7 @@ impl BookWikiService {
                         .await?;
                     (
                         retry_run_id,
-                        parse_presentation_spec(&retry_answer, evidence.len())?,
+                        parse_task_presentation_spec(&retry_answer, evidence.len(), task)?,
                     )
                 }
             };
@@ -2009,6 +2116,7 @@ impl BookWikiService {
             "resume_run_id",
             "qa_retry_parent_run_id",
             "output_expansion_attempt",
+            "transient_retry_attempt",
             "selected_candidate_ids",
             "planning_run_ids",
             "compile_step",
@@ -3306,11 +3414,73 @@ fn is_recoverable_empty_answer(error: &BrainError) -> bool {
             && (detail.contains("空回答") || detail.contains("未返回正文")))
 }
 
-fn is_qa_empty_output_truncation(error: &BrainError) -> bool {
+fn is_qa_output_truncation(error: &BrainError) -> bool {
     matches!(error, BrainError::LlmApiError { provider, detail }
         if provider == "deepseek_harness"
-            && detail.contains("未返回正文")
             && detail.contains("stop_reason=max_tokens"))
+}
+
+fn is_qa_partial_output_truncation(error: &BrainError) -> bool {
+    matches!(error, BrainError::LlmApiError { provider, detail }
+        if provider == "deepseek_harness"
+            && detail.contains("已生成正文保留为部分结果")
+            && detail.contains("stop_reason=max_tokens"))
+}
+
+fn is_retryable_harness_failure(error: &BrainError) -> bool {
+    let BrainError::LlmApiError { provider, detail } = error else {
+        return false;
+    };
+    if provider != "deepseek_harness" {
+        return false;
+    }
+    let detail = detail.to_ascii_lowercase();
+    if [
+        "401",
+        "403",
+        "400",
+        "422",
+        "unauthorized",
+        "forbidden",
+        "invalid_api_key",
+        "invalid_request",
+        "insufficient_quota",
+        "billing",
+        "permission",
+        "credential",
+        "凭据",
+        "拒绝回答",
+        "refusal",
+        "context_length",
+        "max_tokens",
+        "max_turn_requests",
+    ]
+    .iter()
+    .any(|marker| detail.contains(marker))
+    {
+        return false;
+    }
+    [
+        "429",
+        "500",
+        "502",
+        "503",
+        "504",
+        "rate limit",
+        "too many requests",
+        "temporarily unavailable",
+        "service unavailable",
+        "connection reset",
+        "econnreset",
+        "econnrefused",
+        "connection closed",
+        "连接中断",
+        "网络连接中断",
+        "返回了空回答",
+        "未返回正文",
+    ]
+    .iter()
+    .any(|marker| detail.contains(marker))
 }
 
 fn semantic_retry_input(input: &serde_json::Value, error: &BrainError) -> serde_json::Value {
@@ -3326,6 +3496,7 @@ fn compile_cancellation_key(base_id: &str) -> String {
 
 fn runtime_timeout_for_task(task_type: &str) -> Option<Duration> {
     match task_type {
+        "research_preflight" => Some(RESEARCH_PREFLIGHT_TIMEOUT),
         "knowledge_ingest" => Some(SEMANTIC_COMPILE_TIMEOUT),
         "knowledge_qa_select" => Some(QA_SELECTION_TIMEOUT),
         "skill_benchmark" => Some(SKILL_BENCHMARK_TIMEOUT),
@@ -3337,6 +3508,7 @@ fn runtime_timeout_for_task(task_type: &str) -> Option<Duration> {
 
 fn runtime_max_output_tokens_for_task(task_type: &str) -> Option<u32> {
     match task_type {
+        "research_preflight" => Some(RESEARCH_PREFLIGHT_MAX_OUTPUT_TOKENS),
         "knowledge_ingest" => Some(SEMANTIC_MAX_OUTPUT_TOKENS),
         "knowledge_qa_select" => Some(QA_SELECTION_MAX_OUTPUT_TOKENS),
         "skill_benchmark" => Some(SKILL_BENCHMARK_MAX_OUTPUT_TOKENS),
@@ -3517,6 +3689,7 @@ fn provider_credential_env(provider: &ModelProviderProfile) -> &str {
 
 fn agent_tools_for_task_type(task_type: &str) -> Vec<&'static str> {
     match task_type {
+        "research_preflight" => Vec::new(),
         "knowledge_qa_select" => Vec::new(),
         "knowledge_qa" => vec![
             "book_get_context",
@@ -4799,6 +4972,57 @@ fn interleave_qa_candidates(batches: &[Vec<String>]) -> Vec<String> {
     candidates
 }
 
+fn parse_research_preflight(
+    answer: &str,
+    deliverable_type: &str,
+) -> Result<ResearchPreflight, BrainError> {
+    let trimmed = answer.trim();
+    let json = trimmed
+        .strip_prefix("```json\n")
+        .or_else(|| trimmed.strip_prefix("```\n"))
+        .and_then(|value| value.strip_suffix("```"))
+        .unwrap_or(trimmed)
+        .trim();
+    let mut preview: ResearchPreflight = serde_json::from_str(json).map_err(|error| {
+        BrainError::KnowledgeValidation(format!("研究预分析未返回完整 JSON：{error}"))
+    })?;
+    preview
+        .validate(deliverable_type)
+        .map_err(BrainError::KnowledgeValidation)?;
+    preview.recommended.confirmed = false;
+    Ok(preview)
+}
+
+fn parse_task_presentation_spec(
+    answer: &str,
+    evidence_count: usize,
+    task: &KnowledgeTask,
+) -> Result<PresentationSpec, BrainError> {
+    let spec = parse_presentation_spec(answer, evidence_count)?;
+    ensure_task_presentation_theme(&spec, task)?;
+    Ok(spec)
+}
+
+fn ensure_task_presentation_theme(
+    spec: &PresentationSpec,
+    task: &KnowledgeTask,
+) -> Result<(), BrainError> {
+    if task.brief.confirmed {
+        let expected = match task.brief.presentation_theme.as_str() {
+            "midnight" => PresentationTheme::Midnight,
+            "sage" => PresentationTheme::Sage,
+            _ => PresentationTheme::Editorial,
+        };
+        if spec.theme != expected {
+            return Err(BrainError::KnowledgeValidation(format!(
+                "演示主题必须遵守用户确认的 {}，不能自动换成其他主题",
+                task.brief.presentation_theme,
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn build_task_prompt(
     book_name: &str,
     task: &KnowledgeTask,
@@ -4825,6 +5049,18 @@ fn build_task_prompt(
             task.description.as_str()
         },
     );
+    if task.brief.confirmed {
+        prompt.push_str(&format!(
+        "<user_confirmed_brief>\n受众：{}；材料用途：{}；表述方式：{}；期望深度：{}；特别强调：{}。\n</user_confirmed_brief>\n\
+         上述简报由用户确认，是成果的编辑要求，不是来源证据。报告必须按用途组织材料：用于决策时明确选项、权衡与适用条件；用于教学时先建立概念再展开例证；用于查阅时让结论和定位易于检索。\
+         叙述应是可独立阅读的专题材料，不要写成逐条回答聊天问题；保持事实、推断与建议分层，优先处理用户强调的事项，但不得因此省略反证与边界。\n\n",
+        task.brief.audience,
+        task.brief.purpose,
+        task.brief.tone,
+        task.brief.depth,
+        if task.brief.emphasis.trim().is_empty() { "无" } else { task.brief.emphasis.as_str() },
+        ));
+    }
     if task.deliverable_type == "presentation" {
         prompt.push_str("交付物：presentation。这一阶段仍输出完整的 Markdown 研究报告，不要为了幻灯片提前压缩为短要点。保留细节、数据口径、竞争解释、适用边界和逐项 [S<n>] 引用；后续会由独立的演示策划阶段重构叙事与版式。\n\n");
     }
@@ -4866,9 +5102,29 @@ fn build_presentation_prompt(
             task.description.as_str()
         },
     );
+    if task.brief.confirmed {
+        prompt.push_str(&format!(
+        "<user_confirmed_brief>\n受众：{}；用途：{}；叙事风格：{}；内容深度：{}；指定主题：{}；特别强调：{}。\n</user_confirmed_brief>\n\
+         这是用户明确确认的编辑要求，优先于默认风格建议。audience 必须面向指定受众，theme 必须严格等于指定主题。\
+         先确定这份材料在受众面前要建立什么判断或支持什么决策，再选择证据、对照、流程与收束；不要把研究任务当作问答逐页拆分。\n\n",
+        task.brief.audience,
+        task.brief.purpose,
+        task.brief.tone,
+        task.brief.depth,
+        task.brief.presentation_theme,
+        if task.brief.emphasis.trim().is_empty() { "无" } else { task.brief.emphasis.as_str() },
+        ));
+    }
     prompt.push_str("<presentation_skill>\n");
     prompt.push_str(&skill.instructions);
-    prompt.push_str("\n</presentation_skill>\n\n<evidence_catalog>\n");
+    prompt.push_str("\n</presentation_skill>\n");
+    if task.brief.confirmed {
+        prompt.push_str(&format!(
+            "用户最终确认的演示主题是 {}，无论 Skill 的默认建议如何，最终 JSON 的 theme 必须一致；叙事需适配受众 {} 与用途 {}。\n",
+            task.brief.presentation_theme, task.brief.audience, task.brief.purpose,
+        ));
+    }
+    prompt.push_str("\n<evidence_catalog>\n");
     for (index, entry) in evidence.iter().enumerate() {
         prompt.push_str(
             &serde_json::json!({

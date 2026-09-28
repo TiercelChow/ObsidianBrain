@@ -283,7 +283,7 @@ fn test_resume_requires_same_book_question_conversation_and_explicit_truncation(
 }
 
 #[tokio::test]
-async fn test_truncated_answer_explicit_resume_replans_and_returns_complete_fresh_citations() {
+async fn test_truncated_answer_automatically_retries_with_fresh_citations() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     struct Runtime {
         inner: AdaptiveFixtureRuntime,
@@ -340,16 +340,20 @@ async fn test_truncated_answer_explicit_resume_replans_and_returns_complete_fres
     let service = BookWikiService::new(store.clone(), runtime);
     let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     let question = "全面分析全书机制";
-    assert!(service
+    let result = service
         .ask_streaming(&base, question, None, events)
         .await
-        .is_err());
+        .unwrap();
     let run_id = std::iter::from_fn(|| receiver.try_recv().ok())
         .filter_map(|event| match event {
             KnowledgeChatStreamEvent::RunStarted { run_id } => Some(run_id),
             _ => None,
         })
-        .last()
+        .find(|run_id| {
+            store
+                .get_agent_run(run_id)
+                .is_ok_and(|run| run.task_type == "knowledge_qa" && run.status == "failed")
+        })
         .unwrap();
     let failed = store.get_agent_run(&run_id).unwrap();
     assert_eq!(failed.status, "failed");
@@ -357,13 +361,8 @@ async fn test_truncated_answer_explicit_resume_replans_and_returns_complete_fres
         .as_str()
         .unwrap()
         .contains("第一段"));
-    let (events, _receiver) = tokio::sync::mpsc::unbounded_channel();
-    let result = service
-        .resume_qa_streaming(&base, question, None, &run_id, events)
-        .await
-        .unwrap();
     let run = store.get_agent_run(&result.run_id).unwrap();
-    assert_eq!(run.input["resume_run_id"], run_id);
+    assert_eq!(run.input["qa_retry_parent_run_id"], run_id);
     assert!(
         run.input["request_max_output_tokens"].as_u64().unwrap()
             > failed.input["request_max_output_tokens"].as_u64().unwrap()
@@ -424,6 +423,119 @@ async fn test_qa_empty_max_tokens_stops_after_two_expansions_or_hard_cap() {
         assert_eq!(runtime.answers.load(Ordering::SeqCst), calls);
         assert!(store.list_conversations(&base, 10).unwrap().is_empty());
     }
+}
+
+#[tokio::test]
+async fn test_qa_partial_max_tokens_stops_after_bounded_retries_without_saving_conversation() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct AlwaysPartial {
+        answers: AtomicUsize,
+    }
+    #[async_trait]
+    impl AgentRuntime for AlwaysPartial {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            if request.prompt.contains("只读检索规划器") {
+                return Ok(serde_json::json!({
+                    "standalone_question":"全书",
+                    "candidate_ids":[],
+                    "answer_mode":"book_lookup",
+                    "plan":{"goal":"全书","constraints":[],"subquestions":["机制"],"depth":"standard","scope":"whole_book","expected_output_tokens":4096},
+                    "memory_update":{"objective":"全书","constraints":[],"unresolved_questions":[],"entity_ids":[]}
+                }).to_string());
+            }
+            Err(BrainError::Internal("测试应走事件型运行接口".into()))
+        }
+        async fn prompt_with_events(
+            &self,
+            request: AgentPromptRequest,
+            events: Option<tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+            _cancel: tokio::sync::watch::Receiver<bool>,
+        ) -> Result<String, BrainError> {
+            if request.prompt.contains("只读检索规划器") {
+                return self.prompt(request).await;
+            }
+            self.answers.fetch_add(1, Ordering::SeqCst);
+            if let Some(events) = events {
+                events
+                    .send(AgentRuntimeEvent::TextDelta {
+                        delta: "未完成正文 [S99]".into(),
+                    })
+                    .unwrap();
+                events
+                    .send(AgentRuntimeEvent::Completed {
+                        stop_reason: "max_tokens".into(),
+                        complete: false,
+                    })
+                    .unwrap();
+            }
+            Err(BrainError::LlmApiError {
+                provider: "deepseek_harness".into(),
+                detail: "DeepSeek Harness 达到输出 token 上限，已生成正文保留为部分结果 (stop_reason=max_tokens)".into(),
+            })
+        }
+    }
+    let (store, _dir, base) = fixture();
+    let runtime = Arc::new(AlwaysPartial {
+        answers: AtomicUsize::new(0),
+    });
+    let service = BookWikiService::new(store.clone(), runtime.clone());
+    let error = service
+        .ask(&base, "全面分析全书机制", None)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("stop_reason=max_tokens"));
+    assert_eq!(runtime.answers.load(Ordering::SeqCst), 3);
+    assert!(store.list_conversations(&base, 10).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_qa_transient_transport_failure_retries_only_answer_run_once() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct TransportThenAnswer {
+        planner: AdaptiveFixtureRuntime,
+        answers: AtomicUsize,
+    }
+    #[async_trait]
+    impl AgentRuntime for TransportThenAnswer {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            self.planner.prompt(request).await
+        }
+        async fn prompt_with_events(
+            &self,
+            request: AgentPromptRequest,
+            _events: Option<tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+            _cancel: tokio::sync::watch::Receiver<bool>,
+        ) -> Result<String, BrainError> {
+            if request.prompt.contains("只读检索规划器") {
+                return self.planner.prompt(request).await;
+            }
+            if self.answers.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Err(BrainError::LlmApiError {
+                    provider: "deepseek_harness".into(),
+                    detail: "ACP 调用失败: HTTP 503 Service Unavailable".into(),
+                });
+            }
+            Ok("本轮综合结论。[S1]".into())
+        }
+    }
+    let (store, _dir, base) = fixture();
+    let runtime = Arc::new(TransportThenAnswer {
+        planner: AdaptiveFixtureRuntime {
+            requests: Arc::new(Mutex::new(vec![])),
+        },
+        answers: AtomicUsize::new(0),
+    });
+    let service = BookWikiService::new(store.clone(), runtime.clone());
+    let answer = service
+        .ask(&base, "全面分析全书的机制和边界", None)
+        .await
+        .unwrap();
+    assert_eq!(answer.answer, "本轮综合结论。[S1]");
+    assert_eq!(runtime.answers.load(Ordering::SeqCst), 2);
+    let completed = store.get_agent_run(&answer.run_id).unwrap();
+    assert_eq!(completed.input["transient_retry_attempt"], 1);
+    assert!(completed.input["qa_retry_parent_run_id"].is_string());
+    assert_eq!(store.list_conversations(&base, 10).unwrap().len(), 1);
 }
 
 #[tokio::test]

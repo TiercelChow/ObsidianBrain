@@ -10,7 +10,7 @@ use crate::infra::book_wiki_store::{
     KnowledgeEntrySplitPart, KnowledgeEntrySplitProposal,
 };
 use crate::infra::deepseek_harness::inspect_runtime_profiles;
-use crate::models::book_wiki::SaveModelProviderRequest;
+use crate::models::book_wiki::{ResearchBrief, SaveModelProviderRequest};
 use crate::tools::traits::ToolHandler;
 use crate::AppContext;
 
@@ -1099,6 +1099,55 @@ impl ToolHandler for ListKnowledgeTasksHandler {
 
 pub struct CreateKnowledgeTaskHandler;
 
+pub struct PreviewKnowledgeTaskBriefHandler;
+
+#[async_trait]
+impl ToolHandler for PreviewKnowledgeTaskBriefHandler {
+    fn name(&self) -> &str {
+        "preview_knowledge_task_brief"
+    }
+
+    fn description(&self) -> &str {
+        "分析研究诉求并提出需要用户确认的材料决策，不启动研究"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type":"object",
+            "properties":{
+                "knowledge_base_id":{"type":"string"},
+                "title":{"type":"string","minLength":1,"maxLength":200},
+                "description":{"type":"string","maxLength":4000,"default":""},
+                "task_type":{"type":"string","enum":["research","refresh","review"]},
+                "deliverable_type":{"type":"string","enum":["report","presentation"]}
+            },
+            "required":["knowledge_base_id","title","task_type","deliverable_type"],
+            "additionalProperties":false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let preview = ctx
+            .book_wiki_service
+            .preview_research_brief(
+                required_string(&args, "knowledge_base_id")?,
+                required_string(&args, "title")?,
+                args.get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+                required_string(&args, "task_type")?,
+                required_string(&args, "deliverable_type")?,
+            )
+            .await?;
+        serde_json::to_value(preview)
+            .map_err(|error| BrainError::Internal(format!("研究预分析序列化失败: {error}")))
+    }
+}
+
 #[async_trait]
 impl ToolHandler for CreateKnowledgeTaskHandler {
     fn name(&self) -> &str {
@@ -1141,6 +1190,20 @@ impl ToolHandler for CreateKnowledgeTaskHandler {
                     "minimum": 0,
                     "maximum": 50,
                     "default": 0
+                },
+                "brief": {
+                    "type": "object",
+                    "properties": {
+                        "confirmed": {"type":"boolean"},
+                        "audience": {"type":"string","enum":["general","specialist","beginner","self"]},
+                        "purpose": {"type":"string","enum":["understand","decision","teach","reference"]},
+                        "tone": {"type":"string","enum":["analytical","technical","narrative","concise"]},
+                        "depth": {"type":"string","enum":["brief","standard","deep"]},
+                        "presentation_theme": {"type":"string","enum":["editorial","midnight","sage"]},
+                        "emphasis": {"type":"string","maxLength":500}
+                    },
+                    "required": ["confirmed","audience","purpose","tone","depth","presentation_theme","emphasis"],
+                    "additionalProperties": false
                 }
             },
             "required": ["knowledge_base_id", "title"],
@@ -1161,7 +1224,16 @@ impl ToolHandler for CreateKnowledgeTaskHandler {
             Some(_) => string_array(&args, "external_domains")?,
             None => Vec::new(),
         };
-        let task = ctx.book_wiki_service.store().create_task_with_options(
+        let brief = args
+            .get("brief")
+            .map(|value| {
+                serde_json::from_value::<ResearchBrief>(value.clone()).map_err(|error| {
+                    BrainError::KnowledgeValidation(format!("研究简报格式无效: {error}"))
+                })
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let task = ctx.book_wiki_service.store().create_task_with_brief(
             required_string(&args, "knowledge_base_id")?,
             required_string(&args, "title")?,
             args.get("description")
@@ -1178,6 +1250,7 @@ impl ToolHandler for CreateKnowledgeTaskHandler {
             args.get("external_request_limit")
                 .and_then(Value::as_i64)
                 .unwrap_or(0),
+            &brief,
         )?;
         serde_json::to_value(task)
             .map_err(|error| BrainError::Internal(format!("结果序列化失败: {error}")))

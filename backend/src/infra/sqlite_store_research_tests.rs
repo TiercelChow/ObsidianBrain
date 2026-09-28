@@ -20,10 +20,12 @@ fn snapshot(conn: &Connection) -> Vec<Vec<Vec<Value>>> {
             let mut statement = conn
                 .prepare(&format!("SELECT * FROM {table} ORDER BY 1,2"))
                 .unwrap();
-            let columns = statement.column_count();
+            let columns = (0..statement.column_count())
+                .filter(|column| statement.column_name(*column).ok() != Some("brief_json"))
+                .collect::<Vec<_>>();
             statement
                 .query_map([], |row| {
-                    (0..columns).map(|column| row.get(column)).collect()
+                    columns.iter().map(|column| row.get(*column)).collect()
                 })
                 .unwrap()
                 .collect::<Result<Vec<Vec<Value>>, _>>()
@@ -97,6 +99,11 @@ fn assert_research_upgrade_preserves_data(legacy_constraint: bool) {
         }
         Ok(())
     }).unwrap();
+    db.with_connection(|conn| {
+        conn.execute_batch("ALTER TABLE knowledge_tasks DROP COLUMN brief_json;")?;
+        Ok(())
+    })
+    .unwrap();
     let before = db.with_connection(|conn| Ok(snapshot(conn))).unwrap();
     // Even a failure after both tables were rebuilt must restore the old data
     // and constraint, not merely report failure after dropping the snapshots.

@@ -1048,6 +1048,7 @@ impl BookWikiStore {
         task: &str,
         attempt: i64,
         error: &str,
+        retryable: bool,
     ) -> Result<(), BrainError> {
         let now = Utc::now();
         self.db.transaction(|conn| {
@@ -1056,7 +1057,7 @@ impl BookWikiStore {
             let report:Option<String>=conn.query_row("SELECT content_md FROM knowledge_research_stages WHERE task_id=?1 AND stage_key='report' AND content_md<>''",[task],|row|row.get(0)).optional()?;
             let reason=error.chars().take(2000).collect::<String>();
             let summary=if let Some(report)=report {format!("> [!warning] 后续交付未完成，完整研究报告和已保存阶段仍保留。\n> 原因：{reason}\n\n{report}")} else {format!("执行未完成：{reason}；已保存阶段保留，重试从未完成阶段恢复。")};
-            let retry=!cancelled && retry_count<max_attempts && !["(research_output_hard_limit)","(research_input_hard_limit)","(research_output_retry_exhausted)"].iter().any(|marker|error.contains(marker));
+            let retry=retryable && !cancelled && retry_count<max_attempts && !["(research_output_hard_limit)","(research_input_hard_limit)","(research_output_retry_exhausted)"].iter().any(|marker|error.contains(marker));
             let status=if cancelled {"cancelled"} else if retry {"queued"} else {"failed"};
             let delay=5_i64.saturating_mul(2_i64.saturating_pow((retry_count-1).clamp(0,8) as u32)).min(300);
             let next=retry.then(||(now+chrono::Duration::seconds(delay)).to_rfc3339());
@@ -1139,10 +1140,23 @@ mod tests {
                 &task,
                 epoch,
                 "(research_output_retry_exhausted) 当前阶段扩容已耗尽",
+                false,
             )
             .unwrap();
         assert_eq!(store.get_task(&task).unwrap().status, "failed");
         assert_eq!(store.queue_task_execution(&task).unwrap().status, "queued");
+    }
+
+    #[test]
+    fn test_research_retry_requires_explicit_transient_disposition() {
+        for (retryable, expected) in [(false, "failed"), (true, "queued")] {
+            let (store, _dir, _base, task) = fixture();
+            let epoch = store.research_attempt(&task).unwrap();
+            store
+                .fail_research_task(&task, epoch, "模型调用失败", retryable)
+                .unwrap();
+            assert_eq!(store.get_task(&task).unwrap().status, expected);
+        }
     }
     fn plan() -> ResearchPlan {
         ResearchPlan {
@@ -1675,7 +1689,7 @@ mod tests {
         let run = attach(&store, &base, &task, &claim);
         store.check_research_report(&claim, &run).unwrap();
         store
-            .fail_research_task(&task, attempt, "模拟后续交付失败")
+            .fail_research_task(&task, attempt, "模拟后续交付失败", true)
             .unwrap();
         let failed = store.get_task(&task).unwrap();
         assert_eq!(failed.status, "queued");
@@ -1684,7 +1698,7 @@ mod tests {
         store.start_task_execution(&task).unwrap();
         assert!(!store.renew_research_task_lease(&task, attempt).unwrap());
         assert!(store
-            .fail_research_task(&task, attempt, "旧执行器失败")
+            .fail_research_task(&task, attempt, "旧执行器失败", true)
             .is_err());
         assert!(store
             .complete_research_task(&task, attempt, &report.content_md)
@@ -2032,7 +2046,7 @@ mod tests {
             .fail_research_stage(&new, "新的暂时失败", false)
             .unwrap();
         store
-            .fail_research_task(&task, new.attempt, "新一次失败")
+            .fail_research_task(&task, new.attempt, "新一次失败", true)
             .unwrap();
         assert_eq!(store.get_task(&task).unwrap().status, "queued");
     }

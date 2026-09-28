@@ -1,6 +1,44 @@
 use super::*;
 
 #[test]
+fn test_retryable_harness_failure_only_allows_clear_transient_conditions() {
+    for detail in [
+        "ACP 调用失败: HTTP 503 Service Unavailable",
+        "ACP 调用失败: 429 rate limit",
+        "ACP 调用失败: connection reset by peer",
+        "DeepSeek Harness 返回了空回答 (stop_reason=end_turn)",
+    ] {
+        assert!(
+            is_retryable_harness_failure(&BrainError::LlmApiError {
+                provider: "deepseek_harness".into(),
+                detail: detail.into(),
+            }),
+            "{detail}"
+        );
+    }
+    for detail in [
+        "HTTP 401 invalid_api_key",
+        "HTTP 403 forbidden",
+        "HTTP 400 invalid_request",
+        "HTTP 429 insufficient_quota",
+        "DeepSeek Harness 达到输出 token 上限 (stop_reason=max_tokens)",
+        "DeepSeek Harness 在 600 秒内没有完成回答",
+        "ACP 调用失败: 未知错误",
+    ] {
+        assert!(
+            !is_retryable_harness_failure(&BrainError::LlmApiError {
+                provider: "deepseek_harness".into(),
+                detail: detail.into(),
+            }),
+            "{detail}"
+        );
+    }
+    assert!(!is_retryable_harness_failure(
+        &BrainError::KnowledgeValidation("JSON 合同不合法".into())
+    ));
+}
+
+#[test]
 fn test_old_run_cleanup_does_not_remove_new_attempt_cancellation() {
     let (sender, receiver) = tokio::sync::watch::channel(false);
     let mut map = HashMap::new();
@@ -471,7 +509,7 @@ fn test_repair_includes_bounded_failure_data_and_concrete_error() {
 
 #[test]
 fn test_presentation_prompt_keeps_report_evidence_and_strict_contract() {
-    let task = KnowledgeTask {
+    let mut task = KnowledgeTask {
         id: "task-presentation".into(),
         knowledge_base_id: "base".into(),
         book_name: "设计之书".into(),
@@ -488,6 +526,7 @@ fn test_presentation_prompt_keeps_report_evidence_and_strict_contract() {
         external_domains: vec![],
         external_request_limit: 0,
         external_requests_used: 0,
+        brief: crate::models::book_wiki::ResearchBrief::default(),
         created_at: String::new(),
         updated_at: String::new(),
     };
@@ -523,6 +562,18 @@ fn test_presentation_prompt_keeps_report_evidence_and_strict_contract() {
         "完整论证。".repeat(12000)
     );
 
+    let legacy_prompt = build_presentation_prompt(&task, &report, &evidence, &skill);
+    assert!(!legacy_prompt.contains("<user_confirmed_brief>"));
+    task.brief = crate::models::book_wiki::ResearchBrief {
+        confirmed: true,
+        audience: "specialist".into(),
+        purpose: "decision".into(),
+        tone: "technical".into(),
+        depth: "deep".into(),
+        presentation_theme: "midnight".into(),
+        emphasis: "保留反例".into(),
+    };
+
     let prompt = build_presentation_prompt(&task, &report, &evidence, &skill);
 
     assert!(prompt.contains(PRESENTATION_INSTRUCTIONS));
@@ -531,7 +582,42 @@ fn test_presentation_prompt_keeps_report_evidence_and_strict_contract() {
     assert!(prompt.contains("尾部关键结论和条件必须进入演示"));
     assert!(prompt.contains("\"citation\":\"S1\""));
     assert!(prompt.contains("只输出符合演示策划合同的单个 JSON 对象"));
+    assert!(prompt.contains("指定主题：midnight"));
+    assert!(prompt.contains("保留反例"));
     assert!(!prompt.contains("调用工具生成 PPTX"));
+    let mut spec: PresentationSpec = serde_json::from_value(serde_json::json!({
+        "schema_version":"1.0","title":"材料","subtitle":"副标题",
+        "audience":"领域专家","core_message":"中心判断","theme":"editorial","slides":[]
+    }))
+    .unwrap();
+    assert!(ensure_task_presentation_theme(&spec, &task).is_err());
+    spec.theme = PresentationTheme::Midnight;
+    assert!(ensure_task_presentation_theme(&spec, &task).is_ok());
+}
+
+#[test]
+fn test_research_preflight_rejects_presentation_theme_for_report() {
+    let answer = serde_json::json!({
+        "summary":"为读者形成可复核的比较材料",
+        "recommended":{"confirmed":true,"audience":"general","purpose":"decision","tone":"analytical","depth":"standard","presentation_theme":"editorial","emphasis":""},
+        "focus_decisions":["purpose","presentation_theme"],
+        "cautions":[]
+    }).to_string();
+    assert!(parse_research_preflight(&answer, "report").is_err());
+}
+
+#[test]
+fn test_research_preflight_never_marks_model_suggestion_as_user_confirmed() {
+    assert!(agent_tools_for_task_type("research_preflight").is_empty());
+    let answer = serde_json::json!({
+        "summary":"为读者形成可复核的比较材料",
+        "recommended":{"confirmed":true,"audience":"specialist","purpose":"decision","tone":"technical","depth":"deep","presentation_theme":"midnight","emphasis":"保留反例"},
+        "focus_decisions":["audience","purpose","presentation_theme"],
+        "cautions":[]
+    }).to_string();
+    let parsed = parse_research_preflight(&answer, "presentation").unwrap();
+    assert!(!parsed.recommended.confirmed);
+    assert_eq!(parsed.recommended.presentation_theme, "midnight");
 }
 
 #[test]

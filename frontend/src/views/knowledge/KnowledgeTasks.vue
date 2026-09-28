@@ -20,6 +20,7 @@
           <div class="task-topline"><span>{{ task.book_name }}</span><span class="knowledge-status" :class="`is-${task.status}`">{{ statusLabel(task.status) }}</span></div>
           <h2>{{ task.title }}</h2>
           <p>{{ task.description || '没有补充任务说明' }}</p>
+          <div v-if="task.brief?.confirmed" class="task-brief-summary">{{ briefSummary(task.brief, task.deliverable_type) }}</div>
           <div v-if="task.status === 'running' && taskActivity[task.id]" class="task-live" role="status">
             <i></i><span>{{ taskActivity[task.id] }}</span>
           </div>
@@ -48,8 +49,8 @@
 
     <MotionModal v-model="createVisible" aria-label="新建研究任务">
       <div class="knowledge-modal-card">
-        <div class="knowledge-modal-head"><h3>新建研究任务</h3><p>任务严格绑定一本书，不会跨库读取。</p></div>
-        <div class="knowledge-modal-body">
+        <div class="knowledge-modal-head"><h3>{{ createStep === 'request' ? '新建研究任务' : '确认研究简报' }}</h3><p>{{ createStep === 'request' ? '先说明要解决的问题，再确认材料的受众与呈现方式。' : '这些选择会随任务保存，并用于研究报告和演示文稿。' }}</p></div>
+        <div v-if="createStep === 'request'" class="knowledge-modal-body">
           <el-select v-model="draft.knowledgeBaseId" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库">
             <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
           </el-select>
@@ -81,9 +82,19 @@
             <p v-else-if="draft.taskType !== 'research'">知识刷新和事实审核保持纯书内证据模式，不开放外部网络。</p>
           </section>
         </div>
+        <div v-else class="knowledge-modal-body research-brief-form">
+          <div v-if="preflight" class="research-brief-summary"><strong>需求预分析</strong><p>{{ preflight.summary }}</p><span v-for="caution in preflight.cautions" :key="caution">{{ caution }}</span></div>
+          <p v-else class="research-brief-fallback">未使用模型预分析；你仍可以直接确定材料偏好，研究将在创建后由你手动启动。</p>
+          <label class="research-brief-field" :class="{ 'is-focus': briefIsFocus('audience') }"><span>面向谁 <small v-if="briefIsFocus('audience')">建议确认</small></span><el-select v-model="brief.audience" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="有一定背景的读者" value="general" /><el-option label="领域专家" value="specialist" /><el-option label="零基础读者" value="beginner" /><el-option label="仅供自己复盘" value="self" /></el-select></label>
+          <label class="research-brief-field" :class="{ 'is-focus': briefIsFocus('purpose') }"><span>材料用途 <small v-if="briefIsFocus('purpose')">建议确认</small></span><el-select v-model="brief.purpose" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="理解主题" value="understand" /><el-option label="辅助决策" value="decision" /><el-option label="讲解或教学" value="teach" /><el-option label="日后查阅" value="reference" /></el-select></label>
+          <label class="research-brief-field" :class="{ 'is-focus': briefIsFocus('tone') }"><span>表述方式 <small v-if="briefIsFocus('tone')">建议确认</small></span><el-select v-model="brief.tone" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="严谨分析" value="analytical" /><el-option label="技术深入" value="technical" /><el-option label="叙事讲述" value="narrative" /><el-option label="简明直接" value="concise" /></el-select></label>
+          <label class="research-brief-field" :class="{ 'is-focus': briefIsFocus('depth') }"><span>内容深度 <small v-if="briefIsFocus('depth')">建议确认</small></span><el-select v-model="brief.depth" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="简要" value="brief" /><el-option label="标准" value="standard" /><el-option label="深入" value="deep" /></el-select></label>
+          <label v-if="draft.deliverableType === 'presentation'" class="research-brief-field" :class="{ 'is-focus': briefIsFocus('presentation_theme') }"><span>PPT 视觉主题 <small v-if="briefIsFocus('presentation_theme')">建议确认</small></span><el-select v-model="brief.presentation_theme" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="Editorial · 明亮编辑风" value="editorial" /><el-option label="Midnight · 深色聚焦" value="midnight" /><el-option label="Sage · 柔和人文" value="sage" /></el-select></label>
+          <label class="research-brief-field"><span>特别强调（可选）</span><el-input v-model="brief.emphasis" :maxlength="500" show-word-limit placeholder="例如：多比较反例、面向非技术听众" /></label>
+        </div>
         <div class="knowledge-modal-actions">
-          <el-button @click="createVisible = false">取消</el-button>
-          <el-button type="primary" :loading="creating" :disabled="!draft.knowledgeBaseId || !draft.title.trim()" @click="createTask">创建任务</el-button>
+          <template v-if="createStep === 'request'"><el-button @click="createVisible = false">取消</el-button><el-button :disabled="!draft.knowledgeBaseId || !draft.title.trim() || previewing" @click="skipBrief">跳过分析</el-button><el-button type="primary" :loading="previewing" :disabled="!draft.knowledgeBaseId || !draft.title.trim()" @click="prepareBrief">分析诉求</el-button></template>
+          <template v-else><el-button @click="createStep = 'request'">返回修改</el-button><el-button type="primary" :loading="creating" @click="createTask">确认并创建</el-button></template>
         </div>
       </div>
     </MotionModal>
@@ -235,6 +246,7 @@ import {
   getKnowledgeTaskActivity,
   listBookKnowledgeBases,
   listKnowledgeTasks,
+  previewKnowledgeTaskBrief,
   knowledgeArtifactDownloadUrl,
   type KnowledgeArtifact,
   type AgentRunInspection,
@@ -243,6 +255,8 @@ import {
   type KnowledgeBaseSummary,
   type KnowledgeEntrySummary,
   type KnowledgeTask,
+  type ResearchBrief,
+  type ResearchPreflight,
 } from '@/api/knowledge'
 
 const router = useRouter()
@@ -252,6 +266,9 @@ const tasks = ref<KnowledgeTask[]>([])
 const filterBaseId = ref('')
 const loading = ref(false)
 const creating = ref(false)
+const previewing = ref(false)
+const createStep = ref<'request' | 'preferences'>('request')
+const preflight = ref<ResearchPreflight | null>(null)
 const executingTaskId = ref('')
 const loadingResultId = ref('')
 const createVisible = ref(false)
@@ -273,12 +290,24 @@ const taskActivity = ref<Record<string, string>>({})
 const inspectionEvents = computed(() => (activeInspection.value?.events || []).filter(event => event.event_type !== 'run.text_delta'))
 const runtimeDiagnostics = computed(() => knowledgeRunDiagnostics(activeInspection.value?.events || [], activeInspection.value?.snapshot?.evidence_refs.runtime_budget))
 const draft = reactive({ knowledgeBaseId: '', title: '', description: '', taskType: 'research' as KnowledgeTask['task_type'], deliverableType: 'report' as KnowledgeTask['deliverable_type'], externalResearchEnabled: false, externalDomains: '', externalRequestLimit: 6 })
+function defaultBrief(): ResearchBrief { return { confirmed: false, audience: 'general', purpose: 'understand', tone: 'analytical', depth: 'standard', presentation_theme: 'editorial', emphasis: '' } }
+const brief = reactive<ResearchBrief>(defaultBrief())
+function briefIsFocus(field: ResearchPreflight['focus_decisions'][number]) { return preflight.value?.focus_decisions.includes(field) ?? false }
+function briefSummary(value: ResearchBrief, deliverable: KnowledgeTask['deliverable_type']) {
+  const audience = { general: '背景读者', specialist: '领域专家', beginner: '入门读者', self: '个人复盘' }[value.audience]
+  const purpose = { understand: '理解主题', decision: '辅助决策', teach: '讲解教学', reference: '日后查阅' }[value.purpose]
+  const depth = { brief: '简要', standard: '标准', deep: '深入' }[value.depth]
+  const theme = deliverable === 'presentation' ? ` · ${value.presentation_theme} 主题` : ''
+  return `${audience} · ${purpose} · ${depth}${theme}`
+}
 let viewActive = true
+let briefPreviewRequestId = 0
 let inspectionRequestId = 0
 let resultRequestId = 0
 let taskPollTimer: ReturnType<typeof setTimeout> | undefined
 let tasksRequestId = 0
 watch(resultVisible, visible => { if (!visible) { ++resultRequestId; ++inspectionRequestId; loadingResultId.value = '' } })
+watch(createVisible, visible => { if (!visible) ++briefPreviewRequestId })
 
 watch(() => draft.taskType, taskType => {
   if (taskType !== 'research') draft.externalResearchEnabled = false
@@ -343,6 +372,11 @@ function inspectStage(runId: string) {
 }
 
 function openCreate() {
+  ++briefPreviewRequestId
+  previewing.value = false
+  createStep.value = 'request'
+  preflight.value = null
+  Object.assign(brief, defaultBrief())
   draft.knowledgeBaseId = filterBaseId.value || bases.value[0]?.id || ''
   draft.title = ''
   draft.description = ''
@@ -352,6 +386,31 @@ function openCreate() {
   draft.externalDomains = ''
   draft.externalRequestLimit = 6
   createVisible.value = true
+}
+
+function skipBrief() {
+  preflight.value = null
+  Object.assign(brief, defaultBrief())
+  createStep.value = 'preferences'
+}
+
+async function prepareBrief() {
+  const requestId = ++briefPreviewRequestId
+  previewing.value = true
+  try {
+    const response = await previewKnowledgeTaskBrief(draft)
+    if (requestId !== briefPreviewRequestId || !createVisible.value) return
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '预分析未完成')
+    preflight.value = response.result
+    Object.assign(brief, response.result.recommended, { confirmed: false })
+    createStep.value = 'preferences'
+  } catch (error) {
+    if (requestId !== briefPreviewRequestId || !createVisible.value) return
+    ElMessage.warning(`预分析未完成，可手动确认偏好：${(error as Error).message}`)
+    skipBrief()
+  } finally {
+    if (requestId === briefPreviewRequestId) previewing.value = false
+  }
 }
 
 async function createTask() {
@@ -364,6 +423,7 @@ async function createTask() {
     if (draft.externalResearchEnabled && externalDomains.length === 0) throw new Error('请填写至少一个允许访问的域名')
     const response = await createKnowledgeTask({
       ...draft,
+      brief: { ...brief, confirmed: true },
       externalDomains,
       externalRequestLimit: draft.externalResearchEnabled ? draft.externalRequestLimit : 0,
     })
@@ -611,6 +671,16 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
 .external-grant-head > div { display: grid; gap: 2px; }
 .external-grant-head strong { color: var(--text-primary); font-size: 12px; }
 .external-grant-head span, .external-grant > p { color: var(--text-faint); font-size: 10px; line-height: 1.55; }
+.research-brief-form { align-content: start; }
+.research-brief-summary { display: grid; gap: 5px; padding: 12px 13px; border: 1px solid var(--accent-border); border-radius: 14px; background: var(--accent-light); }
+.research-brief-summary strong { color: var(--text-primary); font-size: 12px; }
+.research-brief-summary p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
+.research-brief-summary > span, .research-brief-fallback { color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.research-brief-fallback { margin: 0; }
+.research-brief-field { min-width: 0; display: grid; gap: 6px; color: var(--text-secondary); font-size: 11px; font-weight: 650; }
+.research-brief-field > span { display: flex; align-items: center; gap: 7px; }
+.research-brief-field small { padding: 2px 6px; border-radius: 6px; background: var(--accent-light); color: var(--accent); font-size: 9px; }
+.task-brief-summary { overflow-wrap: anywhere; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
 .external-limit-row { display: flex; align-items: center; gap: 9px; color: var(--text-muted); font-size: 11px; }
 .external-limit-row :deep(.el-input-number) { width: 116px; }
 .task-result-modal { width: 100%; height: min(760px, calc(100dvh - 48px)); }

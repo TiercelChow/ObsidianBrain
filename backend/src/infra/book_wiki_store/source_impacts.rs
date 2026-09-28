@@ -485,7 +485,7 @@ mod tests {
             conn.execute("DELETE FROM knowledge_entry_versions WHERE entry_id=?1 AND revision>1",[&id])?;
             // Reconstruct a coherent pre-v48 migration ledger, including any
             // subsequently added migrations. MAX(version) drives upgrades.
-            conn.execute_batch("DROP TABLE knowledge_source_impacts; DELETE FROM _migrations WHERE version>=48;")?;
+            conn.execute_batch("DROP TABLE knowledge_source_impacts; ALTER TABLE knowledge_tasks DROP COLUMN brief_json; DELETE FROM _migrations WHERE version>=48;")?;
             Ok(())
         }).unwrap();
         drop(store);
