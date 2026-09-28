@@ -322,11 +322,22 @@ impl ResearchBrief {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct ResearchDecisionPoint {
+    pub field: String,
+    pub question: String,
+    pub impact: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ResearchPreflight {
     pub summary: String,
     pub recommended: ResearchBrief,
     /// A ranked subset of audience, purpose, tone, depth, presentation_theme.
     pub focus_decisions: Vec<String>,
+    /// Contextual prompts for the corresponding decisions. Older responses may omit these.
+    #[serde(default)]
+    pub decision_points: Vec<ResearchDecisionPoint>,
     pub cautions: Vec<String>,
 }
 
@@ -348,6 +359,21 @@ impl ResearchPreflight {
                 || !seen.insert(field)
             {
                 return Err("研究预分析包含无效或重复决策点".into());
+            }
+        }
+        if self.decision_points.len() > self.focus_decisions.len() {
+            return Err("研究预分析的决策说明数量超出范围".into());
+        }
+        let mut explained = std::collections::HashSet::new();
+        for decision in &self.decision_points {
+            if !self.focus_decisions.contains(&decision.field)
+                || !explained.insert(&decision.field)
+                || decision.question.trim().is_empty()
+                || decision.question.chars().count() > 160
+                || decision.impact.trim().is_empty()
+                || decision.impact.chars().count() > 160
+            {
+                return Err("研究预分析包含无效或重复的决策说明".into());
             }
         }
         if self.cautions.len() > 3 || self.cautions.iter().any(|v| v.chars().count() > 160) {
@@ -403,6 +429,9 @@ pub struct ResearchQuestion {
 #[serde(deny_unknown_fields)]
 pub struct ResearchPlan {
     pub goal: String,
+    /// Reader-facing deliverable title; absent from plans saved before this field existed.
+    #[serde(default)]
+    pub report_title: Option<String>,
     pub constraints: Vec<String>,
     pub acceptance: Vec<String>,
     pub depth: String,

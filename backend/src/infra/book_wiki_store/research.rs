@@ -3,9 +3,9 @@
 use super::{insert_agent_run_event, stable_id, BookWikiStore};
 use crate::error::BrainError;
 use crate::models::book_wiki::{
-    ResearchBaselineSummary, ResearchEvidenceReference, ResearchFinding, ResearchPlan,
-    ResearchSectionOutput, ResearchStageContent, ResearchStageSummary, ResearchSynthesisOutput,
-    ResearchWorkspace,
+    ResearchBaselineSummary, ResearchBrief, ResearchEvidenceReference, ResearchFinding,
+    ResearchPlan, ResearchSectionOutput, ResearchStageContent, ResearchStageSummary,
+    ResearchSynthesisOutput, ResearchWorkspace,
 };
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -40,8 +40,39 @@ fn bounded_list(values: &[String], count: usize, length: usize) -> bool {
     values.len() <= count && values.iter().all(|value| text(value, length))
 }
 
+/// Keep the saved stage text intact; only suppress exact duplication introduced
+/// by the report wrapper. Its summary remains available in stage metadata.
+fn append_report_section(body: &mut String, title: &str, summary: &str, content: &str) {
+    let content = content.trim_matches('\n');
+    let (first_line, rest) = content.split_once('\n').unwrap_or((content, ""));
+    let heading = first_line.trim();
+    let level = heading.bytes().take_while(|byte| *byte == b'#').count();
+    let repeats_title = (1..=6).contains(&level)
+        && heading
+            .as_bytes()
+            .get(level)
+            .is_some_and(u8::is_ascii_whitespace)
+        && heading[level..].trim().trim_end_matches('#').trim() == title.trim();
+    let content = if repeats_title && !rest.trim().is_empty() {
+        rest.trim_start_matches('\n')
+    } else {
+        content
+    };
+    body.push_str(&format!("## {title}\n\n"));
+    let summary = summary.trim();
+    if !summary.is_empty() && !content.contains(summary) {
+        body.push_str(summary);
+        body.push_str("\n\n");
+    }
+    body.push_str(content);
+    body.push_str("\n\n");
+}
+
 pub(crate) fn validate_plan(plan: &ResearchPlan) -> Result<(), BrainError> {
     if !text(&plan.goal, 4000)
+        || plan.report_title.as_ref().is_some_and(|title| {
+            !text(title, 160) || title.contains(['\n', '\r']) || title.trim_start().starts_with('#')
+        })
         || !matches!(plan.depth.as_str(), "brief" | "standard" | "deep")
         || !bounded_list(&plan.constraints, 32, 1000)
         || !bounded_list(&plan.acceptance, 32, 1000)
@@ -889,7 +920,9 @@ impl BookWikiStore {
             check_run(conn,claim,run,false)?;
             let plan_raw:String=conn.query_row("SELECT plan_json FROM knowledge_research_workspaces WHERE task_id=?1",[&claim.task_id],|row|row.get(0))?;
             let plan:ResearchPlan=decode(&plan_raw)?;
-            let mut body=format!("# {}\n\n",plan.goal);
+            let brief_raw:String=conn.query_row("SELECT brief_json FROM knowledge_tasks WHERE id=?1",[&claim.task_id],|row|row.get(0))?;
+            let brief:ResearchBrief=decode(&brief_raw)?;
+            let mut body=format!("# {}\n\n",plan.report_title.as_deref().unwrap_or(&plan.goal));
             if !plan.constraints.is_empty() {body.push_str(&format!("研究范围与约束：{}\n\n",plan.constraints.join("；")))}
             if !plan.terminology.is_empty() {body.push_str(&format!("术语口径：{}\n\n",plan.terminology.join("；")))}
             let mut findings=Vec::<ResearchFinding>::new();
@@ -897,7 +930,17 @@ impl BookWikiStore {
             let mut identities=HashMap::new();
             let mut section_ranges=Vec::new();
             let mut sections=plan.questions.iter().map(|q|(format!("section:{}",q.id),q.id.clone(),q.title.clone())).collect::<Vec<_>>();
-            sections.push(("synthesis".into(),"_synthesis".into(),"综合结论与交叉核验".into()));
+            let synthesis_title=match (brief.confirmed,brief.purpose.as_str()) {
+                (true,"decision")=>"执行摘要与判断",
+                (true,"reference")=>"要点速览",
+                _=>"综合结论与交叉核验",
+            };
+            let synthesis=("synthesis".into(),"_synthesis".into(),synthesis_title.into());
+            if brief.confirmed && matches!(brief.purpose.as_str(),"decision"|"reference") {
+                sections.insert(0,synthesis);
+            } else {
+                sections.push(synthesis);
+            }
             for (key,question_id,title) in sections {
                 let section=read_content(conn,&claim.task_id,&key)?;
                 if section.stage.status!="completed" {return Err(invalid("研究章节尚未完成，不能把局部报告伪装成完整交付"))}
@@ -931,7 +974,7 @@ impl BookWikiStore {
                 }
                 let byte_start=body.len();
                 let section_summary=relabel(&section.stage.summary,&mapping)?;
-                body.push_str(&format!("## {}\n\n{}\n\n{}\n\n",title,section_summary,relabel(&section.content_md,&mapping)?));
+                append_report_section(&mut body,&title,&section_summary,&relabel(&section.content_md,&mapping)?);
                 let finding_start=findings.len();
                 for mut finding in section.findings {
                     finding.finding=relabel(&finding.finding,&mapping)?;
@@ -1105,7 +1148,7 @@ mod tests {
     use super::*;
     use crate::infra::book_wiki_store::tests::{sample_book, sample_source, test_store};
     use crate::models::book_wiki::{
-        ResearchFinding, ResearchPlan, ResearchQuestion, ResearchSectionOutput,
+        ResearchBrief, ResearchFinding, ResearchPlan, ResearchQuestion, ResearchSectionOutput,
     };
     use serde_json::json;
 
@@ -1161,6 +1204,7 @@ mod tests {
     fn plan() -> ResearchPlan {
         ResearchPlan {
             goal: "比较机制与边界".into(),
+            report_title: Some("机制与边界研究".into()),
             constraints: vec!["保留公式".into()],
             acceptance: vec!["给出条件差异及证据不足".into()],
             depth: "deep".into(),
@@ -1215,6 +1259,30 @@ mod tests {
                 baseline_claim_id: None,
             }],
         }
+    }
+
+    #[test]
+    fn test_report_section_omits_only_exact_repeated_heading_and_summary() {
+        let mut body = String::new();
+        append_report_section(
+            &mut body,
+            "适用边界",
+            "只有条件成立才适用。[S1]",
+            "## 适用边界\n\n只有条件成立才适用。[S1]\n\n完整推导与反例。[S1]",
+        );
+        assert_eq!(body.matches("## 适用边界").count(), 1);
+        assert_eq!(body.matches("只有条件成立才适用。[S1]").count(), 1);
+        assert!(body.contains("完整推导与反例。[S1]"));
+
+        let mut distinct = String::new();
+        append_report_section(
+            &mut distinct,
+            "适用边界",
+            "简明摘要仍有新增限定。[S1]",
+            "### 反例\n\n证据只覆盖某一版本。[S1]",
+        );
+        assert!(distinct.contains("简明摘要仍有新增限定。[S1]"));
+        assert!(distinct.contains("### 反例"));
     }
 
     fn complete_section_only(store: &BookWikiStore, base: &str, task: &str, key: &str) {
@@ -1308,6 +1376,11 @@ mod tests {
         let claim = store.claim_research_stage(&task, "report").unwrap();
         let run = attach(&store, &base, &task, &claim);
         let report = store.assemble_research_report(&claim, &run).unwrap();
+        assert!(report.content_md.starts_with("# 机制与边界研究\n\n"));
+        assert!(
+            report.content_md.find("## 机制与公式").unwrap()
+                < report.content_md.find("## 综合结论与交叉核验").unwrap()
+        );
         assert_eq!(report.content_md.matches("LATE_CONCLUSION").count(), 2);
         assert!(report.content_md.contains("$$d_k=d_v=128$$"));
         assert!(report.content_md.contains("[S1]"));
@@ -1328,6 +1401,100 @@ mod tests {
             "assembled_from_actual_read"
         );
         assert_ne!(provenance["research_origins"][0]["run_id"], run);
+    }
+
+    #[test]
+    fn test_decision_report_opens_with_synthesis_without_losing_section_ranges() {
+        let (store, _dir, base, task) = fixture();
+        let brief = ResearchBrief {
+            confirmed: true,
+            purpose: "decision".into(),
+            ..ResearchBrief::default()
+        };
+        store
+            .db
+            .with_connection(|conn| {
+                conn.execute(
+                    "UPDATE knowledge_tasks SET brief_json=?2 WHERE id=?1",
+                    params![task, encode(&brief)?],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        setup_plan(&store, &base, &task);
+        complete_section(&store, &base, &task, "section:mechanism");
+        complete_section(&store, &base, &task, "section:boundary");
+        let claim = store.claim_research_stage(&task, "report").unwrap();
+        let run = attach(&store, &base, &task, &claim);
+        let report = store.assemble_research_report(&claim, &run).unwrap();
+        let synthesis = report.content_md.find("## 执行摘要与判断").unwrap();
+        let section = report.content_md.find("## 机制与公式").unwrap();
+        assert!(synthesis < section);
+        assert!(report.content_md.contains("LATE_CONCLUSION"));
+        let run = store.get_agent_run(&run).unwrap();
+        let ranges = run.output.unwrap()["section_ranges"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(ranges[0]["question_id"], "_synthesis");
+        assert_eq!(ranges.len(), 3);
+        for (index, range) in ranges.iter().enumerate() {
+            let start = range["byte_start"].as_u64().unwrap() as usize;
+            let end = range["byte_end"].as_u64().unwrap() as usize;
+            assert!(report.content_md[start..end].starts_with("## "));
+            if index + 1 < ranges.len() {
+                assert_eq!(
+                    end,
+                    ranges[index + 1]["byte_start"].as_u64().unwrap() as usize
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_reference_report_opens_with_key_points_but_teaching_report_concludes_last() {
+        for (purpose, heading, front) in [
+            ("reference", "## 要点速览", true),
+            ("teach", "## 综合结论与交叉核验", false),
+        ] {
+            let (store, _dir, base, task) = fixture();
+            let brief = ResearchBrief {
+                confirmed: true,
+                purpose: purpose.into(),
+                ..ResearchBrief::default()
+            };
+            store
+                .db
+                .with_connection(|conn| {
+                    conn.execute(
+                        "UPDATE knowledge_tasks SET brief_json=?2 WHERE id=?1",
+                        params![task, encode(&brief)?],
+                    )?;
+                    Ok(())
+                })
+                .unwrap();
+            setup_plan(&store, &base, &task);
+            complete_section(&store, &base, &task, "section:mechanism");
+            complete_section(&store, &base, &task, "section:boundary");
+            let claim = store.claim_research_stage(&task, "report").unwrap();
+            let run = attach(&store, &base, &task, &claim);
+            let report = store.assemble_research_report(&claim, &run).unwrap();
+            let synthesis = report.content_md.find(heading).unwrap();
+            let section = report.content_md.find("## 机制与公式").unwrap();
+            assert_eq!(synthesis < section, front, "{purpose}");
+        }
+    }
+
+    #[test]
+    fn test_research_plan_accepts_legacy_missing_title_and_rejects_multiline_title() {
+        let mut value = serde_json::to_value(plan()).unwrap();
+        value.as_object_mut().unwrap().remove("report_title");
+        let legacy: ResearchPlan = serde_json::from_value(value).unwrap();
+        assert_eq!(legacy.report_title, None);
+        assert!(validate_plan(&legacy).is_ok());
+        let mut invalid = plan();
+        invalid.report_title = Some("标题\n伪造章节".into());
+        assert!(validate_plan(&invalid).is_err());
     }
 
     #[test]

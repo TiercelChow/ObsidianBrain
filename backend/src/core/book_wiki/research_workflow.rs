@@ -40,9 +40,19 @@ fn parse_phase<T: serde::de::DeserializeOwned>(answer: &str) -> Result<T, BrainE
     })
 }
 
+fn validate_new_research_plan(plan: &ResearchPlan) -> Result<(), BrainError> {
+    validate_research_plan(plan)?;
+    if plan.report_title.is_none() {
+        return Err(BrainError::KnowledgeValidation(
+            "研究规划缺少面向读者的材料标题 report_title".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn phase_contract(phase: &str) -> serde_json::Value {
     if phase == "plan" {
-        json!({"goal":"回答任务要解决的核心问题","constraints":["用户明确要求的范围"],"acceptance":["能改变判断的具体验收条件"],"depth":"standard","terminology":["统一术语与定义口径，不捏造事实"],"questions":[{"id":"stable_ascii_id","title":"报告主题标题","question":"一个可完成、对整体目标有贡献的明确问题","required_evidence":["支撑此问题所需的证据类型或反例"],"expected_output_tokens":null,"target_entry_ids":[]}]})
+        json!({"goal":"回答任务要解决的核心问题","report_title":"面向读者的材料标题","constraints":["用户明确要求的范围"],"acceptance":["能改变判断的具体验收条件"],"depth":"standard","terminology":["统一术语与定义口径，不捏造事实"],"questions":[{"id":"stable_ascii_id","title":"报告主题标题","question":"一个可完成、对整体目标有贡献的明确问题","required_evidence":["支撑此问题所需的证据类型或反例"],"expected_output_tokens":null,"target_entry_ids":[]}]})
     } else if phase == "synthesis" {
         json!({"summary":"跨章节综合结论及必要限定","content_md":"回答整体目标，统一比较维度、术语与条件，明确冲突和未覆盖事项；不能重写或删去原始章节。事实使用本轮实际已读引用。","findings":[{"finding":"有界综合判断","status":"partial","citation_indices":[],"limitations":["明确未核验的条件或证据缺口"],"baseline_entry_id":null,"baseline_claim_id":null}],"section_checks":[{"question_id":"stable_ascii_id","revision":1,"assessment":"insufficient","note":"每个主题必须有一项，使用输入中的实际ID和版本；判定只选 consistent、qualified、conflict、insufficient"}]})
     } else {
@@ -75,7 +85,7 @@ impl BookWikiService {
         prompt.push_str("</research_configuration>\n\n");
         prompt.push_str(&format!("<phase_capacity>\n{}\n</phase_capacity>\n规划 depth 只选 brief、standard、deep，章节 finding.status 只选 supported、partial、missing、conflict。expected_output_tokens 是每个主题的必要篇幅估计（可为 null，1至262144为安全边界），不是必须输出的长度；依据目标、复杂度、完整公式/论证需求估计。实际请求仍受模型容量和供应商输出硬限，估计过大的主题应合理拆分，不能删去关键条件以求短。容量若未知，只是应用护栏，不冒充真实模型上限。\n",json!({"capacity_tokens":phase.resources.capacity_tokens,"capacity_basis":phase.resources.capacity_basis,"phase_output_tokens":phase.resources.output_tokens})));
         if phase.phase == "plan" {
-            prompt.push_str("本阶段只确定业务目标、约束、验收条件、术语与报告主题；这不是隐藏思维链。主题数量按实际问题规模确定，1至24是安全边界而非必须凑满，不固定两到四个。可通过只读工具浏览编译知识、查找具体核验对象，不在本阶段编造研究结论。review 必须在子问题中明确待核验的真实条目与具体主张；refresh 必须明确真实基线条目与待比较的依据。找不到基线则把它列为具体缺口，不编造旧版变化。返回规划，不生成长报告或幻灯片。\n");
+            prompt.push_str("本阶段只确定业务目标、约束、验收条件、术语与报告主题；这不是隐藏思维链。report_title 是面向读者的完整材料标题，应概括论题和材料用途，使用单行陈述式标题而非直接照搬用户提问；goal 仍是内部研究目标。主题数量按实际问题规模确定，1至24是安全边界而非必须凑满，不固定两到四个。每个子问题的 question 是内部取证问题，title 用面向读者的章节标题，写成材料中的论题而非“什么是/如何/为什么”的问答标题；不同标题应形成递进或对照，不机械重复任务原话。可通过只读工具浏览编译知识、查找具体核验对象，不在本阶段编造研究结论。review 必须在子问题中明确待核验的真实条目与具体主张；refresh 必须明确真实基线条目与待比较的依据。找不到基线则把它列为具体缺口，不编造旧版变化。返回规划，不生成长报告或幻灯片。\n");
             if phase.task.brief.confirmed {
                 prompt.push_str(&format!(
                     "用户已确认研究简报：plan.depth 必须为 {}；acceptance 需要体现受众 {}、用途 {} 和特别强调事项（{}），同时不把视觉主题当作证据要求。\n",
@@ -85,6 +95,13 @@ impl BookWikiService {
             }
         } else if phase.phase == "synthesis" {
             prompt.push_str("本阶段综合全部已保存主题，回答整体目标，不再逐章重复研究。integration_manifest 含每个主题的完整发现、限制与实际版本；这些是待核验的章节成果，不是本轮原始证据。按需用 knowledge_get_research_section 分页查看完整章节，has_more 时继续；旧章节引用已中性化，不能直接复制为本轮S引用。关键事实需通过当前实体/原文工具取得本轮编号。逐项对照全部主题的目标覆盖、术语、比较维度、适用条件/版本、同源重复、反例和矛盾；不得以术语统一抹平条件差异。section_checks 必须覆盖全部主题且精确对应版本；对照判断只是模型自报，不能冒充独立事实证明。明显冲突保留双方依据和条件，未知列出缺口，不强行得出一致结论。证据不足可输出 partial/missing；supported/conflict 仍必须有本轮实际已读引用。使用预算/覆盖/扩展工具按缺口补查，不固定top-k。question_index 按本阶段预算工具的 required_evidence 列表填写。禁止生成幻灯片、删去原报告章节或伪装历史对象核验。\n");
+            if phase.task.brief.confirmed {
+                match phase.task.brief.purpose.as_str() {
+                    "decision" => prompt.push_str("本综合将作为报告开篇的执行摘要：先给当前证据可支持的判断和判据，再说明关键取舍、适用条件与会改变判断的证据缺口。不要把各章节摘要简单堆叠，也不要把条件性建议写成无条件定论。\n"),
+                    "reference" => prompt.push_str("本综合将作为报告开篇的要点速览：按可检索的主题呈现结论、适用条件、例外和来源定位，让读者能快速找到后文细节；不要重复整份报告。\n"),
+                    _ => {}
+                }
+            }
         } else {
             prompt.push_str("只完成当前明确主题，完整呈现论证、条件和反例；其他主题由独立阶段保存。研究深度、召回和输出随问题决定，不固定 top-k。优先读取编译知识；必要时核对原文。使用 knowledge_get_run_budget、knowledge_request_budget_extension 与 knowledge_report_evidence_coverage 按缺口扩展（question_index 对应预算工具中的要求）。连续补查无新依据则停止，诚实交付缺口。统一 plan.terminology，但不能为统一用词抹去条件差异。presentation 任务此阶段仍保存完整研究章节，禁止提前压成幻灯片要点。每项 finding 的引用只来自本阶段真实已读编号；上阶段编号不能直接沿用。\n");
         }
@@ -329,7 +346,7 @@ impl BookWikiService {
         } else {
             self.persist_model_research_phase(ResearchPhase{task,profile:&profile,key:"plan".into(),phase:"plan",payload:json!({"goal":task.title,"description":task.description,"task_type":task.task_type}),resources:ResearchResources::new(&profile,None,None,catalog.len()),evidence:vec![]},|claim,run,answer| {
                 let plan:ResearchPlan=parse_phase(answer)?;
-                validate_research_plan(&plan)?;
+                validate_new_research_plan(&plan)?;
                 if task.brief.confirmed && plan.depth != task.brief.depth {
                     return Err(BrainError::KnowledgeValidation(format!("研究规划 depth={} 与用户确认的 {} 不一致",plan.depth,task.brief.depth)));
                 }
@@ -377,7 +394,7 @@ impl BookWikiService {
                     profile: &profile,
                     key,
                     phase: "section",
-                payload: json!({"plan":{"goal":plan.goal,"constraints":plan.constraints,"acceptance":plan.acceptance,"depth":plan.depth,"terminology":plan.terminology},"question":question,"frozen_baselines":self.store.get_research_workspace(&task.id)?.map(|w|w.baselines.into_iter().filter(|b|b.question_id==question.id).collect::<Vec<_>>()).unwrap_or_default(),"report_outline":plan.questions.iter().map(|q|json!({"id":q.id,"title":q.title})).collect::<Vec<_>>()}),
+                payload: json!({"plan":{"goal":plan.goal,"report_title":plan.report_title,"constraints":plan.constraints,"acceptance":plan.acceptance,"depth":plan.depth,"terminology":plan.terminology},"question":question,"frozen_baselines":self.store.get_research_workspace(&task.id)?.map(|w|w.baselines.into_iter().filter(|b|b.question_id==question.id).collect::<Vec<_>>()).unwrap_or_default(),"report_outline":plan.questions.iter().map(|q|json!({"id":q.id,"title":q.title})).collect::<Vec<_>>()}),
                     resources,
                     evidence,
                 },
@@ -414,7 +431,7 @@ impl BookWikiService {
             )?;
             self.persist_model_research_phase(ResearchPhase {
                 task, profile:&profile, key:"synthesis".into(), phase:"synthesis",
-                payload:json!({"plan":{"goal":plan.goal,"constraints":plan.constraints,"acceptance":plan.acceptance,"depth":plan.depth,"terminology":plan.terminology},"question":question,"integration_manifest":self.store.research_integration_manifest(&task.id)?}),
+                payload:json!({"plan":{"goal":plan.goal,"report_title":plan.report_title,"constraints":plan.constraints,"acceptance":plan.acceptance,"depth":plan.depth,"terminology":plan.terminology},"question":question,"integration_manifest":self.store.research_integration_manifest(&task.id)?}),
                 resources, evidence:vec![],
             }, |claim,run,answer| {
                 let output:ResearchSynthesisOutput=parse_phase(answer)?;
@@ -471,8 +488,13 @@ mod tests {
 
     #[test]
     fn test_phase_contract_is_one_valid_example_and_rejects_trailing_or_incomplete_json() {
+        assert_eq!(phase_contract("plan")["report_title"], "面向读者的材料标题");
         let plan: ResearchPlan = parse_phase(&phase_contract("plan").to_string()).unwrap();
         validate_research_plan(&plan).unwrap();
+        validate_new_research_plan(&plan).unwrap();
+        let mut missing_title = plan.clone();
+        missing_title.report_title = None;
+        assert!(validate_new_research_plan(&missing_title).is_err());
         assert!(parse_phase::<ResearchPlan>(&format!("{} {{}}", phase_contract("plan"))).is_err());
         assert!(parse_phase::<ResearchPlan>("{}").is_err());
         assert!(parse_phase::<ResearchSectionOutput>("{\"content_md\":\"正文\"}").is_err());
@@ -568,6 +590,26 @@ mod tests {
             resources: ResearchResources::new(profile, None, None, 0),
             evidence: Vec::new(),
         }
+    }
+
+    #[test]
+    fn test_synthesis_prompt_adapts_to_front_loaded_decision_material() {
+        let (_dir, service, mut task, _) = plan_repair_fixture(false);
+        task.brief.confirmed = true;
+        task.brief.purpose = "decision".into();
+        let profile = service.active_runtime_profile().unwrap();
+        let phase = ResearchPhase {
+            task: &task,
+            profile: &profile,
+            key: "synthesis".into(),
+            phase: "synthesis",
+            payload: json!({}),
+            resources: ResearchResources::new(&profile, None, None, 0),
+            evidence: vec![],
+        };
+        let prompt = service.research_phase_prompt(&phase).unwrap().0;
+        assert!(prompt.contains("作为报告开篇的执行摘要"));
+        assert!(prompt.contains("会改变判断的证据缺口"));
     }
 
     struct ExpandingResearchRuntime {
@@ -873,6 +915,7 @@ mod tests {
         let calls = calls.lock().unwrap();
         assert_eq!(calls.len(), 2);
         assert!(!calls[0].contains("<phase_repair_context>"));
+        assert!(calls[0].contains("title 用面向读者的章节标题"));
         assert!(calls[1].contains("unknown field `kind`"));
         let workspace = service
             .store
@@ -971,7 +1014,7 @@ mod tests {
                 .prompt
                 .contains("<research_phase>plan</research_phase>")
             {
-                return Ok(json!({"goal":"机制与反例","constraints":["保留完整公式"],"acceptance":["明确未覆盖事项"],"depth":"deep","terminology":["缓存机制"],"questions":[{"id":"mechanism","title":"机制","question":"机制是什么","required_evidence":["完整公式"]},{"id":"boundary","title":"反例","question":"适用条件与反例是什么","required_evidence":["条件和反例"]}]}).to_string());
+                return Ok(json!({"goal":"机制与反例","report_title":"机制与反例研究","constraints":["保留完整公式"],"acceptance":["明确未覆盖事项"],"depth":"deep","terminology":["缓存机制"],"questions":[{"id":"mechanism","title":"机制","question":"机制是什么","required_evidence":["完整公式"]},{"id":"boundary","title":"反例","question":"适用条件与反例是什么","required_evidence":["条件和反例"]}]}).to_string());
             }
             if request
                 .prompt
@@ -1013,8 +1056,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_long_research_report_delivers_valid_pptx_using_all_themes_not_a_prefix() {
-        struct LongReportRuntime;
+    async fn test_long_research_report_retries_truncated_presentation_plan_without_research_rerun()
+    {
+        struct LongReportRuntime {
+            presentation_calls: Arc<Mutex<usize>>,
+            research_calls: Arc<Mutex<[usize; 3]>>,
+        }
         #[async_trait]
         impl AgentRuntime for LongReportRuntime {
             async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
@@ -1022,12 +1069,14 @@ mod tests {
                     .prompt
                     .contains("<research_phase>plan</research_phase>")
                 {
-                    return Ok(json!({"goal":"核心架构专题报告","constraints":[],"acceptance":["保留每个主题的边界"],"depth":"standard","terminology":[],"questions":(0..10).map(|i|json!({"id":format!("q{i}"),"title":"核心架构","question":"核心架构是什么","required_evidence":["架构与边界"],"expected_output_tokens":4000})).collect::<Vec<_>>()} ).to_string());
+                    self.research_calls.lock().unwrap()[0] += 1;
+                    return Ok(json!({"goal":"核心架构专题报告","report_title":"核心架构研究","constraints":[],"acceptance":["保留每个主题的边界"],"depth":"standard","terminology":[],"questions":(0..10).map(|i|json!({"id":format!("q{i}"),"title":"核心架构","question":"核心架构是什么","required_evidence":["架构与边界"],"expected_output_tokens":4000})).collect::<Vec<_>>()} ).to_string());
                 }
                 if request
                     .prompt
                     .contains("<research_phase>section</research_phase>")
                 {
+                    self.research_calls.lock().unwrap()[1] += 1;
                     let raw = request
                         .prompt
                         .split_once("<phase_scope>\n")
@@ -1046,11 +1095,20 @@ mod tests {
                     for i in 0..10 {
                         assert!(request.prompt.contains(&format!("LATE_q{i}")));
                     }
+                    let mut calls = self.presentation_calls.lock().unwrap();
+                    *calls += 1;
+                    if *calls == 1 {
+                        return Err(BrainError::LlmApiError {
+                            provider: "deepseek_harness".into(),
+                            detail: "演示策划达到输出上限 (stop_reason=max_tokens)".into(),
+                        });
+                    }
                 }
                 if request
                     .prompt
                     .contains("<research_phase>synthesis</research_phase>")
                 {
+                    self.research_calls.lock().unwrap()[2] += 1;
                     return Ok(synthesis_answer(&request.prompt));
                 }
                 super::super::tests::FakeRuntime.prompt(request).await
@@ -1116,9 +1174,17 @@ mod tests {
         credentials
             .set(&provider.provider_id, "fixture-only")
             .unwrap();
-        let service = BookWikiService::new(store.clone(), Arc::new(LongReportRuntime))
-            .with_credential_store(credentials)
-            .with_artifact_root(dir.path().join("artifacts"));
+        let presentation_calls = Arc::new(Mutex::new(0));
+        let research_calls = Arc::new(Mutex::new([0; 3]));
+        let service = BookWikiService::new(
+            store.clone(),
+            Arc::new(LongReportRuntime {
+                presentation_calls: presentation_calls.clone(),
+                research_calls: research_calls.clone(),
+            }),
+        )
+        .with_credential_store(credentials)
+        .with_artifact_root(dir.path().join("artifacts"));
         let base = service.initialize_and_sync("book").unwrap().knowledge_base;
         let task = store
             .create_task_with_deliverable(
@@ -1130,6 +1196,8 @@ mod tests {
             )
             .unwrap();
         let result = service.execute_task(&task.id).await.unwrap();
+        assert_eq!(*presentation_calls.lock().unwrap(), 2);
+        assert_eq!(*research_calls.lock().unwrap(), [1, 10, 1]);
         assert_eq!(result.task.status, "completed");
         assert!(result.task.result_summary.len() > 90000);
         assert!(result.task.result_summary.contains("LATE_q9"));
@@ -1145,11 +1213,185 @@ mod tests {
             run.input["presentation_materialization"]["section_count"],
             11
         );
+        assert_eq!(run.input["output_expansion_attempt"], 1);
+        let parent_id = run.input["research_retry_parent_run_id"].as_str().unwrap();
+        let parent = store.get_agent_run(parent_id).unwrap();
+        assert_eq!(parent.status, "failed");
+        assert!(
+            run.input["request_max_output_tokens"].as_u64().unwrap()
+                > parent.input["request_max_output_tokens"].as_u64().unwrap()
+        );
         let (path, _, _) = service.artifact_path(&result.artifacts[0].id).unwrap();
         assert!(validate_pptx(&path).is_ok());
         assert_eq!(
             service.get_task_result(&task.id).unwrap().run_id,
             result.run_id
+        );
+    }
+
+    #[tokio::test]
+    async fn test_presentation_resume_does_not_replay_same_provider_output_hard_limit() {
+        struct CappedPresentationRuntime {
+            calls: Arc<Mutex<usize>>,
+            allow_success: Arc<Mutex<bool>>,
+        }
+        #[async_trait]
+        impl AgentRuntime for CappedPresentationRuntime {
+            async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+                if request.prompt.contains("演示文稿策划器") {
+                    *self.calls.lock().unwrap() += 1;
+                    if !*self.allow_success.lock().unwrap() {
+                        return Err(BrainError::LlmApiError {
+                            provider: "deepseek_harness".into(),
+                            detail: "演示策划达到输出上限 (stop_reason=max_tokens)".into(),
+                        });
+                    }
+                    return super::super::tests::FakeRuntime.prompt(request).await;
+                }
+                PhasedRuntime {
+                    calls: Arc::new(Mutex::new(Vec::new())),
+                    failed: Arc::new(Mutex::new(true)),
+                    synthesis_failure_pending: Arc::new(Mutex::new(false)),
+                }
+                .prompt(request)
+                .await
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let book = dir.path().join("book");
+        std::fs::create_dir(&book).unwrap();
+        std::fs::write(
+            book.join("source.md"),
+            "# 机制\n缓存机制、完整公式与适用条件。\n# 反例\n适用条件与反例。",
+        )
+        .unwrap();
+        let store = BookWikiStore::new(Arc::new(
+            SqliteStore::new(&dir.path().join("capped-ppt.db")).unwrap(),
+        ));
+        let provider = store
+            .save_model_provider_profile(
+                "capped-presentation",
+                "演示输出硬限测试",
+                "openai-completions",
+                "https://example.com/v1",
+                "capped-test",
+                "keychain",
+                "",
+                true,
+                true,
+                Some(32_768),
+                Some(2_048),
+                "off",
+                0,
+            )
+            .unwrap();
+        let profile = store.list_runtime_profiles().unwrap().remove(0);
+        store
+            .save_runtime_profile(
+                &profile.id,
+                &profile.executable,
+                &provider.model,
+                Some(&provider.provider_id),
+                true,
+                profile.revision,
+            )
+            .unwrap();
+        store
+            .save_reader_books(&[ReaderBook {
+                id: "book".into(),
+                path: book.display().to_string(),
+                kind: BookKind::Folder,
+                name: "演示硬限测试".into(),
+                description: String::new(),
+                category: String::new(),
+                added_at: 1,
+                progress: None,
+            }])
+            .unwrap();
+        use crate::infra::credential_store::{
+            tests::MemoryProviderCredentialStore, ProviderCredentialStore,
+        };
+        let credentials = Arc::new(MemoryProviderCredentialStore::default());
+        credentials
+            .set(&provider.provider_id, "fixture-only")
+            .unwrap();
+        let calls = Arc::new(Mutex::new(0));
+        let allow_success = Arc::new(Mutex::new(false));
+        let service = BookWikiService::new(
+            store.clone(),
+            Arc::new(CappedPresentationRuntime {
+                calls: calls.clone(),
+                allow_success: allow_success.clone(),
+            }),
+        )
+        .with_credential_store(credentials)
+        .with_artifact_root(dir.path().join("artifacts"));
+        let base = service.initialize_and_sync("book").unwrap().knowledge_base;
+        let task = store
+            .create_task_with_deliverable(
+                &base.id,
+                "机制与反例",
+                "明确适用边界",
+                "research",
+                "presentation",
+            )
+            .unwrap();
+        let first = service.execute_task(&task.id).await.unwrap_err();
+        assert!(first.to_string().contains("presentation_output_hard_limit"));
+        assert_eq!(*calls.lock().unwrap(), 1);
+        let failed_run_id = store
+            .get_research_stage_content(&task.id, "presentation", None)
+            .unwrap()
+            .stage
+            .run_id
+            .unwrap();
+        assert_eq!(store.get_task(&task.id).unwrap().status, "failed");
+        assert!(
+            service.get_task_result(&task.id).is_ok(),
+            "已保存报告必须仍能查看"
+        );
+        let second = service.execute_task(&task.id).await.unwrap_err();
+        assert!(second
+            .to_string()
+            .contains("presentation_output_hard_limit"));
+        assert_eq!(
+            *calls.lock().unwrap(),
+            1,
+            "相同模型硬限下不得重复调用策划器"
+        );
+        store
+            .save_model_provider_profile(
+                &provider.provider_id,
+                &provider.display_name,
+                &provider.api_protocol,
+                &provider.base_url,
+                &provider.model,
+                &provider.credential_source,
+                &provider.api_key_env,
+                true,
+                true,
+                Some(32_768),
+                Some(16_384),
+                "off",
+                provider.revision,
+            )
+            .unwrap();
+        *allow_success.lock().unwrap() = true;
+        let resumed = service.execute_task(&task.id).await.unwrap();
+        assert_eq!(resumed.task.status, "completed");
+        assert_eq!(*calls.lock().unwrap(), 2);
+        let artifact_run = store
+            .get_agent_run(resumed.artifacts[0].agent_run_id.as_deref().unwrap())
+            .unwrap();
+        assert!(
+            artifact_run.input["request_max_output_tokens"]
+                .as_u64()
+                .unwrap()
+                > 2_048
+        );
+        assert_eq!(
+            artifact_run.input["presentation_resume_from_truncated_run"],
+            failed_run_id
         );
     }
 

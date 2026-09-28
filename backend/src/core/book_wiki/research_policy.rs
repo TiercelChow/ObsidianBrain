@@ -154,7 +154,7 @@ impl ResearchResources {
             .output_tokens
             .min(available.min(u64::from(u32::MAX)) as u32);
         if self.output_tokens <= previous {
-            return Err(BrainError::KnowledgeValidation("(research_output_hard_limit) 当前完整输入与工具预留后已无输出扩容空间；未裁剪材料，部分结果仍保留，请调整实际容量或拆分主题".into()));
+            return Err(BrainError::KnowledgeValidation("(research_output_hard_limit) 当前完整输入与运行预留后已无输出扩容空间；未裁剪材料，部分结果仍保留，请调整实际容量或拆分主题".into()));
         }
         self.policy.max_output_tokens = Some(self.output_tokens);
         self.prompt_token_limit = self
@@ -180,7 +180,7 @@ impl ResearchResources {
             .max(previous.saturating_mul(2))
             .min(output_limit(context, provider_cap));
         if output <= previous {
-            return Err(BrainError::KnowledgeValidation("(research_output_hard_limit) 研究章节输出已达配置或容量硬上限；已有阶段保留，请拆分主题或配置真实模型能力，不重复同一截断请求".into()));
+            return Err(BrainError::KnowledgeValidation("(research_output_hard_limit) 当前阶段输出已达配置或容量硬上限；已有阶段保留，请拆分主题或配置真实模型能力，不重复同一截断请求".into()));
         }
         self.output_tokens = output;
         self.policy.max_output_tokens = Some(output);
@@ -268,6 +268,7 @@ mod tests {
         };
         let mut plan = ResearchPlan {
             goal: "比较机制".into(),
+            report_title: None,
             constraints: vec![],
             acceptance: vec!["报告缺口".into()],
             depth: "brief".into(),

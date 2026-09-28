@@ -11,6 +11,7 @@
       <details v-if="workspace.plan" class="research-scope">
         <summary>研究目标、约束与验收条件</summary>
         <strong>{{ workspace.plan.goal }}</strong>
+        <p v-if="workspace.plan.report_title" class="research-material-title">材料标题：{{ workspace.plan.report_title }}</p>
         <div v-for="(items, label) in { '范围约束': workspace.plan.constraints, '验收条件': workspace.plan.acceptance, '术语口径': workspace.plan.terminology }" :key="label">
           <h4>{{ label }}</h4><ul v-if="items.length"><li v-for="item in items" :key="item">{{ item }}</li></ul><p v-else>未指定</p>
         </div>
@@ -142,6 +143,7 @@ onBeforeUnmount(() => { alive = false; stop(); ++workspaceRequest; ++stageReques
 .workspace-overview > span { color: var(--text-secondary); }
 .research-scope, .selected-stage { min-width: 0; padding: 14px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); overflow-wrap: anywhere; }
 .research-scope summary { min-height: 32px; color: var(--text-secondary); font-weight: 650; cursor: pointer; }
+.research-material-title { margin: 6px 0 0; color: var(--text-muted); }
 .research-scope h4, .selected-stage h4 { margin: 10px 0 4px; font-size: 13px; }
 .research-scope ul, .findings ul { margin: 4px 0; padding-left: 20px; }
 .baseline-list article { display: grid; gap: 2px; margin-top: 8px; }.baseline-list span { color: var(--text-muted); }

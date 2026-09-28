@@ -66,9 +66,22 @@ test('research creation confirms an analyzed brief before persisting or running'
   assert.match(tasks, /previewKnowledgeTaskBrief\(draft\)/)
   assert.match(tasks, /createStep\.value = 'preferences'/)
   assert.match(tasks, /brief: \{ \.\.\.brief, confirmed: true \}/)
+  assert.match(tasks, /briefDecision\('purpose'\)/)
+  assert.match(tasks, /briefDecision\('purpose'\)\?\.question/)
+  assert.match(tasks, /briefDecision\('purpose'\)\?\.impact/)
   assert.match(tasks, /requestId !== briefPreviewRequestId \|\| !createVisible\.value/)
   assert.match(api, /preview_knowledge_task_brief/)
   assert.match(api, /brief: input\.brief/)
+})
+
+test('research workspace distinguishes the internal goal from the reader-facing report title', async () => {
+  const [workspace, api] = await Promise.all([
+    source('src/components/knowledge/KnowledgeResearchWorkspace.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+  assert.match(api, /report_title\?: string \| null/)
+  assert.match(workspace, /workspace\.plan\.report_title/)
+  assert.match(workspace, /材料标题/)
 })
 
 test('knowledge chat previews numbered sources before an explicit workspace navigation', async () => {

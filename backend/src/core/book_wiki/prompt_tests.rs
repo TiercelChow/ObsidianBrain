@@ -4,6 +4,9 @@ use super::*;
 fn test_retryable_harness_failure_only_allows_clear_transient_conditions() {
     for detail in [
         "ACP 调用失败: HTTP 503 Service Unavailable",
+        "ACP 调用失败: HTTP/1.1 502 Bad Gateway",
+        "ACP 调用失败: status=500",
+        "ACP 调用失败: status code 429",
         "ACP 调用失败: 429 rate limit",
         "ACP 调用失败: connection reset by peer",
         "DeepSeek Harness 返回了空回答 (stop_reason=end_turn)",
@@ -19,11 +22,15 @@ fn test_retryable_harness_failure_only_allows_clear_transient_conditions() {
     for detail in [
         "HTTP 401 invalid_api_key",
         "HTTP 403 forbidden",
+        "HTTP 401 service unavailable",
         "HTTP 400 invalid_request",
         "HTTP 429 insufficient_quota",
         "DeepSeek Harness 达到输出 token 上限 (stop_reason=max_tokens)",
         "DeepSeek Harness 在 600 秒内没有完成回答",
         "ACP 调用失败: 未知错误",
+        "模型输出需要 5000 tokens，但供应商未提供更多空间",
+        "日志提到 503 个引用，但请求因格式错误终止",
+        "请求预算为 4290 tokens，未返回完整内容",
     ] {
         assert!(
             !is_retryable_harness_failure(&BrainError::LlmApiError {
@@ -584,6 +591,22 @@ fn test_presentation_prompt_keeps_report_evidence_and_strict_contract() {
     assert!(prompt.contains("只输出符合演示策划合同的单个 JSON 对象"));
     assert!(prompt.contains("指定主题：midnight"));
     assert!(prompt.contains("保留反例"));
+    assert!(prompt.contains("决策路径：先明确选择与判据"));
+    assert!(prompt.contains("不要把研究子问题一题一页地搬进演示"));
+    assert!(prompt.contains("保留术语、公式、变量定义与适用前提"));
+    let report_prompt = build_task_prompt(&task.book_name, &task, &[], &[], &[]);
+    assert!(report_prompt.contains("决策材料先交代决策与判据"));
+    task.brief.purpose = "teach".into();
+    let teaching_prompt = build_presentation_prompt(&task, &report, &evidence, &skill);
+    assert!(teaching_prompt.contains("教学路径：先建立必要概念"));
+    assert!(!teaching_prompt.contains("决策路径：先明确选择与判据"));
+    task.brief.purpose = "reference".into();
+    assert!(build_presentation_prompt(&task, &report, &evidence, &skill)
+        .contains("查阅路径：先给可快速定位的结论"));
+    task.brief.purpose = "understand".into();
+    assert!(
+        build_task_prompt(&task.book_name, &task, &[], &[], &[]).contains("理解材料先给中心判断")
+    );
     assert!(!prompt.contains("调用工具生成 PPTX"));
     let mut spec: PresentationSpec = serde_json::from_value(serde_json::json!({
         "schema_version":"1.0","title":"材料","subtitle":"副标题",
@@ -618,6 +641,35 @@ fn test_research_preflight_never_marks_model_suggestion_as_user_confirmed() {
     let parsed = parse_research_preflight(&answer, "presentation").unwrap();
     assert!(!parsed.recommended.confirmed);
     assert_eq!(parsed.recommended.presentation_theme, "midnight");
+}
+
+#[test]
+fn test_research_preflight_exposes_contextual_decision_questions() {
+    let answer = serde_json::json!({
+        "summary":"为产品团队准备选型汇报",
+        "recommended":{"confirmed":false,"audience":"general","purpose":"decision","tone":"analytical","depth":"standard","presentation_theme":"midnight","emphasis":""},
+        "focus_decisions":["audience","purpose"],
+        "decision_points":[
+            {"field":"audience","question":"汇报对象是技术评审还是业务负责人？","impact":"会改变术语解释和实现细节的比重。"},
+            {"field":"purpose","question":"这份材料要帮助选型，还是只说明现状？","impact":"选型会突出判据、方案比较和条件性建议。"}
+        ],
+        "cautions":[]
+    }).to_string();
+    let parsed = parse_research_preflight(&answer, "presentation").unwrap();
+    assert_eq!(parsed.decision_points.len(), 2);
+    assert_eq!(parsed.decision_points[0].field, "audience");
+}
+
+#[test]
+fn test_research_preflight_rejects_decision_not_in_focus_fields() {
+    let answer = serde_json::json!({
+        "summary":"制作研究报告",
+        "recommended":{"confirmed":false,"audience":"general","purpose":"understand","tone":"analytical","depth":"standard","presentation_theme":"editorial","emphasis":""},
+        "focus_decisions":["purpose"],
+        "decision_points":[{"field":"tone","question":"使用何种表达？","impact":"改变术语密度。"}],
+        "cautions":[]
+    }).to_string();
+    assert!(parse_research_preflight(&answer, "report").is_err());
 }
 
 #[test]

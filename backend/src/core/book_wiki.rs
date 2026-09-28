@@ -50,7 +50,7 @@ use crate::infra::deepseek_harness::{AgentPromptRequest, AgentRuntime, AgentRunt
 use crate::models::book_wiki::{
     AgentTokenUsage, ConfigDocument, KnowledgeAnswer, KnowledgeBaseSummary, KnowledgeChangeSet,
     KnowledgeEntryDetail, KnowledgeEntrySummary, KnowledgeMessage, KnowledgeTask,
-    KnowledgeTaskExecution, ModelProviderProfile, ResearchPreflight, RuntimeProfile,
+    KnowledgeTaskExecution, ModelProviderProfile, ResearchBrief, ResearchPreflight, RuntimeProfile,
     RuntimeVerification, SaveModelProviderRequest, SemanticCompileResult, SourceSpanSnapshot,
     WikiSkill, WikiSkillBenchmarkCase, WikiSkillBenchmarkCaseResult, WikiSkillBenchmarkRun,
     MARKDOWN_EXTRACTION_VERSION,
@@ -71,6 +71,7 @@ const SKILL_BENCHMARK_MAX_OUTPUT_TOKENS: u32 = 4_096;
 const QA_SELECTION_TIMEOUT: Duration = Duration::from_secs(90);
 const QA_SELECTION_MAX_OUTPUT_TOKENS: u32 = 2_048;
 const MAX_QA_OUTPUT_EXPANSIONS: usize = 2;
+const MAX_PRESENTATION_OUTPUT_EXPANSIONS: usize = 2;
 const MAX_QA_TRANSIENT_RETRIES: usize = 1;
 const RESEARCH_TASK_TIMEOUT: Duration = Duration::from_secs(600);
 const PRESENTATION_PLAN_TIMEOUT: Duration = Duration::from_secs(180);
@@ -322,9 +323,9 @@ impl BookWikiService {
             "你是研究任务的启动顾问，只分析用户希望获得什么材料，不研究书籍内容，不查找证据，也不代替用户决定。\n\
              书籍：{}\n任务类型：{task_type}\n交付形式：{deliverable_type}\n标题：{title}\n补充说明：{description}\n\n\
              判断哪些编辑决策最影响最终成果，只返回一个完整 JSON 对象：\n\
-             {{\"summary\":\"用一句话复述预期成果，不声称已完成研究\",\"recommended\":{{\"confirmed\":false,\"audience\":\"general\",\"purpose\":\"understand\",\"tone\":\"analytical\",\"depth\":\"standard\",\"presentation_theme\":\"editorial\",\"emphasis\":\"\"}},\"focus_decisions\":[\"audience\",\"purpose\",\"tone\"],\"cautions\":[\"需要用户确认的范围歧义\"]}}\n\
+             {{\"summary\":\"用一句话复述预期成果，不声称已完成研究\",\"recommended\":{{\"confirmed\":false,\"audience\":\"general\",\"purpose\":\"understand\",\"tone\":\"analytical\",\"depth\":\"standard\",\"presentation_theme\":\"editorial\",\"emphasis\":\"\"}},\"focus_decisions\":[\"audience\",\"purpose\"],\"decision_points\":[{{\"field\":\"audience\",\"question\":\"材料面向领域专家还是入门读者？\",\"impact\":\"会改变术语解释和技术细节的比重。\"}},{{\"field\":\"purpose\",\"question\":\"要辅助决策还是帮助理解？\",\"impact\":\"决策材料会突出选项判据和条件性建议。\"}}],\"cautions\":[\"需要用户确认的范围歧义\"]}}\n\
              audience 只能为 general/specialist/beginner/self；purpose 只能为 understand/decision/teach/reference；tone 只能为 analytical/technical/narrative/concise；depth 只能为 brief/standard/deep；presentation_theme 只能为 editorial/midnight/sage。\n\
-             focus_decisions 按重要性选 1 至 4 个字段，不能重复；仅演示文稿可选 presentation_theme。所有字段必须齐全，未知信息保持保守默认。cautions 最多 3 条，只指出实际歧义，不制造决策。不得增加字段或输出解释、代码围栏。",
+             focus_decisions 按重要性选 1 至 4 个字段，不能重复；仅演示文稿可选 presentation_theme。decision_points 按相同顺序为每个重点字段给出与当前任务相关的具体选择问题和该选择对成品的影响，不写通用空话，也不把建议当成用户决定；每条 question/impact 各不超过 160 字。所有字段必须齐全，未知信息保持保守默认。cautions 最多 3 条，只指出实际歧义，不制造决策。不得增加字段或输出解释、代码围栏。",
             base.book_name,
         );
         let input = serde_json::json!({
@@ -855,7 +856,7 @@ impl BookWikiService {
                     break (run_id, answer, evidence);
                 }
                 Err(error)
-                    if is_qa_output_truncation(&error)
+                    if is_harness_output_truncation(&error)
                         && output_expansions < MAX_QA_OUTPUT_EXPANSIONS
                         && !attempted_run_id.is_empty()
                         && !stream.is_some_and(|sender| sender.is_closed()) =>
@@ -1572,6 +1573,100 @@ impl BookWikiService {
         })
     }
 
+    async fn run_presentation_plan_with_output_retries(
+        &self,
+        task: &KnowledgeTask,
+        profile: &RuntimeProfile,
+        prompt: &str,
+        claim: &mut ResearchStageClaim,
+        input: &mut serde_json::Value,
+        resources: &mut research_policy::ResearchResources,
+    ) -> Result<(String, String), BrainError> {
+        let mut expansions = input["output_expansion_attempt"].as_u64().unwrap_or(0) as usize;
+        loop {
+            resources.check_prompt(prompt)?;
+            match self
+                .run_audited(
+                    &task.knowledge_base_id,
+                    "knowledge_task_presentation_plan",
+                    input,
+                    profile,
+                    prompt.to_string(),
+                    None,
+                )
+                .await
+            {
+                Ok(result) => return Ok(result),
+                Err(error) if is_harness_output_truncation(&error) => {
+                    if self.store.get_task(&task.id)?.cancel_requested {
+                        return Err(error);
+                    }
+                    if expansions >= MAX_PRESENTATION_OUTPUT_EXPANSIONS {
+                        return Err(BrainError::KnowledgeValidation(format!(
+                            "(presentation_output_retry_exhausted) 演示策划已扩容 {MAX_PRESENTATION_OUTPUT_EXPANSIONS} 次仍被截断；完整研究报告保留，请调整模型输出能力或缩小演示范围后恢复。原错误：{error}"
+                        )));
+                    }
+                    let parent_run_id = self
+                        .store
+                        .get_research_stage_content(&task.id, "presentation", None)?
+                        .stage
+                        .run_id
+                        .ok_or_else(|| {
+                            BrainError::Internal("演示策划截断但没有对应运行记录".into())
+                        })?;
+                    let previous = resources.output_tokens;
+                    let mut next_resources = resources.clone();
+                    if let Some(size) = self
+                        .store
+                        .list_agent_run_events(&parent_run_id)?
+                        .into_iter()
+                        .rev()
+                        .find(|event| event.event_type == "run.usage")
+                        .and_then(|event| event.payload["context_size"].as_u64())
+                    {
+                        next_resources.observe_capacity(size);
+                    }
+                    let mut expanded = next_resources
+                        .expand_output_after_truncation(profile, previous)
+                        .map_err(presentation_output_limit_error)?;
+                    expanded
+                        .fit_expansion_to_input(estimated_tokens(prompt), previous)
+                        .map_err(presentation_output_limit_error)?;
+                    expansions += 1;
+                    self.store.append_agent_run_event(
+                        &parent_run_id,
+                        "run.output_budget_expanded",
+                        Some("budget"),
+                        &format!(
+                            "演示策划输出被截断，预算从 {previous} 扩至 {} tokens；不重做研究章节",
+                            expanded.output_tokens
+                        ),
+                        &serde_json::json!({
+                            "research_stage_key": "presentation",
+                            "previous_output_tokens": previous,
+                            "next_output_tokens": expanded.output_tokens,
+                            "expansion_attempt": expansions,
+                            "max_expansions": MAX_PRESENTATION_OUTPUT_EXPANSIONS,
+                        }),
+                    )?;
+                    self.store
+                        .fail_research_stage(claim, &error.to_string(), false)?;
+                    *claim = self.store.claim_research_stage(&task.id, "presentation")?;
+                    input["research_claim_id"] = serde_json::json!(claim.claim_id);
+                    input["research_claim_attempt"] = serde_json::json!(claim.attempt);
+                    input["research_resources"] = serde_json::json!(expanded);
+                    input["request_max_output_tokens"] = serde_json::json!(expanded.output_tokens);
+                    input["request_timeout_seconds"] =
+                        serde_json::json!(expanded.policy.timeout_seconds);
+                    input["output_expansion_attempt"] = serde_json::json!(expansions);
+                    input["research_retry_parent_run_id"] = serde_json::json!(parent_run_id);
+                    *resources = expanded;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
     async fn generate_presentation(
         &self,
         task: &KnowledgeTask,
@@ -1590,6 +1685,39 @@ impl BookWikiService {
                     "缺少可用的 book-presentation Skill，无法策划演示文稿".to_string(),
                 )
             })?;
+        let previous_stage =
+            self.store
+                .get_research_stage_content(&task.id, "presentation", None)?;
+        let previous_truncation = if previous_stage.stage.status == "failed" {
+            previous_stage
+                .stage
+                .run_id
+                .as_deref()
+                .map(|run_id| self.store.get_agent_run(run_id))
+                .transpose()?
+                .and_then(|run| {
+                    run.error
+                        .as_deref()
+                        .filter(|detail| detail.contains("stop_reason=max_tokens"))
+                        .and_then(|_| {
+                            run.input["request_max_output_tokens"]
+                                .as_u64()
+                                .and_then(|value| u32::try_from(value).ok())
+                                .map(|output| (run.id, output))
+                        })
+                })
+        } else {
+            None
+        };
+        let mut resources =
+            research_policy::ResearchResources::new(&profile, None, None, evidence.len());
+        if let Some((_, previous_output)) = &previous_truncation {
+            if resources.output_tokens <= *previous_output {
+                resources = resources
+                    .expand_output_after_truncation(&profile, *previous_output)
+                    .map_err(presentation_output_limit_error)?;
+            }
+        }
         let mut claim = self.store.claim_research_stage(&task.id, "presentation")?;
         let result: Result<(), BrainError> = async {
             self.store.append_agent_run_event(
@@ -1599,8 +1727,6 @@ impl BookWikiService {
                 "研究报告已完成，正在策划演示叙事与版式",
                 &serde_json::json!({ "skill_id": &presentation_skill.id }),
             )?;
-            let resources =
-                research_policy::ResearchResources::new(&profile, None, None, evidence.len());
             let mut input = serde_json::json!({
                 "knowledge_task_id": task.id,
                 "research_stage_key":"presentation",
@@ -1628,15 +1754,22 @@ impl BookWikiService {
                 input["presentation_materialization"]=serde_json::json!({"mode":"whole_structure_projection","report_characters":report.chars().count(),"omitted_characters":projection["omitted_characters"],"section_count":projection["sections"].as_array().map_or(0,Vec::len),"estimated_material_tokens":estimated_tokens(&material),"billing_usage":false});
                 prompt=build_presentation_prompt(task,&material,evidence,&presentation_skill);
             }
+            if let Some((parent_run_id, previous_output)) = &previous_truncation {
+                resources
+                    .fit_expansion_to_input(estimated_tokens(&prompt), *previous_output)
+                    .map_err(presentation_output_limit_error)?;
+                input["research_resources"] = serde_json::json!(resources);
+                input["request_max_output_tokens"] = serde_json::json!(resources.output_tokens);
+                input["request_timeout_seconds"] =
+                    serde_json::json!(resources.policy.timeout_seconds);
+                input["research_retry_parent_run_id"] = serde_json::json!(parent_run_id);
+                input["presentation_resume_from_truncated_run"] =
+                    serde_json::json!(parent_run_id);
+            }
             resources.check_prompt(&prompt)?;
             let (first_plan_run_id, answer) = self
-                .run_audited(
-                    &task.knowledge_base_id,
-                    "knowledge_task_presentation_plan",
-                    &input,
-                    &profile,
-                    prompt.clone(),
-                    None,
+                .run_presentation_plan_with_output_retries(
+                    task, &profile, &prompt, &mut claim, &mut input, &mut resources,
                 )
                 .await?;
             let (plan_run_id, spec) = match parse_task_presentation_spec(&answer, evidence.len(), task) {
@@ -1657,17 +1790,19 @@ impl BookWikiService {
                     retry_input["research_claim_attempt"] = serde_json::json!(claim.attempt);
                     retry_input["retry"] = serde_json::json!(1);
                     retry_input["reason"] = serde_json::json!(first_error.to_string());
+                    retry_input["research_retry_parent_run_id"] =
+                        serde_json::json!(first_plan_run_id);
                     let repair_prompt =
                         build_presentation_repair_prompt(&prompt, &first_error, &answer);
                     resources.check_prompt(&repair_prompt)?;
                     let (retry_run_id, retry_answer) = self
-                        .run_audited(
-                            &task.knowledge_base_id,
-                            "knowledge_task_presentation_plan",
-                            &retry_input,
+                        .run_presentation_plan_with_output_retries(
+                            task,
                             &profile,
-                            repair_prompt,
-                            None,
+                            &repair_prompt,
+                            &mut claim,
+                            &mut retry_input,
+                            &mut resources,
                         )
                         .await?;
                     (
@@ -3414,10 +3549,19 @@ fn is_recoverable_empty_answer(error: &BrainError) -> bool {
             && (detail.contains("空回答") || detail.contains("未返回正文")))
 }
 
-fn is_qa_output_truncation(error: &BrainError) -> bool {
+fn is_harness_output_truncation(error: &BrainError) -> bool {
     matches!(error, BrainError::LlmApiError { provider, detail }
         if provider == "deepseek_harness"
             && detail.contains("stop_reason=max_tokens"))
+}
+
+fn presentation_output_limit_error(error: BrainError) -> BrainError {
+    match error {
+        BrainError::KnowledgeValidation(detail) => BrainError::KnowledgeValidation(format!(
+            "(presentation_output_hard_limit) 演示策划无法在当前模型输出上限和完整输入空间内继续扩容；已保存的研究报告保留，请调整模型配置或缩小演示范围。{detail}"
+        )),
+        other => other,
+    }
 }
 
 fn is_qa_partial_output_truncation(error: &BrainError) -> bool {
@@ -3425,6 +3569,28 @@ fn is_qa_partial_output_truncation(error: &BrainError) -> bool {
         if provider == "deepseek_harness"
             && detail.contains("已生成正文保留为部分结果")
             && detail.contains("stop_reason=max_tokens"))
+}
+
+fn has_explicit_http_status(detail: &str, status: &str) -> bool {
+    ["http", "status", "code", "状态码"].iter().any(|marker| {
+        detail.match_indices(marker).any(|(index, _)| {
+            let before = detail[..index].chars().next_back();
+            let after = &detail[index + marker.len()..];
+            if before.is_some_and(|value| value.is_ascii_alphanumeric())
+                || after
+                    .chars()
+                    .next()
+                    .is_some_and(|value| value.is_ascii_alphanumeric())
+            {
+                return false;
+            }
+            after
+                .split(|value: char| !value.is_ascii_alphanumeric() && value != '.')
+                .filter(|part| !part.is_empty())
+                .take(2)
+                .any(|part| part == status)
+        })
+    })
 }
 
 fn is_retryable_harness_failure(error: &BrainError) -> bool {
@@ -3435,11 +3601,13 @@ fn is_retryable_harness_failure(error: &BrainError) -> bool {
         return false;
     }
     let detail = detail.to_ascii_lowercase();
+    if ["400", "401", "403", "422"]
+        .iter()
+        .any(|code| has_explicit_http_status(&detail, code))
+    {
+        return false;
+    }
     if [
-        "401",
-        "403",
-        "400",
-        "422",
         "unauthorized",
         "forbidden",
         "invalid_api_key",
@@ -3460,12 +3628,13 @@ fn is_retryable_harness_failure(error: &BrainError) -> bool {
     {
         return false;
     }
+    if ["429", "500", "502", "503", "504"]
+        .iter()
+        .any(|code| has_explicit_http_status(&detail, code))
+    {
+        return true;
+    }
     [
-        "429",
-        "500",
-        "502",
-        "503",
-        "504",
         "rate limit",
         "too many requests",
         "temporarily unavailable",
@@ -5023,6 +5192,39 @@ fn ensure_task_presentation_theme(
     Ok(())
 }
 
+fn research_editorial_blueprint(brief: &ResearchBrief, presentation: bool) -> String {
+    let purpose = match (presentation, brief.purpose.as_str()) {
+        (true, "decision") => "决策路径：先明确选择与判据，再展示备选方案及同口径证据、权衡和反例，最后给出带适用条件的建议与下一步验证。不要把研究子问题一题一页地搬进演示。",
+        (true, "teach") => "教学路径：先建立必要概念，再讲机制与书内可核对的例证，接着指出常见误解和适用边界，最后给出可复述的要点；不虚构课堂案例。不要把研究子问题一题一页地搬进演示。",
+        (true, "reference") => "查阅路径：先给可快速定位的结论，再按定义、条件、对照、例外和来源组织页面；每页标题应帮助读者查找，而不是复述一个提问。不要把研究子问题一题一页地搬进演示。",
+        (true, _) => "理解路径：先交代中心判断，再逐步展开机制、关键证据、相邻概念的差异和适用边界；末页收束为能够迁移的理解。不要把研究子问题一题一页地搬进演示。",
+        (false, "decision") => "决策材料先交代决策与判据，再比较选项、收益、代价和反例，最后给出有条件的建议及会改变判断的证据缺口；研究子问题是取证分工，不是逐条问答模板。",
+        (false, "teach") => "教学材料先建立必要概念与前提，再沿机制、可核对的例证、容易混淆的边界逐层展开；不要虚构案例，研究子问题是取证分工而非问答目录。",
+        (false, "reference") => "查阅材料把结论、定义、适用条件、版本和来源放在易扫描的位置；避免铺垫式问答，保留能快速定位的差异与例外。",
+        (false, _) => "理解材料先给中心判断，再按机制、证据和边界组织正文；研究子问题用于分工，不要求最终材料逐题复述。",
+    };
+    let audience = match brief.audience.as_str() {
+        "specialist" => "面向熟悉领域的读者：略去常识性解释，保留关键术语、争议、条件与版本差异。",
+        "beginner" => "面向初学者：术语首次出现时用一句话解释，先修概念要早于依赖它的推论。",
+        "self" => "面向自己的后续复查：突出可重访的来源、仍需核验的假设和下一步动作。",
+        _ => "面向一般读者：避免未经解释的行话，但不要牺牲必要的条件和证据。",
+    };
+    let tone = match brief.tone.as_str() {
+        "technical" => "保留术语、公式、变量定义与适用前提；不要为求通俗而改变技术含义。",
+        "narrative" => "用真实材料之间的进展与转折组织叙述；不编造人物、场景或因果故事。",
+        "concise" => "压缩套话和重复铺垫，不压缩关键证据、反例与限制。",
+        _ => "把判断、依据和推断关系写清楚，不堆砌空泛形容词。",
+    };
+    let depth = match brief.depth.as_str() {
+        "brief" => "篇幅保持聚焦，但至少交代结论成立的条件与主要缺口。",
+        "deep" => "深入呈现机制、反例、版本与竞争解释；篇幅由有效证据决定，不为凑长度扩写。",
+        _ => "在论证完整和阅读节奏之间取得平衡。",
+    };
+    format!(
+        "<editorial_blueprint>\n{purpose}\n{audience}\n{tone}\n{depth}\n</editorial_blueprint>\n"
+    )
+}
+
 fn build_task_prompt(
     book_name: &str,
     task: &KnowledgeTask,
@@ -5058,8 +5260,9 @@ fn build_task_prompt(
         task.brief.purpose,
         task.brief.tone,
         task.brief.depth,
-        if task.brief.emphasis.trim().is_empty() { "无" } else { task.brief.emphasis.as_str() },
+         if task.brief.emphasis.trim().is_empty() { "无" } else { task.brief.emphasis.as_str() },
         ));
+        prompt.push_str(&research_editorial_blueprint(&task.brief, false));
     }
     if task.deliverable_type == "presentation" {
         prompt.push_str("交付物：presentation。这一阶段仍输出完整的 Markdown 研究报告，不要为了幻灯片提前压缩为短要点。保留细节、数据口径、竞争解释、适用边界和逐项 [S<n>] 引用；后续会由独立的演示策划阶段重构叙事与版式。\n\n");
@@ -5123,6 +5326,7 @@ fn build_presentation_prompt(
             "用户最终确认的演示主题是 {}，无论 Skill 的默认建议如何，最终 JSON 的 theme 必须一致；叙事需适配受众 {} 与用途 {}。\n",
             task.brief.presentation_theme, task.brief.audience, task.brief.purpose,
         ));
+        prompt.push_str(&research_editorial_blueprint(&task.brief, true));
     }
     prompt.push_str("\n<evidence_catalog>\n");
     for (index, entry) in evidence.iter().enumerate() {
@@ -6482,7 +6686,7 @@ mod tests {
                 .prompt
                 .contains("<research_phase>plan</research_phase>")
             {
-                return Ok(serde_json::json!({"goal":"梳理核心架构","constraints":["说明分层方式"],"acceptance":["结论有来源支持"],"depth":"standard","terminology":["界面层、服务层、存储层"],"questions":[{"id":"architecture","title":"核心架构","question":"核心架构采用什么分层方式？","required_evidence":["原文分层描述"]}]}).to_string());
+                return Ok(serde_json::json!({"goal":"梳理核心架构","report_title":"核心架构的分层设计","constraints":["说明分层方式"],"acceptance":["结论有来源支持"],"depth":"standard","terminology":["界面层、服务层、存储层"],"questions":[{"id":"architecture","title":"核心架构","question":"核心架构采用什么分层方式？","required_evidence":["原文分层描述"]}]}).to_string());
             }
             if request
                 .prompt
@@ -7189,6 +7393,10 @@ mod tests {
         let result = service.execute_task(&task.id).await.expect("execution");
 
         assert_eq!(result.task.status, "completed");
+        assert!(result
+            .task
+            .result_summary
+            .starts_with("# 核心架构的分层设计\n"));
         assert!(result.task.result_summary.contains("[S1]"));
         assert_eq!(result.evidence.len(), 1);
         assert_eq!(

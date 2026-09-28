@@ -153,10 +153,14 @@ mod tests {
                 baseline_claim_id: None,
             });
         }
+        // Decision-style reports can place synthesis first; projection must
+        // follow validated ranges rather than assume it is the final section.
+        ranges[0]["question_id"] = json!("_synthesis");
         let material = project_report(&report, &json!(ranges), &findings, 7000).unwrap();
         assert!(estimated_tokens(&material) <= 7000);
         let parsed: Value = serde_json::from_str(&material).unwrap();
         assert_eq!(parsed["sections"].as_array().unwrap().len(), 10);
+        assert_eq!(parsed["sections"][0]["question_id"], "_synthesis");
         for index in 0..10 {
             assert!(material.contains(&format!("LAST_CRITICAL_{index}")));
             assert!(material.contains(&format!("后段关键证据{index}")));

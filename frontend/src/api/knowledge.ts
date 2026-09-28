@@ -242,6 +242,7 @@ export interface ResearchPreflight {
   summary: string
   recommended: ResearchBrief
   focus_decisions: Array<'audience' | 'purpose' | 'tone' | 'depth' | 'presentation_theme'>
+  decision_points?: Array<{ field: ResearchPreflight['focus_decisions'][number]; question: string; impact: string }>
   cautions: string[]
 }
 
@@ -296,7 +297,7 @@ export interface ResearchWorkspace {
   knowledge_base_id: string
   original_request: Record<string, unknown>
   plan?: {
-    goal: string; constraints: string[]; acceptance: string[]; depth: string; terminology: string[]
+    goal: string; report_title?: string | null; constraints: string[]; acceptance: string[]; depth: string; terminology: string[]
     questions: { id: string; title: string; question: string; required_evidence: string[]; target_entry_ids?: string[]; expected_output_tokens?: number | null }[]
   } | null
   stages: ResearchStageSummary[]
