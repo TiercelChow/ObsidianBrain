@@ -544,14 +544,33 @@ impl BookWikiService {
             ConversationMemory::default()
         };
         let profile = self.active_runtime_profile()?;
-        let context_window = profile
+        let configured_context_window = profile
             .provider_config
             .as_ref()
             .and_then(|p| p.context_window);
+        let observed_resume_context = resume_run_id
+            .map(|id| self.store.get_adaptive_run_budget(id))
+            .transpose()?
+            .flatten()
+            .and_then(|budget| budget.observed_context_window)
+            .filter(|capacity| *capacity > 0)
+            .map(|capacity| capacity.min(u64::from(u32::MAX)) as u32);
+        let context_window = match (configured_context_window, observed_resume_context) {
+            (Some(configured), Some(observed)) => Some(configured.min(observed)),
+            (configured, observed) => configured.or(observed),
+        };
         let output_cap = profile
             .provider_config
             .as_ref()
             .and_then(|p| p.max_output_tokens);
+        if let Some((_, previous_output)) = &resume {
+            let limit = crate::models::agent_budget::output_limit(context_window, output_cap);
+            if *previous_output >= limit {
+                return Err(BrainError::KnowledgeValidation(format!(
+                    "(qa_output_hard_limit) 上次问答已申请 {previous_output} token，当前单次有效输出上限为 {limit}，无法通过相同预算继续生成；未完成正文仍在原运行记录中。请提高模型最大输出、调整推理策略或缩小问题范围后重试 (stop_reason=max_tokens)"
+                )));
+            }
+        }
         let reasoning_policy = profile
             .provider_config
             .as_ref()
@@ -888,7 +907,10 @@ impl BookWikiService {
                         output_cap,
                     );
                     if expanded.output_tokens <= resources.output_tokens {
-                        return Err(error);
+                        return Err(BrainError::KnowledgeValidation(format!(
+                            "(qa_output_hard_limit) 本轮问答已达到当前模型单次有效输出上限 {} token，无法再扩容；未完成正文保留。请提高最大输出、调整推理策略或缩小问题范围。原错误：{error}",
+                            resources.output_tokens
+                        )));
                     }
                     if let Some(sender) = stream {
                         sender
@@ -945,6 +967,36 @@ impl BookWikiService {
                             "问答流已由客户端关闭".into(),
                         ));
                     }
+                }
+                Err(error) if is_harness_output_truncation(&error) => {
+                    if stream.is_some_and(|sender| sender.is_closed()) {
+                        return Err(BrainError::KnowledgeValidation(
+                            "问答流已由客户端关闭".into(),
+                        ));
+                    }
+                    let hard_limit = resources.output_tokens
+                        >= crate::models::agent_budget::output_limit(
+                            effective_context_window,
+                            output_cap,
+                        );
+                    return Err(BrainError::KnowledgeValidation(format!(
+                        "({}) 本轮问答{}；未完成正文保留。请{}后重新提问。原错误：{error}",
+                        if hard_limit {
+                            "qa_output_hard_limit"
+                        } else {
+                            "qa_output_retry_exhausted"
+                        },
+                        if hard_limit {
+                            "已达到模型单次有效输出上限"
+                        } else {
+                            "已用完本轮两次独立输出扩容机会"
+                        },
+                        if hard_limit {
+                            "提高最大输出、调整推理策略或缩小问题范围"
+                        } else {
+                            "调整模型配置或缩小问题范围"
+                        },
+                    )));
                 }
                 Err(error) => return Err(error),
             }
@@ -5236,7 +5288,7 @@ fn build_task_prompt(
     let task_instruction = match task.task_type.as_str() {
         "refresh" => "输出知识刷新报告：逐项说明旧表述、本次证据、新增/补充/争议及建议动作。没有旧版本依据时不得编造变化，只报告当前观察与待核验项。不声称已完成知识回写。",
         "review" => "输出核验报告：逐项列出待核验主张、证据、结论（支持/反对/条件成立/不足）和理由；证据不足不等于主张为假，生成条目的 verified 状态也不替代原文核查。",
-        _ => "围绕任务目标完成专题研究，按子问题论证，提炼可复核的结论、适用边界与会改变判断的待确认事项。",
+        _ => "围绕任务目标完成专题研究；子问题用于独立取证，交付材料应按面向读者的论点组织，提炼可复核的结论、适用边界与会改变判断的待确认事项。",
     };
     let mut prompt = format!(
         "你是阅境轩的书籍研究助手，正在处理《{book_name}》的一项研究任务。\n\n\

@@ -336,34 +336,66 @@ impl BookWikiService {
                         Ok(task) => task.cancel_requested,
                         Err(_) => return Err(error),
                     };
-                    let recorded_failure =
-                        self.store
-                            .fail_research_stage(&claim, &error.to_string(), cancelled);
-                    if cancelled || recorded_failure.is_err() || !is_output_truncation(&error) {
+                    if cancelled || !is_output_truncation(&error) {
+                        let _ =
+                            self.store
+                                .fail_research_stage(&claim, &error.to_string(), cancelled);
                         return Err(error);
                     }
                     if output_expansions >= MAX_PHASE_OUTPUT_EXPANSIONS {
-                        return Err(BrainError::KnowledgeValidation(format!("(research_output_retry_exhausted) 当前研究阶段已独立扩容 {MAX_PHASE_OUTPUT_EXPANSIONS} 次仍未完成；部分输出和已完成章节保留，请调整模型最大输出/推理策略或拆分主题后恢复。原错误：{error}")));
+                        let terminal = BrainError::KnowledgeValidation(format!("(research_output_retry_exhausted) 当前研究阶段已独立扩容 {MAX_PHASE_OUTPUT_EXPANSIONS} 次仍未完成；部分输出和已完成章节保留，请调整模型最大输出/推理策略或拆分主题后恢复。原错误：{error}"));
+                        if self
+                            .store
+                            .fail_research_stage(&claim, &terminal.to_string(), false)
+                            .is_err()
+                        {
+                            return Err(error);
+                        }
+                        return Err(terminal);
                     }
                     let previous = phase.resources.output_tokens;
-                    retry_parent_run_id = self
-                        .store
-                        .get_research_stage_content(&phase.task.id, &phase.key, None)?
-                        .stage
-                        .run_id;
-                    let mut resources = phase.resources.clone();
-                    if let Some(run_id) = &retry_parent_run_id {
-                        if let Some(size) = self
+                    let expansion = (|| {
+                        let parent_run_id = self
                             .store
-                            .get_adaptive_run_budget(run_id)?
-                            .and_then(|budget| budget.observed_context_window)
-                        {
-                            resources.observe_capacity(size);
+                            .get_research_stage_content(&phase.task.id, &phase.key, None)?
+                            .stage
+                            .run_id;
+                        let mut resources = phase.resources.clone();
+                        if let Some(run_id) = &parent_run_id {
+                            if let Some(size) = self
+                                .store
+                                .get_adaptive_run_budget(run_id)?
+                                .and_then(|budget| budget.observed_context_window)
+                            {
+                                resources.observe_capacity(size);
+                            }
                         }
+                        let mut expanded =
+                            resources.expand_output_after_truncation(phase.profile, previous)?;
+                        expanded.fit_expansion_to_input(invocation_tokens, previous)?;
+                        Ok::<_, BrainError>((parent_run_id, expanded))
+                    })();
+                    let (parent_run_id, expanded) = match expansion {
+                        Ok(value) => value,
+                        Err(terminal) => {
+                            if self
+                                .store
+                                .fail_research_stage(&claim, &terminal.to_string(), false)
+                                .is_err()
+                            {
+                                return Err(error);
+                            }
+                            return Err(terminal);
+                        }
+                    };
+                    if self
+                        .store
+                        .fail_research_stage(&claim, &error.to_string(), false)
+                        .is_err()
+                    {
+                        return Err(error);
                     }
-                    let mut expanded =
-                        resources.expand_output_after_truncation(phase.profile, previous)?;
-                    expanded.fit_expansion_to_input(invocation_tokens, previous)?;
+                    retry_parent_run_id = parent_run_id;
                     if let Some(run_id) = &retry_parent_run_id {
                         self.store.append_agent_run_event(run_id,"run.output_budget_expanded",Some("budget"),&format!("当前阶段输出截断，预算从 {previous} 扩至 {} tokens；仅重做本阶段",expanded.output_tokens),&json!({"research_stage_key":phase.key,"previous_output_tokens":previous,"next_output_tokens":expanded.output_tokens,"expansion_attempt":output_expansions+1,"max_expansions":MAX_PHASE_OUTPUT_EXPANSIONS}))?;
                     }
@@ -923,6 +955,7 @@ mod tests {
         let prompt = service.research_phase_prompt(&phase).unwrap().0;
         assert!(prompt.contains("作为报告开篇的执行摘要"));
         assert!(prompt.contains("会改变判断的证据缺口"));
+        assert!(!prompt.contains("按子问题论证"));
     }
 
     struct ExpandingResearchRuntime {
@@ -1169,13 +1202,51 @@ mod tests {
                     .to_string()
                     .contains("research_output_retry_exhausted"));
             }
-            assert!(store
-                .get_research_workspace(&task.id)
-                .unwrap()
-                .unwrap()
-                .plan
-                .is_none());
+            let workspace = store.get_research_workspace(&task.id).unwrap().unwrap();
+            assert!(workspace.plan.is_none());
+            if !cancelled {
+                assert!(workspace.stages[0]
+                    .error
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("research_output_retry_exhausted"));
+            }
         }
+    }
+
+    #[tokio::test]
+    async fn test_research_output_hard_limit_is_saved_on_failed_stage_without_same_budget_retry() {
+        let (_dir, original, task, _) = plan_repair_fixture(false);
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let store = original.store.clone();
+        let service = BookWikiService::new(
+            store.clone(),
+            Arc::new(ExpandingResearchRuntime {
+                calls: calls.clone(),
+                truncations: 10,
+                format_first: false,
+                cancel_task: None,
+            }),
+        );
+        let profile = service.active_runtime_profile().unwrap();
+        let mut phase = plan_phase(&task, &profile);
+        phase.resources.output_tokens = crate::models::agent_budget::MAX_AGENT_OUTPUT_TOKENS;
+        phase.resources.policy.max_output_tokens = Some(phase.resources.output_tokens);
+        let error = service
+            .persist_model_research_phase(phase, |_, _, _| Ok(()))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("research_output_hard_limit"));
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        let stage = store
+            .get_research_stage_content(&task.id, "plan", None)
+            .unwrap();
+        assert!(stage
+            .stage
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("research_output_hard_limit"));
     }
 
     #[tokio::test]

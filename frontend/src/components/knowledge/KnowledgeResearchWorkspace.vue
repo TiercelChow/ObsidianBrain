@@ -30,12 +30,12 @@
       <div v-if="stageLoading" class="workspace-state" role="status">正在读取所选阶段…</div>
       <div v-if="stageError" class="workspace-state" role="alert">{{ stageError }}</div>
       <article v-if="selected" class="selected-stage" aria-label="所选阶段成果">
-        <header><h4>{{ selected.stage.title }}</h4><span>{{ researchStageStatus(selected.stage.status) }} · 版本 {{ selected.stage.revision }}</span></header>
-        <div class="stage-controls">
+        <header><h4>{{ selected.stage.title }}</h4><span>{{ researchStageStatus(selected.stage.status) }} · {{ selected.stage.revision > 0 ? `版本 ${selected.stage.revision}` : '尚无保存版本' }}</span></header>
+        <div v-if="selected.stage.run_id || selected.content_run_id || (currentStage?.revision || 0) > 0" class="stage-controls">
           <button v-if="selected.stage.run_id" type="button" @click="emit('inspect', selected.stage.run_id)">本次阶段检查器</button>
           <button v-if="selected.content_run_id && selected.content_run_id !== selected.stage.run_id" type="button" @click="emit('inspect', selected.content_run_id)">保留正文的来源运行</button>
-          <label>历史版本 <el-input-number v-model="revision" :min="1" :max="currentStage?.revision || selected.stage.revision" :precision="0" controls-position="right" aria-label="研究阶段历史版本" /></label>
-          <button type="button" :disabled="stageLoading" @click="readRevision">读取版本</button>
+          <label v-if="(currentStage?.revision || 0) > 0">历史版本 <el-input-number v-model="revision" :min="1" :max="currentStage?.revision" :precision="0" controls-position="right" aria-label="研究阶段历史版本" /></label>
+          <button v-if="(currentStage?.revision || 0) > 0" type="button" :disabled="stageLoading" @click="readRevision">读取版本</button>
         </div>
         <p v-if="currentStage && selected.stage.revision !== currentStage.revision" class="stage-notice">此阶段已有新状态或成果，当前显示保存的历史版本。<button type="button" @click="loadStage(currentStage)">读取当前版本</button></p>
         <p v-if="selected.stage.error" class="stage-notice is-error">{{ selected.stage.error }}</p>
@@ -53,7 +53,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
 import { getKnowledgeResearchWorkspace, getKnowledgeResearchStage, type ResearchWorkspace, type ResearchStageContent, type ResearchStageSummary } from '@/api/knowledge'
-import { researchCoverage, researchStageStatus, researchFindingStatus } from '@/utils/knowledgeResearch'
+import { researchCoverage, researchStageStatus, researchFindingStatus, pickResearchStageToOpen, shouldRefreshResearchStage } from '@/utils/knowledgeResearch'
 import KnowledgeAnswerMarkdown from './KnowledgeAnswerMarkdown.vue'
 import KnowledgeCitationPreview from './KnowledgeCitationPreview.vue'
 
@@ -68,6 +68,7 @@ const isMobile = useMediaQuery('(max-width: 768px)')
 const stageLoading = ref(false)
 const stageError = ref('')
 const revision = ref(1)
+const followLatest = ref(true)
 const citationVisible = ref(false)
 const citationRun = ref('')
 const citationIndex = ref(0)
@@ -94,6 +95,15 @@ async function loadWorkspace(quiet = false) {
     if (response.status !== 'success') throw new Error(response.error?.message || '研究阶段读取失败')
     workspace.value = response.result || null
     error.value = ''
+    if (workspace.value && !stageLoading.value && !stageError.value) {
+      if (selected.value) {
+        const current = workspace.value.stages.find(stage => stage.stage_key === selected.value?.stage.stage_key)
+        if (current && shouldRefreshResearchStage(selected.value.stage, workspace.value.stages, followLatest.value)) void loadStage(current)
+      } else {
+        const focus = pickResearchStageToOpen(workspace.value.stages)
+        if (focus) void loadStage(focus)
+      }
+    }
   } catch (failure) { if (request === workspaceRequest && visible()) error.value = (failure as Error).message }
   finally { if (request === workspaceRequest) { loading.value = false; schedule() } }
 }
@@ -109,6 +119,7 @@ async function loadStage(stage: ResearchStageSummary, requestedRevision?: number
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '阶段成果读取失败')
     selected.value = response.result
     revision.value = response.result.stage.revision
+    followLatest.value = requestedRevision == null
     if (isMobile.value) stageDirectoryOpen.value = false
   } catch (failure) { if (request === stageRequest && visible()) stageError.value = (failure as Error).message }
   finally { if (request === stageRequest) stageLoading.value = false }
@@ -125,7 +136,7 @@ function visibilityChanged() { if (visible()) void loadWorkspace(true); else { s
 watch(() => [props.taskId, props.active], () => {
   ++workspaceRequest; ++stageRequest; stop(); loading.value = false; stageLoading.value = false
   if (!props.active) { citationVisible.value = false; return }
-  workspace.value = null; selected.value = null; error.value = ''; stageError.value = ''
+  workspace.value = null; selected.value = null; followLatest.value = true; error.value = ''; stageError.value = ''
   void loadWorkspace()
 }, { immediate: true })
 watch(() => props.taskStatus, () => { if (visible()) void loadWorkspace(true) })

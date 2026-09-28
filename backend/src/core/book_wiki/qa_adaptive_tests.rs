@@ -283,6 +283,119 @@ fn test_resume_requires_same_book_question_conversation_and_explicit_truncation(
 }
 
 #[tokio::test]
+async fn test_qa_resume_at_output_hard_limit_rejects_before_paid_planning() {
+    let (store, _dir, base) = fixture();
+    let question = "全面分析全书机制";
+    let run = store
+        .start_agent_run(
+            &base,
+            "deepseek_harness",
+            "knowledge_qa",
+            &serde_json::json!({"question": question, "conversation_id": null, "request_max_output_tokens": crate::models::agent_budget::MAX_AGENT_OUTPUT_TOKENS}),
+        )
+        .unwrap();
+    store
+        .append_agent_run_event(
+            &run.id,
+            "run.text_delta",
+            Some("answer"),
+            "",
+            &serde_json::json!({"delta": "未完成的正文"}),
+        )
+        .unwrap();
+    store
+        .append_agent_run_event(
+            &run.id,
+            "run.runtime_completed",
+            Some("completion"),
+            "",
+            &serde_json::json!({"stop_reason": "max_tokens", "complete": false}),
+        )
+        .unwrap();
+    store.fail_agent_run(&run.id, "max_tokens").unwrap();
+    let requests = Arc::new(Mutex::new(vec![]));
+    let service = BookWikiService::new(
+        store,
+        Arc::new(AdaptiveFixtureRuntime {
+            requests: requests.clone(),
+        }),
+    );
+    let (events, _receiver) = tokio::sync::mpsc::unbounded_channel();
+    let error = service
+        .resume_qa_streaming(&base, question, None, &run.id, events)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("qa_output_hard_limit"));
+    assert!(requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_qa_resume_uses_previous_run_observed_context_as_hard_limit() {
+    let (store, _dir, base) = fixture();
+    let question = "全面分析全书机制";
+    let run = store
+        .start_agent_run(
+            &base,
+            "deepseek_harness",
+            "knowledge_qa",
+            &serde_json::json!({"question": question, "conversation_id": null, "request_max_output_tokens": 8192}),
+        )
+        .unwrap();
+    store
+        .init_adaptive_run_budget(
+            &run.id,
+            &AdaptiveBudgetPolicy {
+                initial_prompt_tokens: 1000,
+                soft_tool_calls: 1,
+                hard_tool_calls: 2,
+                soft_retrieval_tokens: 1000,
+                hard_retrieval_tokens: 2000,
+                context_window: None,
+                max_output_tokens: Some(8192),
+                timeout_seconds: 60,
+                subquestions: vec![question.into()],
+            },
+        )
+        .unwrap();
+    store
+        .observe_adaptive_context(&run.id, 4000, 16_384)
+        .unwrap();
+    store
+        .append_agent_run_event(
+            &run.id,
+            "run.text_delta",
+            Some("answer"),
+            "",
+            &serde_json::json!({"delta": "未完成的正文"}),
+        )
+        .unwrap();
+    store
+        .append_agent_run_event(
+            &run.id,
+            "run.runtime_completed",
+            Some("completion"),
+            "",
+            &serde_json::json!({"stop_reason": "max_tokens", "complete": false}),
+        )
+        .unwrap();
+    store.fail_agent_run(&run.id, "max_tokens").unwrap();
+    let requests = Arc::new(Mutex::new(vec![]));
+    let service = BookWikiService::new(
+        store,
+        Arc::new(AdaptiveFixtureRuntime {
+            requests: requests.clone(),
+        }),
+    );
+    let (events, _receiver) = tokio::sync::mpsc::unbounded_channel();
+    let error = service
+        .resume_qa_streaming(&base, question, None, &run.id, events)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("qa_output_hard_limit"));
+    assert!(requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn test_truncated_answer_automatically_retries_with_fresh_citations() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     struct Runtime {
@@ -408,7 +521,10 @@ async fn test_qa_empty_max_tokens_stops_after_two_expansions_or_hard_cap() {
             })
         }
     }
-    for (expected_output_tokens, calls) in [(262_144, 1), (4096, 3)] {
+    for (expected_output_tokens, calls, failure_code) in [
+        (262_144, 1, "qa_output_hard_limit"),
+        (4096, 3, "qa_output_retry_exhausted"),
+    ] {
         let (store, _dir, base) = fixture();
         let runtime = Arc::new(AlwaysEmpty {
             answers: AtomicUsize::new(0),
@@ -420,6 +536,7 @@ async fn test_qa_empty_max_tokens_stops_after_two_expansions_or_hard_cap() {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("stop_reason=max_tokens"));
+        assert!(error.to_string().contains(failure_code));
         assert_eq!(runtime.answers.load(Ordering::SeqCst), calls);
         assert!(store.list_conversations(&base, 10).unwrap().is_empty());
     }
@@ -484,6 +601,7 @@ async fn test_qa_partial_max_tokens_stops_after_bounded_retries_without_saving_c
         .await
         .unwrap_err();
     assert!(error.to_string().contains("stop_reason=max_tokens"));
+    assert!(error.to_string().contains("qa_output_retry_exhausted"));
     assert_eq!(runtime.answers.load(Ordering::SeqCst), 3);
     assert!(store.list_conversations(&base, 10).unwrap().is_empty());
 }

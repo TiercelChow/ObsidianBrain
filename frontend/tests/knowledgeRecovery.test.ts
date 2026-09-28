@@ -7,7 +7,16 @@ test('an interrupted provider-batched answer retains all received text, not only
   const recovered = interruptedKnowledgeAnswer('已显示', '已显示但还有待显示的正文', new Error('max_tokens'))
   assert.equal(recovered.content, '已显示但还有待显示的正文')
   assert.equal(recovered.kind, 'truncated')
+  assert.equal(recovered.canRetry, true)
   assert.match(recovered.notice, /不完整/)
+})
+
+test('a confirmed output hard limit keeps the draft but does not offer a same-budget retry', () => {
+  const interrupted = interruptedKnowledgeAnswer('未完成正文', '未完成正文', new Error('(qa_output_hard_limit) 输出已达到单次有效上限 (stop_reason=max_tokens)'))
+  assert.equal(interrupted.kind, 'truncated')
+  assert.equal(interrupted.content, '未完成正文')
+  assert.equal(interrupted.canRetry, false)
+  assert.match(interrupted.notice, /调整.*最大输出|调整.*推理策略/)
 })
 
 test('an empty max-token answer explains retry exhaustion without pretending a draft exists', () => {
