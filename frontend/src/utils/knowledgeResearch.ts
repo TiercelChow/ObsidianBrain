@@ -12,6 +12,10 @@ export function researchCoverage(stages: { kind: string; status: string }[]) {
   return { saved, planned: chapters.length, unfinished: chapters.length - saved }
 }
 
+export function hasFailedResearchStage(stages: { status: string }[] | null | undefined): boolean {
+  return stages?.some(stage => stage.status === 'failed' || stage.status === 'stale') ?? false
+}
+
 interface ResearchStageSnapshot {
   stage_key: string
   status: string

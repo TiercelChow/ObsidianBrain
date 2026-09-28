@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { researchStageStatus, researchFindingStatus, researchCoverage, pickResearchStageToOpen, shouldRefreshResearchStage } from '../src/utils/knowledgeResearch.ts'
+import { researchStageStatus, researchFindingStatus, researchCoverage, pickResearchStageToOpen, shouldRefreshResearchStage, hasFailedResearchStage } from '../src/utils/knowledgeResearch.ts'
 
 test('research coverage counts only saved planned chapters and never implies fact proof', () => {
   assert.deepEqual(researchCoverage([{ kind: 'plan', status: 'completed' }, { kind: 'section', status: 'completed' }, { kind: 'section', status: 'stale' }, { kind: 'synthesis', status: 'completed' }, { kind: 'presentation', status: 'failed' }]), { saved: 1, planned: 2, unfinished: 1 })
@@ -36,4 +36,11 @@ test('research workspace refreshes current stage changes but preserves an explic
   assert.equal(shouldRefreshResearchStage(oldCurrent, [oldCurrent], true), false)
   assert.equal(shouldRefreshResearchStage({ ...oldCurrent, revision: 1 }, [completed], false), false)
   assert.equal(shouldRefreshResearchStage(oldCurrent, [], true), false)
+})
+
+test('failed task routes to a failed or stale stage only when one exists', () => {
+  assert.equal(hasFailedResearchStage(null), false)
+  assert.equal(hasFailedResearchStage([{ status: 'pending' }, { status: 'completed' }]), false)
+  assert.equal(hasFailedResearchStage([{ status: 'completed' }, { status: 'failed' }]), true)
+  assert.equal(hasFailedResearchStage([{ status: 'stale' }]), true)
 })

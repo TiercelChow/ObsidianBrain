@@ -593,6 +593,9 @@ fn test_presentation_prompt_keeps_report_evidence_and_strict_contract() {
     assert!(prompt.contains("保留反例"));
     assert!(prompt.contains("决策路径：先明确选择与判据"));
     assert!(prompt.contains("不要把研究子问题一题一页地搬进演示"));
+    assert!(prompt.contains("标题不要照搬研究子问题"));
+    assert!(prompt.contains("背景、定义、过程和对照页的 `title` 直接命名具体对象或关系"));
+    assert!(!prompt.contains("title` 必须是结论式标题"));
     assert!(prompt.contains("保留术语、公式、变量定义与适用前提"));
     let report_prompt = build_task_prompt(&task.book_name, &task, &[], &[], &[]);
     assert!(report_prompt.contains("决策材料先交代决策与判据"));

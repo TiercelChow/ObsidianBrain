@@ -273,6 +273,16 @@ test('knowledge task results expose an auditable run inspector', async () => {
   assert.match(view, /canFocusDocument\(document\)/)
 })
 
+test('failed research tasks open their failed stage before the legacy run inspector', async () => {
+  const view = await source('src/views/knowledge/KnowledgeTasks.vue')
+  const handler = view.split('async function openFailedInspection(task: KnowledgeTask) {')[1]?.split('\nasync function loadRunInspection')[0] || ''
+  assert.match(handler, /getKnowledgeResearchWorkspace\(task\.id\)/)
+  assert.match(handler, /hasFailedResearchStage\(workspace\.result\?\.stages\)/)
+  assert.match(handler, /openStages\(task\)/)
+  assert.match(handler, /getKnowledgeTaskActivity\(task\.id\)/)
+  assert.ok(handler.indexOf('openStages(task)') < handler.indexOf('getKnowledgeTaskActivity(task.id)'))
+})
+
 test('external research stays opt-in, domain scoped, and rate limited per task', async () => {
   const [view, api] = await Promise.all([
     source('src/views/knowledge/KnowledgeTasks.vue'),

@@ -237,6 +237,7 @@ import KnowledgeCitationPreview from '@/components/knowledge/KnowledgeCitationPr
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import { canFocusDocument } from '@/utils/modalFocusPolicy'
 import { knowledgeRunDiagnostics } from '@/utils/knowledgeRunDiagnostics'
+import { hasFailedResearchStage } from '@/utils/knowledgeResearch'
 import {
   createKnowledgeTask,
   cancelKnowledgeTask,
@@ -244,6 +245,7 @@ import {
   getAgentRunInspection,
   getKnowledgeTaskResult,
   getKnowledgeTaskActivity,
+  getKnowledgeResearchWorkspace,
   listBookKnowledgeBases,
   listKnowledgeTasks,
   previewKnowledgeTaskBrief,
@@ -569,6 +571,12 @@ async function openFailedInspection(task: KnowledgeTask) {
   const requestId = ++resultRequestId
   loadingResultId.value = task.id
   try {
+    const workspace = await getKnowledgeResearchWorkspace(task.id).catch(() => null)
+    if (requestId !== resultRequestId || !viewActive || !canFocusDocument(document)) return
+    if (workspace?.status === 'success' && hasFailedResearchStage(workspace.result?.stages)) {
+      openStages(task)
+      return
+    }
     const response = await getKnowledgeTaskActivity(task.id)
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '运行记录加载失败')
     if (requestId !== resultRequestId || !viewActive || !canFocusDocument(document)) return

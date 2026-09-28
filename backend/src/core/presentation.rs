@@ -215,12 +215,24 @@ pub fn validate_presentation_spec(
     }
 
     let mut layouts = HashSet::new();
+    let mut slide_titles = HashSet::new();
     let mut cited_slide_count = 0;
     for (index, slide) in spec.slides.iter().enumerate() {
         let field = format!("slides[{index}]");
         validate_text(&format!("{field}.eyebrow"), &slide.eyebrow, 24, true)?;
         validate_text(&format!("{field}.title"), &slide.title, 60, false)?;
         validate_text(&format!("{field}.takeaway"), &slide.takeaway, 140, false)?;
+        let title_identity = heading_identity(&slide.title);
+        if !slide_titles.insert(title_identity.clone()) {
+            return Err(validation_error(&format!(
+                "{field}.title 与其他页面标题重复"
+            )));
+        }
+        if title_identity == heading_identity(&slide.takeaway) {
+            return Err(validation_error(&format!(
+                "{field}.takeaway 不应重复本页标题"
+            )));
+        }
         if slide.body.len() > 5 {
             return Err(validation_error(&format!("{field}.body 最多 5 条")));
         }
@@ -265,6 +277,14 @@ pub fn validate_presentation_spec(
         layout_count: layouts.len(),
         cited_slide_count,
     })
+}
+
+fn heading_identity(value: &str) -> String {
+    value
+        .trim()
+        .trim_end_matches(&['。', '.', '？', '?', '！', '!'][..])
+        .trim()
+        .to_lowercase()
 }
 
 fn validate_layout_payload(field: &str, slide: &PresentationSlide) -> Result<(), BrainError> {
@@ -1767,11 +1787,32 @@ mod tests {
     fn test_validate_presentation_spec_rejects_repetitive_plan() {
         let mut spec = sample_spec();
         spec.slides.push(spec.slides[0].clone());
+        spec.slides.last_mut().unwrap().title = "额外内容页".into();
         for slide in &mut spec.slides {
             slide.layout = PresentationLayout::Statement;
         }
         let error = validate_presentation_spec(&spec, 1).unwrap_err();
         assert!(error.to_string().contains("至少需要 3 种布局"));
+    }
+
+    #[test]
+    fn test_validate_presentation_spec_rejects_repeated_titles_and_takeaways() {
+        let mut spec = sample_spec();
+        spec.slides[1].title = format!("{}。", spec.slides[0].title);
+        let duplicate = validate_presentation_spec(&spec, 1).unwrap_err();
+        assert!(duplicate.to_string().contains("标题重复"));
+
+        let mut spec = sample_spec();
+        spec.slides[1].takeaway = format!("{}。", spec.slides[1].title);
+        let repeated = validate_presentation_spec(&spec, 1).unwrap_err();
+        assert!(repeated.to_string().contains("重复本页标题"));
+    }
+
+    #[test]
+    fn test_validate_presentation_spec_allows_direct_topic_title() {
+        let mut spec = sample_spec();
+        spec.slides[2].title = "分层实施流程".into();
+        assert!(validate_presentation_spec(&spec, 1).is_ok());
     }
 
     #[test]

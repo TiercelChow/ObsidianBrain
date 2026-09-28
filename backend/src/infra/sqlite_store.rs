@@ -315,6 +315,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "user confirmed research task briefs",
         sql: include_str!("../../migrations/053_research_task_brief.sql"),
     },
+    Migration {
+        version: 54,
+        description: "presentation narrative contract for existing builtin skill",
+        sql: include_str!("../../migrations/054_presentation_narrative_contract.sql"),
+    },
 ];
 
 #[cfg(test)]
@@ -667,6 +672,30 @@ fn compact_wiki_skill_versions(conn: &Connection) -> Result<(), BrainError> {
 fn overwrite_structured_presentation_skill(conn: &Connection) -> Result<(), BrainError> {
     let skill_id = "skill-book-presentation";
     let version_id = "skill-version-book-presentation-v3";
+    let current: Option<(String, String, String, i64)> = conn
+        .query_row(
+            "SELECT s.current_version_id, s.source_type, v.release_state,
+                    EXISTS (SELECT 1 FROM skill_files f
+                            WHERE f.skill_version_id = v.id
+                              AND f.relative_path = 'SKILL.md')
+             FROM skills s
+             JOIN skill_versions v ON v.id = s.current_version_id AND v.skill_id = s.id
+             WHERE s.id = ?1",
+            params![skill_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?;
+    let (current_version_id, source_type, release_state, has_skill_file) = current
+        .ok_or_else(|| BrainError::Internal("内置演示 Skill 缺少有效的当前版本".to_string()))?;
+    if source_type != "builtin" || release_state != "published" || has_skill_file != 1 {
+        return Err(BrainError::Internal(
+            "内置演示 Skill 当前版本不完整，不能执行迁移".to_string(),
+        ));
+    }
+    if current_version_id != version_id {
+        tracing::info!(current_version_id, "保留已发布的后续演示 Skill 版本");
+        return Ok(());
+    }
     let content = include_str!("../../skills/book-presentation/SKILL.md");
     let content_hash = hex::encode(Sha256::digest(content.as_bytes()));
     let size_bytes = i64::try_from(content.len())
@@ -685,7 +714,7 @@ fn overwrite_structured_presentation_skill(conn: &Connection) -> Result<(), Brai
     let updated = conn.execute(
         "UPDATE skill_versions
          SET content_hash = ?1, release_state = 'published',
-             changelog = '重构为受众导向的结构化演示策划，增加叙事、证据、受限数据图、关系图和交付自检。'
+             changelog = '按用户用途编排材料；为背景和流程页保留直接主题标题，避免逐页问答和重复标题。'
          WHERE id = ?2 AND skill_id = ?3",
         params![&content_hash, version_id, skill_id],
     )?;
@@ -824,6 +853,7 @@ impl SqliteStore {
                 32 => compact_wiki_skill_versions(&conn),
                 33 => overwrite_structured_presentation_skill(&conn),
                 34 => overwrite_structured_presentation_skill(&conn),
+                54 => overwrite_structured_presentation_skill(&conn),
                 38 | 42 | 45 | 47 => overwrite_harness_wiki_skills(&conn),
                 48 => crate::infra::book_wiki_store::backfill_source_impacts(&conn),
                 51 => migrate_research_execution_epoch(&conn),
@@ -1668,6 +1698,102 @@ mod tests {
         let _store1 = SqliteStore::new(&db_path).unwrap();
         let store2 = SqliteStore::new(&db_path).unwrap();
         assert!(store2.health_check());
+    }
+
+    #[test]
+    fn test_migration_054_refreshes_existing_presentation_skill_body() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("presentation-upgrade.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("DELETE FROM _migrations WHERE version = 54", [])
+                .unwrap();
+            conn.execute(
+                "UPDATE skill_files
+                 SET content_text = '旧版演示指令', content_hash = 'legacy', size_bytes = 18
+                 WHERE skill_version_id = 'skill-version-book-presentation-v3'
+                   AND relative_path = 'SKILL.md'",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE skill_versions SET content_hash = 'legacy'
+                 WHERE id = 'skill-version-book-presentation-v3'",
+                [],
+            )
+            .unwrap();
+        }
+        drop(store);
+
+        let upgraded = SqliteStore::new(&db_path).unwrap();
+        let conn = upgraded.conn.lock().unwrap();
+        let (content, file_hash, version_hash, size): (String, String, String, i64) = conn
+            .query_row(
+                "SELECT f.content_text, f.content_hash, v.content_hash, f.size_bytes FROM skills s
+                 JOIN skill_versions v ON v.id = s.current_version_id
+                 JOIN skill_files f ON f.skill_version_id = s.current_version_id
+                 WHERE s.id = 'skill-book-presentation' AND f.relative_path = 'SKILL.md'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        let expected = include_str!("../../skills/book-presentation/SKILL.md");
+        let expected_hash = hex::encode(Sha256::digest(expected.as_bytes()));
+        assert_eq!(content, expected);
+        assert_eq!(file_hash, expected_hash);
+        assert_eq!(version_hash, expected_hash);
+        assert_eq!(size, expected.len() as i64);
+    }
+
+    #[test]
+    fn test_migration_054_preserves_later_published_presentation_skill() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("presentation-v4.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+        let version_id = "skill-version-book-presentation-v4";
+        let content = "用户已发布的演示 v4 规则";
+        let hash = hex::encode(Sha256::digest(content.as_bytes()));
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("DELETE FROM _migrations WHERE version = 54", [])
+                .unwrap();
+            conn.execute(
+                "INSERT INTO skill_versions
+                    (id, skill_id, revision, content_hash, release_state, created_at)
+                 VALUES (?1, 'skill-book-presentation', 4, ?2, 'published', CURRENT_TIMESTAMP)",
+                params![version_id, hash],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO skill_files
+                    (skill_version_id, relative_path, media_type, content_text,
+                     content_hash, size_bytes)
+                 VALUES (?1, 'SKILL.md', 'text/markdown', ?2, ?3, ?4)",
+                params![version_id, content, hash, content.len() as i64],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE skills SET current_version_id = ?1 WHERE id = 'skill-book-presentation'",
+                params![version_id],
+            )
+            .unwrap();
+            compact_wiki_skill_versions(&conn).unwrap();
+        }
+        drop(store);
+
+        let upgraded = SqliteStore::new(&db_path).unwrap();
+        let conn = upgraded.conn.lock().unwrap();
+        let actual: (String, String) = conn
+            .query_row(
+                "SELECT s.current_version_id, f.content_text FROM skills s
+                 JOIN skill_files f ON f.skill_version_id = s.current_version_id
+                 WHERE s.id = 'skill-book-presentation' AND f.relative_path = 'SKILL.md'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(actual, (version_id.into(), content.into()));
     }
 
     #[test]

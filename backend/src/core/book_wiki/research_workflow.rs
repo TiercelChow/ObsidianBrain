@@ -467,6 +467,15 @@ impl BookWikiService {
         if question.id == "_synthesis" {
             resources.fit_synthesis_output(profile, plan.questions.len())?;
         }
+        self.resume_research_phase_resources(profile, resources, previous_run)
+    }
+
+    fn resume_research_phase_resources(
+        &self,
+        profile: &RuntimeProfile,
+        mut resources: ResearchResources,
+        previous_run: Option<&str>,
+    ) -> Result<ResearchResources, BrainError> {
         let Some(run) = previous_run
             .map(|id| self.store.get_agent_run(id))
             .transpose()?
@@ -484,6 +493,13 @@ impl BookWikiService {
             .as_u64()
             .and_then(|value| u32::try_from(value).ok())
             .unwrap_or(resources.output_tokens);
+        if let Some(size) = self
+            .store
+            .get_adaptive_run_budget(&run.id)?
+            .and_then(|budget| budget.observed_context_window)
+        {
+            resources.observe_capacity(size);
+        }
         resources.expand_output_after_truncation(profile, previous)
     }
 
@@ -502,7 +518,17 @@ impl BookWikiService {
         let plan = if let Some(plan) = workspace.plan {
             plan
         } else {
-            self.persist_model_research_phase(ResearchPhase{task,profile:&profile,key:"plan".into(),phase:"plan",payload:json!({"goal":task.title,"description":task.description,"task_type":task.task_type}),resources:ResearchResources::new(&profile,None,None,catalog.len()),evidence:vec![]},|claim,run,answer| {
+            let previous_run = workspace
+                .stages
+                .iter()
+                .find(|stage| stage.stage_key == "plan")
+                .and_then(|stage| stage.run_id.as_deref());
+            let resources = self.resume_research_phase_resources(
+                &profile,
+                ResearchResources::new(&profile, None, None, catalog.len()),
+                previous_run,
+            )?;
+            self.persist_model_research_phase(ResearchPhase{task,profile:&profile,key:"plan".into(),phase:"plan",payload:json!({"goal":task.title,"description":task.description,"task_type":task.task_type}),resources,evidence:vec![]},|claim,run,answer| {
                 let plan:ResearchPlan=parse_phase(answer)?;
                 validate_new_research_plan(&plan, &profile)?;
                 if task.brief.confirmed && plan.depth != task.brief.depth {
@@ -1247,6 +1273,116 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("research_output_hard_limit"));
+    }
+
+    #[tokio::test]
+    async fn test_plan_manual_resume_at_output_hard_limit_rejects_before_model_call() {
+        let (_dir, original, task, _) = plan_repair_fixture(false);
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let store = original.store.clone();
+        let service = BookWikiService::new(
+            store,
+            Arc::new(ExpandingResearchRuntime {
+                calls: calls.clone(),
+                truncations: 10,
+                format_first: false,
+                cancel_task: None,
+            }),
+        );
+        let profile = service.active_runtime_profile().unwrap();
+        let mut phase = plan_phase(&task, &profile);
+        phase.resources.output_tokens = crate::models::agent_budget::MAX_AGENT_OUTPUT_TOKENS;
+        phase.resources.policy.max_output_tokens = Some(phase.resources.output_tokens);
+        let first = service
+            .persist_model_research_phase(phase, |_, _, _| Ok(()))
+            .await
+            .unwrap_err();
+        assert!(first.to_string().contains("research_output_hard_limit"));
+        assert_eq!(calls.lock().unwrap().len(), 1);
+
+        let resumed = service.execute_research_workflow(&task).await.unwrap_err();
+        assert!(resumed.to_string().contains("research_output_hard_limit"));
+        assert_eq!(calls.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_plan_manual_resume_uses_more_output_than_last_truncated_run() {
+        let (_dir, original, task, _) = plan_repair_fixture(false);
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let service = BookWikiService::new(
+            original.store.clone(),
+            Arc::new(ExpandingResearchRuntime {
+                calls: calls.clone(),
+                truncations: 10,
+                format_first: false,
+                cancel_task: None,
+            }),
+        );
+        let profile = service.active_runtime_profile().unwrap();
+        let mut phase = plan_phase(&task, &profile);
+        phase.resources.output_tokens = 16_384;
+        phase.resources.policy.max_output_tokens = Some(phase.resources.output_tokens);
+        let first = service
+            .persist_model_research_phase(phase, |_, _, _| Ok(()))
+            .await
+            .unwrap_err();
+        assert!(first
+            .to_string()
+            .contains("research_output_retry_exhausted"));
+        let before = calls.lock().unwrap().clone();
+        assert_eq!(before.len(), 3);
+
+        let _ = service.execute_research_workflow(&task).await;
+        let after = calls.lock().unwrap();
+        assert!(after.len() > before.len());
+        assert_eq!(after[3].0, "plan");
+        assert!(after[3].1 > before[2].1);
+    }
+
+    #[tokio::test]
+    async fn test_plan_manual_resume_respects_observed_context_before_model_call() {
+        let (dir, original, task, _) = plan_repair_fixture(false);
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let service = BookWikiService::new(
+            original.store.clone(),
+            Arc::new(ExpandingResearchRuntime {
+                calls: calls.clone(),
+                truncations: 10,
+                format_first: false,
+                cancel_task: None,
+            }),
+        );
+        let profile = service.active_runtime_profile().unwrap();
+        let mut phase = plan_phase(&task, &profile);
+        phase.resources.output_tokens = 16_384;
+        phase.resources.policy.max_output_tokens = Some(phase.resources.output_tokens);
+        let _ = service
+            .persist_model_research_phase(phase, |_, _, _| Ok(()))
+            .await
+            .unwrap_err();
+        assert_eq!(calls.lock().unwrap().len(), 3);
+        let run_id = service
+            .store
+            .get_research_stage_content(&task.id, "plan", None)
+            .unwrap()
+            .stage
+            .run_id
+            .unwrap();
+        let connection = rusqlite::Connection::open(dir.path().join("phase-repair.db")).unwrap();
+        assert_eq!(
+            connection
+                .execute(
+                    "UPDATE agent_run_adaptive_budgets
+                     SET observed_context_window = 100000 WHERE run_id = ?1",
+                    [&run_id],
+                )
+                .unwrap(),
+            1
+        );
+
+        let resumed = service.execute_research_workflow(&task).await.unwrap_err();
+        assert!(resumed.to_string().contains("research_input_hard_limit"));
+        assert_eq!(calls.lock().unwrap().len(), 3);
     }
 
     #[tokio::test]
