@@ -283,6 +283,20 @@ test('failed research tasks open their failed stage before the legacy run inspec
   assert.ok(handler.indexOf('openStages(task)') < handler.indexOf('getKnowledgeTaskActivity(task.id)'))
 })
 
+test('research creation shows book readiness and blocks inactive bases before paid preflight', async () => {
+  const view = await source('src/views/knowledge/KnowledgeTasks.vue')
+  assert.match(view, /researchReadiness\(selectedBase\.value\)/)
+  assert.match(view, /材料准备情况/)
+  assert.match(view, /readiness\.notes/)
+  assert.match(view, /前往知识库处理/)
+  assert.match(view, /:disabled="!canPrepareBrief"/)
+  assert.match(view, /if \(!canPrepareBrief\.value\) return/)
+  assert.match(view, /async function refreshResearchBases\(\)/)
+  assert.match(view, /void refreshResearchBases\(\)/)
+  assert.match(view, /readinessLoading/)
+  assert.match(view, /readinessError/)
+})
+
 test('external research stays opt-in, domain scoped, and rate limited per task', async () => {
   const [view, api] = await Promise.all([
     source('src/views/knowledge/KnowledgeTasks.vue'),

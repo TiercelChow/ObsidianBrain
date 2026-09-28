@@ -54,6 +54,16 @@
           <el-select v-model="draft.knowledgeBaseId" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库">
             <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
           </el-select>
+          <div v-if="readinessLoading" class="research-readiness-state" role="status"><el-icon class="is-loading"><Loading /></el-icon>正在核对知识库状态…</div>
+          <div v-else-if="readinessError" class="research-readiness-state is-error" role="alert"><span>无法核对知识库状态：{{ readinessError }}</span><button type="button" @click="refreshResearchBases">重试读取</button></div>
+          <section v-else-if="selectedBase && readiness" class="research-readiness" :class="`is-${readiness.status}`" aria-label="材料准备情况">
+            <div class="research-readiness-head"><strong>材料准备情况</strong><span>{{ readiness.status === 'blocked' ? '需先处理' : readiness.status === 'attention' ? '建议检查' : '可继续' }}</span></div>
+            <p>{{ readiness.summary }}</p>
+            <div class="research-readiness-counts"><span>已同步来源 {{ selectedBase.source_count }}</span><span>可检索条目 {{ selectedBase.entry_count }}</span><span>待审核 {{ selectedBase.pending_review_count }}</span></div>
+            <ul><li v-for="note in readiness.notes" :key="note">{{ note }}</li></ul>
+            <button v-if="readiness.status !== 'ready'" type="button" @click="openBaseManagement">前往知识库处理</button>
+          </section>
+          <div v-else class="research-readiness-state" role="status"><span>当前没有可选择的书籍知识库。</span><button type="button" @click="openBaseManagement">前往知识库</button></div>
           <el-input v-model="draft.title" :maxlength="200" show-word-limit placeholder="要研究或核实的问题" />
           <el-input v-model="draft.description" type="textarea" :rows="4" :maxlength="4000" show-word-limit placeholder="补充目标、范围和期望结果" />
           <el-select v-model="draft.taskType" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true">
@@ -93,8 +103,8 @@
           <label class="research-brief-field"><span>特别强调（可选）</span><el-input v-model="brief.emphasis" :maxlength="500" show-word-limit placeholder="例如：多比较反例、面向非技术听众" /></label>
         </div>
         <div class="knowledge-modal-actions">
-          <template v-if="createStep === 'request'"><el-button @click="createVisible = false">取消</el-button><el-button :disabled="!draft.knowledgeBaseId || !draft.title.trim() || previewing" @click="skipBrief">跳过分析</el-button><el-button type="primary" :loading="previewing" :disabled="!draft.knowledgeBaseId || !draft.title.trim()" @click="prepareBrief">分析诉求</el-button></template>
-          <template v-else><el-button @click="createStep = 'request'">返回修改</el-button><el-button type="primary" :loading="creating" @click="createTask">确认并创建</el-button></template>
+          <template v-if="createStep === 'request'"><el-button @click="createVisible = false">取消</el-button><el-button :disabled="!canPrepareBrief || previewing" @click="skipBrief">跳过分析</el-button><el-button type="primary" :loading="previewing" :disabled="!canPrepareBrief" @click="prepareBrief">分析诉求</el-button></template>
+          <template v-else><el-button @click="createStep = 'request'">返回修改</el-button><el-button type="primary" :loading="creating" :disabled="!canPrepareBrief" @click="createTask">确认并创建</el-button></template>
         </div>
       </div>
     </MotionModal>
@@ -238,6 +248,7 @@ import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import { canFocusDocument } from '@/utils/modalFocusPolicy'
 import { knowledgeRunDiagnostics } from '@/utils/knowledgeRunDiagnostics'
 import { hasFailedResearchStage } from '@/utils/knowledgeResearch'
+import { researchReadiness } from '@/utils/researchReadiness'
 import {
   createKnowledgeTask,
   cancelKnowledgeTask,
@@ -269,6 +280,8 @@ const filterBaseId = ref('')
 const loading = ref(false)
 const creating = ref(false)
 const previewing = ref(false)
+const readinessLoading = ref(false)
+const readinessError = ref('')
 const createStep = ref<'request' | 'preferences'>('request')
 const preflight = ref<ResearchPreflight | null>(null)
 const executingTaskId = ref('')
@@ -292,6 +305,9 @@ const taskActivity = ref<Record<string, string>>({})
 const inspectionEvents = computed(() => (activeInspection.value?.events || []).filter(event => event.event_type !== 'run.text_delta'))
 const runtimeDiagnostics = computed(() => knowledgeRunDiagnostics(activeInspection.value?.events || [], activeInspection.value?.snapshot?.evidence_refs.runtime_budget))
 const draft = reactive({ knowledgeBaseId: '', title: '', description: '', taskType: 'research' as KnowledgeTask['task_type'], deliverableType: 'report' as KnowledgeTask['deliverable_type'], externalResearchEnabled: false, externalDomains: '', externalRequestLimit: 6 })
+const selectedBase = computed(() => bases.value.find(base => base.id === draft.knowledgeBaseId))
+const readiness = computed(() => selectedBase.value ? researchReadiness(selectedBase.value) : null)
+const canPrepareBrief = computed(() => Boolean(!readinessLoading.value && !readinessError.value && readiness.value?.canCreate && draft.title.trim()))
 function defaultBrief(): ResearchBrief { return { confirmed: false, audience: 'general', purpose: 'understand', tone: 'analytical', depth: 'standard', presentation_theme: 'editorial', emphasis: '' } }
 const brief = reactive<ResearchBrief>(defaultBrief())
 function briefIsFocus(field: ResearchPreflight['focus_decisions'][number]) { return preflight.value?.focus_decisions.includes(field) ?? false }
@@ -305,12 +321,13 @@ function briefSummary(value: ResearchBrief, deliverable: KnowledgeTask['delivera
 }
 let viewActive = true
 let briefPreviewRequestId = 0
+let baseRefreshRequestId = 0
 let inspectionRequestId = 0
 let resultRequestId = 0
 let taskPollTimer: ReturnType<typeof setTimeout> | undefined
 let tasksRequestId = 0
 watch(resultVisible, visible => { if (!visible) { ++resultRequestId; ++inspectionRequestId; loadingResultId.value = '' } })
-watch(createVisible, visible => { if (!visible) ++briefPreviewRequestId })
+watch(createVisible, visible => { if (!visible) { ++briefPreviewRequestId; ++baseRefreshRequestId; readinessLoading.value = false } })
 
 watch(() => draft.taskType, taskType => {
   if (taskType !== 'research') draft.externalResearchEnabled = false
@@ -389,26 +406,56 @@ function openCreate() {
   draft.externalDomains = ''
   draft.externalRequestLimit = 6
   createVisible.value = true
+  void refreshResearchBases()
+}
+
+async function refreshResearchBases() {
+  const requestId = ++baseRefreshRequestId
+  readinessLoading.value = true
+  readinessError.value = ''
+  try {
+    const response = await listBookKnowledgeBases()
+    if (requestId !== baseRefreshRequestId || !createVisible.value) return
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '知识库加载失败')
+    bases.value = response.result.items.flatMap(card => (
+      card.book.kind === 'folder' && card.knowledge_base ? [card.knowledge_base] : []
+    ))
+    if (!bases.value.some(base => base.id === draft.knowledgeBaseId)) draft.knowledgeBaseId = bases.value[0]?.id || ''
+  } catch (error) {
+    if (requestId !== baseRefreshRequestId || !createVisible.value) return
+    readinessError.value = (error as Error).message
+  } finally {
+    if (requestId === baseRefreshRequestId) readinessLoading.value = false
+  }
+}
+
+function openBaseManagement() {
+  const baseId = selectedBase.value?.id
+  createVisible.value = false
+  void router.push({ path: '/knowledge', query: baseId ? { base: baseId } : {} })
 }
 
 function skipBrief() {
+  if (!canPrepareBrief.value) return
   preflight.value = null
   Object.assign(brief, defaultBrief())
   createStep.value = 'preferences'
 }
 
 async function prepareBrief() {
+  if (!canPrepareBrief.value) return
   const requestId = ++briefPreviewRequestId
+  const requestSnapshot = JSON.stringify({ ...draft })
   previewing.value = true
   try {
     const response = await previewKnowledgeTaskBrief(draft)
-    if (requestId !== briefPreviewRequestId || !createVisible.value) return
+    if (requestId !== briefPreviewRequestId || !createVisible.value || requestSnapshot !== JSON.stringify({ ...draft })) return
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '预分析未完成')
     preflight.value = response.result
     Object.assign(brief, response.result.recommended, { confirmed: false })
     createStep.value = 'preferences'
   } catch (error) {
-    if (requestId !== briefPreviewRequestId || !createVisible.value) return
+    if (requestId !== briefPreviewRequestId || !createVisible.value || requestSnapshot !== JSON.stringify({ ...draft })) return
     ElMessage.warning(`预分析未完成，可手动确认偏好：${(error as Error).message}`)
     skipBrief()
   } finally {
@@ -417,6 +464,7 @@ async function prepareBrief() {
 }
 
 async function createTask() {
+  if (!canPrepareBrief.value) return
   creating.value = true
   try {
     const externalDomains = draft.externalDomains
@@ -674,6 +722,20 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
 .task-action.is-cancel { border-color: color-mix(in srgb, var(--danger, #ff3b30) 25%, transparent); background: color-mix(in srgb, var(--danger, #ff3b30) 9%, transparent); color: var(--danger, #d9342b); }
 .task-empty-symbol { width: 62px; height: 62px; display: grid; place-items: center; border-radius: 20px; background: var(--accent-light); color: var(--accent); font-size: 27px; }
 .mobile-create-task { display: none; }
+.research-readiness-state { min-width: 0; min-height: 50px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 13px; border: 1px solid var(--border-faint); border-radius: 14px; color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
+.research-readiness-state.is-error { border-color: color-mix(in srgb, var(--danger, #d9342b) 35%, transparent); color: var(--danger, #d9342b); }
+.research-readiness-state button { min-height: 30px; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; }
+.research-readiness { min-width: 0; display: grid; gap: 8px; padding: 12px 13px; border: 1px solid var(--border-faint); border-radius: 14px; background: color-mix(in srgb, var(--bg-base) 44%, transparent); }
+.research-readiness.is-attention { border-color: var(--accent-border); }
+.research-readiness.is-blocked { border-color: color-mix(in srgb, var(--danger, #d9342b) 35%, transparent); }
+.research-readiness-head { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.research-readiness-head strong { color: var(--text-primary); font-size: 12px; }
+.research-readiness-head span { flex: none; color: var(--text-muted); font-size: 10px; font-weight: 700; }
+.research-readiness.is-blocked .research-readiness-head span { color: var(--danger, #d9342b); }
+.research-readiness > p { margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.research-readiness-counts { display: flex; flex-wrap: wrap; gap: 5px 10px; color: var(--text-faint); font-size: 10px; }
+.research-readiness ul { display: grid; gap: 4px; margin: 0; padding-left: 16px; color: var(--text-muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.research-readiness button { justify-self: start; min-height: 30px; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
 .external-grant { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border-faint); border-radius: 14px; background: color-mix(in srgb, var(--bg-glass) 72%, transparent); transition: border-color var(--motion-fast) var(--ease-emphasized), background var(--motion-fast) var(--ease-emphasized); }
 .external-grant.is-enabled { border-color: var(--accent-border); background: var(--accent-light); }
 .external-grant-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
@@ -794,6 +856,11 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
   .task-action span { display: none; }
 }
 @media (max-width: 768px) {
+  .research-readiness-state { font-size: 12px; }
+  .research-readiness-state button { min-height: 44px; }
+  .research-readiness-head strong { font-size: 13px; }
+  .research-readiness > p, .research-readiness ul { font-size: 12px; }
+  .research-readiness button { min-height: 44px; font-size: 12px; }
   .research-brief-field { font-size: 13px; }
   .research-decision-tip b { font-size: 13px; }
   .research-decision-tip em { font-size: 12px; }
