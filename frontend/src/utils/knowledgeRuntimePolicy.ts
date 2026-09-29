@@ -49,9 +49,35 @@ export function researchTaskRouteFromQuestion(baseId: string, question: string) 
       create: '1',
       base: baseId,
       title: characters.slice(0, 200).join(''),
-      description: characters.length > 200 ? characters.slice(0, 1800).join('') : '',
+      description: characters.length > 200 ? characters.slice(0, 4000).join('') : '',
     },
   }
+}
+
+/** Only reuse a planner rewrite belonging to this exact book and user turn. */
+export function researchTaskQuestionFromRun(
+  originalQuestion: string,
+  baseId: string,
+  run: { knowledge_base_id?: string | null; task_type: string; input: Record<string, unknown> } | null,
+) {
+  const original = originalQuestion.trim()
+  const input = run?.input
+  const standalone = typeof input?.standalone_question === 'string' ? input.standalone_question.trim() : ''
+  if (run?.knowledge_base_id === baseId
+    && run.task_type === 'knowledge_qa'
+    && input?.question === original
+    && standalone
+    && Array.from(standalone).length <= 2000) {
+    return { question: standalone, contextRecovered: true }
+  }
+  return { question: original, contextRecovered: false }
+}
+
+/** The task summary can append an entire report; inspect only its failure header. */
+export function researchTaskTurnLimitFailure(task: { status: string; result_summary: string } | null): boolean {
+  if (task?.status !== 'failed') return false
+  const failureHeader = task.result_summary.split(/\n\s*\n/, 1)[0]
+  return /\(research_turn_limit\)|stop_reason=max_turn_requests/.test(failureHeader)
 }
 
 export const modelReasoningPolicies = ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const

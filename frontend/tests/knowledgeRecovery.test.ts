@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskRouteFromQuestion, validateModelCapabilities } from '../src/utils/knowledgeRuntimePolicy.ts'
+import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskQuestionFromRun, researchTaskRouteFromQuestion, researchTaskTurnLimitFailure, validateModelCapabilities } from '../src/utils/knowledgeRuntimePolicy.ts'
 
 test('planning fallback remains visible as a retrieval adjustment', () => {
   assert.equal(labelForRuntimePhase('目录规划未完成，正在改用书内检索继续核查'), '正在调整检索方式')
@@ -35,6 +35,36 @@ test('a Harness turn limit is not mistaken for an output-token retry', () => {
     path: '/knowledge/tasks',
     query: { create: '1', base: 'book-a', title: '分析机制与边界', description: '' },
   })
+})
+
+test('research transfer resolves a contextual follow-up using the matching answer run', () => {
+  const run = {
+    knowledge_base_id: 'book-a',
+    task_type: 'knowledge_qa',
+    input: { question: '那第二点呢？', standalone_question: '《示例书》第二章提出的第二种机制有哪些适用边界？' },
+  }
+  const resolved = researchTaskQuestionFromRun('那第二点呢？', 'book-a', run)
+  assert.equal(resolved.question, run.input.standalone_question)
+  assert.equal(resolved.contextRecovered, true)
+  assert.equal(researchTaskQuestionFromRun('那第二点呢？', 'book-b', run).contextRecovered, false)
+  assert.equal(researchTaskQuestionFromRun('另一个问题', 'book-a', run).question, '另一个问题')
+  assert.equal(researchTaskQuestionFromRun('那第二点呢？', 'book-a', { ...run, input: { ...run.input, standalone_question: '' } }).contextRecovered, false)
+  assert.equal(researchTaskQuestionFromRun('那第二点呢？', 'book-a', { ...run, task_type: 'knowledge_task_research' }).contextRecovered, false)
+})
+
+test('research transfer retains the full resolved question in its editable description', () => {
+  const question = '这本书的论证边界与证据链是什么？'.repeat(120)
+  const route = researchTaskRouteFromQuestion('book-a', question)
+  assert.equal(route.query.title.length, 200)
+  assert.equal(route.query.description, question)
+})
+
+test('only a failed task whose failure header reached the Harness turn limit gets narrowing advice', () => {
+  assert.equal(researchTaskTurnLimitFailure({ status: 'failed', result_summary: '执行未完成：(research_turn_limit) 当前阶段达到轮次上限 (stop_reason=max_turn_requests)' }), true)
+  assert.equal(researchTaskTurnLimitFailure({ status: 'failed', result_summary: '> [!warning] 后续交付未完成\n> 原因：(research_turn_limit) 轮次上限\n\n报告正文' }), true)
+  assert.equal(researchTaskTurnLimitFailure({ status: 'completed', result_summary: '执行未完成：(research_turn_limit)' }), false)
+  assert.equal(researchTaskTurnLimitFailure({ status: 'failed', result_summary: '执行未完成：输出上限 (stop_reason=max_tokens)' }), false)
+  assert.equal(researchTaskTurnLimitFailure({ status: 'failed', result_summary: '执行未完成：普通错误\n\n报告提及 max_turn_requests' }), false)
 })
 
 test('an empty max-token answer explains retry exhaustion without pretending a draft exists', () => {

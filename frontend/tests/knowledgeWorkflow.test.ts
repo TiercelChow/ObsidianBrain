@@ -27,7 +27,9 @@ test('knowledge chat persists conversations and restores their cited messages', 
   assert.match(chat, /labelForRuntimePhase\(event\.message\)/)
   assert.match(runtimePolicy, /正在理解问题与选择知识/)
   assert.match(chat, /转为分阶段研究任务/)
-  assert.match(chat, /researchTaskRouteFromQuestion\(activeBaseId\.value, question\)/)
+  assert.match(chat, /researchTaskQuestionFromRun/)
+  assert.match(chat, /getAgentRunInspection\(message\.runId\)/)
+  assert.match(chat, /researchTaskRouteFromQuestion\(baseId, resolved\.question\)/)
   assert.match(chat, /const assistantMessage = messages\.value\[assistantIndex\]/)
   assert.match(chat, /createStreamedTextBuffer/)
   assert.match(chat, /if \(receivedText\) \{\s*textBuffer\.cancel\(\)\s*assistantMessage\.content = ''\s*receivedText = ''/)
@@ -290,6 +292,16 @@ test('failed research tasks open their failed stage before the legacy run inspec
   assert.match(handler, /openStages\(task\)/)
   assert.match(handler, /getKnowledgeTaskActivity\(task\.id\)/)
   assert.ok(handler.indexOf('openStages(task)') < handler.indexOf('getKnowledgeTaskActivity(task.id)'))
+  assert.match(view, /researchTaskTurnLimitFailure/)
+  assert.match(view, /缩小范围另建任务/)
+  assert.match(view, /新任务不会继承已完成阶段/)
+  assert.match(view, /openNarrowedTask\(activeTask\)/)
+  const narrow = view.split('async function openNarrowedTask(task: KnowledgeTask) {')[1]?.split('\nasync function refreshResearchBases')[0] || ''
+  assert.match(narrow, /draft\.knowledgeBaseId = task\.knowledge_base_id/)
+  assert.match(narrow, /draft\.title = task\.title/)
+  assert.match(narrow, /draft\.description = task\.description/)
+  assert.match(narrow, /draft\.deliverableType = task\.deliverable_type/)
+  assert.doesNotMatch(narrow, /externalResearchEnabled = task\./)
 })
 
 test('research creation shows book readiness and blocks inactive bases before paid preflight', async () => {

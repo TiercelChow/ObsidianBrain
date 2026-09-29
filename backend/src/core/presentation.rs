@@ -216,6 +216,7 @@ pub fn validate_presentation_spec(
 
     let mut layouts = HashSet::new();
     let mut slide_titles = HashSet::new();
+    let mut takeaways = HashSet::new();
     let mut cited_slide_count = 0;
     for (index, slide) in spec.slides.iter().enumerate() {
         let field = format!("slides[{index}]");
@@ -231,6 +232,16 @@ pub fn validate_presentation_spec(
         if title_identity == heading_identity(&slide.takeaway) {
             return Err(validation_error(&format!(
                 "{field}.takeaway 不应重复本页标题"
+            )));
+        }
+        if slide.takeaway.trim_end().ends_with(['?', '？']) {
+            return Err(validation_error(&format!(
+                "{field}.takeaway 应陈述本页已经得出的信息或边界，不能只留下问题"
+            )));
+        }
+        if !takeaways.insert(heading_identity(&slide.takeaway)) {
+            return Err(validation_error(&format!(
+                "{field}.takeaway 与不同页面重复；每页应有独立的沟通职责"
             )));
         }
         if slide.body.len() > 5 {
@@ -253,6 +264,11 @@ pub fn validate_presentation_spec(
                 )));
             }
         }
+        if evidence_count > 0 && index + 1 < spec.slides.len() && slide.citations.is_empty() {
+            return Err(validation_error(&format!(
+                "{field}.citations 不能为空：只有最后的收束页可以不带引用"
+            )));
+        }
         cited_slide_count += usize::from(!slide.citations.is_empty());
         validate_layout_payload(&field, slide)?;
         if slide_character_count(slide) > MAX_SLIDE_CHARACTERS {
@@ -264,13 +280,6 @@ pub fn validate_presentation_spec(
         return Err(validation_error(
             "5 页以上的演示文稿至少需要 3 种布局，避免整篇重复",
         ));
-    }
-    let required_cited_slides = spec.slides.len().saturating_sub(1).max(1);
-    if evidence_count > 0 && cited_slide_count < required_cited_slides {
-        return Err(validation_error(&format!(
-            "除收束页外的内容页都应绑定证据：当前 {cited_slide_count}/{} 页有引用",
-            spec.slides.len()
-        )));
     }
     Ok(PresentationPlanValidation {
         content_slide_count: spec.slides.len(),
@@ -548,7 +557,14 @@ fn validation_error(message: &str) -> BrainError {
 }
 
 pub fn render_pptx(spec: &PresentationSpec, output: &Path) -> Result<(), BrainError> {
-    let plan = validate_presentation_spec(spec, usize::MAX)?;
+    // Rendering does not have the source list. A citation-free plan may be valid when
+    // the planning stage had no external evidence; cited plans still enforce coverage.
+    let citation_limit = if spec.slides.iter().all(|slide| slide.citations.is_empty()) {
+        0
+    } else {
+        usize::MAX
+    };
+    let plan = validate_presentation_spec(spec, citation_limit)?;
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -1788,11 +1804,13 @@ mod tests {
         let mut spec = sample_spec();
         spec.slides.push(spec.slides[0].clone());
         spec.slides.last_mut().unwrap().title = "额外内容页".into();
+        spec.slides.last_mut().unwrap().takeaway = "新增内容需要独立验证与归纳。".into();
+        spec.slides[3].citations = vec!["S1".into()];
         for slide in &mut spec.slides {
             slide.layout = PresentationLayout::Statement;
         }
         let error = validate_presentation_spec(&spec, 1).unwrap_err();
-        assert!(error.to_string().contains("至少需要 3 种布局"));
+        assert!(error.to_string().contains("至少需要 3 种布局"), "{error}");
     }
 
     #[test]
@@ -1806,6 +1824,28 @@ mod tests {
         spec.slides[1].takeaway = format!("{}。", spec.slides[1].title);
         let repeated = validate_presentation_spec(&spec, 1).unwrap_err();
         assert!(repeated.to_string().contains("重复本页标题"));
+    }
+
+    #[test]
+    fn test_presentation_citations_cannot_hide_an_uncited_early_slide_behind_a_cited_ending() {
+        let mut spec = sample_spec();
+        spec.slides[0].citations.clear();
+        spec.slides[3].citations = vec!["S1".into()];
+        let error = validate_presentation_spec(&spec, 1).unwrap_err();
+        assert!(error.to_string().contains("slides[0].citations"));
+    }
+
+    #[test]
+    fn test_presentation_takeaways_must_answer_and_not_repeat_across_pages() {
+        let mut spec = sample_spec();
+        spec.slides[0].takeaway = "为什么依赖方向重要？".into();
+        let question = validate_presentation_spec(&spec, 1).unwrap_err();
+        assert!(question.to_string().contains("takeaway 应陈述"));
+
+        let mut spec = sample_spec();
+        spec.slides[1].takeaway = format!("{}。", spec.slides[0].takeaway);
+        let repeated = validate_presentation_spec(&spec, 1).unwrap_err();
+        assert!(repeated.to_string().contains("不同页面重复"));
     }
 
     #[test]
@@ -1881,6 +1921,19 @@ mod tests {
         if let Ok(keep_path) = std::env::var("OBRAIN_KEEP_TEST_PPTX") {
             std::fs::copy(output, keep_path).unwrap();
         }
+    }
+
+    #[test]
+    fn test_render_pptx_allows_valid_plan_without_external_citations() {
+        let mut spec = sample_spec();
+        for slide in &mut spec.slides {
+            slide.citations.clear();
+        }
+        validate_presentation_spec(&spec, 0).expect("valid evidence-free plan");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = dir.path().join("no-citations.pptx");
+        render_pptx(&spec, &output).expect("render evidence-free plan");
+        assert_eq!(validate_pptx(&output).unwrap().slide_count, 5);
     }
 
     #[test]

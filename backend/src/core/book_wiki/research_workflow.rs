@@ -353,6 +353,14 @@ impl BookWikiService {
                         Ok(task) => task.cancel_requested,
                         Err(_) => return Err(error),
                     };
+                    if !cancelled && is_harness_turn_limit(&error) {
+                        let terminal = BrainError::KnowledgeValidation(format!(
+                            "(research_turn_limit) 当前研究阶段达到 Harness 请求轮次上限，增加输出 token 不能解决；部分输出和已完成章节保留。请检查阶段取证范围，缩小主题另建任务，或在调整运行配置后显式恢复当前阶段。原错误：{error}"
+                        ));
+                        self.store
+                            .fail_research_stage(&claim, &terminal.to_string(), false)?;
+                        return Err(terminal);
+                    }
                     if cancelled || !is_output_truncation(&error) {
                         let _ =
                             self.store
@@ -1383,6 +1391,64 @@ mod tests {
                     .contains("research_output_retry_exhausted"));
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_research_turn_limit_fails_one_stage_without_output_expansion() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct TurnLimitRuntime(Arc<AtomicUsize>);
+        #[async_trait]
+        impl AgentRuntime for TurnLimitRuntime {
+            async fn prompt(&self, _request: AgentPromptRequest) -> Result<String, BrainError> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Err(BrainError::LlmApiError {
+                    provider: "deepseek_harness".into(),
+                    detail: "DeepSeek Harness 达到请求轮次上限 (stop_reason=max_turn_requests)"
+                        .into(),
+                })
+            }
+
+            async fn prompt_with_events(
+                &self,
+                request: AgentPromptRequest,
+                events: Option<tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+                _cancel: tokio::sync::watch::Receiver<bool>,
+            ) -> Result<String, BrainError> {
+                if let Some(events) = events {
+                    let _ = events.send(AgentRuntimeEvent::TextDelta {
+                        delta: "未完成的规划".into(),
+                    });
+                    let _ = events.send(AgentRuntimeEvent::Completed {
+                        stop_reason: "max_turn_requests".into(),
+                        complete: false,
+                    });
+                }
+                self.prompt(request).await
+            }
+        }
+
+        let (_dir, original, task, _) = plan_repair_fixture(false);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let store = original.store.clone();
+        let service =
+            BookWikiService::new(store.clone(), Arc::new(TurnLimitRuntime(calls.clone())));
+        let profile = service.active_runtime_profile().unwrap();
+        let error = service
+            .persist_model_research_phase(plan_phase(&task, &profile), |_, _, _| Ok(()))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("research_turn_limit"));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let stage = store
+            .get_research_stage_content(&task.id, "plan", None)
+            .unwrap();
+        assert_eq!(stage.stage.status, "failed");
+        assert!(stage.stage.error.unwrap().contains("research_turn_limit"));
+        let run = store
+            .get_agent_run(stage.stage.run_id.as_deref().unwrap())
+            .unwrap();
+        assert_eq!(run.output.unwrap()["stop_reason"], "max_turn_requests");
     }
 
     #[tokio::test]

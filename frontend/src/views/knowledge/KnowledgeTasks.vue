@@ -155,6 +155,10 @@
           </div>
         </div>
         <div v-else-if="resultTab === 'stages'" class="task-result-scroll" role="region" aria-label="研究阶段">
+          <div v-if="hasTurnLimitFailure" class="research-recovery-advice" role="status">
+            <strong>当前阶段已达 Harness 请求轮次上限</strong>
+            <p>增加输出 token 不能解决。直接恢复会重跑同一阶段；已完成章节仍保留在本任务。你可以先检查取证范围与运行设置，或缩小范围另建任务；新任务不会继承已完成阶段。</p>
+          </div>
           <KnowledgeResearchWorkspace :task-id="activeTask.id" :task-status="activeTask.status" :active="resultVisible && resultTab === 'stages'" @inspect="inspectStage" />
         </div>
         <div v-else class="task-result-scroll" role="region" aria-label="运行检查器">
@@ -226,7 +230,8 @@
           </div>
         </div>
         <div class="knowledge-modal-actions">
-          <el-button v-if="['failed', 'cancelled'].includes(activeTask.status)" :loading="executingTaskId === activeTask.id" @click="runTask(activeTask)">恢复未完成阶段</el-button>
+          <el-button v-if="hasTurnLimitFailure && activeTask.task_type === 'research'" @click="openNarrowedTask(activeTask)">缩小范围另建任务</el-button>
+          <el-button v-if="['failed', 'cancelled'].includes(activeTask.status)" :loading="executingTaskId === activeTask.id" @click="runTask(activeTask)">{{ hasTurnLimitFailure ? '仍要恢复当前阶段' : '恢复未完成阶段' }}</el-button>
           <el-button v-if="['queued', 'running'].includes(activeTask.status)" @click="cancelTask(activeTask)">取消任务</el-button>
           <el-button type="primary" @click="resultVisible = false">完成</el-button>
         </div>
@@ -237,7 +242,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { DataAnalysis, Download, Loading, Operation, Plus, Refresh, Select, VideoPlay, View } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -249,6 +254,7 @@ import KnowledgeCitationPreview from '@/components/knowledge/KnowledgeCitationPr
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import { canFocusDocument } from '@/utils/modalFocusPolicy'
 import { knowledgeRunDiagnostics } from '@/utils/knowledgeRunDiagnostics'
+import { researchTaskTurnLimitFailure } from '@/utils/knowledgeRuntimePolicy'
 import { hasFailedResearchStage } from '@/utils/knowledgeResearch'
 import { researchReadiness } from '@/utils/researchReadiness'
 import {
@@ -291,6 +297,7 @@ const loadingResultId = ref('')
 const createVisible = ref(false)
 const resultVisible = ref(false)
 const activeTask = ref<KnowledgeTask | null>(null)
+const hasTurnLimitFailure = computed(() => researchTaskTurnLimitFailure(activeTask.value))
 const activeEvidence = ref<KnowledgeEntrySummary[]>([])
 const activeArtifacts = ref<KnowledgeArtifact[]>([])
 const activeInspection = ref<AgentRunInspection | null>(null)
@@ -409,6 +416,18 @@ function openCreate() {
   draft.externalRequestLimit = 6
   createVisible.value = true
   void refreshResearchBases()
+}
+
+async function openNarrowedTask(task: KnowledgeTask) {
+  resultVisible.value = false
+  await nextTick()
+  if (!viewActive) return
+  openCreate()
+  draft.knowledgeBaseId = task.knowledge_base_id
+  draft.title = task.title
+  draft.description = task.description
+  draft.taskType = task.task_type
+  draft.deliverableType = task.deliverable_type
 }
 
 async function refreshResearchBases() {
@@ -779,6 +798,9 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
 .artifact-failure { display: grid; gap: 3px; padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--danger, #d9342b) 24%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--danger, #d9342b) 8%, transparent); }
 .artifact-failure strong { color: var(--danger, #d9342b); font-size: 11px; }
 .artifact-failure span { color: var(--text-muted); font-size: 9px; line-height: 1.5; }
+.research-recovery-advice { display: grid; gap: 5px; padding: 12px 14px; border: 1px solid var(--accent-border); border-radius: 12px; background: var(--accent-light); }
+.research-recovery-advice strong { color: var(--text-primary); font-size: 12px; }
+.research-recovery-advice p { margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.6; }
 .task-artifacts { display: grid; gap: 8px; }
 .artifact-card { overflow: hidden; border: 1px solid var(--accent-border); border-radius: 14px; background: var(--accent-light); }
 .artifact-main-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 10px 12px; }

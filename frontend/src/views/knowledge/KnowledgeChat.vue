@@ -97,7 +97,7 @@
                 <span v-if="message.interruption.kind !== 'cancelled'">{{ message.interruption.detail }}</span>
                 <button v-if="message.interruption.canRetry && message.runId && message.originalQuestion && message.content" type="button" :disabled="searching || !runtimeReady" @click="ask(message.originalQuestion, message)">继续完成完整答案</button>
                 <button v-else-if="message.interruption.canRetry && message.originalQuestion && !message.content" type="button" :disabled="searching || !runtimeReady" @click="ask(message.originalQuestion)">重新提问</button>
-                <button v-if="message.interruption.kind === 'turn_limit' && message.originalQuestion && activeBaseId" type="button" :disabled="searching" @click="openResearchTask(message.originalQuestion)">转为分阶段研究任务</button>
+                <button v-if="message.interruption.kind === 'turn_limit' && message.originalQuestion && activeBaseId" type="button" :disabled="searching || !!researchTransferMessageId" @click="openResearchTask(message)">{{ researchTransferMessageId === message.id ? '正在恢复问题…' : '转为分阶段研究任务' }}</button>
               </div>
               <button v-if="message.role === 'assistant' && message.runId && message.id !== streamingMessageId" type="button" class="save-answer" @click="inspectRun(message.runId)">查看本轮目标与取证预算</button>
               <button v-if="message.role === 'assistant' && message.runId && !message.interruption && message.id !== streamingMessageId" class="save-answer" type="button" :disabled="savingRunId === message.runId" @click="saveAnswer(message)">
@@ -224,7 +224,7 @@ import MotionModal from '@/components/motion/MotionModal.vue'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { shouldSendComposerOnEnter } from '@/utils/chatComposer'
 import { createStreamedTextBuffer, type StreamedTextBuffer } from '@/utils/streamedText'
-import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskRouteFromQuestion } from '@/utils/knowledgeRuntimePolicy'
+import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskQuestionFromRun, researchTaskRouteFromQuestion } from '@/utils/knowledgeRuntimePolicy'
 import { loadKnowledgeCitationPreview } from '@/utils/knowledgeCitationPreview'
 import {
   getBookWikiSettings,
@@ -284,6 +284,7 @@ const sourceCurrentEntry = ref<KnowledgeEntrySummary | null>(null)
 const sourceHtml = ref('')
 const sourceMarkdownRef = ref<HTMLElement | null>(null)
 const savingRunId = ref('')
+const researchTransferMessageId = ref('')
 const inspectorVisible = ref(false)
 const inspectorLoading = ref(false)
 const inspectorError = ref('')
@@ -305,9 +306,33 @@ function setActivity(phase: string) {
   if (streamPhase.value !== phase) streamPhase.value = phase
 }
 
-function openResearchTask(question: string) {
-  if (!activeBaseId.value) return
-  void router.push(researchTaskRouteFromQuestion(activeBaseId.value, question))
+async function openResearchTask(message: ChatMessage) {
+  const baseId = activeBaseId.value
+  if (!baseId || !message.originalQuestion || researchTransferMessageId.value) return
+  researchTransferMessageId.value = message.id
+  let resolved = researchTaskQuestionFromRun(message.originalQuestion, baseId, null)
+  let inspectionUnavailable = false
+  try {
+    if (message.runId) {
+      try {
+        const response = await getAgentRunInspection(message.runId)
+        if (response.status === 'success' && response.result) {
+          resolved = researchTaskQuestionFromRun(message.originalQuestion, baseId, response.result.run)
+        } else {
+          inspectionUnavailable = true
+        }
+      } catch { inspectionUnavailable = true }
+    }
+    if (activeBaseId.value !== baseId) return
+    if (!resolved.contextRecovered && (inspectionUnavailable || message.requestConversationId)) {
+      ElMessage.warning('未能从运行记录补全追问，请在创建任务前确认上下文')
+    }
+    await router.push(researchTaskRouteFromQuestion(baseId, resolved.question))
+  } catch (error) {
+    ElMessage.error((error as Error).message || '无法打开研究任务创建页')
+  } finally {
+    researchTransferMessageId.value = ''
+  }
 }
 
 function stopAnswer() {
