@@ -297,6 +297,15 @@ test('research creation shows book readiness and blocks inactive bases before pa
   assert.match(view, /readinessError/)
 })
 
+test('research preflight can finish one bounded recovery before the client times out', async () => {
+  const [api, view] = await Promise.all([
+    source('src/api/knowledge.ts'),
+    source('src/views/knowledge/KnowledgeTasks.vue'),
+  ])
+  assert.match(api, /preview_knowledge_task_brief[\s\S]*?timeout:\s*180_000/)
+  assert.match(view, /v-if="previewing"[^>]*role="status"/)
+})
+
 test('external research stays opt-in, domain scoped, and rate limited per task', async () => {
   const [view, api] = await Promise.all([
     source('src/views/knowledge/KnowledgeTasks.vue'),

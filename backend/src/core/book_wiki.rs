@@ -78,6 +78,8 @@ const PRESENTATION_PLAN_TIMEOUT: Duration = Duration::from_secs(180);
 const PRESENTATION_PLAN_MAX_OUTPUT_TOKENS: u32 = 6_144;
 const RESEARCH_PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(75);
 const RESEARCH_PREFLIGHT_MAX_OUTPUT_TOKENS: u32 = 8_192;
+const RESEARCH_PREFLIGHT_RETRY_MAX_OUTPUT_TOKENS: u32 = 16_384;
+const RESEARCH_PREFLIGHT_MIN_OUTPUT_TOKENS: u32 = 1_024;
 const SEMANTIC_COMPILE_PROTOCOL_REVISION: &str = "semantic-contract-v5-knowledge-body";
 const AGENT_CAPABILITY_MIN_TTL_SECONDS: i64 = 300;
 const AGENT_CAPABILITY_TTL_BUFFER_SECONDS: i64 = 60;
@@ -328,18 +330,115 @@ impl BookWikiService {
              focus_decisions 按重要性选 1 至 4 个字段，不能重复；仅演示文稿可选 presentation_theme。decision_points 按相同顺序为每个重点字段给出与当前任务相关的具体选择问题和该选择对成品的影响，不写通用空话，也不把建议当成用户决定；每条 question/impact 各不超过 160 字。所有字段必须齐全，未知信息保持保守默认。cautions 最多 3 条，只指出实际歧义，不制造决策。不得增加字段或输出解释、代码围栏。",
             base.book_name,
         );
+        let provider_output_limit = profile
+            .provider_config
+            .as_ref()
+            .and_then(|provider| provider.max_output_tokens);
+        let context_window = profile
+            .provider_config
+            .as_ref()
+            .and_then(|provider| provider.context_window);
+        let output_tokens = preflight_output_budget(
+            RESEARCH_PREFLIGHT_MAX_OUTPUT_TOKENS,
+            provider_output_limit,
+            context_window,
+            u32::try_from(estimate_token_count(&prompt)).unwrap_or(u32::MAX),
+        )?;
         let input = serde_json::json!({
             "title":title,"task_type":task_type,"deliverable_type":deliverable_type,
-            "model":profile.model,"request_max_output_tokens":RESEARCH_PREFLIGHT_MAX_OUTPUT_TOKENS,
+            "model":profile.model,"request_max_output_tokens":output_tokens,
             "request_timeout_seconds":RESEARCH_PREFLIGHT_TIMEOUT.as_secs(),
         });
-        let (_, answer) = self
-            .run_audited(
+        let mut first_run_id = String::new();
+        let first = self
+            .run_audited_with_started(
                 base_id,
                 "research_preflight",
                 &input,
                 &profile,
-                prompt,
+                prompt.clone(),
+                AuditedRunObservers {
+                    stream: None,
+                    started_run_id: Some(&mut first_run_id),
+                },
+            )
+            .await;
+        let (retry_prompt, retry_output_tokens, retry_kind) = match first {
+            Ok((run_id, answer)) => match parse_research_preflight(&answer, deliverable_type) {
+                Ok(preview) => return Ok(preview),
+                Err(error) => {
+                    self.store.append_agent_run_event(
+                        &run_id,
+                        "run.phase_changed",
+                        Some("retrying"),
+                        "研究预分析 JSON 校验失败，重新生成完整合同一次",
+                        &serde_json::json!({"validation":"rejected","error":error.to_string()}),
+                    )?;
+                    let retry_prompt = format!(
+                        "{prompt}\n\n上一轮输出未通过 JSON 合同校验：{}。这是唯一一次格式修复机会；请重新生成一个完整 JSON 对象，包含所有字段，不输出补丁、解释或围栏。",
+                        error.to_string().chars().take(500).collect::<String>()
+                    );
+                    let retry_output_tokens = preflight_output_budget(
+                        output_tokens,
+                        provider_output_limit,
+                        context_window,
+                        u32::try_from(estimate_token_count(&retry_prompt)).unwrap_or(u32::MAX),
+                    )?;
+                    (retry_prompt, retry_output_tokens, "format_repair")
+                }
+            },
+            Err(error) if is_harness_output_truncation(&error) => {
+                // Without an application-managed provider patch, a larger
+                // request cannot change Harness's effective model cap.
+                if profile.provider_config.is_none() {
+                    return Err(error);
+                }
+                let retry_prompt = format!(
+                    "{prompt}\n\n上一轮达到输出 token 上限，结果不完整。本次请重新生成唯一且完整的 JSON 对象，不拼接之前的片段，不输出解释或围栏。"
+                );
+                let retry_output_tokens = preflight_output_budget(
+                    RESEARCH_PREFLIGHT_RETRY_MAX_OUTPUT_TOKENS,
+                    provider_output_limit,
+                    context_window,
+                    u32::try_from(estimate_token_count(&retry_prompt)).unwrap_or(u32::MAX),
+                )?;
+                if retry_output_tokens <= output_tokens {
+                    return Err(error);
+                }
+                (retry_prompt, retry_output_tokens, "output_expansion")
+            }
+            Err(error) if is_recoverable_empty_answer(&error) => {
+                let retry_prompt = format!(
+                    "{prompt}\n\n上一轮未返回正文。这是唯一一次空回答恢复机会；请重新生成唯一且完整的 JSON 对象，不输出解释或围栏。"
+                );
+                let retry_output_tokens = preflight_output_budget(
+                    output_tokens,
+                    provider_output_limit,
+                    context_window,
+                    u32::try_from(estimate_token_count(&retry_prompt)).unwrap_or(u32::MAX),
+                )?;
+                (retry_prompt, retry_output_tokens, "empty_answer")
+            }
+            Err(error) => return Err(error),
+        };
+        let mut retry_input = input;
+        retry_input["request_max_output_tokens"] = serde_json::json!(retry_output_tokens);
+        retry_input["preflight_retry_parent_run_id"] = serde_json::json!(first_run_id);
+        retry_input["preflight_retry_reason"] = serde_json::json!(retry_kind);
+        if retry_kind == "output_expansion" {
+            retry_input["output_expansion_attempt"] = serde_json::json!(1);
+        } else if retry_kind == "format_repair" {
+            retry_input["format_repair_attempt"] = serde_json::json!(1);
+        } else {
+            retry_input["transient_retry_attempt"] = serde_json::json!(1);
+        }
+        let (_, answer) = self
+            .run_audited(
+                base_id,
+                "research_preflight",
+                &retry_input,
+                &profile,
+                retry_prompt,
                 None,
             )
             .await?;
@@ -2159,7 +2258,7 @@ impl BookWikiService {
             } else {
                 format!("当前阶段第 {attempt} 次输出扩容，申请 {} tokens；之前部分结果保留，重新生成完整合同",input["request_max_output_tokens"])
             };
-            self.store.append_agent_run_event(&run.id,"run.output_budget_expanded",Some("budget"),&message,&serde_json::json!({"expansion_attempt":attempt,"research_retry_parent_run_id":input["research_retry_parent_run_id"],"qa_retry_parent_run_id":input["qa_retry_parent_run_id"],"next_output_tokens":input["request_max_output_tokens"]}))?;
+            self.store.append_agent_run_event(&run.id,"run.output_budget_expanded",Some("budget"),&message,&serde_json::json!({"expansion_attempt":attempt,"research_retry_parent_run_id":input["research_retry_parent_run_id"],"qa_retry_parent_run_id":input["qa_retry_parent_run_id"],"preflight_retry_parent_run_id":input["preflight_retry_parent_run_id"],"next_output_tokens":input["request_max_output_tokens"]}))?;
         }
         if (task_type == "knowledge_qa" || task_type.starts_with("knowledge_task_"))
             && !allowed_tools.is_empty()
@@ -2302,6 +2401,8 @@ impl BookWikiService {
             "conversation_memory",
             "resume_run_id",
             "qa_retry_parent_run_id",
+            "preflight_retry_parent_run_id",
+            "preflight_retry_reason",
             "output_expansion_attempt",
             "transient_retry_attempt",
             "selected_candidate_ids",
@@ -2314,6 +2415,7 @@ impl BookWikiService {
             "analysis_fragment_count",
             "topic_title",
             "research_stage_key",
+            "defer_research_citation_validation",
             "research_resources",
             "research_retry_parent_run_id",
             "format_repair_attempt",
@@ -2528,10 +2630,16 @@ impl BookWikiService {
         drop(cancel_tx);
         match runtime_result {
             Ok(answer) => {
-                if matches!(task_type, "knowledge_qa")
-                    || (task_type.starts_with("knowledge_task_")
-                        && task_type != "knowledge_task_presentation_plan"
-                        && input["research_stage_key"] != "plan")
+                let deferred_research_validation = task_type.starts_with("knowledge_task_")
+                    && input["defer_research_citation_validation"] == true
+                    && input["research_stage_key"]
+                        .as_str()
+                        .is_some_and(|key| key == "synthesis" || key.starts_with("section:"));
+                if !deferred_research_validation
+                    && (matches!(task_type, "knowledge_qa")
+                        || (task_type.starts_with("knowledge_task_")
+                            && task_type != "knowledge_task_presentation_plan"
+                            && input["research_stage_key"] != "plan"))
                 {
                     let ledger = match self.store.list_agent_run_evidence(&run.id) {
                         Ok(ledger) => ledger,
@@ -3742,7 +3850,8 @@ fn runtime_max_output_tokens_for_invocation(
     task_type: &str,
     input: &serde_json::Value,
 ) -> Option<u32> {
-    if task_type.starts_with("knowledge_qa")
+    if task_type == "research_preflight"
+        || task_type.starts_with("knowledge_qa")
         || task_type == "knowledge_ingest"
         || task_type.starts_with("knowledge_task_")
     {
@@ -3767,6 +3876,26 @@ fn runtime_max_output_tokens_for_invocation(
     } else {
         runtime_max_output_tokens_for_task(task_type)
     }
+}
+
+fn preflight_output_budget(
+    requested: u32,
+    provider_limit: Option<u32>,
+    context_window: Option<u32>,
+    prompt_tokens: u32,
+) -> Result<u32, BrainError> {
+    let available_context = context_window
+        .map(|window| window.saturating_sub(prompt_tokens).saturating_sub(1_024))
+        .unwrap_or(u32::MAX);
+    let output_tokens = requested
+        .min(provider_limit.unwrap_or(u32::MAX))
+        .min(available_context);
+    if output_tokens < RESEARCH_PREFLIGHT_MIN_OUTPUT_TOKENS {
+        return Err(BrainError::KnowledgeValidation(
+            "研究预分析的模型输出或上下文空间不足；请调整模型配置，或跳过分析手动确认偏好".into(),
+        ));
+    }
+    Ok(output_tokens)
 }
 
 fn effective_output_cap(profile: &RuntimeProfile, requested: Option<u32>) -> Option<u32> {
@@ -5893,6 +6022,257 @@ mod tests {
         let service = BookWikiService::new(BookWikiStore::new(db.clone()), Arc::new(FakeRuntime))
             .with_credential_store(credentials.clone());
         (service, credentials)
+    }
+
+    struct ScriptedPreflightRuntime {
+        responses: Mutex<Vec<Result<String, BrainError>>>,
+        prompts: Arc<Mutex<Vec<(String, u32)>>>,
+    }
+
+    #[async_trait]
+    impl AgentRuntime for ScriptedPreflightRuntime {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            let patch = request
+                .patch_paths
+                .iter()
+                .find(|path| {
+                    path.file_name()
+                        .is_some_and(|name| name == "model-provider.patch.json")
+                })
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .expect("test provider patch");
+            let patch: serde_json::Value = serde_json::from_str(&patch).unwrap();
+            let output_tokens = patch[0]["config"]["providers"]["preflight-test"]["models"][0]
+                ["maxTokens"]
+                .as_u64()
+                .unwrap() as u32;
+            self.prompts
+                .lock()
+                .unwrap()
+                .push((request.prompt, output_tokens));
+            self.responses.lock().unwrap().remove(0)
+        }
+    }
+
+    fn preflight_test_service(
+        root: &std::path::Path,
+        responses: Vec<Result<String, BrainError>>,
+        provider_output_limit: u32,
+    ) -> (
+        BookWikiService,
+        Arc<SqliteStore>,
+        String,
+        Arc<Mutex<Vec<(String, u32)>>>,
+    ) {
+        let book_path = root.join("preflight-book");
+        std::fs::create_dir(&book_path).unwrap();
+        std::fs::write(book_path.join("chapter.md"), "# 章节\n测试来源").unwrap();
+        let db = Arc::new(SqliteStore::new(&root.join("preflight.db")).unwrap());
+        let store = BookWikiStore::new(db.clone());
+        store
+            .save_reader_books(&[ReaderBook {
+                id: "preflight-book".into(),
+                path: book_path.to_string_lossy().to_string(),
+                kind: BookKind::Folder,
+                name: "预分析测试书".into(),
+                description: String::new(),
+                category: String::new(),
+                added_at: 1,
+                progress: None,
+            }])
+            .unwrap();
+        let provider = store
+            .save_model_provider_profile(
+                "preflight-test",
+                "测试供应商",
+                "openai-completions",
+                "https://example.com/v1",
+                "test-model",
+                "keychain",
+                "",
+                true,
+                true,
+                Some(1_048_576),
+                Some(provider_output_limit),
+                "auto",
+                0,
+            )
+            .unwrap();
+        let profile = store
+            .list_runtime_profiles()
+            .unwrap()
+            .into_iter()
+            .find(|profile| profile.runtime == "deepseek_harness")
+            .unwrap();
+        store
+            .save_runtime_profile(
+                &profile.id,
+                &profile.executable,
+                "",
+                Some(&provider.provider_id),
+                true,
+                profile.revision,
+            )
+            .unwrap();
+        let credentials = Arc::new(MemoryProviderCredentialStore::default());
+        credentials
+            .set(&provider.provider_id, "test-secret")
+            .unwrap();
+        let prompts = Arc::new(Mutex::new(Vec::new()));
+        let runtime = ScriptedPreflightRuntime {
+            responses: Mutex::new(responses),
+            prompts: prompts.clone(),
+        };
+        let service =
+            BookWikiService::new(store, Arc::new(runtime)).with_credential_store(credentials);
+        let base_id = service
+            .initialize_and_sync("preflight-book")
+            .unwrap()
+            .knowledge_base
+            .id;
+        (service, db, base_id, prompts)
+    }
+
+    fn valid_preflight_answer() -> String {
+        serde_json::json!({
+            "summary":"为读者准备可复核的研究材料",
+            "recommended":{"confirmed":false,"audience":"general","purpose":"understand","tone":"analytical","depth":"standard","presentation_theme":"editorial","emphasis":""},
+            "focus_decisions":["purpose"],
+            "decision_points":[{"field":"purpose","question":"需要理解还是决策？","impact":"决定材料的开篇和比较深度。"}],
+            "cautions":[]
+        }).to_string()
+    }
+
+    #[tokio::test]
+    async fn test_research_preflight_expands_once_after_max_tokens_and_links_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = BrainError::LlmApiError {
+            provider: "deepseek_harness".into(),
+            detail: "未返回正文 (stop_reason=max_tokens)".into(),
+        };
+        let (service, db, base_id, prompts) = preflight_test_service(
+            dir.path(),
+            vec![Err(error), Ok(valid_preflight_answer())],
+            65_536,
+        );
+        let preview = service
+            .preview_research_brief(&base_id, "研究目标", "", "research", "report")
+            .await
+            .unwrap();
+        assert!(!preview.recommended.confirmed);
+        assert_eq!(
+            prompts
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(_, cap)| *cap)
+                .collect::<Vec<_>>(),
+            vec![8192, 16384]
+        );
+        let runs: Vec<(String, String)> = db.with_connection(|conn| {
+            let mut statement = conn.prepare("SELECT id, input_json FROM agent_runs WHERE task_type = 'research_preflight' ORDER BY rowid")?;
+            let rows = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        }).unwrap();
+        let runs = runs
+            .into_iter()
+            .map(|(id, input)| {
+                (
+                    id,
+                    serde_json::from_str::<serde_json::Value>(&input).unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].1["request_max_output_tokens"], 8192);
+        assert_eq!(runs[1].1["request_max_output_tokens"], 16384);
+        assert_eq!(runs[1].1["preflight_retry_parent_run_id"], runs[0].0);
+    }
+
+    #[tokio::test]
+    async fn test_research_preflight_repairs_invalid_json_once_without_repeating_limit_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let (service, _, base_id, prompts) = preflight_test_service(
+            dir.path(),
+            vec![
+                Ok("{\"summary\":\"incomplete\"}".into()),
+                Ok(valid_preflight_answer()),
+            ],
+            65_536,
+        );
+        service
+            .preview_research_brief(&base_id, "研究目标", "", "research", "report")
+            .await
+            .unwrap();
+        let prompts = prompts.lock().unwrap();
+        assert_eq!(prompts.len(), 2);
+        assert!(prompts[1].0.contains("上一轮输出未通过 JSON 合同校验"));
+        assert!(prompts[1].0.contains("完整 JSON 对象"));
+
+        let dir = tempfile::tempdir().unwrap();
+        let error = BrainError::LlmApiError {
+            provider: "deepseek_harness".into(),
+            detail: "HTTP 401 invalid_api_key".into(),
+        };
+        let (service, _, base_id, prompts) =
+            preflight_test_service(dir.path(), vec![Err(error)], 65_536);
+        assert!(service
+            .preview_research_brief(&base_id, "研究目标", "", "research", "report")
+            .await
+            .is_err());
+        assert_eq!(prompts.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_research_preflight_does_not_replay_max_tokens_at_provider_hard_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = BrainError::LlmApiError {
+            provider: "deepseek_harness".into(),
+            detail: "未返回正文 (stop_reason=max_tokens)".into(),
+        };
+        let (service, _, base_id, prompts) =
+            preflight_test_service(dir.path(), vec![Err(error)], 8_192);
+        assert!(service
+            .preview_research_brief(&base_id, "研究目标", "", "research", "report")
+            .await
+            .is_err());
+        assert_eq!(prompts.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_research_preflight_empty_answer_recovers_once_without_expanding_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = BrainError::LlmApiError {
+            provider: "deepseek_harness".into(),
+            detail: "DeepSeek Harness 返回了空回答 (stop_reason=end_turn)".into(),
+        };
+        let (service, _, base_id, prompts) = preflight_test_service(
+            dir.path(),
+            vec![Err(error), Ok(valid_preflight_answer())],
+            65_536,
+        );
+        service
+            .preview_research_brief(&base_id, "研究目标", "", "research", "report")
+            .await
+            .unwrap();
+        assert_eq!(
+            prompts
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(_, cap)| *cap)
+                .collect::<Vec<_>>(),
+            vec![8192, 8192]
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let (service, _, base_id, prompts) =
+            preflight_test_service(dir.path(), vec![Ok("{}".into()), Ok("{}".into())], 65_536);
+        assert!(service
+            .preview_research_brief(&base_id, "研究目标", "", "research", "report")
+            .await
+            .is_err());
+        assert_eq!(prompts.lock().unwrap().len(), 2);
     }
 
     #[tokio::test]

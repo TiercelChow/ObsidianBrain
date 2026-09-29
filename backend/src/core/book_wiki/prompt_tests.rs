@@ -692,6 +692,10 @@ fn test_presentation_repair_is_single_object_and_bounded() {
 fn test_research_and_presentation_honor_per_phase_output_allocation() {
     let input = serde_json::json!({"request_max_output_tokens":16384});
     assert_eq!(
+        runtime_max_output_tokens_for_invocation("research_preflight", &input),
+        Some(16384)
+    );
+    assert_eq!(
         runtime_max_output_tokens_for_invocation("knowledge_task_research", &input),
         Some(16384)
     );
@@ -699,4 +703,22 @@ fn test_research_and_presentation_honor_per_phase_output_allocation() {
         runtime_max_output_tokens_for_invocation("knowledge_task_presentation_plan", &input),
         Some(16384)
     );
+}
+
+#[test]
+fn test_research_preflight_output_budget_respects_provider_and_context_headroom() {
+    assert_eq!(
+        preflight_output_budget(8192, None, None, 1000).unwrap(),
+        8192
+    );
+    assert_eq!(
+        preflight_output_budget(16384, Some(12000), Some(20000), 2000).unwrap(),
+        12000
+    );
+    assert_eq!(
+        preflight_output_budget(16384, None, Some(10000), 2000).unwrap(),
+        6976
+    );
+    assert!(preflight_output_budget(8192, Some(512), None, 1000).is_err());
+    assert!(preflight_output_budget(8192, None, Some(2000), 1200).is_err());
 }

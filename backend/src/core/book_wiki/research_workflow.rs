@@ -305,6 +305,7 @@ impl BookWikiService {
             let input = json!({"knowledge_task_id":phase.task.id,"research_stage_key":phase.key,"research_claim_id":claim.claim_id,"research_claim_attempt":claim.attempt,
                 "research_resources":phase.resources,"research_plan":phase.payload.get("plan"),"research_question":phase.payload.get("question"),
                 "evidence_entry_ids":evidence_ids,"skill_ids":skills,"model":phase.profile.model,"retry":retry,
+                "defer_research_citation_validation":phase.phase!="plan",
                 "output_expansion_attempt":output_expansions,"format_repair_attempt":format_repairs,"research_retry_parent_run_id":retry_parent_run_id,
                 "request_max_output_tokens":phase.resources.output_tokens,"request_timeout_seconds":phase.resources.policy.timeout_seconds,"adaptive_budget":phase.resources.policy,
                 "external_research":{"enabled":phase.task.external_research_enabled && phase.phase!="plan","domains":phase.task.external_domains,"request_limit":phase.task.external_request_limit}});
@@ -404,7 +405,17 @@ impl BookWikiService {
                     continue;
                 }
             };
-            match persist(&claim, &run, &answer) {
+            // Citation mistakes are repairable model-output errors. Validate
+            // them before persistence, then use the existing one-shot contract
+            // repair without ever saving an unverified citation.
+            let validated = (|| {
+                if phase.phase != "plan" {
+                    let ledger = self.store.list_agent_run_evidence(&run)?;
+                    validate_agent_answer_references(&answer, &input, &ledger)?;
+                }
+                persist(&claim, &run, &answer)
+            })();
+            match validated {
                 Ok(value) => return Ok(value),
                 Err(error) => {
                     let cancelled = match self.store.get_task(&phase.task.id) {
@@ -422,6 +433,16 @@ impl BookWikiService {
                         || !matches!(error, BrainError::KnowledgeValidation(_))
                         || recorded_failure.is_err()
                     {
+                        return Err(error);
+                    }
+                    if let Err(event_error) = self.store.append_agent_run_event(
+                        &run,
+                        "run.validation_rejected",
+                        Some("validating"),
+                        "研究阶段输出未通过引用或合同校验，将完整重生成一次",
+                        &json!({"research_stage_key":phase.key,"reason":error.to_string().chars().take(1000).collect::<String>()}),
+                    ) {
+                        tracing::error!(run_id = %run, error = %event_error, "记录研究阶段校验拒绝事件失败");
                         return Err(error);
                     }
                     repair = Some((
@@ -740,6 +761,29 @@ mod tests {
         invalid_first_answer: bool,
     }
 
+    struct CitationRepairRuntime {
+        calls: Arc<Mutex<Vec<String>>>,
+        invalid_answers: usize,
+    }
+
+    #[async_trait]
+    impl AgentRuntime for CitationRepairRuntime {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            let mut calls = self.calls.lock().unwrap();
+            calls.push(request.prompt);
+            let content_md = if calls.len() <= self.invalid_answers {
+                "这个编号并未读取。[S999]"
+            } else {
+                "当前没有可用证据，保留研究缺口。"
+            };
+            Ok(json!({
+                "summary":"待补证据的阶段判断",
+                "content_md":content_md,
+                "findings":[{"finding":"结论仍需取证","status":"partial","citation_indices":[],"limitations":["当前阶段没有实际读取的证据"]}]
+            }).to_string())
+        }
+    }
+
     #[async_trait]
     impl AgentRuntime for PlanRepairRuntime {
         async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
@@ -803,6 +847,91 @@ mod tests {
             payload: json!({"request":task.description}),
             resources: ResearchResources::new(profile, None, None, 0),
             evidence: Vec::new(),
+        }
+    }
+
+    async fn citation_repair_fixture(
+        invalid_answers: usize,
+    ) -> (
+        tempfile::TempDir,
+        BookWikiService,
+        KnowledgeTask,
+        ResearchPlan,
+        Arc<Mutex<Vec<String>>>,
+    ) {
+        let (dir, original, task, _) = plan_repair_fixture(false);
+        let profile = original.active_runtime_profile().unwrap();
+        let plan = original
+            .persist_model_research_phase(plan_phase(&task, &profile), |claim, run, answer| {
+                let plan: ResearchPlan = parse_phase(answer)?;
+                original.store.save_research_plan(claim, run, &plan)?;
+                Ok(plan)
+            })
+            .await
+            .unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let service = BookWikiService::new(
+            original.store.clone(),
+            Arc::new(CitationRepairRuntime {
+                calls: calls.clone(),
+                invalid_answers,
+            }),
+        );
+        (dir, service, task, plan, calls)
+    }
+
+    #[tokio::test]
+    async fn test_research_citation_validation_uses_one_format_repair_before_persisting() {
+        for invalid_answers in [1, 2] {
+            let (_dir, service, task, plan, calls) = citation_repair_fixture(invalid_answers).await;
+            let profile = service.active_runtime_profile().unwrap();
+            let question = &plan.questions[0];
+            let key = format!("section:{}", question.id);
+            let result = service
+                .persist_model_research_phase(
+                    ResearchPhase {
+                        task: &task,
+                        profile: &profile,
+                        key: key.clone(),
+                        phase: "section",
+                        payload: json!({"plan":plan,"question":question}),
+                        resources: ResearchResources::new(&profile, Some(&plan), Some(question), 0),
+                        evidence: vec![],
+                    },
+                    |claim, run, answer| {
+                        let output: ResearchSectionOutput = parse_phase(answer)?;
+                        service.store.save_research_section(claim, run, &output)
+                    },
+                )
+                .await;
+            assert_eq!(calls.lock().unwrap().len(), 2, "引用错误只能修复一次");
+            assert!(calls.lock().unwrap()[1].contains("未分配的引用 [S999]"));
+            let stage = service
+                .store
+                .get_research_stage_content(&task.id, &key, None)
+                .unwrap();
+            if invalid_answers == 1 {
+                assert!(result.is_ok());
+                assert_eq!(stage.stage.status, "completed");
+                assert!(!stage.content_md.contains("[S999]"));
+                let retry = service
+                    .store
+                    .get_agent_run(stage.stage.run_id.as_deref().unwrap())
+                    .unwrap();
+                let parent = retry.input["research_retry_parent_run_id"]
+                    .as_str()
+                    .unwrap();
+                assert!(service
+                    .store
+                    .list_agent_run_events(parent)
+                    .unwrap()
+                    .iter()
+                    .any(|event| event.event_type == "run.validation_rejected"));
+            } else {
+                assert!(result.is_err());
+                assert_eq!(stage.stage.status, "failed");
+                assert!(stage.content_md.is_empty());
+            }
         }
     }
 

@@ -1120,6 +1120,8 @@ export function previewKnowledgeTaskBrief(input: {
     description: input.description,
     task_type: input.taskType,
     deliverable_type: input.deliverableType,
+  }, {
+    timeout: 180_000,
   }) as unknown as Promise<ToolEnvelope<ResearchPreflight>>
 }
 

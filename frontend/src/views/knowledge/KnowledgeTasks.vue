@@ -102,6 +102,7 @@
           <label v-if="draft.deliverableType === 'presentation'" class="research-brief-field" :class="{ 'is-focus': briefIsFocus('presentation_theme') }"><span>PPT 视觉主题 <small v-if="briefIsFocus('presentation_theme')">建议确认</small></span><span v-if="briefDecision('presentation_theme')" class="research-decision-tip"><b>{{ briefDecision('presentation_theme')?.question }}</b><em>{{ briefDecision('presentation_theme')?.impact }}</em></span><el-select v-model="brief.presentation_theme" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="Editorial · 明亮编辑风" value="editorial" /><el-option label="Midnight · 深色聚焦" value="midnight" /><el-option label="Sage · 柔和人文" value="sage" /></el-select></label>
           <label class="research-brief-field"><span>特别强调（可选）</span><el-input v-model="brief.emphasis" :maxlength="500" show-word-limit placeholder="例如：多比较反例、面向非技术听众" /></label>
         </div>
+        <p v-if="previewing" class="research-preflight-progress" role="status">正在分析任务目标和材料偏好；如输出不完整，会自动恢复一次。</p>
         <div class="knowledge-modal-actions">
           <template v-if="createStep === 'request'"><el-button @click="createVisible = false">取消</el-button><el-button :disabled="!canPrepareBrief || previewing" @click="skipBrief">跳过分析</el-button><el-button type="primary" :loading="previewing" :disabled="!canPrepareBrief" @click="prepareBrief">分析诉求</el-button></template>
           <template v-else><el-button @click="createStep = 'request'">返回修改</el-button><el-button type="primary" :loading="creating" :disabled="!canPrepareBrief" @click="createTask">确认并创建</el-button></template>
@@ -736,6 +737,7 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
 .research-readiness-counts { display: flex; flex-wrap: wrap; gap: 5px 10px; color: var(--text-faint); font-size: 10px; }
 .research-readiness ul { display: grid; gap: 4px; margin: 0; padding-left: 16px; color: var(--text-muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .research-readiness button { justify-self: start; min-height: 30px; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+.research-preflight-progress { margin: 0 0 6px; padding: 0 2px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
 .external-grant { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border-faint); border-radius: 14px; background: color-mix(in srgb, var(--bg-glass) 72%, transparent); transition: border-color var(--motion-fast) var(--ease-emphasized), background var(--motion-fast) var(--ease-emphasized); }
 .external-grant.is-enabled { border-color: var(--accent-border); background: var(--accent-light); }
 .external-grant-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
@@ -861,6 +863,7 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
   .research-readiness-head strong { font-size: 13px; }
   .research-readiness > p, .research-readiness ul { font-size: 12px; }
   .research-readiness button { min-height: 44px; font-size: 12px; }
+  .research-preflight-progress { font-size: 12px; }
   .research-brief-field { font-size: 13px; }
   .research-decision-tip b { font-size: 13px; }
   .research-decision-tip em { font-size: 12px; }
