@@ -157,7 +157,7 @@
         <div v-else-if="resultTab === 'stages'" class="task-result-scroll" role="region" aria-label="研究阶段">
           <div v-if="hasTurnLimitFailure" class="research-recovery-advice" role="status">
             <strong>当前阶段已达 Harness 请求轮次上限</strong>
-            <p>增加输出 token 不能解决。直接恢复会重跑同一阶段；已完成章节仍保留在本任务。你可以先检查取证范围与运行设置，或缩小范围另建任务；新任务不会继承已完成阶段。</p>
+            <p>增加输出 token 不能解决。直接恢复会重跑同一阶段；{{ activeTask.deliverable_type === 'presentation' ? '已生成的研究报告仍可查看。' : '已完成章节仍保留在本任务。' }}你可以先检查取证范围与运行设置，或缩小范围另建任务；新任务不会继承已完成阶段。</p>
           </div>
           <KnowledgeResearchWorkspace :task-id="activeTask.id" :task-status="activeTask.status" :active="resultVisible && resultTab === 'stages'" @inspect="inspectStage" />
         </div>

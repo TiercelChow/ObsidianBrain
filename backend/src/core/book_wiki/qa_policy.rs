@@ -1,5 +1,6 @@
 //! Business resource policy. Harness still owns reasoning and the tool loop.
 
+use crate::error::BrainError;
 use crate::models::agent_budget::{context_capacity, output_limit};
 use serde::{Deserialize, Serialize};
 
@@ -119,6 +120,39 @@ pub(super) struct QaResources {
 }
 
 impl QaResources {
+    /// Reject only a severe mismatch with an explicitly estimated answer and
+    /// known capacity. Smaller estimate errors should still get a chance to
+    /// produce a bounded answer; unknown provider limits are not invented.
+    pub fn check_visible_output_fit(
+        plan: &QaPlan,
+        context: Option<u32>,
+        output_cap: Option<u32>,
+        reasoning_policy: &str,
+    ) -> Result<(), BrainError> {
+        let Some(expected) = plan.expected_output_tokens else {
+            return Ok(());
+        };
+        if context.is_none() && output_cap.is_none() {
+            return Ok(());
+        }
+        let cap = output_limit(context, output_cap);
+        let reasoning_margin = if reasoning_policy == "off" {
+            0
+        } else {
+            (cap / 4).min(8192)
+        };
+        let visible = cap.saturating_sub(reasoning_margin);
+        let extra_questions =
+            u32::try_from(plan.subquestions.len().saturating_sub(1)).unwrap_or(u32::MAX);
+        let planned = expected.saturating_add(extra_questions.saturating_mul(768));
+        if planned > visible.saturating_mul(2) {
+            return Err(BrainError::KnowledgeValidation(format!(
+                "(qa_output_scope_limit) 规划器估计本轮完整回答约需 {planned} token 可见正文；当前单次有效输出上限为 {cap} token，扣除估计推理余量后约有 {visible} token 可用于正文。该估计不是实际用量，但差距过大，按当前深度发起回答很可能截断；尚未启动回答 Run。请缩小问题、提高模型单次输出能力，或转为分阶段研究任务。"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn with_reasoning_headroom(
         mut self,
         context: Option<u32>,
@@ -253,6 +287,31 @@ impl QaResources {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_explicit_large_answer_plan_requires_staged_research_before_answer_run() {
+        let mut plan = QaPlan::fallback("全面比较全书所有机制及证据");
+        plan.subquestions = vec!["机制".into(), "证据".into(), "边界".into()];
+        plan.expected_output_tokens = Some(50_000);
+        let error =
+            QaResources::check_visible_output_fit(&plan, Some(1_048_576), Some(4_096), "auto")
+                .unwrap_err();
+        assert!(error.to_string().contains("qa_output_scope_limit"));
+        assert!(error.to_string().contains("分阶段研究任务"));
+        assert!(QaResources::check_visible_output_fit(&plan, None, None, "auto").is_ok());
+        assert!(QaResources::check_visible_output_fit(
+            &plan,
+            Some(1_048_576),
+            Some(65_536),
+            "auto"
+        )
+        .is_ok());
+        plan.expected_output_tokens = None;
+        assert!(
+            QaResources::check_visible_output_fit(&plan, Some(1_048_576), Some(4_096), "auto")
+                .is_ok()
+        );
+    }
 
     #[test]
     fn test_qa_reasoning_headroom_is_separate_from_answer_length_and_respects_model_cap() {

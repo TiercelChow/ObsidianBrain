@@ -97,7 +97,7 @@
                 <span v-if="message.interruption.kind !== 'cancelled'">{{ message.interruption.detail }}</span>
                 <button v-if="message.interruption.canRetry && message.runId && message.originalQuestion && message.content" type="button" :disabled="searching || !runtimeReady" @click="ask(message.originalQuestion, message)">继续完成完整答案</button>
                 <button v-else-if="message.interruption.canRetry && message.originalQuestion && !message.content" type="button" :disabled="searching || !runtimeReady" @click="ask(message.originalQuestion)">重新提问</button>
-                <button v-if="message.interruption.kind === 'turn_limit' && message.originalQuestion && activeBaseId" type="button" :disabled="searching || !!researchTransferMessageId" @click="openResearchTask(message)">{{ researchTransferMessageId === message.id ? '正在恢复问题…' : '转为分阶段研究任务' }}</button>
+                <button v-if="['turn_limit', 'scope_limit'].includes(message.interruption.kind) && message.originalQuestion && activeBaseId" type="button" :disabled="searching || !!researchTransferMessageId" @click="openResearchTask(message)">{{ researchTransferMessageId === message.id ? '正在恢复问题…' : '转为分阶段研究任务' }}</button>
               </div>
               <button v-if="message.role === 'assistant' && message.runId && message.id !== streamingMessageId" type="button" class="save-answer" @click="inspectRun(message.runId)">查看本轮目标与取证预算</button>
               <button v-if="message.role === 'assistant' && message.runId && !message.interruption && message.id !== streamingMessageId" class="save-answer" type="button" :disabled="savingRunId === message.runId" @click="saveAnswer(message)">
@@ -224,7 +224,7 @@ import MotionModal from '@/components/motion/MotionModal.vue'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { shouldSendComposerOnEnter } from '@/utils/chatComposer'
 import { createStreamedTextBuffer, type StreamedTextBuffer } from '@/utils/streamedText'
-import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskQuestionFromRun, researchTaskRouteFromQuestion } from '@/utils/knowledgeRuntimePolicy'
+import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskQuestionFromPlanning, researchTaskQuestionFromRun, researchTaskRouteFromQuestion } from '@/utils/knowledgeRuntimePolicy'
 import { loadKnowledgeCitationPreview } from '@/utils/knowledgeCitationPreview'
 import {
   getBookWikiSettings,
@@ -248,10 +248,12 @@ interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  knowledgeBaseId?: string
   evidence?: KnowledgeEntrySummary[]
   runId?: string
   originalQuestion?: string
   requestConversationId?: string
+  planningContext?: { knowledge_base_id: string; question: string; standalone_question: string }
   interruption?: ReturnType<typeof interruptedKnowledgeAnswer>
 }
 
@@ -309,15 +311,20 @@ function setActivity(phase: string) {
 async function openResearchTask(message: ChatMessage) {
   const baseId = activeBaseId.value
   if (!baseId || !message.originalQuestion || researchTransferMessageId.value) return
+  if (message.knowledgeBaseId && message.knowledgeBaseId !== baseId) {
+    ElMessage.warning('这轮问答属于另一知识库，请先切回对应书籍')
+    return
+  }
   researchTransferMessageId.value = message.id
-  let resolved = researchTaskQuestionFromRun(message.originalQuestion, baseId, null)
+  let resolved = researchTaskQuestionFromPlanning(message.originalQuestion, baseId, message.planningContext || null)
   let inspectionUnavailable = false
   try {
     if (message.runId) {
       try {
         const response = await getAgentRunInspection(message.runId)
         if (response.status === 'success' && response.result) {
-          resolved = researchTaskQuestionFromRun(message.originalQuestion, baseId, response.result.run)
+          const fromRun = researchTaskQuestionFromRun(message.originalQuestion, baseId, response.result.run)
+          if (fromRun.contextRecovered) resolved = fromRun
         } else {
           inspectionUnavailable = true
         }
@@ -418,12 +425,14 @@ async function openConversation(conversationId: string, parentRequestId?: number
     if (requestId !== historyRequestId) return
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '会话读取失败')
     if (response.result.knowledge_base_id !== activeBaseId.value) throw new Error('该会话不属于当前知识库')
+    const conversationBaseId = response.result.knowledge_base_id
     activeConversationId.value = response.result.id
     followOutput.value = true
     messages.value = response.result.messages.map(message => ({
       id: message.id,
       role: message.role,
       content: message.content,
+      knowledgeBaseId: conversationBaseId,
       evidence: message.evidence,
       runId: message.run_id || undefined,
     }))
@@ -484,12 +493,13 @@ async function inspectRun(runId: string) {
 
 async function ask(question: string, recovery?: ChatMessage) {
   const value = question.trim()
-  if (!value || !activeBaseId.value || searching.value) return
+  const baseId = activeBaseId.value
+  if (!value || !baseId || searching.value) return
   draft.value = ''
   const requestConversationId = recovery ? recovery.requestConversationId : activeConversationId.value || undefined
   messages.value.push({ id: `local-${++localMessageId}`, role: 'user', content: recovery ? `继续完成：${value}` : value })
   const assistantIndex = messages.value.length
-  messages.value.push({ id: `local-${++localMessageId}`, role: 'assistant', content: '', evidence: [], originalQuestion: value, requestConversationId })
+  messages.value.push({ id: `local-${++localMessageId}`, role: 'assistant', content: '', knowledgeBaseId: baseId, evidence: [], originalQuestion: value, requestConversationId })
   // Always mutate the proxy stored in the reactive array, not the raw object passed to push().
   const assistantMessage = messages.value[assistantIndex]
   streamingMessageId.value = assistantMessage.id
@@ -505,13 +515,15 @@ async function ask(question: string, recovery?: ChatMessage) {
       activeTextBuffer = textBuffer
       let answerEvidenceDelivered = false
       const result = await streamBookKnowledge(
-        activeBaseId.value,
+        baseId,
         value,
         requestConversationId,
         (event) => {
           if (event.type === 'evidence') {
             answerEvidenceDelivered = true
             assistantMessage.evidence = event.evidence
+          } else if (event.type === 'planning_ready') {
+            assistantMessage.planningContext = event
           } else if (event.type === 'run_started') {
             if (answerEvidenceDelivered) {
               if (receivedText) {

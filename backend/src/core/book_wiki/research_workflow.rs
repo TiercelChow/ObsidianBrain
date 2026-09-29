@@ -2171,6 +2171,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_presentation_turn_limit_preserves_report_without_output_expansion() {
+        struct PresentationTurnLimitRuntime(Arc<Mutex<usize>>);
+        #[async_trait]
+        impl AgentRuntime for PresentationTurnLimitRuntime {
+            async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+                if request.prompt.contains("演示文稿策划器") {
+                    *self.0.lock().unwrap() += 1;
+                    return Err(BrainError::LlmApiError {
+                        provider: "deepseek_harness".into(),
+                        detail: "演示策划达到请求轮次上限 (stop_reason=max_turn_requests)".into(),
+                    });
+                }
+                PhasedRuntime {
+                    calls: Arc::new(Mutex::new(Vec::new())),
+                    failed: Arc::new(Mutex::new(true)),
+                    synthesis_failure_pending: Arc::new(Mutex::new(false)),
+                }
+                .prompt(request)
+                .await
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let book = dir.path().join("book");
+        std::fs::create_dir(&book).unwrap();
+        std::fs::write(
+            book.join("source.md"),
+            "# 机制\n缓存机制、完整公式与适用条件。\n# 反例\n适用条件与反例。",
+        )
+        .unwrap();
+        let store = BookWikiStore::new(Arc::new(
+            SqliteStore::new(&dir.path().join("turn-limited-presentation.db")).unwrap(),
+        ));
+        store
+            .save_reader_books(&[ReaderBook {
+                id: "book".into(),
+                path: book.display().to_string(),
+                kind: BookKind::Folder,
+                name: "演示轮次上限测试".into(),
+                description: String::new(),
+                category: String::new(),
+                added_at: 1,
+                progress: None,
+            }])
+            .unwrap();
+        let calls = Arc::new(Mutex::new(0));
+        let service = BookWikiService::new(
+            store.clone(),
+            Arc::new(PresentationTurnLimitRuntime(calls.clone())),
+        )
+        .with_artifact_root(dir.path().join("artifacts"));
+        let base = service.initialize_and_sync("book").unwrap().knowledge_base;
+        let task = store
+            .create_task_with_deliverable(
+                &base.id,
+                "机制与反例",
+                "明确适用边界",
+                "research",
+                "presentation",
+            )
+            .unwrap();
+        let error = service.execute_task(&task.id).await.unwrap_err();
+        assert!(error.to_string().contains("presentation_turn_limit"));
+        assert_eq!(*calls.lock().unwrap(), 1);
+        let presentation = store
+            .get_research_stage_content(&task.id, "presentation", None)
+            .unwrap();
+        assert_eq!(presentation.stage.status, "failed");
+        assert!(presentation
+            .stage
+            .error
+            .unwrap()
+            .contains("presentation_turn_limit"));
+        let run_id = presentation.stage.run_id.unwrap();
+        assert!(!store
+            .list_agent_run_events(&run_id)
+            .unwrap()
+            .iter()
+            .any(|event| event.event_type == "run.output_budget_expanded"));
+        let saved = service.get_task_result(&task.id).unwrap();
+        assert!(saved.task.result_summary.contains("完整公式"));
+        assert!(store
+            .get_task(&task.id)
+            .unwrap()
+            .result_summary
+            .contains("presentation_turn_limit"));
+    }
+
+    #[tokio::test]
     async fn test_phased_research_resumes_only_failed_section_and_keeps_real_budget_and_citations()
     {
         let dir = tempfile::tempdir().unwrap();

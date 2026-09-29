@@ -701,6 +701,7 @@ export interface AgentRunCitationPreview {
 
 export type KnowledgeChatStreamEvent =
   | { type: 'evidence'; evidence: KnowledgeEntrySummary[] }
+  | { type: 'planning_ready'; knowledge_base_id: string; question: string; standalone_question: string }
   | { type: 'run_started'; run_id: string }
   | { type: 'text_delta'; run_id: string; delta: string }
   | { type: 'phase'; run_id: string; message: string }

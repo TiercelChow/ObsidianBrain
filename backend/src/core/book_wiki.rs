@@ -230,6 +230,11 @@ pub enum KnowledgeChatStreamEvent {
     Evidence {
         evidence: Vec<KnowledgeEntrySummary>,
     },
+    PlanningReady {
+        knowledge_base_id: String,
+        question: String,
+        standalone_question: String,
+    },
     RunStarted {
         run_id: String,
     },
@@ -861,6 +866,23 @@ impl BookWikiService {
             } else {
                 selection.answer_mode = QaAnswerMode::BookLookup;
             }
+        }
+        if selection.answer_mode == QaAnswerMode::BookLookup {
+            if let Some(sender) = stream {
+                sender
+                    .send(KnowledgeChatStreamEvent::PlanningReady {
+                        knowledge_base_id: base_id.to_string(),
+                        question: question.to_string(),
+                        standalone_question: selection.standalone_question.clone(),
+                    })
+                    .map_err(|_| BrainError::KnowledgeValidation("问答流已由客户端关闭".into()))?;
+            }
+            QaResources::check_visible_output_fit(
+                &plan,
+                context_window,
+                output_cap,
+                reasoning_policy,
+            )?;
         }
         let mut seen = HashSet::new();
         let mut details = Vec::new();
@@ -1844,6 +1866,11 @@ impl BookWikiService {
                     input["output_expansion_attempt"] = serde_json::json!(expansions);
                     input["research_retry_parent_run_id"] = serde_json::json!(parent_run_id);
                     *resources = expanded;
+                }
+                Err(error) if is_harness_turn_limit(&error) => {
+                    return Err(BrainError::KnowledgeValidation(format!(
+                        "(presentation_turn_limit) 演示策划达到 Harness 请求轮次上限，增加输出 token 不能解决；完整研究报告仍可查看。请检查演示范围，缩小目标另建任务，或调整运行配置后显式恢复演示阶段。原错误：{error}"
+                    )));
                 }
                 Err(error) => return Err(error),
             }
@@ -7215,6 +7242,7 @@ mod tests {
             if request.prompt.contains("演示文稿策划器") {
                 assert!(request.prompt.contains("<research_report>"));
                 assert!(request.prompt.contains("<presentation_skill>"));
+                assert!(request.prompt.contains("逐页文字审校"));
                 return Ok(serde_json::json!({
                     "schema_version": "1.0",
                     "title": "分层架构的价值在于稳定依赖",

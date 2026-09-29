@@ -1,4 +1,4 @@
-export type KnowledgeInterruptionKind = 'cancelled' | 'credentials' | 'truncated' | 'turn_limit' | 'failed'
+export type KnowledgeInterruptionKind = 'cancelled' | 'credentials' | 'truncated' | 'turn_limit' | 'scope_limit' | 'failed'
 
 /** Launcher availability is not invalidated by a single failed model request. */
 export function knowledgeRuntimeMode(launcherAvailable: boolean): 'runtime' | 'evidence_only' {
@@ -20,8 +20,9 @@ export function interruptedKnowledgeAnswer(displayedText: string, receivedText: 
   const cancelled = error instanceof Error && error.name === 'AbortError'
   const credentials = /secure storage|凭据|keychain|User canceled the operation|permission denied|401|403/i.test(detail)
   const turnLimit = /max_turn_requests|qa_turn_limit/i.test(detail)
+  const scopeLimit = detail.includes('qa_output_scope_limit')
   const truncated = /max_tokens|max_turn_requests|max_output|token.{0,12}(limit|上限)|输出.{0,12}(截断|上限)/i.test(detail)
-  const kind: KnowledgeInterruptionKind = cancelled ? 'cancelled' : credentials ? 'credentials' : turnLimit ? 'turn_limit' : truncated ? 'truncated' : 'failed'
+  const kind: KnowledgeInterruptionKind = cancelled ? 'cancelled' : credentials ? 'credentials' : turnLimit ? 'turn_limit' : scopeLimit ? 'scope_limit' : truncated ? 'truncated' : 'failed'
   const hardOutputLimit = detail.includes('qa_output_hard_limit')
   const canRetry = kind === 'truncated' && !hardOutputLimit
   const content = receivedText || displayedText
@@ -31,6 +32,8 @@ export function interruptedKnowledgeAnswer(displayedText: string, receivedText: 
       ? '本次凭据授权未完成，内容可能不完整。检查供应商凭据后可以再次尝试。'
       : kind === 'turn_limit'
         ? 'Harness 请求轮次已用尽，内容不完整。增加输出 token 无法解决；复杂问题建议转为研究任务，按子问题独立分析后综合。'
+      : kind === 'scope_limit'
+        ? '本轮规划的完整答案明显超出模型单次输出空间，尚未开始生成回答。可缩小问题、调整模型输出能力，或转为分阶段研究任务。'
       : kind === 'truncated'
         ? hardOutputLimit
           ? '模型单次输出已达到硬上限，未完成内容已保留。请先调整模型最大输出或推理策略，或缩小问题范围。'
@@ -73,11 +76,28 @@ export function researchTaskQuestionFromRun(
   return { question: original, contextRecovered: false }
 }
 
+/** A planner result can be used even if no answer Run was started. */
+export function researchTaskQuestionFromPlanning(
+  originalQuestion: string,
+  baseId: string,
+  planning: { knowledge_base_id: string; question: string; standalone_question: string } | null,
+) {
+  const original = originalQuestion.trim()
+  const standalone = planning?.standalone_question.trim() || ''
+  if (planning?.knowledge_base_id === baseId
+    && planning.question === original
+    && standalone
+    && Array.from(standalone).length <= 2000) {
+    return { question: standalone, contextRecovered: true }
+  }
+  return { question: original, contextRecovered: false }
+}
+
 /** The task summary can append an entire report; inspect only its failure header. */
 export function researchTaskTurnLimitFailure(task: { status: string; result_summary: string } | null): boolean {
   if (task?.status !== 'failed') return false
   const failureHeader = task.result_summary.split(/\n\s*\n/, 1)[0]
-  return /\(research_turn_limit\)|stop_reason=max_turn_requests/.test(failureHeader)
+  return /\((?:research|presentation)_turn_limit\)|stop_reason=max_turn_requests/.test(failureHeader)
 }
 
 export const modelReasoningPolicies = ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const

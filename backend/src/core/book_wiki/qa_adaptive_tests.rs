@@ -62,6 +62,95 @@ fn fixture() -> (BookWikiStore, tempfile::TempDir, String) {
 }
 
 #[tokio::test]
+async fn test_qa_declared_small_output_defers_oversized_plan_before_answer_run() {
+    use crate::infra::credential_store::{
+        tests::MemoryProviderCredentialStore, ProviderCredentialStore,
+    };
+
+    struct OversizedPlanRuntime(Arc<Mutex<Vec<String>>>);
+    #[async_trait]
+    impl AgentRuntime for OversizedPlanRuntime {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            self.0.lock().unwrap().push(request.prompt.clone());
+            if request.prompt.contains("只读检索规划器") {
+                return Ok(serde_json::json!({
+                    "standalone_question":"全面分析全书机制和适用条件",
+                    "candidate_ids":["compiled-0"],
+                    "answer_mode":"book_lookup",
+                    "plan":{
+                        "goal":"全面分析全书机制和适用条件",
+                        "constraints":[],
+                        "subquestions":["机制","证据","边界"],
+                        "evidence_requirements":["编译知识和原文"],
+                        "depth":"comprehensive",
+                        "scope":"whole_book",
+                        "expected_output_tokens":50_000
+                    },
+                    "memory_update":{"objective":"全面分析全书机制和适用条件","constraints":[],"unresolved_questions":[],"entity_ids":[]}
+                })
+                .to_string());
+            }
+            panic!("infeasible answer must not start a paid answer run");
+        }
+    }
+
+    let (store, _dir, base) = fixture();
+    let provider = store
+        .save_model_provider_profile(
+            "small-qa-output",
+            "问答输出容量测试",
+            "openai-completions",
+            "https://example.com/v1",
+            "qa-cap-test",
+            "keychain",
+            "",
+            true,
+            true,
+            Some(1_048_576),
+            Some(4_096),
+            "auto",
+            0,
+        )
+        .unwrap();
+    let profile = store.list_runtime_profiles().unwrap().remove(0);
+    store
+        .save_runtime_profile(
+            &profile.id,
+            &profile.executable,
+            &provider.model,
+            Some(&provider.provider_id),
+            true,
+            profile.revision,
+        )
+        .unwrap();
+    let credentials = Arc::new(MemoryProviderCredentialStore::default());
+    credentials
+        .set(&provider.provider_id, "fixture-only")
+        .unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let service = BookWikiService::new(
+        store.clone(),
+        Arc::new(OversizedPlanRuntime(requests.clone())),
+    )
+    .with_credential_store(credentials);
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let error = service
+        .ask_streaming(&base, "全面分析全书机制和适用条件", None, events)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("qa_output_scope_limit"));
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    let emitted = std::iter::from_fn(|| receiver.try_recv().ok()).collect::<Vec<_>>();
+    assert!(emitted.iter().any(|event| matches!(
+        event,
+        KnowledgeChatStreamEvent::PlanningReady { knowledge_base_id, question, standalone_question }
+            if knowledge_base_id == &base
+                && question == "全面分析全书机制和适用条件"
+                && standalone_question == "全面分析全书机制和适用条件"
+    )));
+}
+
+#[tokio::test]
 async fn test_adaptive_qa_reads_more_than_old_top_seven_and_remembers_only_current_intent() {
     let (store, _dir, base) = fixture();
     let requests = Arc::new(Mutex::new(vec![]));
