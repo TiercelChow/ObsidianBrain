@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskQuestionFromPlanning, researchTaskQuestionFromRun, researchTaskRouteFromQuestion, researchTaskTurnLimitFailure, validateModelCapabilities } from '../src/utils/knowledgeRuntimePolicy.ts'
+import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskCapacityFailure, researchTaskQuestionFromPlanning, researchTaskQuestionFromRun, researchTaskRouteFromQuestion, researchTaskTurnLimitFailure, validateModelCapabilities } from '../src/utils/knowledgeRuntimePolicy.ts'
 
 test('planning fallback remains visible as a retrieval adjustment', () => {
   assert.equal(labelForRuntimePhase('目录规划未完成，正在改用书内检索继续核查'), '正在调整检索方式')
@@ -88,6 +88,15 @@ test('only a failed task whose failure header reached the Harness turn limit get
   assert.equal(researchTaskTurnLimitFailure({ status: 'completed', result_summary: '执行未完成：(research_turn_limit)' }), false)
   assert.equal(researchTaskTurnLimitFailure({ status: 'failed', result_summary: '执行未完成：输出上限 (stop_reason=max_tokens)' }), false)
   assert.equal(researchTaskTurnLimitFailure({ status: 'failed', result_summary: '执行未完成：普通错误\n\n报告提及 max_turn_requests' }), false)
+})
+
+test('only a failed task with a capacity failure header gets model-setting advice', () => {
+  assert.equal(researchTaskCapacityFailure({ status: 'failed', result_summary: '执行未完成：(research_section_output_hard_limit) 当前模型单次输出不足' }), true)
+  assert.equal(researchTaskCapacityFailure({ status: 'failed', result_summary: '> [!warning] 后续交付未完成\n> 原因：(research_synthesis_output_hard_limit) 综合容量不足\n\n完整报告' }), true)
+  assert.equal(researchTaskCapacityFailure({ status: 'failed', result_summary: '执行未完成：(presentation_output_retry_exhausted) 演示策划无法完成' }), true)
+  assert.equal(researchTaskCapacityFailure({ status: 'completed', result_summary: '(research_input_hard_limit)' }), false)
+  assert.equal(researchTaskCapacityFailure({ status: 'failed', result_summary: '执行未完成：普通错误\n\n报告提及 (research_input_hard_limit)' }), false)
+  assert.equal(researchTaskCapacityFailure({ status: 'failed', result_summary: '执行未完成：(research_turn_limit) 请求轮次不足' }), false)
 })
 
 test('an empty max-token answer explains retry exhaustion without pretending a draft exists', () => {

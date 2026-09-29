@@ -548,7 +548,10 @@ fn read_content(
 
 fn preserve(conn: &Connection, task: &str, key: &str, now: &str) -> Result<(), BrainError> {
     let content = read_content(conn, task, key)?;
-    if !content.content_md.is_empty() || content.stage.status == "completed" {
+    if !content.content_md.is_empty()
+        || content.stage.status == "completed"
+        || content.stage.run_id.is_some()
+    {
         conn.execute("INSERT OR IGNORE INTO knowledge_research_stage_versions(task_id,stage_key,revision,snapshot_json,created_at) VALUES(?1,?2,?3,?4,?5)",params![task,key,content.stage.revision,encode(&content)?,now])?;
     }
     Ok(())
@@ -834,6 +837,31 @@ impl BookWikiStore {
             if revision.is_none() || revision==Some(current) {return read_content(conn,task,key)}
             let raw:String=conn.query_row("SELECT snapshot_json FROM knowledge_research_stage_versions WHERE task_id=?1 AND stage_key=?2 AND revision=?3",params![task,key,revision],|row|row.get(0)).optional()?.ok_or_else(||invalid("该研究阶段历史版本不存在"))?;
             decode(&raw)
+        })
+    }
+
+    /// The latest attempted model Run may no longer be the current stage's
+    /// run_id after a preflight-only retry. Read it from the immutable Run
+    /// ledger so a later resume still honors its observed capacity and output
+    /// request, including databases created before failed stages were archived.
+    pub(crate) fn latest_research_stage_run(
+        &self,
+        task: &str,
+        stage_key: &str,
+    ) -> Result<Option<String>, BrainError> {
+        self.get_task(task)?;
+        self.db.with_connection(|conn| {
+            conn.query_row(
+                "SELECT id FROM agent_runs
+                 WHERE json_extract(input_json, '$.knowledge_task_id') = ?1
+                   AND json_extract(input_json, '$.research_stage_key') = ?2
+                   AND task_type LIKE 'knowledge_task_%'
+                 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                params![task, stage_key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(Into::into)
         })
     }
 

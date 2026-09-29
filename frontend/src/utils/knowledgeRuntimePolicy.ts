@@ -100,6 +100,13 @@ export function researchTaskTurnLimitFailure(task: { status: string; result_summ
   return /\((?:research|presentation)_turn_limit\)|stop_reason=max_turn_requests/.test(failureHeader)
 }
 
+/** Only the failure header is authoritative; report prose may mention old errors. */
+export function researchTaskCapacityFailure(task: { status: string; result_summary: string } | null): boolean {
+  if (task?.status !== 'failed') return false
+  const failureHeader = task.result_summary.split(/\n\s*\n/, 1)[0]
+  return /\((?:research_(?:section_output|synthesis_output|integration|input|output)_hard_limit|research_output_retry_exhausted|presentation_output_(?:hard_limit|retry_exhausted))\)/.test(failureHeader)
+}
+
 export const modelReasoningPolicies = ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
 export function validateModelCapabilities(capabilities: {
