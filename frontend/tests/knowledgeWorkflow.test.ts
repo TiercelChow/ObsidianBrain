@@ -26,6 +26,8 @@ test('knowledge chat persists conversations and restores their cited messages', 
   assert.match(chat, /assistantMessage\.runId = event\.run_id/)
   assert.match(chat, /labelForRuntimePhase\(event\.message\)/)
   assert.match(runtimePolicy, /正在理解问题与选择知识/)
+  assert.match(chat, /转为分阶段研究任务/)
+  assert.match(chat, /researchTaskRouteFromQuestion\(activeBaseId\.value, question\)/)
   assert.match(chat, /const assistantMessage = messages\.value\[assistantIndex\]/)
   assert.match(chat, /createStreamedTextBuffer/)
   assert.match(chat, /if \(receivedText\) \{\s*textBuffer\.cancel\(\)\s*assistantMessage\.content = ''\s*receivedText = ''/)

@@ -5,6 +5,29 @@ function number(value: unknown): number | null { return typeof value === 'number
 function text(value: unknown): string { return typeof value === 'string' ? value : '' }
 function strings(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [] }
 
+function completeManifestScope(pages: ObjectValue[], scope: string | null): boolean {
+  const versions = new Map<string, { total: number; ranges: Array<[number, number]> }>()
+  for (const page of pages) {
+    if (page.question_id !== scope) continue
+    const hash = text(page.manifest_hash)
+    const start = number(page.offset_chars)
+    const length = number(page.returned_chars)
+    const total = number(page.total_chars)
+    if (!hash || start == null || length == null || total == null || ![start, length, total].every(Number.isSafeInteger) || length === 0 || total === 0 || start + length > total) continue
+    const key = JSON.stringify([hash, total])
+    if (!versions.has(key)) versions.set(key, { total, ranges: [] })
+    versions.get(key)!.ranges.push([start, start + length])
+  }
+  return [...versions.values()].some(version => {
+    let covered = 0
+    for (const [start, end] of version.ranges.sort((a, b) => a[0] - b[0])) {
+      if (start > covered) return false
+      covered = Math.max(covered, end)
+    }
+    return covered >= version.total
+  })
+}
+
 /** Business diagnostics only. No thought payloads and no invented billing or semantic proof. */
 export function adaptiveKnowledgeDiagnostics(refsValue: unknown, events: BudgetEvent[]) {
   const refs = object(refsValue)
@@ -17,10 +40,10 @@ export function adaptiveKnowledgeDiagnostics(refsValue: unknown, events: BudgetE
   const reports = new Map<number, ObjectValue>()
   const expansions: string[] = []
   const limits: string[] = []
-  let manifestPages = 0
+  const manifestPages: ObjectValue[] = []
   for (const event of events) {
     const payload = object(event.payload)
-    if (event.event_type === 'run.research_manifest_page') manifestPages += 1
+    if (event.event_type === 'run.research_manifest_page') manifestPages.push(payload)
     if (event.event_type === 'run.budget_limited') limits.push(text(payload.reason) || text(event.message))
     if (event.event_type === 'run.output_budget_expanded') expansions.push(text(event.message))
     if (event.event_type === 'run.budget_changed') {
@@ -42,10 +65,15 @@ export function adaptiveKnowledgeDiagnostics(refsValue: unknown, events: BudgetE
     }
   }
   const policy = object(state.policy)
+  const globalManifestReturned = completeManifestScope(manifestPages, null)
+  const manifestTopics = (Array.isArray(refs.research_manifest_topics) ? refs.research_manifest_topics : [])
+    .map(object)
+    .filter(topic => text(topic.question_id))
+    .map(topic => ({ id: text(topic.question_id), title: text(topic.title) || text(topic.question_id), complete: globalManifestReturned || completeManifestScope(manifestPages, text(topic.question_id)) }))
   return {
     available: Object.keys(plan).length > 0 || Object.keys(state).length > 0,
     plan: { goal: text(plan.goal), constraints: strings(plan.constraints), subquestions: strings(plan.subquestions), depth: text(plan.depth), scope: text(plan.scope) },
-    research: { stageKey: text(refs.research_stage_key), question: text(question.question), title: text(question.title), requirements: strings(question.required_evidence), initialTarget: number(resources.initial_entry_target), capacity: number(resources.capacity_tokens), capacityBasis: text(resources.capacity_basis), capacityKnown: ['configured_model_capacity', 'observed_runtime_capacity'].includes(text(resources.capacity_basis)) ? true : resources.capacity_basis === 'unknown_model_application_guard' ? false : null, secondsLimit: number(object(resources.policy).timeout_seconds), contentTokens: number(resources.content_output_tokens), structureTokens: number(resources.structure_output_tokens), reasoningTokens: number(resources.reasoning_output_tokens), outputTokens: number(resources.output_tokens), manifestProjected: refs.research_manifest_projected === true, manifestPages },
+    research: { stageKey: text(refs.research_stage_key), question: text(question.question), title: text(question.title), requirements: strings(question.required_evidence), initialTarget: number(resources.initial_entry_target), capacity: number(resources.capacity_tokens), capacityBasis: text(resources.capacity_basis), capacityKnown: ['configured_model_capacity', 'observed_runtime_capacity'].includes(text(resources.capacity_basis)) ? true : resources.capacity_basis === 'unknown_model_application_guard' ? false : null, secondsLimit: number(object(resources.policy).timeout_seconds), contentTokens: number(resources.content_output_tokens), structureTokens: number(resources.structure_output_tokens), reasoningTokens: number(resources.reasoning_output_tokens), outputTokens: number(resources.output_tokens), manifestProjected: refs.research_manifest_projected === true, manifestPages: manifestPages.length, manifestTopics, manifestReadCount: manifestTopics.filter(topic => topic.complete).length, manifestTopicCount: manifestTopics.length },
     presentation: { mode: text(presentation.mode), reportCharacters: number(presentation.report_characters), omittedCharacters: number(presentation.omitted_characters), sections: number(presentation.section_count), materialTokens: number(presentation.estimated_material_tokens) },
     planning: { seen: number(stats.catalog_seen), total: number(stats.catalog_total), tokens: number(stats.estimated_payload_tokens), tokenLimit: number(stats.token_limit), elapsedMs: number(stats.elapsed_ms), secondsLimit: number(stats.time_limit_seconds), stopReason: text(stats.stop_reason) },
     budget: { used: number(state.used_tool_calls), soft: number(state.soft_tool_calls), hard: number(policy.hard_tool_calls), tokens: number(state.estimated_tool_payload_tokens), softTokens: number(state.soft_retrieval_tokens), hardTokens: number(policy.hard_retrieval_tokens), extensions: number(state.extension_count), deadline: text(state.deadline) },

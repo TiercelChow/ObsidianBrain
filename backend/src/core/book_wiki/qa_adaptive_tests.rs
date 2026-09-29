@@ -330,6 +330,87 @@ async fn test_qa_resume_at_output_hard_limit_rejects_before_paid_planning() {
 }
 
 #[tokio::test]
+async fn test_qa_turn_limit_cannot_use_output_budget_resume() {
+    let (store, _dir, base) = fixture();
+    let question = "全面分析全书机制";
+    let run = store
+        .start_agent_run(
+            &base,
+            "deepseek_harness",
+            "knowledge_qa",
+            &serde_json::json!({"question": question, "conversation_id": null, "request_max_output_tokens": 8192}),
+        )
+        .unwrap();
+    store
+        .append_agent_run_event(
+            &run.id,
+            "run.text_delta",
+            Some("answer"),
+            "",
+            &serde_json::json!({"delta": "未完成的正文"}),
+        )
+        .unwrap();
+    store
+        .append_agent_run_event(
+            &run.id,
+            "run.runtime_completed",
+            Some("completion"),
+            "",
+            &serde_json::json!({"stop_reason": "max_turn_requests", "complete": false}),
+        )
+        .unwrap();
+    store.fail_agent_run(&run.id, "max_turn_requests").unwrap();
+    let requests = Arc::new(Mutex::new(vec![]));
+    let service = BookWikiService::new(
+        store,
+        Arc::new(AdaptiveFixtureRuntime {
+            requests: requests.clone(),
+        }),
+    );
+    let (events, _receiver) = tokio::sync::mpsc::unbounded_channel();
+    let error = service
+        .resume_qa_streaming(&base, question, None, &run.id, events)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("qa_turn_limit"));
+    assert!(requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_qa_turn_limit_stops_after_one_answer_run_without_output_expansion() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct TurnLimitRuntime(AtomicUsize);
+    #[async_trait]
+    impl AgentRuntime for TurnLimitRuntime {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            if request.prompt.contains("只读检索规划器") {
+                return Ok(serde_json::json!({
+                    "standalone_question":"全面分析全书机制",
+                    "candidate_ids":[],
+                    "answer_mode":"book_lookup",
+                    "plan":{"goal":"全面分析全书机制","constraints":[],"subquestions":["机制"],"depth":"comprehensive","scope":"whole_book"}
+                }).to_string());
+            }
+            Err(BrainError::LlmApiError {
+                provider: "deepseek_harness".into(),
+                detail: "DeepSeek Harness 达到请求轮次上限 (stop_reason=max_turn_requests)".into(),
+            })
+        }
+    }
+    let (store, _dir, base) = fixture();
+    let runtime = Arc::new(TurnLimitRuntime(AtomicUsize::new(0)));
+    let service = BookWikiService::new(store.clone(), runtime.clone());
+    let error = service
+        .ask(&base, "全面分析全书机制", None)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("qa_turn_limit"));
+    assert_eq!(runtime.0.load(Ordering::SeqCst), 2);
+    assert!(store.list_conversations(&base, 10).unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn test_qa_resume_uses_previous_run_observed_context_as_hard_limit() {
     let (store, _dir, base) = fixture();
     let question = "全面分析全书机制";

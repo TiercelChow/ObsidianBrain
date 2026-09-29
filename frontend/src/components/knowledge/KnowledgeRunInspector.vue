@@ -25,7 +25,13 @@
       <p class="adaptive-note">软预算可按证据缺口扩大；硬上限、时间与授权不变。负载为业务估算，不是模型账单；浏览目录不代表已读正文。</p>
       <p v-if="diagnostics.planning.stopReason === 'planning_budget_reached'" class="adaptive-warning">目录规划已到预算上限；剩余目录需要由 Agent 针对具体缺口补查，不代表全书已覆盖。</p>
       <p v-if="['planner_failed', 'planner_invalid_output'].includes(diagnostics.planning.stopReason)" class="adaptive-warning">目录规划未完成，本轮保留已选候选并使用只读工具补查。</p>
-      <p v-if="diagnostics.research.manifestProjected" class="adaptive-warning">综合输入是容量内投影；完整发现矩阵已向模型返回 {{ format(diagnostics.research.manifestPages) }} 页。返回页数不等于核验完成，肯定性逐章判断仍需读完对应矩阵。</p>
+      <template v-if="diagnostics.research.manifestProjected">
+        <p class="adaptive-warning">综合输入是容量内投影；矩阵工具已返回 {{ format(diagnostics.research.manifestPages) }} 页<span v-if="diagnostics.research.manifestTopicCount">，其中 {{ format(diagnostics.research.manifestReadCount) }} / {{ format(diagnostics.research.manifestTopicCount) }} 个主题的完整矩阵已返回</span>。读取范围完整不等于事实核验完成；未读全的主题只能标记依据不足。</p>
+        <details v-if="diagnostics.research.manifestTopics.length" class="adaptive-manifest-topics">
+          <summary>查看各主题的矩阵读取范围</summary>
+          <ul><li v-for="topic in diagnostics.research.manifestTopics" :key="topic.id"><span>{{ topic.title }}</span><small>{{ topic.complete ? '完整矩阵已返回' : '矩阵仍有未读范围' }}</small></li></ul>
+        </details>
+      </template>
       <section v-if="diagnostics.coverage.length" class="adaptive-coverage">
         <h4>子问题与依据</h4><p class="adaptive-note">以下为 Agent 自报的取证覆盖，不等于独立事实核验。尚未报告的子问题不推定已完成。</p>
         <article v-for="item in diagnostics.coverage" :key="item.index">
@@ -77,6 +83,12 @@ function format(value: number | null) { return value == null ? '—' : value.toL
 .adaptive-metrics small, .adaptive-note, .adaptive-coverage small { color: var(--text-muted); }
 .adaptive-note { font-size: .8125rem; }
 .adaptive-warning { color: var(--warning, #a66b21); }
+.adaptive-manifest-topics { margin-top: .5rem; }
+.adaptive-manifest-topics summary { cursor: pointer; color: var(--text-secondary); }
+.adaptive-manifest-topics ul { display: grid; gap: .4rem; padding: .5rem 0 0; margin: 0; list-style: none; }
+.adaptive-manifest-topics li { display: flex; justify-content: space-between; gap: .75rem; padding: .45rem .6rem; border-radius: 8px; background: var(--bg-glass-subtle); }
+.adaptive-manifest-topics li span { min-width: 0; overflow-wrap: anywhere; }
+.adaptive-manifest-topics li small { flex: none; color: var(--text-muted); }
 .adaptive-coverage { margin-top: 1.5rem; }
 .adaptive-coverage article { background: var(--bg-glass-subtle); border-radius: 12px; padding: .875rem; margin-top: .625rem; }
 .adaptive-coverage article p { margin: .375rem 0; }

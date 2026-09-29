@@ -1,4 +1,4 @@
-export type KnowledgeInterruptionKind = 'cancelled' | 'credentials' | 'truncated' | 'failed'
+export type KnowledgeInterruptionKind = 'cancelled' | 'credentials' | 'truncated' | 'turn_limit' | 'failed'
 
 /** Launcher availability is not invalidated by a single failed model request. */
 export function knowledgeRuntimeMode(launcherAvailable: boolean): 'runtime' | 'evidence_only' {
@@ -19,8 +19,9 @@ export function interruptedKnowledgeAnswer(displayedText: string, receivedText: 
   const detail = error instanceof Error ? error.message : String(error)
   const cancelled = error instanceof Error && error.name === 'AbortError'
   const credentials = /secure storage|凭据|keychain|User canceled the operation|permission denied|401|403/i.test(detail)
+  const turnLimit = /max_turn_requests|qa_turn_limit/i.test(detail)
   const truncated = /max_tokens|max_turn_requests|max_output|token.{0,12}(limit|上限)|输出.{0,12}(截断|上限)/i.test(detail)
-  const kind: KnowledgeInterruptionKind = cancelled ? 'cancelled' : credentials ? 'credentials' : truncated ? 'truncated' : 'failed'
+  const kind: KnowledgeInterruptionKind = cancelled ? 'cancelled' : credentials ? 'credentials' : turnLimit ? 'turn_limit' : truncated ? 'truncated' : 'failed'
   const hardOutputLimit = detail.includes('qa_output_hard_limit')
   const canRetry = kind === 'truncated' && !hardOutputLimit
   const content = receivedText || displayedText
@@ -28,6 +29,8 @@ export function interruptedKnowledgeAnswer(displayedText: string, receivedText: 
     ? '已停止生成，内容可能不完整。'
     : kind === 'credentials'
       ? '本次凭据授权未完成，内容可能不完整。检查供应商凭据后可以再次尝试。'
+      : kind === 'turn_limit'
+        ? 'Harness 请求轮次已用尽，内容不完整。增加输出 token 无法解决；复杂问题建议转为研究任务，按子问题独立分析后综合。'
       : kind === 'truncated'
         ? hardOutputLimit
           ? '模型单次输出已达到硬上限，未完成内容已保留。请先调整模型最大输出或推理策略，或缩小问题范围。'
@@ -36,6 +39,19 @@ export function interruptedKnowledgeAnswer(displayedText: string, receivedText: 
           : '本次输出达到运行上限且没有收到正文。请核对模型最大输出与推理策略，或缩小问题范围后重新提问。'
         : '本次回答未完成，已有内容已保留。下一次提问会再次尝试连接模型。'
   return { content, kind, notice, detail, canRetry }
+}
+
+export function researchTaskRouteFromQuestion(baseId: string, question: string) {
+  const characters = Array.from(question.trim())
+  return {
+    path: '/knowledge/tasks',
+    query: {
+      create: '1',
+      base: baseId,
+      title: characters.slice(0, 200).join(''),
+      description: characters.length > 200 ? characters.slice(0, 1800).join('') : '',
+    },
+  }
 }
 
 export const modelReasoningPolicies = ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const

@@ -130,6 +130,38 @@ fn append_report_section(body: &mut String, title: &str, summary: &str, content:
     body.push_str("\n\n");
 }
 
+fn append_report_context(body: &mut String, plan: &ResearchPlan, after_executive_summary: bool) {
+    if plan.constraints.is_empty() && plan.terminology.is_empty() {
+        return;
+    }
+    if after_executive_summary {
+        body.push_str("### 研究边界\n\n");
+        if !plan.constraints.is_empty() {
+            body.push_str(&format!(
+                "- **范围与约束**：{}\n",
+                plan.constraints.join("；")
+            ));
+        }
+        if !plan.terminology.is_empty() {
+            body.push_str(&format!(
+                "- **术语口径**：{}\n",
+                plan.terminology.join("；")
+            ));
+        }
+        body.push('\n');
+    } else {
+        if !plan.constraints.is_empty() {
+            body.push_str(&format!(
+                "研究范围与约束：{}\n\n",
+                plan.constraints.join("；")
+            ));
+        }
+        if !plan.terminology.is_empty() {
+            body.push_str(&format!("术语口径：{}\n\n", plan.terminology.join("；")));
+        }
+    }
+}
+
 pub(crate) fn validate_plan(plan: &ResearchPlan) -> Result<(), BrainError> {
     if !text(&plan.goal, 4000)
         || plan.report_title.as_ref().is_some_and(|title| {
@@ -1025,8 +1057,8 @@ impl BookWikiStore {
             let brief_raw:String=conn.query_row("SELECT brief_json FROM knowledge_tasks WHERE id=?1",[&claim.task_id],|row|row.get(0))?;
             let brief:ResearchBrief=decode(&brief_raw)?;
             let mut body=format!("# {}\n\n",plan.report_title.as_deref().unwrap_or(&plan.goal));
-            if !plan.constraints.is_empty() {body.push_str(&format!("研究范围与约束：{}\n\n",plan.constraints.join("；")))}
-            if !plan.terminology.is_empty() {body.push_str(&format!("术语口径：{}\n\n",plan.terminology.join("；")))}
+            let front_loaded=brief.confirmed && matches!(brief.purpose.as_str(),"decision"|"reference");
+            if !front_loaded {append_report_context(&mut body,&plan,false)}
             let mut findings=Vec::<ResearchFinding>::new();
             let mut references=Vec::<ResearchEvidenceReference>::new();
             let mut identities=HashMap::new();
@@ -1038,7 +1070,7 @@ impl BookWikiStore {
                 _=>"综合结论与交叉核验",
             };
             let synthesis=("synthesis".into(),"_synthesis".into(),synthesis_title.into());
-            if brief.confirmed && matches!(brief.purpose.as_str(),"decision"|"reference") {
+            if front_loaded {
                 sections.insert(0,synthesis);
             } else {
                 sections.push(synthesis);
@@ -1076,7 +1108,8 @@ impl BookWikiStore {
                 }
                 let byte_start=body.len();
                 let section_summary=relabel(&section.stage.summary,&mapping)?;
-                append_report_section(&mut body,&title,&section_summary,&relabel(&section.content_md,&mapping)?);
+                append_report_section(&mut body,&title,if brief.confirmed {""} else {&section_summary},&relabel(&section.content_md,&mapping)?);
+                if front_loaded && key=="synthesis" {append_report_context(&mut body,&plan,true)}
                 let finding_start=findings.len();
                 for mut finding in section.findings {
                     finding.finding=relabel(&finding.finding,&mapping)?;
@@ -1630,7 +1663,20 @@ mod tests {
         let report = store.assemble_research_report(&claim, &run).unwrap();
         let synthesis = report.content_md.find("## 执行摘要与判断").unwrap();
         let section = report.content_md.find("## 机制与公式").unwrap();
+        assert!(report
+            .content_md
+            .starts_with("# 机制与边界研究\n\n## 执行摘要与判断"));
         assert!(synthesis < section);
+        let boundaries = report.content_md.find("### 研究边界").unwrap();
+        assert!(boundaries > synthesis && boundaries < section);
+        assert!(report.content_md.contains("- **范围与约束**：保留公式"));
+        assert!(
+            !report.content_md.contains("保留条件和缺口"),
+            "阶段摘要留在元数据，不重复插入已确认偏好的正文"
+        );
+        assert!(!report
+            .content_md
+            .contains("当前章节只支持机制，边界仍需更多证据"));
         assert!(report.content_md.contains("LATE_CONCLUSION"));
         let run = store.get_agent_run(&run).unwrap();
         let ranges = run.output.unwrap()["section_ranges"]
@@ -1638,6 +1684,7 @@ mod tests {
             .unwrap()
             .clone();
         assert_eq!(ranges[0]["question_id"], "_synthesis");
+        assert_eq!(ranges[0]["summary"], "保留条件和缺口");
         assert_eq!(ranges.len(), 3);
         for (index, range) in ranges.iter().enumerate() {
             let start = range["byte_start"].as_u64().unwrap() as usize;
@@ -1683,6 +1730,18 @@ mod tests {
             let synthesis = report.content_md.find(heading).unwrap();
             let section = report.content_md.find("## 机制与公式").unwrap();
             assert_eq!(synthesis < section, front, "{purpose}");
+            assert!(
+                !report.content_md.contains("保留条件和缺口"),
+                "{purpose} 的阶段摘要不重复插入正文"
+            );
+            if front {
+                assert!(report
+                    .content_md
+                    .starts_with(&format!("# 机制与边界研究\n\n{heading}")));
+                assert!(report.content_md.find("### 研究边界").unwrap() < section);
+            } else {
+                assert!(report.content_md.find("研究范围与约束").unwrap() < section);
+            }
         }
     }
 

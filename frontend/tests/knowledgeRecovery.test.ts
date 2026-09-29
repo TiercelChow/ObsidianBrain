@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, validateModelCapabilities } from '../src/utils/knowledgeRuntimePolicy.ts'
+import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskRouteFromQuestion, validateModelCapabilities } from '../src/utils/knowledgeRuntimePolicy.ts'
 
 test('planning fallback remains visible as a retrieval adjustment', () => {
   assert.equal(labelForRuntimePhase('目录规划未完成，正在改用书内检索继续核查'), '正在调整检索方式')
@@ -22,6 +22,19 @@ test('a confirmed output hard limit keeps the draft but does not offer a same-bu
   assert.equal(interrupted.content, '未完成正文')
   assert.equal(interrupted.canRetry, false)
   assert.match(interrupted.notice, /调整.*最大输出|调整.*推理策略/)
+})
+
+test('a Harness turn limit is not mistaken for an output-token retry', () => {
+  const interrupted = interruptedKnowledgeAnswer('已有分析', '已有分析', new Error('DeepSeek Harness 达到请求轮次上限 (stop_reason=max_turn_requests)'))
+  assert.equal(interrupted.kind, 'turn_limit')
+  assert.equal(interrupted.canRetry, false)
+  assert.equal(interrupted.content, '已有分析')
+  assert.match(interrupted.notice, /研究任务/)
+  assert.doesNotMatch(interrupted.notice, /提高输出/)
+  assert.deepEqual(researchTaskRouteFromQuestion('book-a', ' 分析机制与边界 '), {
+    path: '/knowledge/tasks',
+    query: { create: '1', base: 'book-a', title: '分析机制与边界', description: '' },
+  })
 })
 
 test('an empty max-token answer explains retry exhaustion without pretending a draft exists', () => {

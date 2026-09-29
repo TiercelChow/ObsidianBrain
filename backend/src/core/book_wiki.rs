@@ -1124,6 +1124,11 @@ impl BookWikiService {
                         },
                     )));
                 }
+                Err(error) if is_harness_turn_limit(&error) => {
+                    return Err(BrainError::KnowledgeValidation(format!(
+                        "(qa_turn_limit) 本轮达到 Harness 请求轮次上限，增加输出 token 不能解决；未完成正文保留在本轮记录中。复杂问题建议转为研究任务，按子问题独立取证后综合；也可缩小问题范围重新提问。原错误：{error}"
+                    )));
+                }
                 Err(error) => return Err(error),
             }
         };
@@ -2443,6 +2448,7 @@ impl BookWikiService {
             "topic_title",
             "research_stage_key",
             "research_manifest_projected",
+            "research_manifest_topics",
             "defer_research_citation_validation",
             "research_resources",
             "research_retry_parent_run_id",
@@ -3721,6 +3727,7 @@ fn is_cancelled_agent_error(error: &BrainError) -> bool {
 fn is_recoverable_empty_answer(error: &BrainError) -> bool {
     matches!(error, BrainError::LlmApiError { provider, detail }
         if provider == "deepseek_harness"
+            && !detail.contains("stop_reason=max_turn_requests")
             && (detail.contains("空回答") || detail.contains("未返回正文")))
 }
 
@@ -3728,6 +3735,12 @@ fn is_harness_output_truncation(error: &BrainError) -> bool {
     matches!(error, BrainError::LlmApiError { provider, detail }
         if provider == "deepseek_harness"
             && detail.contains("stop_reason=max_tokens"))
+}
+
+fn is_harness_turn_limit(error: &BrainError) -> bool {
+    matches!(error, BrainError::LlmApiError { provider, detail }
+        if provider == "deepseek_harness"
+            && detail.contains("stop_reason=max_turn_requests"))
 }
 
 fn presentation_output_limit_error(error: BrainError) -> BrainError {
@@ -4981,14 +4994,17 @@ fn validated_qa_resume(
         .output
         .as_ref()
         .ok_or_else(|| BrainError::KnowledgeValidation("该运行没有可恢复的部分输出".into()))?;
-    if !matches!(
-        output
-            .get("stop_reason")
-            .and_then(serde_json::Value::as_str),
-        Some("max_tokens" | "max_turn_requests")
-    ) {
+    let stop_reason = output
+        .get("stop_reason")
+        .and_then(serde_json::Value::as_str);
+    if stop_reason == Some("max_turn_requests") {
         return Err(BrainError::KnowledgeValidation(
-            "该运行不是输出/轮次截断，请处理原错误后重新提问".into(),
+            "(qa_turn_limit) 该运行达到 Harness 请求轮次上限，增加输出 token 不能恢复；请拆分为研究任务，或缩小范围重新提问".into(),
+        ));
+    }
+    if stop_reason != Some("max_tokens") {
+        return Err(BrainError::KnowledgeValidation(
+            "该运行不是输出 token 截断，请处理原错误后重新提问".into(),
         ));
     }
     let draft = output
@@ -6314,6 +6330,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_research_preflight_does_not_replay_empty_turn_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = BrainError::LlmApiError {
+            provider: "deepseek_harness".into(),
+            detail: "DeepSeek Harness 达到请求轮次上限且未返回正文 (stop_reason=max_turn_requests)"
+                .into(),
+        };
+        let (service, _, base_id, prompts) =
+            preflight_test_service(dir.path(), vec![Err(error)], 65_536);
+        assert!(service
+            .preview_research_brief(&base_id, "研究目标", "", "research", "report")
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("max_turn_requests"));
+        assert_eq!(prompts.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
     async fn test_research_preflight_empty_answer_recovers_once_without_expanding_budget() {
         let dir = tempfile::tempdir().unwrap();
         let error = BrainError::LlmApiError {
@@ -6767,9 +6802,15 @@ mod tests {
             provider: "deepseek_harness".to_string(),
             detail: "DeepSeek Harness 拒绝回答 (stop_reason=refusal)".to_string(),
         };
+        let turn_limit = BrainError::LlmApiError {
+            provider: "deepseek_harness".to_string(),
+            detail: "DeepSeek Harness 达到请求轮次上限且未返回正文 (stop_reason=max_turn_requests)"
+                .to_string(),
+        };
         assert!(is_recoverable_empty_answer(&empty));
         assert!(is_recoverable_empty_answer(&exhausted));
         assert!(!is_recoverable_empty_answer(&refusal));
+        assert!(!is_recoverable_empty_answer(&turn_limit));
         assert!(!is_recoverable_empty_answer(
             &BrainError::KnowledgeValidation("Agent 运行已取消".to_string())
         ));

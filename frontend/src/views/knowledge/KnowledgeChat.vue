@@ -97,6 +97,7 @@
                 <span v-if="message.interruption.kind !== 'cancelled'">{{ message.interruption.detail }}</span>
                 <button v-if="message.interruption.canRetry && message.runId && message.originalQuestion && message.content" type="button" :disabled="searching || !runtimeReady" @click="ask(message.originalQuestion, message)">继续完成完整答案</button>
                 <button v-else-if="message.interruption.canRetry && message.originalQuestion && !message.content" type="button" :disabled="searching || !runtimeReady" @click="ask(message.originalQuestion)">重新提问</button>
+                <button v-if="message.interruption.kind === 'turn_limit' && message.originalQuestion && activeBaseId" type="button" :disabled="searching" @click="openResearchTask(message.originalQuestion)">转为分阶段研究任务</button>
               </div>
               <button v-if="message.role === 'assistant' && message.runId && message.id !== streamingMessageId" type="button" class="save-answer" @click="inspectRun(message.runId)">查看本轮目标与取证预算</button>
               <button v-if="message.role === 'assistant' && message.runId && !message.interruption && message.id !== streamingMessageId" class="save-answer" type="button" :disabled="savingRunId === message.runId" @click="saveAnswer(message)">
@@ -223,7 +224,7 @@ import MotionModal from '@/components/motion/MotionModal.vue'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { shouldSendComposerOnEnter } from '@/utils/chatComposer'
 import { createStreamedTextBuffer, type StreamedTextBuffer } from '@/utils/streamedText'
-import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase } from '@/utils/knowledgeRuntimePolicy'
+import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskRouteFromQuestion } from '@/utils/knowledgeRuntimePolicy'
 import { loadKnowledgeCitationPreview } from '@/utils/knowledgeCitationPreview'
 import {
   getBookWikiSettings,
@@ -302,6 +303,11 @@ const { renderMarkdown, enhance, cleanup } = useMarkdownRender(() => {})
 
 function setActivity(phase: string) {
   if (streamPhase.value !== phase) streamPhase.value = phase
+}
+
+function openResearchTask(question: string) {
+  if (!activeBaseId.value) return
+  void router.push(researchTaskRouteFromQuestion(activeBaseId.value, question))
 }
 
 function stopAnswer() {

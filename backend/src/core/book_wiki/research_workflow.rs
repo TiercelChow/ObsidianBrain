@@ -302,11 +302,26 @@ impl BookWikiService {
                 .filter(|skill| skill.id != "skill-book-presentation")
                 .map(|skill| skill.id)
                 .collect::<Vec<_>>();
+            let manifest_topics = if phase.phase == "synthesis" {
+                self.store
+                    .get_research_workspace(&phase.task.id)?
+                    .and_then(|workspace| workspace.plan)
+                    .map(|plan| {
+                        plan.questions
+                            .into_iter()
+                            .map(|question| json!({"question_id":question.id,"title":question.title}))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             let input = json!({"knowledge_task_id":phase.task.id,"research_stage_key":phase.key,"research_claim_id":claim.claim_id,"research_claim_attempt":claim.attempt,
                 "research_resources":phase.resources,"research_plan":phase.payload.get("plan"),"research_question":phase.payload.get("question"),
                 "evidence_entry_ids":evidence_ids,"skill_ids":skills,"model":phase.profile.model,"retry":retry,
                 "defer_research_citation_validation":phase.phase!="plan",
                 "research_manifest_projected":phase.phase=="synthesis" && phase.payload["integration_manifest"]["complete"]==false,
+                "research_manifest_topics":manifest_topics,
                 "output_expansion_attempt":output_expansions,"format_repair_attempt":format_repairs,"research_retry_parent_run_id":retry_parent_run_id,
                 "request_max_output_tokens":phase.resources.output_tokens,"request_timeout_seconds":phase.resources.policy.timeout_seconds,"adaptive_budget":phase.resources.policy,
                 "external_research":{"enabled":phase.task.external_research_enabled && phase.phase!="plan","domains":phase.task.external_domains,"request_limit":phase.task.external_request_limit}});
@@ -1877,6 +1892,22 @@ mod tests {
         assert_eq!(*presentation_calls.lock().unwrap(), 2);
         assert_eq!(*research_calls.lock().unwrap(), [1, 10, 1]);
         assert_eq!(result.task.status, "completed");
+        let workspace = store.get_research_workspace(&task.id).unwrap().unwrap();
+        let synthesis_run = workspace
+            .stages
+            .iter()
+            .find(|stage| stage.stage_key == "synthesis")
+            .and_then(|stage| stage.run_id.as_deref())
+            .unwrap();
+        let inspected_topics = &store
+            .get_agent_run_inspection(synthesis_run)
+            .unwrap()
+            .snapshot
+            .unwrap()
+            .evidence_refs["research_manifest_topics"];
+        assert_eq!(inspected_topics.as_array().unwrap().len(), 10);
+        assert_eq!(inspected_topics[9]["question_id"], "q9");
+        assert_eq!(inspected_topics[9]["title"], "核心架构");
         assert!(result.task.result_summary.len() > 90000);
         assert!(result.task.result_summary.contains("LATE_q9"));
         assert_eq!(result.artifacts.len(), 1);

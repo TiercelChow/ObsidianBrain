@@ -91,3 +91,34 @@ test('projected synthesis diagnostics show returned matrix pages without claimin
   assert.equal(result.research.manifestPages, 2)
   assert.equal(adaptiveKnowledgeDiagnostics({}, []).research.manifestProjected, false)
 })
+
+test('projected synthesis distinguishes complete topic reads from gaps and mixed versions', () => {
+  const refs = {
+    research_stage_key: 'synthesis',
+    research_plan: { goal: '跨主题综合' },
+    research_manifest_projected: true,
+    research_manifest_topics: [
+      { question_id: 'mechanism', title: '机制' },
+      { question_id: 'boundary', title: '边界' },
+    ],
+  }
+  const pages = [
+    { event_type: 'run.research_manifest_page', payload: { question_id: 'mechanism', offset_chars: 0, returned_chars: 5, total_chars: 10, manifest_hash: 'v1' } },
+    { event_type: 'run.research_manifest_page', payload: { question_id: 'mechanism', offset_chars: 5, returned_chars: 5, total_chars: 10, manifest_hash: 'v1' } },
+    { event_type: 'run.research_manifest_page', payload: { question_id: 'boundary', offset_chars: 0, returned_chars: 5, total_chars: 10, manifest_hash: 'v1' } },
+    { event_type: 'run.research_manifest_page', payload: { question_id: 'boundary', offset_chars: 5, returned_chars: 5, total_chars: 10, manifest_hash: 'v2' } },
+  ]
+  const partial = adaptiveKnowledgeDiagnostics(refs, pages)
+  assert.equal(partial.research.manifestReadCount, 1)
+  assert.equal(partial.research.manifestTopicCount, 2)
+  assert.deepEqual(partial.research.manifestTopics.map(item => [item.id, item.complete]), [
+    ['mechanism', true], ['boundary', false],
+  ])
+  const global = adaptiveKnowledgeDiagnostics(refs, [
+    ...pages,
+    { event_type: 'run.research_manifest_page', payload: { question_id: null, offset_chars: 0, returned_chars: 6, total_chars: 10, manifest_hash: 'global' } },
+    { event_type: 'run.research_manifest_page', payload: { question_id: null, offset_chars: 6, returned_chars: 4, total_chars: 10, manifest_hash: 'global' } },
+  ])
+  assert.equal(global.research.manifestReadCount, 2)
+  assert.ok(global.research.manifestTopics.every(item => item.complete))
+})
