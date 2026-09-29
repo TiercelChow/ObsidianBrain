@@ -7936,6 +7936,7 @@ fn validate_agent_event_type(value: &str) -> Result<(), BrainError> {
             | "run.tool_started"
             | "run.tool_finished"
             | "run.external_source_read"
+            | "run.research_manifest_page"
             | "run.review_required"
             | "run.completed"
             | "run.failed"

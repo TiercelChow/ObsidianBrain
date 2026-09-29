@@ -106,6 +106,39 @@ fn test_qa_planning_does_not_retry_denied_credentials_as_a_search_fallback() {
 }
 
 #[test]
+fn test_qa_planning_fallback_rejects_deterministic_runtime_failures() {
+    for detail in [
+        "ACP 调用失败: HTTP 400 invalid_request",
+        "ACP 调用失败: HTTP 401 invalid_api_key",
+        "ACP 调用失败: HTTP 429 insufficient_quota",
+        "DeepSeek Harness 在 600 秒内没有完成回答",
+        "ACP 调用失败: 未知错误",
+        "上下文超出限制 context_length_exceeded",
+    ] {
+        assert!(
+            !qa_planning_allows_fallback(&BrainError::LlmApiError {
+                provider: "deepseek_harness".into(),
+                detail: detail.into(),
+            }),
+            "{detail}"
+        );
+    }
+    for detail in [
+        "DeepSeek Harness 返回了空回答 (stop_reason=end_turn)",
+        "DeepSeek Harness 达到输出 token 上限 (stop_reason=max_tokens)",
+        "ACP 调用失败: status=503",
+    ] {
+        assert!(
+            qa_planning_allows_fallback(&BrainError::LlmApiError {
+                provider: "deepseek_harness".into(),
+                detail: detail.into(),
+            }),
+            "{detail}"
+        );
+    }
+}
+
+#[test]
 fn test_answer_reference_validation_rejects_unseen_source_numbers_and_ids() {
     let input = serde_json::json!({ "evidence_entry_ids": ["entry-a"] });
     let ledger = vec![AgentEvidenceRef {

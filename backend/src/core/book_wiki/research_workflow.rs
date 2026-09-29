@@ -306,6 +306,7 @@ impl BookWikiService {
                 "research_resources":phase.resources,"research_plan":phase.payload.get("plan"),"research_question":phase.payload.get("question"),
                 "evidence_entry_ids":evidence_ids,"skill_ids":skills,"model":phase.profile.model,"retry":retry,
                 "defer_research_citation_validation":phase.phase!="plan",
+                "research_manifest_projected":phase.phase=="synthesis" && phase.payload["integration_manifest"]["complete"]==false,
                 "output_expansion_attempt":output_expansions,"format_repair_attempt":format_repairs,"research_retry_parent_run_id":retry_parent_run_id,
                 "request_max_output_tokens":phase.resources.output_tokens,"request_timeout_seconds":phase.resources.policy.timeout_seconds,"adaptive_budget":phase.resources.policy,
                 "external_research":{"enabled":phase.task.external_research_enabled && phase.phase!="plan","domains":phase.task.external_domains,"request_limit":phase.task.external_request_limit}});

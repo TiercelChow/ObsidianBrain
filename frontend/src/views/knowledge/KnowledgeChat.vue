@@ -223,7 +223,7 @@ import MotionModal from '@/components/motion/MotionModal.vue'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { shouldSendComposerOnEnter } from '@/utils/chatComposer'
 import { createStreamedTextBuffer, type StreamedTextBuffer } from '@/utils/streamedText'
-import { interruptedKnowledgeAnswer, knowledgeRuntimeMode } from '@/utils/knowledgeRuntimePolicy'
+import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase } from '@/utils/knowledgeRuntimePolicy'
 import { loadKnowledgeCitationPreview } from '@/utils/knowledgeCitationPreview'
 import {
   getBookWikiSettings,
@@ -302,15 +302,6 @@ const { renderMarkdown, enhance, cleanup } = useMarkdownRender(() => {})
 
 function setActivity(phase: string) {
   if (streamPhase.value !== phase) streamPhase.value = phase
-}
-
-function labelForRuntimePhase(message: string): string | null {
-  if (/理解追问|编译知识目录/.test(message)) return '正在理解问题与选择知识'
-  if (/扩容|重试/.test(message)) return '正在调整输出预算'
-  if (/结束|校验/.test(message)) return '正在整理回答'
-  if (/启动|连接|会话/.test(message)) return '正在连接模型'
-  if (/请求|等待|分析|思考/.test(message)) return '正在分析书内证据'
-  return null
 }
 
 function stopAnswer() {

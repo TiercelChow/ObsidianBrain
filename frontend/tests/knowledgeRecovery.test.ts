@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, validateModelCapabilities } from '../src/utils/knowledgeRuntimePolicy.ts'
+import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, validateModelCapabilities } from '../src/utils/knowledgeRuntimePolicy.ts'
+
+test('planning fallback remains visible as a retrieval adjustment', () => {
+  assert.equal(labelForRuntimePhase('目录规划未完成，正在改用书内检索继续核查'), '正在调整检索方式')
+  assert.equal(labelForRuntimePhase('目录规划结果无效，正在改用书内检索继续核查'), '正在调整检索方式')
+})
 
 test('an interrupted provider-batched answer retains all received text, not only displayed frames', () => {
   const recovered = interruptedKnowledgeAnswer('已显示', '已显示但还有待显示的正文', new Error('max_tokens'))

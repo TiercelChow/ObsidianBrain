@@ -120,6 +120,26 @@ async fn call_tool(
             });
         }
         record_tool_evidence(ctx.book_wiki_service.store(), token, name, &mut value)?;
+        if name == "knowledge_get_research_manifest" {
+            let returned_chars = value["content_json"]
+                .as_str()
+                .ok_or_else(|| BrainError::Internal("综合矩阵分页结果缺少正文".into()))?
+                .chars()
+                .count();
+            store.append_agent_run_event(
+                &grant.run_id,
+                "run.research_manifest_page",
+                Some("synthesis"),
+                "已向 Agent 返回综合矩阵分页",
+                &json!({
+                    "question_id": value["question_id"],
+                    "offset_chars": value["offset_chars"],
+                    "returned_chars": returned_chars,
+                    "total_chars": value["total_chars"],
+                    "manifest_hash": value["manifest_hash"],
+                }),
+            )?;
+        }
         Ok(value)
     });
     match result {
@@ -276,7 +296,120 @@ mod tests {
 
     use crate::api::router::create_router;
     use crate::infra::book_wiki_store::{MarkdownSourceDraft, SourceSectionDraft};
-    use crate::models::book_wiki::{BookKind, ReaderBook};
+    use crate::models::book_wiki::{
+        BookKind, ReaderBook, ResearchFinding, ResearchPlan, ResearchQuestion,
+        ResearchSectionOutput,
+    };
+
+    #[tokio::test]
+    async fn test_mcp_manifest_page_records_the_served_scope_range_and_version() {
+        let (ctx, _dir, vault) = crate::AppContext::for_test();
+        let store = ctx.book_wiki_service.store();
+        store
+            .save_reader_books(&[ReaderBook {
+                id: "manifest-audit-book".into(),
+                path: vault.display().to_string(),
+                kind: BookKind::Folder,
+                name: "综合读取审计".into(),
+                description: String::new(),
+                category: String::new(),
+                added_at: 1,
+                progress: None,
+            }])
+            .unwrap();
+        let base = store.initialize_base("manifest-audit-book").unwrap();
+        let task = store
+            .create_task(&base.id, "综合核查", "保留未读缺口", "research")
+            .unwrap();
+        store.start_task_execution(&task.id).unwrap();
+        store.ensure_research_workspace(&task.id).unwrap();
+        let plan_claim = store.claim_research_stage(&task.id, "plan").unwrap();
+        let plan_run = store.start_agent_run(&base.id,"deepseek_harness","knowledge_task_research",&json!({"knowledge_task_id":task.id,"research_stage_key":"plan","research_claim_id":plan_claim.claim_id,"research_claim_attempt":plan_claim.attempt})).unwrap();
+        store
+            .attach_research_stage_run(&plan_claim, &plan_run.id)
+            .unwrap();
+        store
+            .complete_agent_run(&plan_run.id, &json!({"answer":"目标规划"}))
+            .unwrap();
+        store
+            .save_research_plan(
+                &plan_claim,
+                &plan_run.id,
+                &ResearchPlan {
+                    goal: "综合核查".into(),
+                    report_title: Some("综合核查材料".into()),
+                    constraints: vec![],
+                    acceptance: vec!["说明缺口".into()],
+                    depth: "standard".into(),
+                    terminology: vec![],
+                    questions: vec![ResearchQuestion {
+                        id: "topic".into(),
+                        title: "主题".into(),
+                        question: "当前依据如何".into(),
+                        required_evidence: vec!["当前材料".into()],
+                        expected_output_tokens: None,
+                        target_entry_ids: vec![],
+                    }],
+                },
+            )
+            .unwrap();
+        let section_claim = store
+            .claim_research_stage(&task.id, "section:topic")
+            .unwrap();
+        let section_run = store.start_agent_run(&base.id,"deepseek_harness","knowledge_task_research",&json!({"knowledge_task_id":task.id,"research_stage_key":"section:topic","research_claim_id":section_claim.claim_id,"research_claim_attempt":section_claim.attempt})).unwrap();
+        store
+            .attach_research_stage_run(&section_claim, &section_run.id)
+            .unwrap();
+        store
+            .complete_agent_run(&section_run.id, &json!({"answer":"证据不足"}))
+            .unwrap();
+        store
+            .save_research_section(
+                &section_claim,
+                &section_run.id,
+                &ResearchSectionOutput {
+                    summary: "当前依据不足".into(),
+                    content_md: "现有材料不足以形成确定结论。".into(),
+                    findings: vec![ResearchFinding {
+                        finding: "尚需补充资料".into(),
+                        status: "missing".into(),
+                        citation_indices: vec![],
+                        limitations: vec!["没有当前来源".into()],
+                        baseline_entry_id: None,
+                        baseline_claim_id: None,
+                    }],
+                },
+            )
+            .unwrap();
+        let claim = store.claim_research_stage(&task.id, "synthesis").unwrap();
+        let run = store.start_agent_run(&base.id,"deepseek_harness","knowledge_task_research",&json!({"knowledge_task_id":task.id,"research_stage_key":"synthesis","research_claim_id":claim.claim_id,"research_claim_attempt":claim.attempt,"research_manifest_projected":true})).unwrap();
+        store.attach_research_stage_run(&claim, &run.id).unwrap();
+        let capability = store
+            .issue_agent_run_capability(
+                &run.id,
+                std::slice::from_ref(&base.id),
+                &["knowledge_get_research_manifest".into()],
+                300,
+            )
+            .unwrap();
+        let response = call_tool(&ctx, &capability.token, Some(&json!({"name":"knowledge_get_research_manifest","arguments":{"question_id":"topic","offset_chars":0,"max_chars":12000}}))).await.unwrap();
+        assert_eq!(response["isError"], false, "{response}");
+        let page = &response["structuredContent"];
+        assert_eq!(page["has_more"], false);
+        let events = store.list_agent_run_events(&run.id).unwrap();
+        let served = events
+            .iter()
+            .find(|event| event.event_type == "run.research_manifest_page")
+            .unwrap();
+        assert_eq!(served.payload["question_id"], "topic");
+        assert_eq!(served.payload["offset_chars"], 0);
+        assert_eq!(
+            served.payload["returned_chars"],
+            page["content_json"].as_str().unwrap().chars().count()
+        );
+        assert_eq!(served.payload["total_chars"], page["total_chars"]);
+        assert_eq!(served.payload["manifest_hash"], page["manifest_hash"]);
+    }
 
     #[tokio::test]
     async fn test_mcp_source_tail_candidate_requires_actual_read_before_citation() {

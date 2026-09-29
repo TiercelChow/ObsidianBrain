@@ -759,19 +759,23 @@ impl BookWikiService {
                 "request_max_output_tokens":planning_output,
             });
             planning_payload = planning_payload.saturating_add(prompt_tokens);
+            let mut planning_attempt_id = String::new();
             match self
-                .run_audited(
+                .run_audited_with_started(
                     base_id,
                     "knowledge_qa_select",
                     &input,
                     &profile,
                     prompt,
-                    stream,
+                    AuditedRunObservers {
+                        stream,
+                        started_run_id: Some(&mut planning_attempt_id),
+                    },
                 )
                 .await
             {
                 Ok((planning_run_id, response)) => {
-                    planning_run_ids.push(planning_run_id);
+                    planning_run_ids.push(planning_run_id.clone());
                     planning_payload = planning_payload.saturating_add(estimated_tokens(&response));
                     catalog_seen += chunk.len();
                     let Some(parsed) = parse_qa_selection_response(&response).filter(|parsed| {
@@ -780,6 +784,16 @@ impl BookWikiService {
                     }) else {
                         planning_stop = "planner_invalid_output";
                         tracing::warn!("目录规划输出不符合JSON契约，保留已选候选供工具补查");
+                        if let Some(sender) = stream {
+                            sender
+                                .send(KnowledgeChatStreamEvent::Phase {
+                                    run_id: planning_run_id,
+                                    message: "目录规划结果无效，正在改用书内检索继续核查".into(),
+                                })
+                                .map_err(|_| {
+                                    BrainError::KnowledgeValidation("问答流已由客户端关闭".into())
+                                })?;
+                        }
                         break;
                     };
                     let part = parse_qa_selection(&response, chunk, question);
@@ -807,12 +821,25 @@ impl BookWikiService {
                     }
                 }
                 Err(error) => {
+                    if !planning_attempt_id.is_empty() {
+                        planning_run_ids.push(planning_attempt_id.clone());
+                    }
                     if stream.is_some_and(|s| s.is_closed()) || !qa_planning_allows_fallback(&error)
                     {
                         return Err(error);
                     }
                     tracing::warn!(error=%error,"目录规划失败，保留已选候选并允许只读工具补查");
                     planning_stop = "planner_failed";
+                    if let Some(sender) = stream {
+                        sender
+                            .send(KnowledgeChatStreamEvent::Phase {
+                                run_id: planning_attempt_id,
+                                message: "目录规划未完成，正在改用书内检索继续核查".into(),
+                            })
+                            .map_err(|_| {
+                                BrainError::KnowledgeValidation("问答流已由客户端关闭".into())
+                            })?;
+                    }
                     break;
                 }
             }
@@ -2415,6 +2442,7 @@ impl BookWikiService {
             "analysis_fragment_count",
             "topic_title",
             "research_stage_key",
+            "research_manifest_projected",
             "defer_research_citation_validation",
             "research_resources",
             "research_retry_parent_run_id",
@@ -3680,23 +3708,10 @@ fn chat_stream_event(run_id: &str, event: &AgentRuntimeEvent) -> Option<Knowledg
 }
 
 fn qa_planning_allows_fallback(error: &BrainError) -> bool {
-    // Search cannot repair missing credentials, denied permission, cancellation
-    // or a broken local runtime. Never prompt for the same credential again by
-    // treating those failures as poor catalog selection.
-    let BrainError::LlmApiError { detail, .. } = error else {
-        return false;
-    };
-    let detail = detail.to_ascii_lowercase();
-    ![
-        "401",
-        "403",
-        "unauthorized",
-        "forbidden",
-        "invalid_api_key",
-        "refusal",
-    ]
-    .iter()
-    .any(|marker| detail.contains(marker))
+    // An empty/truncated planner or an explicit transient transport failure
+    // may fall back to read-only retrieval. Deterministic provider failures
+    // must surface directly instead of triggering another paid model request.
+    is_retryable_harness_failure(error) || is_harness_output_truncation(error)
 }
 
 fn is_cancelled_agent_error(error: &BrainError) -> bool {
@@ -3806,6 +3821,7 @@ fn is_retryable_harness_failure(error: &BrainError) -> bool {
         "连接中断",
         "网络连接中断",
         "返回了空回答",
+        "返回空回答",
         "未返回正文",
     ]
     .iter()

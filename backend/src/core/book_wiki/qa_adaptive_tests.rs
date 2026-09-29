@@ -657,6 +657,69 @@ async fn test_qa_transient_transport_failure_retries_only_answer_run_once() {
 }
 
 #[tokio::test]
+async fn test_qa_planner_invalid_request_does_not_start_answer_run() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct InvalidPlanner(AtomicUsize);
+    #[async_trait]
+    impl AgentRuntime for InvalidPlanner {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            if request.prompt.contains("只读检索规划器") {
+                return Err(BrainError::LlmApiError {
+                    provider: "deepseek_harness".into(),
+                    detail: "ACP 调用失败: HTTP 400 invalid_request".into(),
+                });
+            }
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok("不应发送的回答".into())
+        }
+    }
+    let (store, _dir, base) = fixture();
+    let runtime = Arc::new(InvalidPlanner(AtomicUsize::new(0)));
+    let service = BookWikiService::new(store.clone(), runtime.clone());
+    let error = service
+        .ask(&base, "全面分析全书机制", None)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("HTTP 400"));
+    assert_eq!(runtime.0.load(Ordering::SeqCst), 0);
+    assert!(store.list_conversations(&base, 10).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_qa_planner_empty_answer_reports_visible_fallback_and_failed_run() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct EmptyPlanner(AtomicUsize);
+    #[async_trait]
+    impl AgentRuntime for EmptyPlanner {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            if request.prompt.contains("只读检索规划器") {
+                return Err(BrainError::LlmApiError {
+                    provider: "deepseek_harness".into(),
+                    detail: "DeepSeek Harness 返回了空回答 (stop_reason=end_turn)".into(),
+                });
+            }
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok("目前资料不足以支持确定结论。".into())
+        }
+    }
+    let (store, _dir, base) = fixture();
+    let runtime = Arc::new(EmptyPlanner(AtomicUsize::new(0)));
+    let service = BookWikiService::new(store.clone(), runtime.clone());
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let answer = service
+        .ask_streaming(&base, "全面分析全书机制", None, events)
+        .await
+        .unwrap();
+    assert_eq!(runtime.0.load(Ordering::SeqCst), 1);
+    let run = store.get_agent_run(&answer.run_id).unwrap();
+    let failed_plan = run.input["planning_run_ids"][0].as_str().unwrap();
+    assert_eq!(store.get_agent_run(failed_plan).unwrap().status, "failed");
+    assert!(std::iter::from_fn(|| receiver.try_recv().ok()).any(|event| {
+        matches!(event, KnowledgeChatStreamEvent::Phase { message, .. } if message.contains("目录规划未完成"))
+    }));
+}
+
+#[tokio::test]
 async fn test_qa_empty_max_tokens_expands_only_answer_run_and_keeps_failed_run() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     struct EmptyThenAnswer {

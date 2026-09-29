@@ -77,3 +77,17 @@ test('research output headroom is estimated and expansion events do not reset ev
   const legacy = adaptiveKnowledgeDiagnostics({}, [])
   assert.equal(legacy.research.reasoningTokens, null)
 })
+
+test('projected synthesis diagnostics show returned matrix pages without claiming full verification', () => {
+  const result = adaptiveKnowledgeDiagnostics({
+    research_stage_key: 'synthesis',
+    research_plan: { goal: '综合多个主题' },
+    research_manifest_projected: true,
+  }, [
+    { event_type: 'run.research_manifest_page', payload: { question_id: 'a', offset_chars: 0, returned_chars: 1200 } },
+    { event_type: 'run.research_manifest_page', payload: { question_id: 'a', offset_chars: 1200, returned_chars: 900 } },
+  ])
+  assert.equal(result.research.manifestProjected, true)
+  assert.equal(result.research.manifestPages, 2)
+  assert.equal(adaptiveKnowledgeDiagnostics({}, []).research.manifestProjected, false)
+})

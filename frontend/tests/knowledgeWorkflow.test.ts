@@ -9,10 +9,11 @@ async function source(path: string) {
 }
 
 test('knowledge chat persists conversations and restores their cited messages', async () => {
-  const [chat, answer, api] = await Promise.all([
+  const [chat, answer, api, runtimePolicy] = await Promise.all([
     source('src/views/knowledge/KnowledgeChat.vue'),
     source('src/components/knowledge/KnowledgeAnswerMarkdown.vue'),
     source('src/api/knowledge.ts'),
+    source('src/utils/knowledgeRuntimePolicy.ts'),
   ])
 
   assert.match(chat, /KnowledgeAnswerMarkdown/)
@@ -23,7 +24,8 @@ test('knowledge chat persists conversations and restores their cited messages', 
   assert.match(chat, /let answerEvidenceDelivered = false/)
   assert.match(chat, /if \(answerEvidenceDelivered\) \{/)
   assert.match(chat, /assistantMessage\.runId = event\.run_id/)
-  assert.match(chat, /正在理解问题与选择知识/)
+  assert.match(chat, /labelForRuntimePhase\(event\.message\)/)
+  assert.match(runtimePolicy, /正在理解问题与选择知识/)
   assert.match(chat, /const assistantMessage = messages\.value\[assistantIndex\]/)
   assert.match(chat, /createStreamedTextBuffer/)
   assert.match(chat, /if \(receivedText\) \{\s*textBuffer\.cancel\(\)\s*assistantMessage\.content = ''\s*receivedText = ''/)

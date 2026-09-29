@@ -25,6 +25,7 @@
       <p class="adaptive-note">软预算可按证据缺口扩大；硬上限、时间与授权不变。负载为业务估算，不是模型账单；浏览目录不代表已读正文。</p>
       <p v-if="diagnostics.planning.stopReason === 'planning_budget_reached'" class="adaptive-warning">目录规划已到预算上限；剩余目录需要由 Agent 针对具体缺口补查，不代表全书已覆盖。</p>
       <p v-if="['planner_failed', 'planner_invalid_output'].includes(diagnostics.planning.stopReason)" class="adaptive-warning">目录规划未完成，本轮保留已选候选并使用只读工具补查。</p>
+      <p v-if="diagnostics.research.manifestProjected" class="adaptive-warning">综合输入是容量内投影；完整发现矩阵已向模型返回 {{ format(diagnostics.research.manifestPages) }} 页。返回页数不等于核验完成，肯定性逐章判断仍需读完对应矩阵。</p>
       <section v-if="diagnostics.coverage.length" class="adaptive-coverage">
         <h4>子问题与依据</h4><p class="adaptive-note">以下为 Agent 自报的取证覆盖，不等于独立事实核验。尚未报告的子问题不推定已完成。</p>
         <article v-for="item in diagnostics.coverage" :key="item.index">

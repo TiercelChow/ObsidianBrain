@@ -43,6 +43,65 @@ fn bounded_list(values: &[String], count: usize, length: usize) -> bool {
     values.len() <= count && values.iter().all(|value| text(value, length))
 }
 
+fn pages_cover_scope(pages: &[Value], scope: Option<&str>) -> bool {
+    let mut versions: HashMap<(String, u64), Vec<(u64, u64)>> = HashMap::new();
+    for page in pages {
+        let page_scope = match page.get("question_id") {
+            Some(Value::Null) => None,
+            Some(Value::String(id)) => Some(id.as_str()),
+            _ => continue,
+        };
+        if page_scope != scope {
+            continue;
+        }
+        let (Some(hash), Some(start), Some(length), Some(total)) = (
+            page["manifest_hash"].as_str(),
+            page["offset_chars"].as_u64(),
+            page["returned_chars"].as_u64(),
+            page["total_chars"].as_u64(),
+        ) else {
+            continue;
+        };
+        let Some(end) = start.checked_add(length) else {
+            continue;
+        };
+        if hash.is_empty() || length == 0 || total == 0 || end > total {
+            continue;
+        }
+        versions
+            .entry((hash.to_owned(), total))
+            .or_default()
+            .push((start, end));
+    }
+    versions.into_iter().any(|((_, total), mut ranges)| {
+        ranges.sort_unstable();
+        let mut covered = 0;
+        for (start, end) in ranges {
+            if start > covered {
+                break;
+            }
+            covered = covered.max(end);
+        }
+        covered >= total
+    })
+}
+
+fn manifest_pages_cover(pages: &[Value], question_id: &str) -> bool {
+    pages_cover_scope(pages, Some(question_id)) || pages_cover_scope(pages, None)
+}
+
+fn read_manifest_page_events(conn: &Connection, run: &str) -> Result<Vec<Value>, BrainError> {
+    let mut stmt = conn.prepare(
+        "SELECT payload_json FROM agent_run_events
+         WHERE run_id=?1 AND event_type='run.research_manifest_page' ORDER BY sequence",
+    )?;
+    let pages = stmt
+        .query_map([run], |row| row.get::<_, String>(0))?
+        .map(|row| decode(&row?))
+        .collect();
+    pages
+}
+
 /// Keep the saved stage text intact; only suppress exact duplication introduced
 /// by the report wrapper. Its summary remains available in stage metadata.
 fn append_report_section(body: &mut String, title: &str, summary: &str, content: &str) {
@@ -675,6 +734,9 @@ impl BookWikiStore {
             check_run(conn,claim,run,true)?;
             let raw:String=conn.query_row("SELECT plan_json FROM knowledge_research_workspaces WHERE task_id=?1",[&claim.task_id],|row|row.get(0))?;
             let plan:ResearchPlan=decode(&raw)?;
+            let run_input:String=conn.query_row("SELECT input_json FROM agent_runs WHERE id=?1",[run],|row|row.get(0))?;
+            let projected=decode::<Value>(&run_input)?["research_manifest_projected"].as_bool().unwrap_or(false);
+            let manifest_pages=if projected {read_manifest_page_events(conn,run)?} else {Vec::new()};
             let mut seen=HashSet::new();
             if output.section_checks.len()!=plan.questions.len() { return Err(invalid("交叉核验必须逐项记录所有主题的对照结果，不能省略章节")) }
             let mut body=output.content_md.clone();
@@ -684,6 +746,7 @@ impl BookWikiStore {
                 let question=plan.questions.iter().find(|q|q.id==check.question_id).ok_or_else(||invalid("交叉核验引用了未规划主题"))?;
                 let current:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM knowledge_research_stages WHERE task_id=?1 AND stage_key=?2 AND status='completed' AND revision=?3)",params![claim.task_id,format!("section:{}",check.question_id),check.revision],|row|row.get(0))?;
                 if !current { return Err(conflict("交叉核验对应的章节版本已变化，不能写入过期综合")) }
+                if projected && check.assessment!="insufficient" && !manifest_pages_cover(&manifest_pages,&check.question_id) { return Err(invalid("综合输入为容量投影，当前主题的完整发现矩阵未读完；不能标记口径一致、条件成立或冲突。请分页读完矩阵，或诚实标记依据不足")) }
                 let label=match check.assessment.as_str(){"consistent"=>"口径一致（模型自报）","qualified"=>"条件成立","conflict"=>"存在冲突",_=>"依据不足"};
                 body.push_str(&format!("- **{}** · {}：{}\n",question.title,label,check.note));
             }
@@ -1190,6 +1253,105 @@ mod tests {
         ResearchBrief, ResearchFinding, ResearchPlan, ResearchQuestion, ResearchSectionOutput,
     };
     use serde_json::json;
+
+    #[test]
+    fn test_manifest_page_coverage_requires_every_character_from_one_version() {
+        let pages = vec![
+            json!({"question_id":"mechanism","offset_chars":0,"returned_chars":5,"total_chars":10,"manifest_hash":"v1"}),
+            json!({"question_id":"mechanism","offset_chars":5,"returned_chars":5,"total_chars":10,"manifest_hash":"v1"}),
+        ];
+        assert!(manifest_pages_cover(&pages, "mechanism"));
+        assert!(!manifest_pages_cover(&pages[..1], "mechanism"));
+        assert!(!manifest_pages_cover(
+            &[
+                pages[0].clone(),
+                json!({"question_id":"mechanism","offset_chars":5,"returned_chars":5,"total_chars":10,"manifest_hash":"v2"}),
+            ],
+            "mechanism"
+        ));
+        assert!(!manifest_pages_cover(&pages, "boundary"));
+        assert!(!manifest_pages_cover(
+            &[json!({"offset_chars":0,"returned_chars":10,"total_chars":10,"manifest_hash":"all"}),],
+            "boundary"
+        ));
+        let all = vec![
+            json!({"question_id":null,"offset_chars":0,"returned_chars":4,"total_chars":10,"manifest_hash":"all"}),
+            json!({"question_id":null,"offset_chars":4,"returned_chars":6,"total_chars":10,"manifest_hash":"all"}),
+        ];
+        assert!(manifest_pages_cover(&all, "boundary"));
+    }
+
+    #[test]
+    fn test_projected_manifest_needs_full_read_before_affirmative_synthesis_check() {
+        for (with_reads, assessment, succeeds) in [
+            (false, "consistent", false),
+            (true, "consistent", true),
+            (false, "insufficient", true),
+        ] {
+            let (store, _dir, base, task) = fixture();
+            setup_plan(&store, &base, &task);
+            complete_section_only(&store, &base, &task, "section:mechanism");
+            complete_section_only(&store, &base, &task, "section:boundary");
+            let claim = store.claim_research_stage(&task, "synthesis").unwrap();
+            let run = store
+                .start_agent_run(
+                    &base,
+                    "deepseek_harness",
+                    "knowledge_task_research",
+                    &json!({"knowledge_task_id":task,"research_stage_key":"synthesis","research_claim_id":claim.claim_id,"research_claim_attempt":claim.attempt,"research_manifest_projected":true}),
+                )
+                .unwrap();
+            store.attach_research_stage_run(&claim, &run.id).unwrap();
+            let manifest = store.research_integration_manifest(&task).unwrap();
+            let checks = manifest["sections"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|section| crate::models::book_wiki::ResearchSectionCheck {
+                    question_id: section["question_id"].as_str().unwrap().into(),
+                    revision: section["revision"].as_i64().unwrap(),
+                    assessment: assessment.into(),
+                    note: if assessment == "insufficient" {
+                        "完整矩阵尚未读取，暂不能核验一致性"
+                    } else {
+                        "已核对保存章节的完整发现矩阵"
+                    }
+                    .into(),
+                })
+                .collect();
+            if with_reads {
+                for question in ["mechanism", "boundary"] {
+                    let page = store
+                        .read_research_manifest_page(&task, Some(question), 0, 12_000)
+                        .unwrap();
+                    assert_eq!(page["has_more"], false);
+                    store.append_agent_run_event(&run.id,"run.research_manifest_page",Some("synthesis"),"已读取完整综合矩阵页",&json!({"question_id":page["question_id"],"offset_chars":page["offset_chars"],"returned_chars":page["content_json"].as_str().unwrap().chars().count(),"total_chars":page["total_chars"],"manifest_hash":page["manifest_hash"]})).unwrap();
+                }
+            }
+            store
+                .complete_agent_run(&run.id, &json!({"answer":"有界综合"}))
+                .unwrap();
+            let output = ResearchSynthesisOutput {
+                summary: "跨章节综合".into(),
+                content_md: "结论需保持条件限定。".into(),
+                findings: vec![ResearchFinding {
+                    finding: "仍需核验外部适用性".into(),
+                    status: "partial".into(),
+                    citation_indices: vec![],
+                    limitations: vec!["不把同源材料视为独立证明".into()],
+                    baseline_entry_id: None,
+                    baseline_claim_id: None,
+                }],
+                section_checks: checks,
+            };
+            let result = store.save_research_synthesis(&claim, &run.id, &output);
+            if succeeds {
+                assert!(result.is_ok(), "{result:?}");
+            } else {
+                assert!(result.unwrap_err().to_string().contains("完整发现矩阵未读"));
+            }
+        }
+    }
 
     fn fixture() -> (BookWikiStore, tempfile::TempDir, String, String) {
         let (store, dir) = test_store();
