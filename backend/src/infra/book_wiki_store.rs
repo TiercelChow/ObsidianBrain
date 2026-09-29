@@ -11009,6 +11009,7 @@ mod tests {
             tone: "technical".into(),
             depth: "deep".into(),
             presentation_theme: "midnight".into(),
+            presentation_format: "narrative".into(),
             emphasis: "保留反例".into(),
         };
         let task = store

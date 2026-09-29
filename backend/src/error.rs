@@ -49,6 +49,9 @@ pub enum BrainError {
     #[error("知识库校验失败: {0}")]
     KnowledgeValidation(String),
 
+    #[error("知识库状态冲突: {0}")]
+    KnowledgeConflict(String),
+
     #[error("Obsidian API 不可用")]
     ObsidianUnavailable,
 
@@ -89,6 +92,7 @@ impl BrainError {
             Self::TaskDocumentCorrupt { .. } => "TASK_DOCUMENT_CORRUPT",
             Self::KnowledgeNotFound(_) => "KNOWLEDGE_NOT_FOUND",
             Self::KnowledgeValidation(_) => "KNOWLEDGE_VALIDATION_ERROR",
+            Self::KnowledgeConflict(_) => "KNOWLEDGE_CONFLICT",
             Self::ObsidianUnavailable => "OBSIDIAN_UNAVAILABLE",
             Self::GitError { .. } => "GIT_ERROR",
             Self::QdrantError(_) => "QDRANT_ERROR",
@@ -124,6 +128,7 @@ impl BrainError {
             Self::TaskDocumentCorrupt { .. } => Some("任务数据损坏，请检查数据库"),
             Self::KnowledgeNotFound(_) => Some("请刷新书架或知识库列表后重试"),
             Self::KnowledgeValidation(_) => Some("请检查知识库、实体或任务参数"),
+            Self::KnowledgeConflict(_) => Some("请刷新知识库或研究任务状态，复核变化的来源后重试"),
             Self::ObsidianUnavailable => Some("请启用并检查 Obsidian Local REST API 插件"),
             Self::GitError { .. } => {
                 Some("Ensure the repository is a valid git repo and git is accessible")
@@ -151,7 +156,9 @@ impl BrainError {
             | Self::TaskValidation(_)
             | Self::TaskDocumentCorrupt { .. }
             | Self::KnowledgeValidation(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            Self::TaskVersionConflict(_) | Self::TaskDuplicateId(_) => StatusCode::CONFLICT,
+            Self::TaskVersionConflict(_)
+            | Self::TaskDuplicateId(_)
+            | Self::KnowledgeConflict(_) => StatusCode::CONFLICT,
             Self::ObsidianUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::SearchError(_)
             | Self::EmbeddingError(_)
@@ -192,5 +199,21 @@ impl IntoResponse for BrainError {
             "suggestion": self.suggestion(),
         });
         (status, Json(body)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_knowledge_conflict_is_distinct_from_model_output_validation() {
+        let conflict = BrainError::KnowledgeConflict("来源版本已变化".into());
+        assert_eq!(conflict.error_code(), "KNOWLEDGE_CONFLICT");
+        assert_eq!(conflict.status_code(), StatusCode::CONFLICT);
+
+        let validation = BrainError::KnowledgeValidation("研究字段缺失".into());
+        assert_eq!(validation.error_code(), "KNOWLEDGE_VALIDATION_ERROR");
+        assert_eq!(validation.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 }

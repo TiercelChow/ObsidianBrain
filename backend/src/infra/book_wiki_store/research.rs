@@ -26,6 +26,9 @@ pub(crate) struct ResearchStageClaim {
 fn invalid(message: &str) -> BrainError {
     BrainError::KnowledgeValidation(message.into())
 }
+fn conflict(message: &str) -> BrainError {
+    BrainError::KnowledgeConflict(message.into())
+}
 fn encode(value: &impl Serialize) -> Result<String, BrainError> {
     serde_json::to_string(value)
         .map_err(|e| BrainError::Internal(format!("研究状态序列化失败: {e}")))
@@ -118,7 +121,7 @@ fn live_task(
 ) -> Result<(String, i64), BrainError> {
     conn.query_row("SELECT t.knowledge_base_id,t.research_execution_epoch FROM knowledge_tasks t JOIN knowledge_bases b ON b.id=t.knowledge_base_id
         WHERE t.id=?1 AND t.status='running' AND (?2 OR t.cancel_requested=0) AND b.lifecycle='active'
-        AND julianday(t.lease_expires_at)>julianday('now')",params![task,allow_cancel],|row|Ok((row.get(0)?,row.get(1)?))).optional()?.ok_or_else(||invalid("研究任务已取消、结束、暂停或租约已失效，拒绝迟到阶段写入"))
+        AND julianday(t.lease_expires_at)>julianday('now')",params![task,allow_cancel],|row|Ok((row.get(0)?,row.get(1)?))).optional()?.ok_or_else(||conflict("研究任务已取消、结束、暂停或租约已失效，拒绝迟到阶段写入"))
 }
 
 fn owned_stage(
@@ -128,9 +131,9 @@ fn owned_stage(
 ) -> Result<(String, String), BrainError> {
     let (base, attempt) = live_task(conn, &claim.task_id, allow_cancel)?;
     if attempt != claim.attempt {
-        return Err(invalid("该研究阶段属于旧任务尝试，不能覆盖新执行器"));
+        return Err(conflict("该研究阶段属于旧任务尝试，不能覆盖新执行器"));
     }
-    let kind=conn.query_row("SELECT kind FROM knowledge_research_stages WHERE task_id=?1 AND stage_key=?2 AND claim_id=?3 AND claimed_attempt=?4 AND status='running'",params![claim.task_id,claim.stage_key,claim.claim_id,claim.attempt],|row|row.get(0)).optional()?.ok_or_else(||invalid("研究阶段已完成或被重新领取，不能覆盖检查点"))?;
+    let kind=conn.query_row("SELECT kind FROM knowledge_research_stages WHERE task_id=?1 AND stage_key=?2 AND claim_id=?3 AND claimed_attempt=?4 AND status='running'",params![claim.task_id,claim.stage_key,claim.claim_id,claim.attempt],|row|row.get(0)).optional()?.ok_or_else(||conflict("研究阶段已完成或被重新领取，不能覆盖检查点"))?;
     Ok((base, kind))
 }
 
@@ -166,13 +169,13 @@ pub(super) fn validate_artifact_write(
     };
     let (base, kind) = owned_stage(conn, &claim, false)?;
     if kind != "presentation" {
-        return Err(invalid("成果写入未获得当前演示阶段授权"));
+        return Err(conflict("成果写入未获得当前演示阶段授权"));
     }
     check_run(conn, &claim, run, true)?;
     let report = read_content(conn, task, "report")?;
     for reference in &report.evidence {
         if !current_reference(conn, &base, reference)? {
-            return Err(invalid("生成期间报告依据变化，保留报告但不提交过期演示"));
+            return Err(conflict("生成期间报告依据变化，保留报告但不提交过期演示"));
         }
     }
     Ok(())
@@ -190,7 +193,7 @@ fn check_run(
         AND json_extract(r.input_json,'$.knowledge_task_id')=?2 AND json_extract(r.input_json,'$.research_stage_key')=?3
         AND json_extract(r.input_json,'$.research_claim_id')=?4)",params![run,claim.task_id,claim.stage_key,claim.claim_id,if completed {"completed"} else {"running"}],|row|row.get(0))?;
     if !valid {
-        return Err(invalid("阶段运行身份、任务范围或完成状态不匹配"));
+        return Err(conflict("阶段运行身份、任务范围或完成状态不匹配"));
     }
     Ok(())
 }
@@ -427,7 +430,7 @@ fn section_evidence(
             snapshot_hash: stable_id("research-evidence", &raw),
         };
         if !current_reference(conn, base, &reference)? {
-            return Err(invalid(
+            return Err(conflict(
                 "阶段保存前来源已变化或超出书籍权限；保留旧成果，不认证为当前章节",
             ));
         }
@@ -668,7 +671,7 @@ impl BookWikiStore {
         let now = Utc::now().to_rfc3339();
         self.db.transaction(|conn| {
             let (base,kind)=owned_stage(conn,claim,false)?;
-            if kind!="synthesis" { return Err(invalid("综合成果只能保存在交叉核验阶段")) }
+            if kind!="synthesis" { return Err(conflict("综合成果只能保存在交叉核验阶段")) }
             check_run(conn,claim,run,true)?;
             let raw:String=conn.query_row("SELECT plan_json FROM knowledge_research_workspaces WHERE task_id=?1",[&claim.task_id],|row|row.get(0))?;
             let plan:ResearchPlan=decode(&raw)?;
@@ -680,7 +683,7 @@ impl BookWikiStore {
                 if !seen.insert(&check.question_id) || !matches!(check.assessment.as_str(),"consistent"|"qualified"|"conflict"|"insufficient") || !text(&check.note,4000) { return Err(invalid("交叉核验主题、判定或说明不符合合同")) }
                 let question=plan.questions.iter().find(|q|q.id==check.question_id).ok_or_else(||invalid("交叉核验引用了未规划主题"))?;
                 let current:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM knowledge_research_stages WHERE task_id=?1 AND stage_key=?2 AND status='completed' AND revision=?3)",params![claim.task_id,format!("section:{}",check.question_id),check.revision],|row|row.get(0))?;
-                if !current { return Err(invalid("交叉核验对应的章节版本已变化，不能写入过期综合")) }
+                if !current { return Err(conflict("交叉核验对应的章节版本已变化，不能写入过期综合")) }
                 let label=match check.assessment.as_str(){"consistent"=>"口径一致（模型自报）","qualified"=>"条件成立","conflict"=>"存在冲突",_=>"依据不足"};
                 body.push_str(&format!("- **{}** · {}：{}\n",question.title,label,check.note));
             }
@@ -703,7 +706,7 @@ impl BookWikiStore {
         self.db.transaction(|conn| {
             let (base,_)=live_task(conn,task,false)?;
             let old:Option<String>=conn.query_row("SELECT original_request_hash FROM knowledge_research_workspaces WHERE task_id=?1",[task],|row|row.get(0)).optional()?;
-            if old.as_ref().is_some_and(|old|old!=&hash) {return Err(invalid("研究目标已变化，不能复用旧目标的阶段；请建立新任务保留原成果"))}
+            if old.as_ref().is_some_and(|old|old!=&hash) {return Err(conflict("研究目标已变化，不能复用旧目标的阶段；请建立新任务保留原成果"))}
             conn.execute("INSERT OR IGNORE INTO knowledge_research_workspaces(task_id,knowledge_base_id,original_request_json,original_request_hash,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?5)",params![task,base,raw,hash,now])?;
             conn.execute("INSERT OR IGNORE INTO knowledge_research_stages(task_id,stage_key,title,kind,ordinal,status,updated_at) VALUES(?1,'plan','目标与研究规划','plan',0,'pending',?2)",params![task,now])?;
             Ok(())
@@ -824,7 +827,7 @@ impl BookWikiStore {
             let (_,attempt)=live_task(conn,task,false)?;
             let row:Option<(String,Option<i64>)>=conn.query_row("SELECT status,claimed_attempt FROM knowledge_research_stages WHERE task_id=?1 AND stage_key=?2",params![task,key],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
             let Some((status,old_attempt))=row else {return Err(invalid("研究阶段未规划，不能领取未知阶段"))};
-            if status=="completed" || (status=="running" && old_attempt==Some(attempt)) {return Err(invalid("该阶段已完成或正在当前尝试中执行，不应重复研究"))}
+            if status=="completed" || (status=="running" && old_attempt==Some(attempt)) {return Err(conflict("该阶段已完成或正在当前尝试中执行，不应重复研究"))}
             let kind:String=conn.query_row("SELECT kind FROM knowledge_research_stages WHERE task_id=?1 AND stage_key=?2",params![task,key],|row|row.get(0))?;
             let ready:bool=match kind.as_str() {
                 "plan"=>true,
@@ -857,7 +860,7 @@ impl BookWikiStore {
                 |row| row.get(0),
             )?;
             if attached.as_deref().is_some_and(|id| id != run) {
-                return Err(invalid("本阶段已关联其他运行，不能替换来源身份"));
+                return Err(conflict("本阶段已关联其他运行，不能替换来源身份"));
             }
             conn.execute(
                 "UPDATE knowledge_research_stages SET run_id=?3 WHERE task_id=?1 AND stage_key=?2",
@@ -877,10 +880,10 @@ impl BookWikiStore {
         let now = Utc::now().to_rfc3339();
         self.db.transaction(|conn| {
             let (base,kind)=owned_stage(conn,claim,false)?;
-            if kind!="plan" {return Err(invalid("只有规划阶段能保存研究目标"))}
+            if kind!="plan" {return Err(conflict("只有规划阶段能保存研究目标"))}
             check_run(conn,claim,run,true)?;
             let has_plan:bool=conn.query_row("SELECT plan_json IS NOT NULL FROM knowledge_research_workspaces WHERE task_id=?1",[&claim.task_id],|row|row.get(0))?;
-            if has_plan {return Err(invalid("规划已持久化，不得改写已完成阶段的目标身份"))}
+            if has_plan {return Err(conflict("规划已持久化，不得改写已完成阶段的目标身份"))}
             for question in &plan.questions {
                 for entry in &question.target_entry_ids {
                     let snapshot=capture_baseline(conn,&base,entry)?;
@@ -929,7 +932,7 @@ impl BookWikiStore {
         let now = Utc::now().to_rfc3339();
         self.db.transaction(|conn| {
             let (base,kind)=owned_stage(conn,claim,false)?;
-            if kind!="section" {return Err(invalid("章节成果不能替代其他业务阶段的交付物"))}
+            if kind!="section" {return Err(conflict("章节成果不能替代其他业务阶段的交付物"))}
             check_run(conn,claim,run,true)?;
             check_baseline_findings(conn,claim,output)?;
             let references=section_evidence(conn,&base,run,output)?;
@@ -1935,6 +1938,104 @@ mod tests {
         assert_eq!(retry.content_run_id, Some(report_run));
         assert_eq!(retry.content_md, report.content_md);
         assert_eq!(retry.evidence, report.evidence);
+    }
+
+    #[test]
+    fn test_stale_source_at_section_save_is_a_state_conflict_not_model_error() {
+        let (store, _dir, base, task) = fixture();
+        setup_plan(&store, &base, &task);
+        let claim = store
+            .claim_research_stage(&task, "section:mechanism")
+            .unwrap();
+        let run = attach(&store, &base, &task, &claim);
+        store
+            .record_visible_agent_evidence(
+                &run,
+                "source_span",
+                "span",
+                "version-doc",
+                &json!({"content_md":"可追溯的来源正文。","offset_chars":0}),
+            )
+            .unwrap();
+        store
+            .complete_agent_run(&run, &json!({"answer":"结论 [S1]"}))
+            .unwrap();
+        store
+            .sync_markdown_sources(&base, &[sample_source("doc2", "section2", "span2")])
+            .unwrap();
+
+        let error = store
+            .save_research_section(&claim, &run, &output())
+            .unwrap_err();
+        assert!(matches!(error, BrainError::KnowledgeConflict(_)));
+        let stage = store
+            .get_research_stage_content(&task, "section:mechanism", None)
+            .unwrap();
+        assert_eq!(stage.stage.status, "running");
+        assert!(stage.content_md.is_empty());
+    }
+
+    #[test]
+    fn test_changed_section_revision_at_synthesis_save_is_a_state_conflict() {
+        let (store, _dir, base, task) = fixture();
+        setup_plan(&store, &base, &task);
+        complete_section_only(&store, &base, &task, "section:mechanism");
+        complete_section_only(&store, &base, &task, "section:boundary");
+        let claim = store.claim_research_stage(&task, "synthesis").unwrap();
+        let run = attach(&store, &base, &task, &claim);
+        let checks = store.research_integration_manifest(&task).unwrap()["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|section| crate::models::book_wiki::ResearchSectionCheck {
+                question_id: section["question_id"].as_str().unwrap().into(),
+                revision: section["revision"].as_i64().unwrap(),
+                assessment: "insufficient".into(),
+                note: "仍有证据缺口".into(),
+            })
+            .collect();
+        store
+            .complete_agent_run(&run, &json!({"answer":"有界综合"}))
+            .unwrap();
+        store
+            .db
+            .with_connection(|conn| {
+                conn.execute(
+                    "UPDATE knowledge_research_stages SET revision=revision+1 WHERE task_id=?1 AND stage_key='section:mechanism'",
+                    [&task],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        let error = store
+            .save_research_synthesis(
+                &claim,
+                &run,
+                &ResearchSynthesisOutput {
+                    summary: "证据仍有缺口".into(),
+                    content_md: "当前不能得出无条件结论。".into(),
+                    findings: vec![ResearchFinding {
+                        finding: "尚需核验差异".into(),
+                        status: "partial".into(),
+                        citation_indices: vec![],
+                        limitations: vec!["缺少当前版本核验".into()],
+                        baseline_entry_id: None,
+                        baseline_claim_id: None,
+                    }],
+                    section_checks: checks,
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(error, BrainError::KnowledgeConflict(_)));
+        assert_eq!(
+            store
+                .get_research_stage_content(&task, "synthesis", None)
+                .unwrap()
+                .stage
+                .status,
+            "running"
+        );
     }
 
     #[test]

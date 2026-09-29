@@ -267,6 +267,8 @@ pub struct ResearchBrief {
     pub tone: String,
     pub depth: String,
     pub presentation_theme: String,
+    /// Narrative material by default; Q&A slides require explicit confirmation.
+    pub presentation_format: String,
     pub emphasis: String,
 }
 
@@ -279,6 +281,7 @@ impl Default for ResearchBrief {
             tone: "analytical".into(),
             depth: "standard".into(),
             presentation_theme: "editorial".into(),
+            presentation_format: "narrative".into(),
             emphasis: String::new(),
         }
     }
@@ -308,6 +311,11 @@ impl ResearchBrief {
                 self.presentation_theme.as_str(),
                 &["editorial", "midnight", "sage"],
             ),
+            (
+                "演示编排",
+                self.presentation_format.as_str(),
+                &["narrative", "qa"],
+            ),
         ] {
             if !allowed.contains(&value) {
                 return Err(format!("未知的研究{name}偏好"));
@@ -333,7 +341,7 @@ pub struct ResearchDecisionPoint {
 pub struct ResearchPreflight {
     pub summary: String,
     pub recommended: ResearchBrief,
-    /// A ranked subset of audience, purpose, tone, depth, presentation_theme.
+    /// A ranked subset of audience, purpose, tone, depth and presentation choices.
     pub focus_decisions: Vec<String>,
     /// Contextual prompts for the corresponding decisions. Older responses may omit these.
     #[serde(default)]
@@ -354,12 +362,22 @@ impl ResearchPreflight {
         for field in &self.focus_decisions {
             if !matches!(
                 field.as_str(),
-                "audience" | "purpose" | "tone" | "depth" | "presentation_theme"
+                "audience"
+                    | "purpose"
+                    | "tone"
+                    | "depth"
+                    | "presentation_theme"
+                    | "presentation_format"
             ) || (field == "presentation_theme" && deliverable_type != "presentation")
+                || (field == "presentation_format" && deliverable_type != "presentation")
                 || !seen.insert(field)
             {
                 return Err("研究预分析包含无效或重复决策点".into());
             }
+        }
+        if deliverable_type != "presentation" && self.recommended.presentation_format != "narrative"
+        {
+            return Err("研究报告不需要演示编排方式".into());
         }
         if self.decision_points.len() > self.focus_decisions.len() {
             return Err("研究预分析的决策说明数量超出范围".into());
@@ -395,6 +413,22 @@ mod research_brief_tests {
     }
 
     #[test]
+    fn test_research_brief_presentation_format_is_explicit_and_legacy_safe() {
+        let old: ResearchBrief = serde_json::from_value(serde_json::json!({
+            "confirmed":true,"audience":"general","purpose":"understand",
+            "tone":"analytical","depth":"standard","presentation_theme":"editorial",
+            "emphasis":""
+        }))
+        .unwrap();
+        assert_eq!(old.presentation_format, "narrative");
+        let mut brief = old;
+        brief.presentation_format = "qa".into();
+        assert!(brief.validate().is_ok());
+        brief.presentation_format = "unknown".into();
+        assert!(brief.validate().is_err());
+    }
+
+    #[test]
     fn test_research_brief_accepts_bounded_user_preferences() {
         let brief = ResearchBrief {
             confirmed: true,
@@ -403,6 +437,7 @@ mod research_brief_tests {
             tone: "technical".into(),
             depth: "deep".into(),
             presentation_theme: "midnight".into(),
+            presentation_format: "narrative".into(),
             emphasis: "优先比较方案的适用边界".into(),
         };
         assert!(brief.validate().is_ok());

@@ -325,9 +325,9 @@ impl BookWikiService {
             "你是研究任务的启动顾问，只分析用户希望获得什么材料，不研究书籍内容，不查找证据，也不代替用户决定。\n\
              书籍：{}\n任务类型：{task_type}\n交付形式：{deliverable_type}\n标题：{title}\n补充说明：{description}\n\n\
              判断哪些编辑决策最影响最终成果，只返回一个完整 JSON 对象：\n\
-             {{\"summary\":\"用一句话复述预期成果，不声称已完成研究\",\"recommended\":{{\"confirmed\":false,\"audience\":\"general\",\"purpose\":\"understand\",\"tone\":\"analytical\",\"depth\":\"standard\",\"presentation_theme\":\"editorial\",\"emphasis\":\"\"}},\"focus_decisions\":[\"audience\",\"purpose\"],\"decision_points\":[{{\"field\":\"audience\",\"question\":\"材料面向领域专家还是入门读者？\",\"impact\":\"会改变术语解释和技术细节的比重。\"}},{{\"field\":\"purpose\",\"question\":\"要辅助决策还是帮助理解？\",\"impact\":\"决策材料会突出选项判据和条件性建议。\"}}],\"cautions\":[\"需要用户确认的范围歧义\"]}}\n\
-             audience 只能为 general/specialist/beginner/self；purpose 只能为 understand/decision/teach/reference；tone 只能为 analytical/technical/narrative/concise；depth 只能为 brief/standard/deep；presentation_theme 只能为 editorial/midnight/sage。\n\
-             focus_decisions 按重要性选 1 至 4 个字段，不能重复；仅演示文稿可选 presentation_theme。decision_points 按相同顺序为每个重点字段给出与当前任务相关的具体选择问题和该选择对成品的影响，不写通用空话，也不把建议当成用户决定；每条 question/impact 各不超过 160 字。所有字段必须齐全，未知信息保持保守默认。cautions 最多 3 条，只指出实际歧义，不制造决策。不得增加字段或输出解释、代码围栏。",
+             {{\"summary\":\"用一句话复述预期成果，不声称已完成研究\",\"recommended\":{{\"confirmed\":false,\"audience\":\"general\",\"purpose\":\"understand\",\"tone\":\"analytical\",\"depth\":\"standard\",\"presentation_theme\":\"editorial\",\"presentation_format\":\"narrative\",\"emphasis\":\"\"}},\"focus_decisions\":[\"audience\",\"purpose\"],\"decision_points\":[{{\"field\":\"audience\",\"question\":\"材料面向领域专家还是入门读者？\",\"impact\":\"会改变术语解释和技术细节的比重。\"}},{{\"field\":\"purpose\",\"question\":\"要辅助决策还是帮助理解？\",\"impact\":\"决策材料会突出选项判据和条件性建议。\"}}],\"cautions\":[\"需要用户确认的范围歧义\"]}}\n\
+             audience 只能为 general/specialist/beginner/self；purpose 只能为 understand/decision/teach/reference；tone 只能为 analytical/technical/narrative/concise；depth 只能为 brief/standard/deep；presentation_theme 只能为 editorial/midnight/sage；presentation_format 只能为 narrative/qa。\n\
+             presentation_format 默认 narrative（连贯的论点式材料）；仅当用户明确要求逐题讨论、互动问答式演示时才建议 qa。focus_decisions 按重要性选 1 至 4 个字段，不能重复；仅演示文稿可选 presentation_theme 或 presentation_format。decision_points 按相同顺序为每个重点字段给出与当前任务相关的具体选择问题和该选择对成品的影响，不写通用空话，也不把建议当成用户决定；每条 question/impact 各不超过 160 字。所有字段必须齐全，未知信息保持保守默认。cautions 最多 3 条，只指出实际歧义，不制造决策。不得增加字段或输出解释、代码围栏。",
             base.book_name,
         );
         let provider_output_limit = profile
@@ -5351,7 +5351,59 @@ fn parse_task_presentation_spec(
 ) -> Result<PresentationSpec, BrainError> {
     let spec = parse_presentation_spec(answer, evidence_count)?;
     ensure_task_presentation_theme(&spec, task)?;
+    ensure_task_presentation_format(&spec, task)?;
     Ok(spec)
+}
+
+fn is_question_slide_title(title: &str) -> bool {
+    let title = title.trim();
+    if title.ends_with(['?', '？']) {
+        return true;
+    }
+    if [
+        "什么是",
+        "为什么",
+        "为何",
+        "如何",
+        "怎么",
+        "怎样",
+        "是否",
+        "能否",
+        "哪些",
+        "哪种",
+        "何时",
+    ]
+    .iter()
+    .any(|prefix| title.starts_with(prefix))
+    {
+        return true;
+    }
+    // English "How ..." also names a legitimate topic; require punctuation
+    // there rather than treating every such material heading as a question.
+    ["是什么", "有哪些", "怎么办"]
+        .iter()
+        .any(|suffix| title.ends_with(suffix))
+}
+
+fn ensure_task_presentation_format(
+    spec: &PresentationSpec,
+    task: &KnowledgeTask,
+) -> Result<(), BrainError> {
+    if !task.brief.confirmed || task.brief.presentation_format == "qa" {
+        return Ok(());
+    }
+    let question_titles = spec
+        .slides
+        .iter()
+        .filter(|slide| is_question_slide_title(&slide.title))
+        .count();
+    if question_titles * 2 > spec.slides.len() {
+        return Err(BrainError::KnowledgeValidation(format!(
+            "演示文稿有 {question_titles}/{} 页采用问句标题，但用户确认的是论点式材料；请把多数页面改为对象、关系、条件或有证据的判断，不能把研究子问题逐题搬成幻灯片。若确需问答式讲解，请在创建任务前明确选择问答式编排",
+            spec.slides.len()
+        )));
+    }
+    Ok(())
 }
 
 fn ensure_task_presentation_theme(
@@ -5489,7 +5541,7 @@ fn build_presentation_prompt(
     );
     if task.brief.confirmed {
         prompt.push_str(&format!(
-        "<user_confirmed_brief>\n受众：{}；用途：{}；叙事风格：{}；内容深度：{}；指定主题：{}；特别强调：{}。\n</user_confirmed_brief>\n\
+        "<user_confirmed_brief>\n受众：{}；用途：{}；叙事风格：{}；内容深度：{}；指定主题：{}；演示编排：{}；特别强调：{}。\n</user_confirmed_brief>\n\
          这是用户明确确认的编辑要求，优先于默认风格建议。audience 必须面向指定受众，theme 必须严格等于指定主题。\
          先确定这份材料在受众面前要建立什么判断或支持什么决策，再选择证据、对照、流程与收束；不要把研究任务当作问答逐页拆分。\n\n",
         task.brief.audience,
@@ -5497,6 +5549,7 @@ fn build_presentation_prompt(
         task.brief.tone,
         task.brief.depth,
         task.brief.presentation_theme,
+        task.brief.presentation_format,
         if task.brief.emphasis.trim().is_empty() { "无" } else { task.brief.emphasis.as_str() },
         ));
     }
@@ -5504,6 +5557,11 @@ fn build_presentation_prompt(
     prompt.push_str(&skill.instructions);
     prompt.push_str("\n</presentation_skill>\n");
     if task.brief.confirmed {
+        if task.brief.presentation_format == "qa" {
+            prompt.push_str("用户明确选择问答式讲解：可以用真实需要讨论的问题组织页面，但每个问题都要有完整的证据、条件和答案，不得机械照搬后台研究子问题，也不能以空洞提问代替结论。\n");
+        } else {
+            prompt.push_str("用户明确选择论点式材料：先设计连续的叙事主线，多数页面标题应点明对象、关系、条件或有证据的判断，不把每页写成一个待回答的问题。\n");
+        }
         prompt.push_str(&format!(
             "用户最终确认的演示主题是 {}，无论 Skill 的默认建议如何，最终 JSON 的 theme 必须一致；叙事需适配受众 {} 与用途 {}。\n",
             task.brief.presentation_theme, task.brief.audience, task.brief.purpose,

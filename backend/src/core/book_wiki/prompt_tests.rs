@@ -578,6 +578,7 @@ fn test_presentation_prompt_keeps_report_evidence_and_strict_contract() {
         tone: "technical".into(),
         depth: "deep".into(),
         presentation_theme: "midnight".into(),
+        presentation_format: "narrative".into(),
         emphasis: "保留反例".into(),
     };
 
@@ -619,6 +620,26 @@ fn test_presentation_prompt_keeps_report_evidence_and_strict_contract() {
     assert!(ensure_task_presentation_theme(&spec, &task).is_err());
     spec.theme = PresentationTheme::Midnight;
     assert!(ensure_task_presentation_theme(&spec, &task).is_ok());
+
+    let question_deck = serde_json::json!({
+        "schema_version":"1.0","title":"分层架构材料","subtitle":"机制与条件",
+        "audience":"领域专家","core_message":"依赖方向影响变更边界。","theme":"midnight",
+        "slides":[
+            {"layout":"statement","title":"什么是分层架构？","takeaway":"分层用于限定职责与依赖。","body":["职责划分是起点。"],"citations":["S1"]},
+            {"layout":"evidence","title":"为什么需要单向依赖？","takeaway":"反向依赖会扩大变更范围。","body":["依赖方向必须可核对。"],"citations":["S1"]},
+            {"layout":"evidence","title":"如何判断边界？","takeaway":"检查变化是否跨越抽象。","body":["以具体变更作为检验。"],"citations":["S1"]},
+            {"layout":"summary","title":"把依赖规则带入验收","takeaway":"边界需在实际修改中验证。","body":["保留例外和条件。"],"citations":[]}
+        ]
+    }).to_string();
+    assert!(parse_task_presentation_spec(&question_deck, 1, &task)
+        .unwrap_err()
+        .to_string()
+        .contains("问句标题"));
+    task.brief.presentation_format = "qa".into();
+    assert!(parse_task_presentation_spec(&question_deck, 1, &task).is_ok());
+    task.brief.confirmed = false;
+    task.brief.presentation_format = "narrative".into();
+    assert!(parse_task_presentation_spec(&question_deck, 1, &task).is_ok());
 }
 
 #[test]
@@ -630,6 +651,29 @@ fn test_research_preflight_rejects_presentation_theme_for_report() {
         "cautions":[]
     }).to_string();
     assert!(parse_research_preflight(&answer, "report").is_err());
+}
+
+#[test]
+fn test_research_preflight_presentation_format_requires_presentation_delivery() {
+    let answer = serde_json::json!({
+        "summary":"制作一份面向讨论的问答式讲解材料",
+        "recommended":{"confirmed":false,"audience":"general","purpose":"teach","tone":"narrative","depth":"standard","presentation_theme":"editorial","presentation_format":"qa","emphasis":""},
+        "focus_decisions":["presentation_format"],
+        "decision_points":[{"field":"presentation_format","question":"逐题讨论还是形成连贯论点？","impact":"决定页面标题与叙事顺序。"}],
+        "cautions":[]
+    }).to_string();
+    let preview = parse_research_preflight(&answer, "presentation").unwrap();
+    assert_eq!(preview.recommended.presentation_format, "qa");
+    assert!(parse_research_preflight(&answer, "report").is_err());
+}
+
+#[test]
+fn test_question_slide_title_detection_covers_cjk_and_english_without_prose_false_positives() {
+    assert!(is_question_slide_title("分层架构是什么"));
+    assert!(is_question_slide_title("Does the evidence support this?"));
+    assert!(is_question_slide_title("如何验证适用边界"));
+    assert!(!is_question_slide_title("分层架构的依赖边界"));
+    assert!(!is_question_slide_title("How teams learn from feedback"));
 }
 
 #[test]

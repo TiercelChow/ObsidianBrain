@@ -320,6 +320,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "presentation narrative contract for existing builtin skill",
         sql: include_str!("../../migrations/054_presentation_narrative_contract.sql"),
     },
+    Migration {
+        version: 55,
+        description: "explicit narrative or question-led presentation format",
+        sql: include_str!("../../migrations/055_presentation_format_contract.sql"),
+    },
 ];
 
 #[cfg(test)]
@@ -714,7 +719,7 @@ fn overwrite_structured_presentation_skill(conn: &Connection) -> Result<(), Brai
     let updated = conn.execute(
         "UPDATE skill_versions
          SET content_hash = ?1, release_state = 'published',
-             changelog = '按用户用途编排材料；为背景和流程页保留直接主题标题，避免逐页问答和重复标题。'
+             changelog = '按用户确认的用途和编排方式组织材料；默认论点式，明确选择时允许有证据的问答式讲解。'
          WHERE id = ?2 AND skill_id = ?3",
         params![&content_hash, version_id, skill_id],
     )?;
@@ -853,7 +858,7 @@ impl SqliteStore {
                 32 => compact_wiki_skill_versions(&conn),
                 33 => overwrite_structured_presentation_skill(&conn),
                 34 => overwrite_structured_presentation_skill(&conn),
-                54 => overwrite_structured_presentation_skill(&conn),
+                54 | 55 => overwrite_structured_presentation_skill(&conn),
                 38 | 42 | 45 | 47 => overwrite_harness_wiki_skills(&conn),
                 48 => crate::infra::book_wiki_store::backfill_source_impacts(&conn),
                 51 => migrate_research_execution_epoch(&conn),
@@ -1707,7 +1712,7 @@ mod tests {
         let store = SqliteStore::new(&db_path).unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version = 54", [])
+            conn.execute("DELETE FROM _migrations WHERE version IN (54, 55)", [])
                 .unwrap();
             conn.execute(
                 "UPDATE skill_files
@@ -1747,6 +1752,45 @@ mod tests {
     }
 
     #[test]
+    fn test_migration_055_refreshes_current_presentation_format_skill_body() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("presentation-format-upgrade.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("DELETE FROM _migrations WHERE version = 55", [])
+                .unwrap();
+            conn.execute(
+                "UPDATE skill_files
+                 SET content_text='旧版演示指令', content_hash='legacy', size_bytes=18
+                 WHERE skill_version_id='skill-version-book-presentation-v3'
+                   AND relative_path='SKILL.md'",
+                [],
+            )
+            .unwrap();
+        }
+        drop(store);
+
+        let upgraded = SqliteStore::new(&db_path).unwrap();
+        let conn = upgraded.conn.lock().unwrap();
+        let (body, hash): (String, String) = conn
+            .query_row(
+                "SELECT f.content_text, f.content_hash FROM skills s
+                 JOIN skill_files f ON f.skill_version_id=s.current_version_id
+                 WHERE s.id='skill-book-presentation' AND f.relative_path='SKILL.md'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            body,
+            include_str!("../../skills/book-presentation/SKILL.md")
+        );
+        assert_eq!(hash, hex::encode(Sha256::digest(body.as_bytes())));
+        assert!(body.contains("明确确认演示编排"));
+    }
+
+    #[test]
     fn test_migration_054_preserves_later_published_presentation_skill() {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("presentation-v4.db");
@@ -1756,7 +1800,57 @@ mod tests {
         let hash = hex::encode(Sha256::digest(content.as_bytes()));
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version = 54", [])
+            conn.execute("DELETE FROM _migrations WHERE version IN (54, 55)", [])
+                .unwrap();
+            conn.execute(
+                "INSERT INTO skill_versions
+                    (id, skill_id, revision, content_hash, release_state, created_at)
+                 VALUES (?1, 'skill-book-presentation', 4, ?2, 'published', CURRENT_TIMESTAMP)",
+                params![version_id, hash],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO skill_files
+                    (skill_version_id, relative_path, media_type, content_text,
+                     content_hash, size_bytes)
+                 VALUES (?1, 'SKILL.md', 'text/markdown', ?2, ?3, ?4)",
+                params![version_id, content, hash, content.len() as i64],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE skills SET current_version_id = ?1 WHERE id = 'skill-book-presentation'",
+                params![version_id],
+            )
+            .unwrap();
+            compact_wiki_skill_versions(&conn).unwrap();
+        }
+        drop(store);
+
+        let upgraded = SqliteStore::new(&db_path).unwrap();
+        let conn = upgraded.conn.lock().unwrap();
+        let actual: (String, String) = conn
+            .query_row(
+                "SELECT s.current_version_id, f.content_text FROM skills s
+                 JOIN skill_files f ON f.skill_version_id = s.current_version_id
+                 WHERE s.id = 'skill-book-presentation' AND f.relative_path = 'SKILL.md'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(actual, (version_id.into(), content.into()));
+    }
+
+    #[test]
+    fn test_migration_055_preserves_later_published_presentation_skill() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("presentation-format-v4.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+        let version_id = "skill-version-book-presentation-v4";
+        let content = "用户已发布的演示 v4 规则";
+        let hash = hex::encode(Sha256::digest(content.as_bytes()));
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("DELETE FROM _migrations WHERE version = 55", [])
                 .unwrap();
             conn.execute(
                 "INSERT INTO skill_versions

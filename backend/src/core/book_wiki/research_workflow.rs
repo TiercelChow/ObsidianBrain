@@ -1549,6 +1549,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_research_phase_stale_source_conflict_does_not_retry_model() {
+        let (_dir, service, task, calls) = plan_repair_fixture(false);
+        let profile = service.active_runtime_profile().unwrap();
+        let result: Result<(), BrainError> = service
+            .persist_model_research_phase(plan_phase(&task, &profile), |_, _, answer| {
+                let plan: ResearchPlan = parse_phase(answer)?;
+                validate_research_plan(&plan)?;
+                Err(BrainError::KnowledgeConflict(
+                    "阶段保存前来源已变化，不能认证旧证据".into(),
+                ))
+            })
+            .await;
+        assert!(matches!(result, Err(BrainError::KnowledgeConflict(_))));
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        let workspace = service
+            .store
+            .get_research_workspace(&task.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(workspace.stages[0].status, "failed");
+        assert!(workspace.stages[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("来源已变化"));
+    }
+
+    #[tokio::test]
     async fn test_research_phase_unknown_kind_repairs_once_and_persists_strict_contract() {
         let (_dir, service, task, calls) = plan_repair_fixture(true);
         let profile = service.active_runtime_profile().unwrap();

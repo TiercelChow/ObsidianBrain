@@ -235,13 +235,14 @@ export interface ResearchBrief {
   tone: 'analytical' | 'technical' | 'narrative' | 'concise'
   depth: 'brief' | 'standard' | 'deep'
   presentation_theme: 'editorial' | 'midnight' | 'sage'
+  presentation_format: 'narrative' | 'qa'
   emphasis: string
 }
 
 export interface ResearchPreflight {
   summary: string
   recommended: ResearchBrief
-  focus_decisions: Array<'audience' | 'purpose' | 'tone' | 'depth' | 'presentation_theme'>
+  focus_decisions: Array<'audience' | 'purpose' | 'tone' | 'depth' | 'presentation_theme' | 'presentation_format'>
   decision_points?: Array<{ field: ResearchPreflight['focus_decisions'][number]; question: string; impact: string }>
   cautions: string[]
 }
