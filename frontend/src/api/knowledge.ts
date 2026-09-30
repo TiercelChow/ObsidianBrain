@@ -403,6 +403,16 @@ export interface KnowledgeConversationSummary {
   updated_at: string
 }
 
+export interface UnfinishedQaRun {
+  run_id: string
+  question: string
+  conversation_id?: string | null
+  stop_reason?: string | null
+  has_partial_answer: boolean
+  error: string
+  created_at: string
+}
+
 export interface KnowledgeChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -1071,6 +1081,13 @@ export function listKnowledgeConversations(knowledgeBaseId: string, limit = 30) 
     knowledge_base_id: knowledgeBaseId,
     limit,
   }) as unknown as Promise<ToolEnvelope<{ conversations: KnowledgeConversationSummary[] }>>
+}
+
+export function listUnfinishedQaRuns(knowledgeBaseId: string, limit = 10) {
+  return callTool('list_unfinished_qa_runs', {
+    knowledge_base_id: knowledgeBaseId,
+    limit,
+  }) as unknown as Promise<ToolEnvelope<{ runs: UnfinishedQaRun[] }>>
 }
 
 export function getKnowledgeConversation(conversationId: string) {

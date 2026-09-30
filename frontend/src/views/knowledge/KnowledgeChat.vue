@@ -51,6 +51,15 @@
           </div>
         </section>
 
+        <section v-if="unfinishedRuns.length" class="conversation-history unfinished-history" aria-label="未完成的问答">
+          <header><span>未完成的问答</span><span>{{ unfinishedRuns.length }} 轮</span></header>
+          <div class="conversation-list">
+            <button v-for="run in unfinishedRuns" :key="run.run_id" type="button" :disabled="searching || !!openingRunId" @click="openUnfinishedRun(run)">
+              <strong>{{ run.question }}</strong><span>{{ run.has_partial_answer ? '草稿待完成' : '未收到正文' }} · {{ formatConversationTime(run.created_at) }}</span>
+            </button>
+          </div>
+        </section>
+
         <div class="runtime-state">
           <span class="knowledge-status" :class="runtimeReady ? 'is-healthy' : 'is-warning'">
             {{ runtimeReady ? 'Harness 启动器可用' : '证据检索模式' }}
@@ -83,8 +92,9 @@
                   <span class="chat-run-dots" aria-hidden="true"><i></i><i></i><i></i></span>
                   <span class="chat-run-label">{{ streamPhase || '正在处理你的问题' }}</span>
                 </div>
+                <div v-if="message.restoredFailed && message.content" class="restored-answer-draft"><strong>未完成草稿 · 引用待重新核对</strong><p>{{ message.content }}</p></div>
                 <KnowledgeAnswerMarkdown
-                  v-if="message.content"
+                  v-else-if="message.content"
                   :content="message.content"
                   :evidence-count="message.evidence?.length ?? 0"
                   :streaming="streamingMessageId === message.id"
@@ -96,7 +106,10 @@
                 <strong>{{ message.interruption.notice }}</strong>
                 <span v-if="message.interruption.kind !== 'cancelled'">{{ message.interruption.detail }}</span>
                 <button v-if="message.interruption.canRetry && message.runId && message.originalQuestion && message.content" type="button" :disabled="searching || !runtimeReady" @click="ask(message.originalQuestion, message)">继续完成完整答案</button>
-                <button v-else-if="message.interruption.canRetry && message.originalQuestion && !message.content" type="button" :disabled="searching || !runtimeReady" @click="ask(message.originalQuestion)">重新提问</button>
+                <button v-else-if="message.interruption.canRetry && message.originalQuestion && !message.content" type="button" :disabled="searching || !runtimeReady" @click="ask(message.originalQuestion, message.runId ? message : undefined)">{{ message.runId ? '继续生成完整答案' : '重新提问' }}</button>
+                <button v-else-if="message.interruption.kind === 'truncated' && message.runId && message.originalQuestion && message.content" type="button" :disabled="searching || !runtimeReady" @click="ask(message.originalQuestion, message)">调整配置后继续</button>
+                <button v-else-if="['failed', 'credentials'].includes(message.interruption.kind) && message.originalQuestion" type="button" :disabled="searching || !runtimeReady" @click="ask(message.originalQuestion)">重新提问</button>
+                <button v-if="message.interruption.kind === 'truncated' && !message.interruption.canRetry" type="button" @click="router.push({ path: '/knowledge/settings' })">调整模型配置</button>
                 <button v-if="['turn_limit', 'scope_limit'].includes(message.interruption.kind) && message.originalQuestion && activeBaseId" type="button" :disabled="searching || !!researchTransferMessageId" @click="openResearchTask(message)">{{ researchTransferMessageId === message.id ? '正在恢复问题…' : '转为分阶段研究任务' }}</button>
               </div>
               <button v-if="message.role === 'assistant' && message.runId && message.id !== streamingMessageId" type="button" class="save-answer" @click="inspectRun(message.runId)">查看本轮目标与取证预算</button>
@@ -149,6 +162,14 @@
               </button>
               <p v-if="historyLoading">正在恢复历史…</p>
               <p v-else-if="!conversations.length">首次提问后，会话会自动保存在本地数据库。</p>
+            </div>
+          </section>
+          <section v-if="unfinishedRuns.length" class="conversation-history unfinished-history" aria-label="手机端未完成的问答">
+            <header><span>未完成的问答</span><span>{{ unfinishedRuns.length }} 轮</span></header>
+            <div class="conversation-list">
+              <button v-for="run in unfinishedRuns" :key="run.run_id" type="button" :disabled="searching || !!openingRunId" @click="openUnfinishedRun(run)">
+                <strong>{{ run.question }}</strong><span>{{ run.has_partial_answer ? '草稿待完成' : '未收到正文' }} · {{ formatConversationTime(run.created_at) }}</span>
+              </button>
             </div>
           </section>
           <div class="runtime-state"><span class="knowledge-status" :class="runtimeReady ? 'is-healthy' : 'is-warning'">{{ runtimeReady ? 'Harness 启动器可用' : '证据检索模式' }}</span><p>{{ runtimeMessage }}</p></div>
@@ -225,6 +246,7 @@ import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { shouldSendComposerOnEnter } from '@/utils/chatComposer'
 import { createStreamedTextBuffer, type StreamedTextBuffer } from '@/utils/streamedText'
 import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskQuestionFromPlanning, researchTaskQuestionFromRun, researchTaskRouteFromQuestion } from '@/utils/knowledgeRuntimePolicy'
+import { recoverInterruptedQaRun } from '@/utils/qaRunRecovery'
 import { loadKnowledgeCitationPreview } from '@/utils/knowledgeCitationPreview'
 import {
   getBookWikiSettings,
@@ -234,11 +256,13 @@ import {
   getAgentRunInspection,
   listBookKnowledgeBases,
   listKnowledgeConversations,
+  listUnfinishedQaRuns,
   listKnowledgeEntries,
   saveKnowledgeAnswer,
   streamBookKnowledge,
   type KnowledgeBaseSummary,
   type KnowledgeConversationSummary,
+  type UnfinishedQaRun,
   type KnowledgeEntryDetail,
   type KnowledgeEntrySummary,
   type AgentRunInspection,
@@ -255,6 +279,7 @@ interface ChatMessage {
   requestConversationId?: string
   planningContext?: { knowledge_base_id: string; question: string; standalone_question: string }
   interruption?: ReturnType<typeof interruptedKnowledgeAnswer>
+  restoredFailed?: boolean
 }
 
 const route = useRoute()
@@ -263,6 +288,8 @@ const bases = ref<KnowledgeBaseSummary[]>([])
 const activeBaseId = ref('')
 const contextVisible = ref(false)
 const conversations = ref<KnowledgeConversationSummary[]>([])
+const unfinishedRuns = ref<UnfinishedQaRun[]>([])
+const openingRunId = ref('')
 const activeConversationId = ref('')
 const draft = ref('')
 const composerIsComposing = ref(false)
@@ -295,10 +322,12 @@ const inspectedRunId = ref('')
 let inspectorRequestId = 0
 let localMessageId = 0
 let historyRequestId = 0
+let unfinishedRequestId = 0
 let sourceRequestId = 0
 let lastCompositionEndAt = 0
 let askController: AbortController | null = null
 let activeTextBuffer: StreamedTextBuffer | null = null
+let viewActive = true
 
 const activeBase = computed(() => bases.value.find(base => base.id === activeBaseId.value))
 const starterQuestions = ['这本书的核心主题是什么？', '找出与架构相关的章节', '有哪些内容提到了性能优化？']
@@ -385,6 +414,7 @@ async function loadContext() {
       } else {
         await loadConversations(String(route.query.conversation || ''))
       }
+      await loadUnfinishedRuns()
     }
   } catch (error) {
     ElMessage.error((error as Error).message)
@@ -408,6 +438,71 @@ async function loadConversations(preferredConversationId = '') {
     if (requestId === historyRequestId) ElMessage.error((error as Error).message)
   } finally {
     if (requestId === historyRequestId) historyLoading.value = false
+  }
+}
+
+async function loadUnfinishedRuns() {
+  if (!viewActive) return
+  const baseId = activeBaseId.value
+  const requestId = ++unfinishedRequestId
+  if (!baseId) {
+    unfinishedRuns.value = []
+    return
+  }
+  try {
+    const response = await listUnfinishedQaRuns(baseId)
+    if (!viewActive || requestId !== unfinishedRequestId || baseId !== activeBaseId.value) return
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '未完成问答读取失败')
+    unfinishedRuns.value = response.result.runs
+  } catch (error) {
+    if (!viewActive || requestId !== unfinishedRequestId || baseId !== activeBaseId.value) return
+    unfinishedRuns.value = []
+    ElMessage.warning((error as Error).message)
+  }
+}
+
+async function openUnfinishedRun(summary: UnfinishedQaRun) {
+  const baseId = activeBaseId.value
+  if (!viewActive || !baseId || openingRunId.value || searching.value) return
+  if (messages.value.some(message => message.runId === summary.run_id)) {
+    contextVisible.value = false
+    await scrollToBottom(false)
+    return
+  }
+  openingRunId.value = summary.run_id
+  try {
+    const response = await getAgentRunInspection(summary.run_id)
+    if (!viewActive || baseId !== activeBaseId.value) return
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '运行记录读取失败')
+    const recovered = recoverInterruptedQaRun(response.result.run, baseId, summary.run_id)
+    if (!recovered) throw new Error('这轮运行已无法在当前书籍恢复，请刷新未完成列表')
+    if (recovered.conversationId) {
+      await openConversation(recovered.conversationId)
+      if (activeConversationId.value !== recovered.conversationId) throw new Error('原会话不可用，不能把追问转入其他会话')
+    } else {
+      newConversation()
+    }
+    if (!viewActive || baseId !== activeBaseId.value) return
+    messages.value.push({ id: `local-${++localMessageId}`, role: 'user', content: recovered.question })
+    messages.value.push({
+      id: `local-${++localMessageId}`,
+      role: 'assistant',
+      content: recovered.draft,
+      knowledgeBaseId: baseId,
+      evidence: [],
+      runId: recovered.runId,
+      originalQuestion: recovered.question,
+      requestConversationId: recovered.conversationId,
+      interruption: interruptedKnowledgeAnswer(recovered.draft, recovered.draft, new Error(recovered.error)),
+      restoredFailed: true,
+    })
+    contextVisible.value = false
+    followOutput.value = true
+    await scrollToBottom(false)
+  } catch (error) {
+    if (viewActive) ElMessage.error((error as Error).message)
+  } finally {
+    openingRunId.value = ''
   }
 }
 
@@ -447,11 +542,13 @@ async function openConversation(conversationId: string, parentRequestId?: number
 
 async function changeKnowledgeBase() {
   ++historyRequestId
+  ++unfinishedRequestId
   activeConversationId.value = ''
   conversations.value = []
+  unfinishedRuns.value = []
   messages.value = []
   replaceChatQuery()
-  await loadConversations()
+  await Promise.all([loadConversations(), loadUnfinishedRuns()])
 }
 
 function newConversation(updateRoute = true) {
@@ -587,6 +684,7 @@ async function ask(question: string, recovery?: ChatMessage) {
     streamingMessageId.value = ''
     searching.value = false
     followAnswer()
+    void loadUnfinishedRuns()
   }
 }
 
@@ -697,7 +795,9 @@ watch(sourceVisible, (visible) => {
 
 onMounted(loadContext)
 onBeforeUnmount(() => {
+  viewActive = false
   ++historyRequestId
+  ++unfinishedRequestId
   ++sourceRequestId
   ++inspectorRequestId
   askController?.abort()
@@ -740,6 +840,8 @@ onBeforeUnmount(() => {
 .conversation-list strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-list span, .conversation-list > p { color: var(--text-faint); font-size: 9px; line-height: 1.45; }
 .conversation-list > p { padding: 8px 2px; }
+.unfinished-history { padding-top: 12px; border-top: 1px solid var(--border-faint); }
+.unfinished-history .conversation-list > button { background: var(--bg-glass-subtle); }
 .runtime-state { display: grid; justify-items: start; gap: 8px; }
 .runtime-state p { color: var(--text-muted); font-size: 11px; line-height: 1.6; }
 .boundary-note { display: flex; align-items: flex-start; gap: 7px; padding-top: 14px; border-top: 1px solid var(--border-faint); color: var(--text-faint); font-size: 10px; line-height: 1.5; }
@@ -758,6 +860,9 @@ onBeforeUnmount(() => {
 .message-role { color: var(--text-faint); font-size: 10px; }
 .message > p { padding: 11px 14px; overflow-wrap: anywhere; border-radius: 16px 16px 16px 5px; background: var(--bg-glass-subtle); color: var(--text-secondary); font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
 .message.user p { border-radius: 16px 16px 5px 16px; background: var(--accent); color: white; }
+.restored-answer-draft { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); color: var(--text-secondary); line-height: 1.7; overflow-wrap: anywhere; }
+.restored-answer-draft strong { color: var(--text-muted); font-size: 11px; font-weight: 700; }
+.restored-answer-draft p { white-space: pre-wrap; }
 .save-answer { width: fit-content; display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; border: 0; border-radius: 9px; background: transparent; color: var(--accent); font: inherit; font-size: 10px; font-weight: 650; cursor: pointer; }
 .save-answer:hover { background: var(--accent-light); }
 .save-answer:disabled { opacity: .55; cursor: default; }

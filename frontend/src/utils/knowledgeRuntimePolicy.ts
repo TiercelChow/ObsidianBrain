@@ -39,7 +39,7 @@ export function interruptedKnowledgeAnswer(displayedText: string, receivedText: 
           ? '模型单次输出已达到硬上限，未完成内容已保留。请先调整模型最大输出或推理策略，或缩小问题范围。'
           : content
           ? '本次输出达到运行上限，内容不完整。可继续完成完整答案，或缩小问题范围后重新提问。'
-          : '本次输出达到运行上限且没有收到正文。请核对模型最大输出与推理策略，或缩小问题范围后重新提问。'
+          : '本次输出达到运行上限且没有收到正文。请核对模型最大输出与推理策略，再继续生成或缩小问题范围重新提问。'
         : '本次回答未完成，已有内容已保留。下一次提问会再次尝试连接模型。'
   return { content, kind, notice, detail, canRetry }
 }

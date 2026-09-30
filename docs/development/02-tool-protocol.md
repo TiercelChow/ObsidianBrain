@@ -2612,7 +2612,9 @@ http-body-util = "0.1"
 
 调用次数、真实拟返回的工具负载及错误回应均参与预算。预览与目录同样占用上下文，但不登记为已读引用。超预算正文在分配引用前被拒绝；Agent 可缩小 `limit` / `max_chars` 后重试，不能声明读过被拒绝的区间。管理查询不耗费数据软调用，但有独立的 128 次管理硬限，仍受总返回负载、实际容量和期限限制。ACP 上下文观察允许采用 Harness 压缩后的真实占用，累计负载不因此抹除；未知容量采用应用请求护栏，不伪装成模型能力。
 
-`POST /v1/knowledge/chat/stream` 新增可选 `resume_run_id`。只能恢复同书、同原问题、同会话、已失败且 `max_tokens/max_turn_requests`、有部分正文的问答；凭据拒绝、普通服务失败、取消和正常完成均不走自动续写。用户明确触发后建立新 Run，重新规划/读取当前证据、适度增加受模型能力约束的输出额度；旧草稿的 S 编号移除，不作为事实来源，新 Run 输出完整答案而非仅拼接尾巴。原失败运行和部分正文保留。HTTP 非流式问答客户端需允许最长约 810 秒的规划加执行期限，前端问答使用 SSE。
+`POST /v1/knowledge/chat/stream` 提供可选 `resume_run_id`。只能恢复同书、同原问题、同会话、已失败且明确记录 `max_tokens` 的问答，允许正文为空；`max_turn_requests`、凭据拒绝、普通服务失败、取消和正常完成均不走输出扩容续答。用户明确触发后建立新 Run，重新规划/读取当前证据、适度增加受模型能力约束的输出额度；若有旧草稿，其 S 编号移除且不作为事实来源，新 Run 输出完整答案而非仅拼接尾巴。原失败运行和部分正文保留。HTTP 非流式问答客户端需允许最长约 810 秒的规划加执行期限，前端问答使用 SSE。
+
+`list_unfinished_qa_runs`（`book_wiki`）：必填 `knowledge_base_id`，可选 `limit`（1–30，默认 10）；返回同书失败回答 Run 的问题、原会话、截断原因、是否有草稿和运行 ID，不返回整段草稿。已被成功恢复且正式保存到会话的失败祖先不再列出；多次空回答只保留最新尝试，若新尝试无正文则保留较早的有效草稿。页面按 Run ID 再读检查器并校验书籍和状态，旧草稿只作未完成文本展示，不把旧引用当作本轮证据。该工具不加入 Harness Run 的能力白名单，不扩大单轮 Agent 的书籍权限。
 
 运行检查器的 `evidence_refs` 增加 `qa_plan`、`qa_resources`、`planning_stats`、`planning_run_ids`、`selected_candidate_ids`、`adaptive_budget` 和动态读取的 `adaptive_state`。`run.budget_changed`、`run.evidence_coverage`、`run.budget_limited` 分别记录初始/扩展、Agent 自报取证覆盖和被限制的原因；限制事件不是 ACP 完整结束事件。工具预算的估算与 token 计费统计保持分离。
 

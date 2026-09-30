@@ -18,7 +18,7 @@ use crate::models::book_wiki::{
     KnowledgeGraphOverview, KnowledgeGraphPath, KnowledgeGraphRelation, KnowledgeGraphSnapshot,
     KnowledgeHealthIssue, KnowledgeHealthReport, KnowledgeMessage, KnowledgeRelationSummary,
     KnowledgeTask, ModelProviderProfile, ReaderBook, ResearchBrief, RuntimeProfile,
-    SourceDocumentSummary, SourceSpanSnapshot, WikiSkill, WikiSkillBenchmarkCase,
+    SourceDocumentSummary, SourceSpanSnapshot, UnfinishedQaRun, WikiSkill, WikiSkillBenchmarkCase,
     WikiSkillBenchmarkCaseResult, WikiSkillBenchmarkRun, WikiSkillDetail,
     WikiSkillEvaluationFinding, WikiSkillEvaluationRun, WikiSkillFile, WikiSkillOrigin,
     WikiSkillVersion, MARKDOWN_EXTRACTION_VERSION,
@@ -3739,6 +3739,98 @@ impl BookWikiStore {
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(Into::into)
         })
+    }
+
+    pub fn list_unfinished_qa_runs(
+        &self,
+        base_id: &str,
+        limit: usize,
+    ) -> Result<Vec<UnfinishedQaRun>, BrainError> {
+        self.get_base(base_id)?;
+        let rows = self.db.with_connection(|conn| {
+            let mut stmt = conn.prepare(
+                "WITH RECURSIVE resolved(id) AS (
+                     SELECT ar.id FROM agent_runs ar
+                      WHERE ar.knowledge_base_id=?1 AND ar.task_type='knowledge_qa'
+                        AND ar.status='completed'
+                        AND EXISTS (SELECT 1 FROM knowledge_messages km
+                                     WHERE km.run_id=ar.id AND km.role='assistant')
+                     UNION
+                     SELECT parent.value
+                       FROM resolved
+                       JOIN agent_runs child ON child.id=resolved.id AND child.knowledge_base_id=?1
+                       JOIN json_each(json_array(
+                         json_extract(child.input_json, '$.resume_run_id'),
+                         json_extract(child.input_json, '$.qa_retry_parent_run_id')
+                       )) parent
+                      WHERE typeof(parent.value)='text' AND parent.value<>''
+                 )
+                 SELECT r.id, r.input_json, r.output_json, r.error, r.created_at
+                   FROM agent_runs r
+                  WHERE r.knowledge_base_id=?1 AND r.task_type='knowledge_qa'
+                    AND r.status='failed'
+                    AND r.id NOT IN (SELECT id FROM resolved)
+                    AND NOT EXISTS (
+                        SELECT 1 FROM agent_runs newer
+                         WHERE newer.knowledge_base_id=?1
+                           AND newer.task_type='knowledge_qa' AND newer.status='failed'
+                           AND (json_extract(newer.input_json, '$.resume_run_id')=r.id
+                                OR json_extract(newer.input_json, '$.qa_retry_parent_run_id')=r.id)
+                           AND (length(trim(COALESCE(json_extract(newer.output_json, '$.partial_answer'), '')))>0
+                                OR length(trim(COALESCE(json_extract(r.output_json, '$.partial_answer'), '')))=0)
+                    )
+                  ORDER BY r.created_at DESC, r.rowid DESC
+                  LIMIT ?2",
+            )?;
+            let runs = stmt.query_map(params![base_id, limit.clamp(1, 30) as i64], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })?;
+            runs.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        })?;
+        let mut unfinished = Vec::with_capacity(rows.len());
+        for (run_id, input_json, output_json, error, created_at) in rows {
+            let input: Value = serde_json::from_str(&input_json)
+                .map_err(|cause| BrainError::Internal(format!("问答运行输入解析失败: {cause}")))?;
+            let question = input
+                .get("question")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim();
+            if question.is_empty() {
+                continue;
+            }
+            let output: Option<Value> = output_json
+                .map(|json| serde_json::from_str(&json))
+                .transpose()
+                .map_err(|cause| BrainError::Internal(format!("问答运行输出解析失败: {cause}")))?;
+            unfinished.push(UnfinishedQaRun {
+                run_id,
+                question: question.to_string(),
+                conversation_id: input
+                    .get("conversation_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                stop_reason: output
+                    .as_ref()
+                    .and_then(|value| value.get("stop_reason"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                has_partial_answer: output
+                    .as_ref()
+                    .and_then(|value| value.get("partial_answer"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|draft| !draft.trim().is_empty()),
+                error: error.unwrap_or_default(),
+                created_at,
+            });
+        }
+        Ok(unfinished)
     }
 
     pub fn get_conversation(
@@ -7889,6 +7981,7 @@ fn preserve_incomplete_run_output(
     })?;
     let mut partial_answer = String::new();
     let mut stop_reason = fallback_reason.to_string();
+    let mut incomplete_event_seen = false;
     for row in rows {
         let (event_type, raw) = row?;
         let payload: serde_json::Value = serde_json::from_str(&raw)
@@ -7898,6 +7991,7 @@ fn preserve_incomplete_run_output(
                 partial_answer.push_str(delta);
             }
         } else if payload.get("complete").and_then(serde_json::Value::as_bool) == Some(false) {
+            incomplete_event_seen = true;
             if let Some(reason) = payload
                 .get("stop_reason")
                 .and_then(serde_json::Value::as_str)
@@ -7906,7 +8000,7 @@ fn preserve_incomplete_run_output(
             }
         }
     }
-    if !partial_answer.is_empty() {
+    if !partial_answer.is_empty() || incomplete_event_seen {
         let output = serde_json::json!({"partial_answer":partial_answer,"complete":false,"stop_reason":stop_reason}).to_string();
         conn.execute(
             "UPDATE agent_runs SET output_json=?2 WHERE id=?1 AND status='running'",

@@ -805,6 +805,17 @@ pub struct AgentRun {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct UnfinishedQaRun {
+    pub run_id: String,
+    pub question: String,
+    pub conversation_id: Option<String>,
+    pub stop_reason: Option<String>,
+    pub has_partial_answer: bool,
+    pub error: String,
+    pub created_at: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct AgentRunEvent {
     pub run_id: String,
     pub sequence: i64,

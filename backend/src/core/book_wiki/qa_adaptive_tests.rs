@@ -503,12 +503,13 @@ async fn test_qa_turn_limit_stops_after_one_answer_run_without_output_expansion(
 async fn test_qa_resume_uses_previous_run_observed_context_as_hard_limit() {
     let (store, _dir, base) = fixture();
     let question = "全面分析全书机制";
+    let profile = store.list_runtime_profiles().unwrap().remove(0);
     let run = store
         .start_agent_run(
             &base,
             "deepseek_harness",
             "knowledge_qa",
-            &serde_json::json!({"question": question, "conversation_id": null, "request_max_output_tokens": 8192}),
+            &serde_json::json!({"question": question, "conversation_id": null, "request_max_output_tokens": 8192, "model": profile.model, "provider_id": profile.provider_id}),
         )
         .unwrap();
     store
@@ -563,6 +564,285 @@ async fn test_qa_resume_uses_previous_run_observed_context_as_hard_limit() {
         .unwrap_err();
     assert!(error.to_string().contains("qa_output_hard_limit"));
     assert!(requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_qa_resume_after_model_change_does_not_reuse_old_observed_context() {
+    let (store, _dir, base) = fixture();
+    let question = "全面分析全书机制";
+    let profile = store.list_runtime_profiles().unwrap().remove(0);
+    let run = store
+        .start_agent_run(
+            &base,
+            "deepseek_harness",
+            "knowledge_qa",
+            &serde_json::json!({"question": question, "conversation_id": null, "request_max_output_tokens": 8192, "model": profile.model, "provider_id": profile.provider_id}),
+        )
+        .unwrap();
+    store
+        .init_adaptive_run_budget(
+            &run.id,
+            &AdaptiveBudgetPolicy {
+                initial_prompt_tokens: 1000,
+                soft_tool_calls: 1,
+                hard_tool_calls: 2,
+                soft_retrieval_tokens: 1000,
+                hard_retrieval_tokens: 2000,
+                context_window: None,
+                max_output_tokens: Some(8192),
+                timeout_seconds: 60,
+                subquestions: vec![question.into()],
+            },
+        )
+        .unwrap();
+    store
+        .observe_adaptive_context(&run.id, 4000, 16_384)
+        .unwrap();
+    store
+        .append_agent_run_event(
+            &run.id,
+            "run.text_delta",
+            Some("answer"),
+            "",
+            &serde_json::json!({"delta": "未完成的正文"}),
+        )
+        .unwrap();
+    store
+        .append_agent_run_event(
+            &run.id,
+            "run.runtime_completed",
+            Some("completion"),
+            "",
+            &serde_json::json!({"stop_reason": "max_tokens", "complete": false}),
+        )
+        .unwrap();
+    store.fail_agent_run(&run.id, "max_tokens").unwrap();
+    store
+        .save_runtime_profile(
+            &profile.id,
+            &profile.executable,
+            "larger-context-model",
+            profile.provider_id.as_deref(),
+            true,
+            profile.revision,
+        )
+        .unwrap();
+
+    let requests = Arc::new(Mutex::new(vec![]));
+    let service = BookWikiService::new(
+        store.clone(),
+        Arc::new(AdaptiveFixtureRuntime {
+            requests: requests.clone(),
+        }),
+    );
+    let (events, _receiver) = tokio::sync::mpsc::unbounded_channel();
+    let answer = service
+        .resume_qa_streaming(&base, question, None, &run.id, events)
+        .await
+        .unwrap();
+    assert_eq!(answer.answer, "本轮综合结论。[S1]");
+    let resumed = store.get_agent_run(&answer.run_id).unwrap();
+    assert_eq!(resumed.input["resume_run_id"], run.id);
+    assert_eq!(resumed.input["model"], "larger-context-model");
+    assert!(resumed.input["request_max_output_tokens"].as_u64().unwrap() > 8192);
+    assert!(!requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_qa_empty_max_tokens_can_resume_with_more_output_without_a_fake_draft() {
+    let (store, _dir, base) = fixture();
+    let question = "全面分析全书机制";
+    let run = store
+        .start_agent_run(
+            &base,
+            "deepseek_harness",
+            "knowledge_qa",
+            &serde_json::json!({"question":question,"conversation_id":null,"request_max_output_tokens":8192}),
+        )
+        .unwrap();
+    store
+        .append_agent_run_event(
+            &run.id,
+            "run.runtime_completed",
+            Some("completion"),
+            "",
+            &serde_json::json!({"stop_reason":"max_tokens","complete":false}),
+        )
+        .unwrap();
+    store
+        .fail_agent_run(&run.id, "stop_reason=max_tokens")
+        .unwrap();
+    let (draft, previous_output) =
+        validated_qa_resume(&store, &base, question, None, &run.id).unwrap();
+    assert!(draft.is_empty());
+    assert_eq!(previous_output, 8192);
+
+    let requests = Arc::new(Mutex::new(vec![]));
+    let service = BookWikiService::new(
+        store.clone(),
+        Arc::new(AdaptiveFixtureRuntime {
+            requests: requests.clone(),
+        }),
+    );
+    let (events, _receiver) = tokio::sync::mpsc::unbounded_channel();
+    let answer = service
+        .resume_qa_streaming(&base, question, None, &run.id, events)
+        .await
+        .unwrap();
+    let resumed = store.get_agent_run(&answer.run_id).unwrap();
+    assert_eq!(resumed.input["resume_run_id"], run.id);
+    assert!(resumed.input["request_max_output_tokens"].as_u64().unwrap() > 8192);
+    assert!(requests
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|call| !call.0.contains("<incomplete_draft>")));
+}
+
+#[test]
+fn test_unfinished_qa_runs_remain_discoverable_until_a_resume_completes() {
+    let (store, _dir, base) = fixture();
+    let failed = store
+        .start_agent_run(
+            &base,
+            "deepseek_harness",
+            "knowledge_qa",
+            &serde_json::json!({"question":"未完成的问题","conversation_id":null}),
+        )
+        .unwrap();
+    store
+        .append_agent_run_event(
+            &failed.id,
+            "run.text_delta",
+            Some("answer"),
+            "",
+            &serde_json::json!({"delta":"未完成草稿 [S1]"}),
+        )
+        .unwrap();
+    store
+        .append_agent_run_event(
+            &failed.id,
+            "run.runtime_completed",
+            Some("completion"),
+            "",
+            &serde_json::json!({"stop_reason":"max_tokens","complete":false}),
+        )
+        .unwrap();
+    store
+        .fail_agent_run(&failed.id, "stop_reason=max_tokens")
+        .unwrap();
+    let pending = store.list_unfinished_qa_runs(&base, 10).unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].run_id, failed.id);
+    assert_eq!(pending[0].question, "未完成的问题");
+    assert_eq!(pending[0].stop_reason.as_deref(), Some("max_tokens"));
+    assert!(pending[0].has_partial_answer);
+    assert!(store.list_conversations(&base, 10).unwrap().is_empty());
+
+    let retried = store
+        .start_agent_run(
+            &base,
+            "deepseek_harness",
+            "knowledge_qa",
+            &serde_json::json!({"question":"未完成的问题","conversation_id":null,"qa_retry_parent_run_id":failed.id}),
+        )
+        .unwrap();
+    store
+        .append_agent_run_event(
+            &retried.id,
+            "run.text_delta",
+            Some("answer"),
+            "",
+            &serde_json::json!({"delta":"第二版仍未完成"}),
+        )
+        .unwrap();
+    store
+        .append_agent_run_event(
+            &retried.id,
+            "run.runtime_completed",
+            Some("completion"),
+            "",
+            &serde_json::json!({"stop_reason":"max_tokens","complete":false}),
+        )
+        .unwrap();
+    store
+        .fail_agent_run(&retried.id, "stop_reason=max_tokens")
+        .unwrap();
+    let pending = store.list_unfinished_qa_runs(&base, 10).unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].run_id, retried.id);
+
+    let completed = store
+        .start_agent_run(
+            &base,
+            "deepseek_harness",
+            "knowledge_qa",
+            &serde_json::json!({"question":"未完成的问题","conversation_id":null,"resume_run_id":retried.id}),
+        )
+        .unwrap();
+    store
+        .complete_agent_run(&completed.id, &serde_json::json!({"answer":"完整答案"}))
+        .unwrap();
+    assert_eq!(store.list_unfinished_qa_runs(&base, 10).unwrap().len(), 1);
+    store
+        .save_conversation_exchange(&base, None, "未完成的问题", "完整答案", &completed.id, &[])
+        .unwrap();
+    assert!(store.list_unfinished_qa_runs(&base, 10).unwrap().is_empty());
+}
+
+#[test]
+fn test_unfinished_qa_run_retains_earlier_draft_when_newer_retry_has_no_body() {
+    let (store, _dir, base) = fixture();
+    let first = store
+        .start_agent_run(
+            &base,
+            "deepseek_harness",
+            "knowledge_qa",
+            &serde_json::json!({"question":"复杂问题","conversation_id":null}),
+        )
+        .unwrap();
+    store
+        .append_agent_run_event(
+            &first.id,
+            "run.text_delta",
+            Some("answer"),
+            "",
+            &serde_json::json!({"delta":"可恢复的早期草稿"}),
+        )
+        .unwrap();
+    store
+        .fail_agent_run(&first.id, "stop_reason=max_tokens")
+        .unwrap();
+
+    let retry = store
+        .start_agent_run(
+            &base,
+            "deepseek_harness",
+            "knowledge_qa",
+            &serde_json::json!({"question":"复杂问题","conversation_id":null,"qa_retry_parent_run_id":first.id}),
+        )
+        .unwrap();
+    store
+        .append_agent_run_event(
+            &retry.id,
+            "run.runtime_completed",
+            Some("completion"),
+            "",
+            &serde_json::json!({"stop_reason":"max_tokens","complete":false}),
+        )
+        .unwrap();
+    store
+        .fail_agent_run(&retry.id, "stop_reason=max_tokens")
+        .unwrap();
+
+    let pending = store.list_unfinished_qa_runs(&base, 10).unwrap();
+    assert_eq!(pending.len(), 2);
+    assert!(pending
+        .iter()
+        .any(|run| run.run_id == first.id && run.has_partial_answer));
+    assert!(pending
+        .iter()
+        .any(|run| run.run_id == retry.id && !run.has_partial_answer));
 }
 
 #[tokio::test]
@@ -709,6 +989,10 @@ async fn test_qa_empty_max_tokens_stops_after_two_expansions_or_hard_cap() {
         assert!(error.to_string().contains(failure_code));
         assert_eq!(runtime.answers.load(Ordering::SeqCst), calls);
         assert!(store.list_conversations(&base, 10).unwrap().is_empty());
+        let unfinished = store.list_unfinished_qa_runs(&base, 10).unwrap();
+        assert_eq!(unfinished.len(), 1);
+        assert_eq!(unfinished[0].stop_reason.as_deref(), Some("max_tokens"));
+        assert!(!unfinished[0].has_partial_answer);
     }
 }
 

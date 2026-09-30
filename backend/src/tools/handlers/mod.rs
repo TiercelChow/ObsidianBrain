@@ -155,6 +155,9 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     registry
         .register(Arc::new(GetKnowledgeConversationHandler))
         .await;
+    registry
+        .register(Arc::new(ListUnfinishedQaRunsHandler))
+        .await;
     registry.register(Arc::new(AskBookKnowledgeHandler)).await;
     registry
         .register(Arc::new(SaveKnowledgeAnswerHandler))

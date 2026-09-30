@@ -652,13 +652,21 @@ impl BookWikiService {
             .provider_config
             .as_ref()
             .and_then(|p| p.context_window);
-        let observed_resume_context = resume_run_id
-            .map(|id| self.store.get_adaptive_run_budget(id))
-            .transpose()?
-            .flatten()
-            .and_then(|budget| budget.observed_context_window)
-            .filter(|capacity| *capacity > 0)
-            .map(|capacity| capacity.min(u64::from(u32::MAX)) as u32);
+        let observed_resume_context = if let Some(id) = resume_run_id {
+            let previous = self.store.get_agent_run(id)?;
+            // ACP observed capacity belongs to the model route that produced it.
+            if run_uses_active_model_route(&previous.input, &profile) {
+                self.store
+                    .get_adaptive_run_budget(id)?
+                    .and_then(|budget| budget.observed_context_window)
+                    .filter(|capacity| *capacity > 0)
+                    .map(|capacity| capacity.min(u64::from(u32::MAX)) as u32)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let context_window = match (configured_context_window, observed_resume_context) {
             (Some(configured), Some(observed)) => Some(configured.min(observed)),
             (configured, observed) => configured.or(observed),
@@ -955,7 +963,10 @@ impl BookWikiService {
                 catalog_seen,
                 catalog.len(),
             )?;
-            if let Some((draft, _)) = draft_for_retry.as_ref() {
+            if let Some((draft, _)) = draft_for_retry
+                .as_ref()
+                .filter(|(draft, _)| !draft.trim().is_empty())
+            {
                 let spare = resources
                     .prompt_tokens
                     .saturating_sub(estimated_tokens(&prompt))
@@ -993,7 +1004,8 @@ impl BookWikiService {
                 "question":question,"standalone_question":selection.standalone_question,
                 "answer_mode":selection.answer_mode.as_str(),"conversation_id":conversation_id,
                 "evidence_entry_ids":evidence_ids,"skill_ids":skills.iter().map(|s|&s.id).collect::<Vec<_>>(),
-                "model":profile.model,"qa_plan":plan,"conversation_memory":memory,
+                "model":profile.model,"provider_id":profile.provider_id,
+                "qa_plan":plan,"conversation_memory":memory,
                 "qa_resources":resources,"planning_stats":planning_stats,"adaptive_budget":policy,
                 "request_max_output_tokens":resources.output_tokens,"request_timeout_seconds":resources.timeout_seconds,
                 "resume_run_id":resume_run_id,"qa_retry_parent_run_id":retry_parent_run_id,
@@ -2614,6 +2626,7 @@ impl BookWikiService {
         tokio::pin!(runtime);
         let mut thinking_recorded = false;
         let mut generation_recorded = false;
+        let mut completion_recorded = false;
         let mut stream_disconnected = false;
         let runtime_result = loop {
             tokio::select! {
@@ -2637,6 +2650,7 @@ impl BookWikiService {
                     let should_project = !matches!(event, AgentRuntimeEvent::TextDelta { .. })
                         || !generation_recorded;
                     generation_recorded |= matches!(event, AgentRuntimeEvent::TextDelta { .. });
+                    completion_recorded |= matches!(event, AgentRuntimeEvent::Completed { .. });
                     if should_project {
                         project_compile_runtime_event(
                             &self.store,
@@ -2664,6 +2678,7 @@ impl BookWikiService {
                 let should_project =
                     !matches!(event, AgentRuntimeEvent::TextDelta { .. }) || !generation_recorded;
                 generation_recorded |= matches!(event, AgentRuntimeEvent::TextDelta { .. });
+                completion_recorded |= matches!(event, AgentRuntimeEvent::Completed { .. });
                 if should_project {
                     project_compile_runtime_event(
                         &self.store,
@@ -2726,6 +2741,21 @@ impl BookWikiService {
                 Ok((run.id, answer))
             }
             Err(error) => {
+                // Some runtimes return a terminal error without emitting a Completed
+                // event. Keep the stop reason in the audited Run so an empty
+                // max_tokens answer remains distinguishable and resumable.
+                if !completion_recorded && is_harness_output_truncation(&error) {
+                    if let Err(event_error) = persist_runtime_event(
+                        &self.store,
+                        &run.id,
+                        AgentRuntimeEvent::Completed {
+                            stop_reason: "max_tokens".to_string(),
+                            complete: false,
+                        },
+                    ) {
+                        tracing::error!(run_id = %run.id, error = %event_error, "记录 Harness 截断原因时出错");
+                    }
+                }
                 let store_result = if is_cancelled_agent_error(&error) {
                     self.store.cancel_agent_run(&run.id)
                 } else {
@@ -5056,8 +5086,7 @@ fn validated_qa_resume(
     let draft = output
         .get("partial_answer")
         .and_then(serde_json::Value::as_str)
-        .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| BrainError::KnowledgeValidation("没有收到正文，请直接重新提问".into()))?;
+        .unwrap_or_default();
     let mut cleaned = String::new();
     let mut cursor = 0;
     while let Some(offset) = draft[cursor..].find("[S") {

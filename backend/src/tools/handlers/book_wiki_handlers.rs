@@ -994,6 +994,44 @@ impl ToolHandler for ListKnowledgeConversationsHandler {
 
 pub struct GetKnowledgeConversationHandler;
 
+pub struct ListUnfinishedQaRunsHandler;
+
+#[async_trait]
+impl ToolHandler for ListUnfinishedQaRunsHandler {
+    fn name(&self) -> &str {
+        "list_unfinished_qa_runs"
+    }
+
+    fn description(&self) -> &str {
+        "列出一本书中未完成且尚未被成功恢复的问答运行；不会将草稿当作正式会话"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": { "type": "string" },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 30, "default": 10 }
+            },
+            "required": ["knowledge_base_id"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        Ok(json!({
+            "runs": ctx.book_wiki_service.store().list_unfinished_qa_runs(
+                required_string(&args, "knowledge_base_id")?,
+                args.get("limit").and_then(Value::as_u64).unwrap_or(10) as usize,
+            )?
+        }))
+    }
+}
+
 #[async_trait]
 impl ToolHandler for GetKnowledgeConversationHandler {
     fn name(&self) -> &str {
@@ -2555,6 +2593,16 @@ mod tests {
         assert!(handlers
             .iter()
             .all(|handler| handler.module() == "book_wiki" && handler.input_schema().is_object()));
+    }
+
+    #[test]
+    fn test_unfinished_qa_handler_requires_book_scope_and_bounds_limit() {
+        let handler = ListUnfinishedQaRunsHandler;
+        assert_eq!(handler.module(), "book_wiki");
+        let schema = handler.input_schema();
+        assert_eq!(schema["required"][0], "knowledge_base_id");
+        assert_eq!(schema["properties"]["limit"]["maximum"], 30);
+        assert_eq!(schema["additionalProperties"], false);
     }
 
     #[test]
