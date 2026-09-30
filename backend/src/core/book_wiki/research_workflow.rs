@@ -60,14 +60,15 @@ fn validate_new_research_plan(
         };
         let estimate = question.expected_output_tokens.ok_or_else(|| {
             BrainError::KnowledgeValidation(format!(
-                "questions[{index}].expected_output_tokens 缺失：供应商已声明单次输出上限，必须估计本主题必要正文篇幅，以便按容量拆分"
+                "questions[{index}].expected_output_tokens 缺失：当前存在已知的单次输出约束，必须估计本主题必要正文篇幅，以便按容量拆分"
             ))
         })?;
         if estimate > capacity.visible_body_ceiling_tokens {
             return Err(BrainError::KnowledgeValidation(format!(
-                "questions[{index}].expected_output_tokens={estimate} 超过当前单次输出可规划的正文上限 {}（有效输出上限 {}，JSON/发现结构预留 {}，推理规划余量 {}）；请拆分主题或减少同一阶段的证据要求，不能删掉必需论证。若单项也无法容纳，请调整供应商输出上限或推理策略",
+                "questions[{index}].expected_output_tokens={estimate} 超过当前单次输出可规划的正文上限 {}（有效输出上限 {}，约束依据 {}，JSON/发现结构预留 {}，推理规划余量 {}）；请拆分主题或减少同一阶段的证据要求，不能删掉必需论证。若单项也无法容纳，请调整模型上下文窗口、供应商输出上限或推理策略",
                 capacity.visible_body_ceiling_tokens,
                 capacity.effective_output_cap_tokens,
+                capacity.capacity_basis,
                 capacity.structure_tokens,
                 capacity.reasoning_margin_tokens,
             )));
@@ -204,7 +205,7 @@ impl BookWikiService {
             .flatten();
         prompt.push_str(&format!("<phase_capacity>\n{}\n</phase_capacity>\n阶段输出受模型容量和供应商单次输出能力约束；未知容量是应用护栏，不冒充真实模型上限。\n",json!({"capacity_tokens":phase.resources.capacity_tokens,"capacity_basis":phase.resources.capacity_basis,"phase_output_tokens":phase.resources.output_tokens,"declared_max_output_tokens":declared_cap,"section_output_capacity_one_requirement":one_requirement,"section_output_capacity_current":current_section})));
         if phase.phase == "plan" {
-            prompt.push_str("规划 depth 只选 brief、standard、deep。expected_output_tokens 是每个主题的必要正文篇幅估计（1至262144为安全边界），不是必须凑齐的长度；依据目标、复杂度、完整公式/论证需求估计。供应商声明单次最大输出时，每个主题必须填写估计值，不可为 null；章节至少预留 1024 token JSON/发现结构，每多一项 required_evidence 再预留 768 token，并按当前推理策略保留规划余量；正文估计不可超过剩余空间。超过时按独立可研究的主题拆分，不能删除关键论证来求短。没有声明输出上限时可用 null，不能把 1M 上下文当作输出能力。\n");
+            prompt.push_str("规划 depth 只选 brief、standard、deep。expected_output_tokens 是每个主题的必要正文篇幅估计（1至262144为安全边界），不是必须凑齐的长度；依据目标、复杂度、完整公式/论证需求估计。当 section_output_capacity_one_requirement 非 null 时，每个主题必须填写估计值，不可为 null；章节至少预留 1024 token JSON/发现结构，每多一项 required_evidence 再预留 768 token，并按当前推理策略保留规划余量；正文估计不可超过剩余空间。超过时按独立可研究的主题拆分，不能删除关键论证来求短。未知供应商输出能力且没有较小显式上下文约束时可用 null，不能把默认 1M 上下文当作输出能力。\n");
             prompt.push_str("本阶段只确定业务目标、约束、验收条件、术语与报告主题；这不是隐藏思维链。report_title 是面向读者的完整材料标题，应概括论题和材料用途，使用单行陈述式标题而非直接照搬用户提问；goal 仍是内部研究目标。主题数量按实际问题规模确定，1至24是安全边界而非必须凑满，不固定两到四个。每个子问题的 question 是内部取证问题，title 用面向读者的章节标题，写成材料中的论题而非“什么是/如何/为什么”的问答标题；不同标题应形成递进或对照，不机械重复任务原话。可通过只读工具浏览编译知识、查找具体核验对象，不在本阶段编造研究结论。review 必须在子问题中明确待核验的真实条目与具体主张；refresh 必须明确真实基线条目与待比较的依据。找不到基线则把它列为具体缺口，不编造旧版变化。返回规划，不生成长报告或幻灯片。\n");
             if phase.task.brief.confirmed {
                 prompt.push_str(&format!(
@@ -1097,6 +1098,19 @@ mod tests {
         assert!(validate_new_research_plan(&plan, &profile).is_err());
         plan.questions[0].expected_output_tokens = Some(500);
         validate_new_research_plan(&plan, &profile).unwrap();
+
+        let mut context_only = profile.clone();
+        let mut provider = context_only.provider_config.take().unwrap();
+        provider.context_window = Some(32_768);
+        provider.max_output_tokens = None;
+        provider.reasoning_policy = "auto".into();
+        context_only.provider_config = Some(provider);
+        let mut oversized = plan.clone();
+        oversized.questions[0].expected_output_tokens = Some(20_000);
+        assert!(validate_new_research_plan(&oversized, &context_only)
+            .unwrap_err()
+            .to_string()
+            .contains("拆分主题"));
 
         let mut many_topics = plan.clone();
         many_topics.questions = (0..24)

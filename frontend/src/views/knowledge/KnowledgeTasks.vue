@@ -21,6 +21,7 @@
           <h2>{{ task.title }}</h2>
           <p>{{ task.description || '没有补充任务说明' }}</p>
           <div v-if="task.brief?.confirmed" class="task-brief-summary">{{ briefSummary(task.brief, task.deliverable_type) }}</div>
+          <button v-if="task.status === 'draft'" class="task-brief-edit" type="button" :disabled="creating || Boolean(executingTaskId)" @click="openEditBrief(task)">调整材料偏好</button>
           <div v-if="task.status === 'running' && taskActivity[task.id]" class="task-live" role="status">
             <i></i><span>{{ taskActivity[task.id] }}</span>
           </div>
@@ -47,9 +48,9 @@
       <el-button type="primary" :disabled="!bases.length" @click="openCreate">创建第一项任务</el-button>
     </div>
 
-    <MotionModal v-model="createVisible" aria-label="新建研究任务">
+    <MotionModal v-model="createVisible" :aria-label="editingTask ? '编辑研究简报' : '新建研究任务'">
       <div class="knowledge-modal-card">
-        <div class="knowledge-modal-head"><h3>{{ createStep === 'request' ? '新建研究任务' : '确认研究简报' }}</h3><p>{{ createStep === 'request' ? '先说明要解决的问题，再确认材料的受众与呈现方式。' : '这些选择会随任务保存，并用于研究报告和演示文稿。' }}</p></div>
+        <div class="knowledge-modal-head"><h3>{{ editingTask ? '编辑研究简报' : createStep === 'request' ? '新建研究任务' : '确认研究简报' }}</h3><p>{{ editingTask ? '运行前可以调整材料偏好；保存后会按新的简报执行。' : createStep === 'request' ? '先说明要解决的问题，再确认材料的受众与呈现方式。' : '这些选择会随任务保存，并用于研究报告和演示文稿。' }}</p></div>
         <div v-if="createStep === 'request'" class="knowledge-modal-body">
           <el-select v-model="draft.knowledgeBaseId" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库">
             <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
@@ -94,7 +95,7 @@
         </div>
         <div v-else class="knowledge-modal-body research-brief-form">
           <div v-if="preflight" class="research-brief-summary"><strong>需求预分析</strong><p>{{ preflight.summary }}</p><span v-for="caution in preflight.cautions" :key="caution">{{ caution }}</span></div>
-          <p v-else class="research-brief-fallback">未使用模型预分析；你仍可以直接确定材料偏好，研究将在创建后由你手动启动。</p>
+          <p v-else class="research-brief-fallback">{{ editingTask ? '调整已保存的材料偏好。只有尚未运行的草稿可以保存修改。' : '未使用模型预分析；你仍可以直接确定材料偏好，研究将在创建后由你手动启动。' }}</p>
           <p v-if="preflight" class="research-brief-recommended">当前设置：{{ briefSummary(brief, draft.deliverableType) }}</p>
           <label v-if="briefFieldVisible('audience')" class="research-brief-field" :class="{ 'is-focus': briefIsFocus('audience') }"><span>面向谁 <small v-if="briefIsFocus('audience')">建议确认</small></span><span v-if="briefDecision('audience')" class="research-decision-tip"><b>{{ briefDecision('audience')?.question }}</b><em>{{ briefDecision('audience')?.impact }}</em></span><el-select v-model="brief.audience" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="有一定背景的读者" value="general" /><el-option label="领域专家" value="specialist" /><el-option label="零基础读者" value="beginner" /><el-option label="仅供自己复盘" value="self" /></el-select></label>
           <label v-if="briefFieldVisible('purpose')" class="research-brief-field" :class="{ 'is-focus': briefIsFocus('purpose') }"><span>材料用途 <small v-if="briefIsFocus('purpose')">建议确认</small></span><span v-if="briefDecision('purpose')" class="research-decision-tip"><b>{{ briefDecision('purpose')?.question }}</b><em>{{ briefDecision('purpose')?.impact }}</em></span><el-select v-model="brief.purpose" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="理解主题" value="understand" /><el-option label="辅助决策" value="decision" /><el-option label="讲解或教学" value="teach" /><el-option label="日后查阅" value="reference" /></el-select></label>
@@ -108,7 +109,7 @@
         <p v-if="previewing" class="research-preflight-progress" role="status">正在分析任务目标和材料偏好；如输出不完整，会自动恢复一次。</p>
         <div class="knowledge-modal-actions">
           <template v-if="createStep === 'request'"><el-button @click="createVisible = false">取消</el-button><el-button :disabled="!canPrepareBrief || previewing" @click="skipBrief">跳过分析</el-button><el-button type="primary" :loading="previewing" :disabled="!canPrepareBrief" @click="prepareBrief">分析诉求</el-button></template>
-          <template v-else><el-button @click="createStep = 'request'">返回修改</el-button><el-button type="primary" :loading="creating" :disabled="!canPrepareBrief" @click="createTask">确认并创建</el-button></template>
+          <template v-else><el-button @click="editingTask ? createVisible = false : createStep = 'request'">{{ editingTask ? '取消' : '返回修改' }}</el-button><el-button type="primary" :loading="creating" :disabled="!editingTask && !canPrepareBrief" @click="createTask">{{ editingTask ? '保存简报' : '确认并创建' }}</el-button></template>
         </div>
       </div>
     </MotionModal>
@@ -276,6 +277,7 @@ import {
   listBookKnowledgeBases,
   listKnowledgeTasks,
   previewKnowledgeTaskBrief,
+  updateKnowledgeTaskBrief,
   knowledgeArtifactDownloadUrl,
   type KnowledgeArtifact,
   type AgentRunInspection,
@@ -304,6 +306,7 @@ const showAllBriefOptions = ref(false)
 const executingTaskId = ref('')
 const loadingResultId = ref('')
 const createVisible = ref(false)
+const editingTask = ref<KnowledgeTask | null>(null)
 const resultVisible = ref(false)
 const activeTask = ref<KnowledgeTask | null>(null)
 const hasTurnLimitFailure = computed(() => researchTaskTurnLimitFailure(activeTask.value))
@@ -415,6 +418,7 @@ function inspectStage(runId: string) {
 }
 
 function openCreate() {
+  editingTask.value = null
   ++briefPreviewRequestId
   previewing.value = false
   createStep.value = 'request'
@@ -431,6 +435,21 @@ function openCreate() {
   draft.externalRequestLimit = 6
   createVisible.value = true
   void refreshResearchBases()
+}
+
+function openEditBrief(task: KnowledgeTask) {
+  if (task.status !== 'draft') return
+  ++briefPreviewRequestId
+  editingTask.value = task
+  previewing.value = false
+  preflight.value = null
+  showAllBriefOptions.value = true
+  createStep.value = 'preferences'
+  draft.knowledgeBaseId = task.knowledge_base_id
+  draft.title = task.title
+  draft.deliverableType = task.deliverable_type
+  Object.assign(brief, task.brief)
+  createVisible.value = true
 }
 
 async function openNarrowedTask(task: KnowledgeTask) {
@@ -507,9 +526,18 @@ async function prepareBrief() {
 }
 
 async function createTask() {
-  if (!canPrepareBrief.value) return
+  if (!editingTask.value && !canPrepareBrief.value) return
   creating.value = true
   try {
+    if (editingTask.value) {
+      const response = await updateKnowledgeTaskBrief(editingTask.value.id, editingTask.value.updated_at, { ...brief, confirmed: true })
+      if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '简报保存失败')
+      createVisible.value = false
+      editingTask.value = null
+      ElMessage.success('研究简报已更新')
+      await loadTasks()
+      return
+    }
     const externalDomains = draft.externalDomains
       .split(/[，,\n]/)
       .map(domain => domain.trim())
@@ -743,6 +771,8 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
 .task-filter { margin-bottom: 12px; }
 .task-summary { color: var(--text-faint); font-size: 12px; }
 .task-card-actions { min-width: 0; display: grid; gap: 8px; }
+.task-brief-edit { min-height: 30px; margin-top: 5px; padding: 2px 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
+.task-brief-edit:disabled { opacity: .5; cursor: default; }
 .task-stage-link { min-height: 34px; margin-top: 6px; padding: 3px 9px; border: 0; border-radius: 9px; background: var(--accent-light); color: var(--accent); font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
 .research-task-list { display: grid; gap: 9px; }
 .research-task { display: grid; grid-template-columns: 52px minmax(0, 1fr) minmax(96px, auto); align-items: center; gap: 15px; padding: 16px 17px; animation: task-in var(--motion-normal) var(--ease-spring-gentle) both; animation-delay: calc(var(--order) * 30ms); }
@@ -906,6 +936,7 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
   .task-action span { display: none; }
 }
 @media (max-width: 768px) {
+  .task-brief-edit { min-height: 44px; font-size: 12px; }
   .research-readiness-state { font-size: 12px; }
   .research-readiness-state button { min-height: 44px; }
   .research-readiness-head strong { font-size: 13px; }

@@ -167,6 +167,9 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(CreateKnowledgeTaskHandler))
         .await;
     registry
+        .register(Arc::new(UpdateKnowledgeTaskBriefHandler))
+        .await;
+    registry
         .register(Arc::new(PreviewKnowledgeTaskBriefHandler))
         .await;
     registry

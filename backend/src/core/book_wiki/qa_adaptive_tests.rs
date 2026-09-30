@@ -497,6 +497,13 @@ async fn test_qa_turn_limit_stops_after_one_answer_run_without_output_expansion(
     assert!(error.to_string().contains("qa_turn_limit"));
     assert_eq!(runtime.0.load(Ordering::SeqCst), 2);
     assert!(store.list_conversations(&base, 10).unwrap().is_empty());
+    let unfinished = store.list_unfinished_qa_runs(&base, 10).unwrap();
+    assert_eq!(unfinished.len(), 1);
+    assert_eq!(
+        unfinished[0].stop_reason.as_deref(),
+        Some("max_turn_requests")
+    );
+    assert!(!unfinished[0].has_partial_answer);
 }
 
 #[tokio::test]

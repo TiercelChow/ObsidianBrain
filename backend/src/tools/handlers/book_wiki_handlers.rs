@@ -1139,6 +1139,8 @@ pub struct CreateKnowledgeTaskHandler;
 
 pub struct PreviewKnowledgeTaskBriefHandler;
 
+pub struct UpdateKnowledgeTaskBriefHandler;
+
 #[async_trait]
 impl ToolHandler for PreviewKnowledgeTaskBriefHandler {
     fn name(&self) -> &str {
@@ -1238,6 +1240,7 @@ impl ToolHandler for CreateKnowledgeTaskHandler {
                         "tone": {"type":"string","enum":["analytical","technical","narrative","concise"]},
                         "depth": {"type":"string","enum":["brief","standard","deep"]},
                         "presentation_theme": {"type":"string","enum":["editorial","midnight","sage"]},
+                        "presentation_format": {"type":"string","enum":["narrative","qa"]},
                         "emphasis": {"type":"string","maxLength":500}
                     },
                     "required": ["confirmed","audience","purpose","tone","depth","presentation_theme","emphasis"],
@@ -1288,6 +1291,49 @@ impl ToolHandler for CreateKnowledgeTaskHandler {
             args.get("external_request_limit")
                 .and_then(Value::as_i64)
                 .unwrap_or(0),
+            &brief,
+        )?;
+        serde_json::to_value(task)
+            .map_err(|error| BrainError::Internal(format!("结果序列化失败: {error}")))
+    }
+}
+
+#[async_trait]
+impl ToolHandler for UpdateKnowledgeTaskBriefHandler {
+    fn name(&self) -> &str {
+        "update_knowledge_task_brief"
+    }
+
+    fn description(&self) -> &str {
+        "在研究任务启动前更新用户确认的材料偏好；拒绝已启动或已变化的草稿"
+    }
+
+    fn input_schema(&self) -> Value {
+        let brief_schema = CreateKnowledgeTaskHandler.input_schema()["properties"]["brief"].clone();
+        json!({
+            "type":"object",
+            "properties":{
+                "task_id":{"type":"string"},
+                "expected_updated_at":{"type":"string"},
+                "brief":brief_schema
+            },
+            "required":["task_id","expected_updated_at","brief"],
+            "additionalProperties":false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let brief =
+            serde_json::from_value::<ResearchBrief>(args["brief"].clone()).map_err(|error| {
+                BrainError::KnowledgeValidation(format!("研究简报格式无效: {error}"))
+            })?;
+        let task = ctx.book_wiki_service.store().update_draft_task_brief(
+            required_string(&args, "task_id")?,
+            required_string(&args, "expected_updated_at")?,
             &brief,
         )?;
         serde_json::to_value(task)
@@ -2603,6 +2649,56 @@ mod tests {
         assert_eq!(schema["required"][0], "knowledge_base_id");
         assert_eq!(schema["properties"]["limit"]["maximum"], 30);
         assert_eq!(schema["additionalProperties"], false);
+    }
+
+    #[test]
+    fn test_create_knowledge_task_schema_accepts_confirmed_presentation_brief() {
+        let schema = CreateKnowledgeTaskHandler.input_schema();
+        let validator = jsonschema::JSONSchema::compile(&schema).unwrap();
+        let arguments = json!({
+            "knowledge_base_id":"book-a",
+            "title":"比较两种机制",
+            "task_type":"research",
+            "deliverable_type":"presentation",
+            "brief": {
+                "confirmed":true,
+                "audience":"specialist",
+                "purpose":"decision",
+                "tone":"technical",
+                "depth":"deep",
+                "presentation_theme":"midnight",
+                "presentation_format":"narrative",
+                "emphasis":"保留反例"
+            }
+        });
+        assert!(validator.is_valid(&arguments));
+    }
+
+    #[test]
+    fn test_update_knowledge_task_brief_schema_requires_draft_revision_and_full_brief() {
+        let schema = UpdateKnowledgeTaskBriefHandler.input_schema();
+        let validator = jsonschema::JSONSchema::compile(&schema).unwrap();
+        let arguments = json!({
+            "task_id":"task-a",
+            "expected_updated_at":"2026-09-30T00:00:00Z",
+            "brief": {
+                "confirmed":true,
+                "audience":"specialist",
+                "purpose":"decision",
+                "tone":"technical",
+                "depth":"deep",
+                "presentation_theme":"midnight",
+                "presentation_format":"narrative",
+                "emphasis":"保留反例"
+            }
+        });
+        assert!(validator.is_valid(&arguments));
+        let mut missing_revision = arguments;
+        missing_revision
+            .as_object_mut()
+            .unwrap()
+            .remove("expected_updated_at");
+        assert!(!validator.is_valid(&missing_revision));
     }
 
     #[test]

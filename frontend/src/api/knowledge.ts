@@ -1126,6 +1126,14 @@ export function createKnowledgeTask(input: {
   }) as unknown as Promise<ToolEnvelope<KnowledgeTask>>
 }
 
+export function updateKnowledgeTaskBrief(taskId: string, expectedUpdatedAt: string, brief: ResearchBrief) {
+  return callTool('update_knowledge_task_brief', {
+    task_id: taskId,
+    expected_updated_at: expectedUpdatedAt,
+    brief,
+  }) as unknown as Promise<ToolEnvelope<KnowledgeTask>>
+}
+
 export function previewKnowledgeTaskBrief(input: {
   knowledgeBaseId: string
   title: string

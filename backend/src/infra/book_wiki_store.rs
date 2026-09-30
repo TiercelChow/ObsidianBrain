@@ -4264,6 +4264,48 @@ impl BookWikiStore {
         })
     }
 
+    pub fn update_draft_task_brief(
+        &self,
+        task_id: &str,
+        expected_updated_at: &str,
+        brief: &ResearchBrief,
+    ) -> Result<KnowledgeTask, BrainError> {
+        brief.validate().map_err(BrainError::KnowledgeValidation)?;
+        if !brief.confirmed {
+            return Err(BrainError::KnowledgeValidation(
+                "请先确认研究简报，再保存草稿".into(),
+            ));
+        }
+        let current = self.get_task(task_id)?;
+        if current.status != "draft" {
+            return Err(BrainError::KnowledgeValidation(
+                "只有未启动的研究草稿可以修改简报".into(),
+            ));
+        }
+        self.get_active_base(&current.knowledge_base_id)?;
+        let brief_json = serde_json::to_string(brief)
+            .map_err(|error| BrainError::Internal(format!("研究简报序列化失败: {error}")))?;
+        let now = Utc::now().to_rfc3339();
+        let now = if now == current.updated_at {
+            (Utc::now() + chrono::Duration::microseconds(1)).to_rfc3339()
+        } else {
+            now
+        };
+        let changed = self.db.with_connection(|conn| {
+            Ok(conn.execute(
+                "UPDATE knowledge_tasks SET brief_json=?3, updated_at=?4
+                 WHERE id=?1 AND status='draft' AND updated_at=?2",
+                params![task_id, expected_updated_at, brief_json, now],
+            )?)
+        })?;
+        if changed == 0 {
+            return Err(BrainError::KnowledgeValidation(
+                "研究草稿已变更或已启动，请刷新后再编辑".into(),
+            ));
+        }
+        self.get_task(task_id)
+    }
+
     pub fn start_task_execution(&self, task_id: &str) -> Result<KnowledgeTask, BrainError> {
         let current = self.get_task(task_id)?;
         self.get_active_base(&current.knowledge_base_id)?;
@@ -11122,6 +11164,41 @@ mod tests {
             .unwrap();
         assert_eq!(store.get_task(&task.id).unwrap().brief, brief);
         assert_eq!(store.list_tasks(Some(&base.id)).unwrap()[0].brief, brief);
+    }
+
+    #[test]
+    fn test_update_draft_task_brief_saves_final_user_choice_and_rejects_stale_or_started_task() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-edit-brief", "/tmp/book-edit-brief")])
+            .unwrap();
+        let base = store.initialize_base("book-edit-brief").unwrap();
+        let task = store
+            .create_task(&base.id, "比较两种机制", "", "research")
+            .unwrap();
+        let brief = ResearchBrief {
+            confirmed: true,
+            audience: "specialist".into(),
+            purpose: "decision".into(),
+            tone: "technical".into(),
+            depth: "deep".into(),
+            presentation_theme: "midnight".into(),
+            presentation_format: "narrative".into(),
+            emphasis: "保留反例".into(),
+        };
+        let changed = store
+            .update_draft_task_brief(&task.id, &task.updated_at, &brief)
+            .unwrap();
+        assert_eq!(changed.brief, brief);
+        assert_ne!(changed.updated_at, task.updated_at);
+        assert!(store
+            .update_draft_task_brief(&task.id, &task.updated_at, &brief)
+            .is_err());
+        store.start_task_execution(&task.id).unwrap();
+        assert!(store
+            .update_draft_task_brief(&task.id, &changed.updated_at, &brief)
+            .is_err());
+        assert_eq!(store.get_task(&task.id).unwrap().brief, brief);
     }
 
     #[test]

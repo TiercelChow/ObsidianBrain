@@ -2616,6 +2616,8 @@ http-body-util = "0.1"
 
 `list_unfinished_qa_runs`（`book_wiki`）：必填 `knowledge_base_id`，可选 `limit`（1–30，默认 10）；返回同书失败回答 Run 的问题、原会话、截断原因、是否有草稿和运行 ID，不返回整段草稿。已被成功恢复且正式保存到会话的失败祖先不再列出；多次空回答只保留最新尝试，若新尝试无正文则保留较早的有效草稿。页面按 Run ID 再读检查器并校验书籍和状态，旧草稿只作未完成文本展示，不把旧引用当作本轮证据。该工具不加入 Harness Run 的能力白名单，不扩大单轮 Agent 的书籍权限。
 
+`update_knowledge_task_brief`（`book_wiki`）：必填 `task_id`、列表中读取的 `expected_updated_at` 和完整 `brief`。仅更新尚未启动的研究草稿的已确认编辑合同；任务状态或版本已变化时返回冲突提示，调用方刷新后重试。`create_knowledge_task` 的 `brief` 参数允许可选 `presentation_format`（`narrative` 或 `qa`），旧客户端缺省时仍取 `narrative`。
+
 运行检查器的 `evidence_refs` 增加 `qa_plan`、`qa_resources`、`planning_stats`、`planning_run_ids`、`selected_candidate_ids`、`adaptive_budget` 和动态读取的 `adaptive_state`。`run.budget_changed`、`run.evidence_coverage`、`run.budget_limited` 分别记录初始/扩展、Agent 自报取证覆盖和被限制的原因；限制事件不是 ACP 完整结束事件。工具预算的估算与 token 计费统计保持分离。
 
 ### 编译覆盖报告（2026-09-26）

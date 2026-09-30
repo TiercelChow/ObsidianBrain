@@ -2741,15 +2741,23 @@ impl BookWikiService {
                 Ok((run.id, answer))
             }
             Err(error) => {
-                // Some runtimes return a terminal error without emitting a Completed
-                // event. Keep the stop reason in the audited Run so an empty
-                // max_tokens answer remains distinguishable and resumable.
-                if !completion_recorded && is_harness_output_truncation(&error) {
+                // Some runtimes return a terminal error without emitting a
+                // Completed event. Preserve the exact stop reason in the Run;
+                // output truncation and request-turn exhaustion need different
+                // recovery actions even when no answer text was produced.
+                let terminal_reason = if is_harness_output_truncation(&error) {
+                    Some("max_tokens")
+                } else if is_harness_turn_limit(&error) {
+                    Some("max_turn_requests")
+                } else {
+                    None
+                };
+                if let (false, Some(stop_reason)) = (completion_recorded, terminal_reason) {
                     if let Err(event_error) = persist_runtime_event(
                         &self.store,
                         &run.id,
                         AgentRuntimeEvent::Completed {
-                            stop_reason: "max_tokens".to_string(),
+                            stop_reason: stop_reason.to_string(),
                             complete: false,
                         },
                     ) {

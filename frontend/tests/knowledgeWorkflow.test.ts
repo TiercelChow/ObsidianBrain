@@ -101,6 +101,18 @@ test('research creation confirms an analyzed brief before persisting or running'
   assert.match(api, /brief: input\.brief/)
 })
 
+test('a research draft can revise its confirmed editorial brief before execution', async () => {
+  const [tasks, api] = await Promise.all([
+    source('src/views/knowledge/KnowledgeTasks.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+  assert.match(tasks, /task\.status === 'draft'[^\n]*openEditBrief\(task\)/)
+  assert.match(tasks, /Object\.assign\(brief, task\.brief\)/)
+  assert.match(tasks, /updateKnowledgeTaskBrief\(editingTask\.value\.id, editingTask\.value\.updated_at/)
+  assert.match(api, /callTool\('update_knowledge_task_brief'/)
+  assert.match(api, /expected_updated_at/)
+})
+
 test('research workspace distinguishes the internal goal from the reader-facing report title', async () => {
   const [workspace, api] = await Promise.all([
     source('src/components/knowledge/KnowledgeResearchWorkspace.vue'),

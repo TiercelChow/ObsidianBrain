@@ -3,7 +3,7 @@
 use super::qa_policy::{estimated_tokens, QaPlan, QaResources};
 use crate::error::BrainError;
 use crate::infra::book_wiki_store::AdaptiveBudgetPolicy;
-use crate::models::agent_budget::{context_capacity, output_limit};
+use crate::models::agent_budget::{context_capacity, output_limit, MAX_AGENT_OUTPUT_TOKENS};
 use crate::models::book_wiki::{ResearchPlan, ResearchQuestion, RuntimeProfile};
 use serde::Serialize;
 
@@ -22,6 +22,7 @@ pub(super) struct ResearchResources {
 
 #[derive(Clone, Copy, Debug, Serialize)]
 pub(super) struct SectionOutputCapacity {
+    pub capacity_basis: &'static str,
     pub effective_output_cap_tokens: u32,
     pub structure_tokens: u32,
     pub reasoning_margin_tokens: u32,
@@ -29,15 +30,22 @@ pub(super) struct SectionOutputCapacity {
 }
 
 impl ResearchResources {
-    /// A planning bound only when the provider explicitly declares a single
-    /// response output limit. Context capacity alone is not an output promise.
+    /// A planning bound when the provider declares an output limit or a small
+    /// explicit context window constrains the request below the application
+    /// guard. An unknown output capability is not treated as a promise.
     pub fn declared_section_output_capacity(
         profile: &RuntimeProfile,
         evidence_requirements: usize,
     ) -> Option<SectionOutputCapacity> {
         let provider = profile.provider_config.as_ref()?;
-        let declared_cap = provider.max_output_tokens?;
-        let cap = output_limit(provider.context_window, Some(declared_cap));
+        let declared_cap = provider.max_output_tokens;
+        let context_cap = output_limit(provider.context_window, None);
+        let cap = output_limit(provider.context_window, declared_cap);
+        if declared_cap.is_none()
+            && (provider.context_window.is_none() || cap == MAX_AGENT_OUTPUT_TOKENS)
+        {
+            return None;
+        }
         let structure = 1024u32.saturating_add(
             768u32.saturating_mul(evidence_requirements.max(1).saturating_sub(1) as u32),
         );
@@ -50,6 +58,15 @@ impl ResearchResources {
             (cap / 4).min(8192)
         };
         Some(SectionOutputCapacity {
+            capacity_basis: if declared_cap
+                .is_some_and(|limit| limit <= context_cap && limit <= MAX_AGENT_OUTPUT_TOKENS)
+            {
+                "provider_output_limit"
+            } else if context_cap < MAX_AGENT_OUTPUT_TOKENS {
+                "explicit_context_window"
+            } else {
+                "application_guard"
+            },
             effective_output_cap_tokens: cap,
             structure_tokens: structure,
             reasoning_margin_tokens: reasoning,
@@ -389,6 +406,7 @@ mod tests {
         assert_eq!(limited.structure_tokens, 2_560);
         assert_eq!(limited.reasoning_margin_tokens, 1_024);
         assert_eq!(limited.visible_body_ceiling_tokens, 512);
+        assert_eq!(limited.capacity_basis, "provider_output_limit");
         let question = ResearchQuestion {
             id: "small".into(),
             title: "有界主题".into(),
@@ -412,8 +430,24 @@ mod tests {
             1_536
         );
         provider.max_output_tokens = None;
-        profile.provider_config = Some(provider);
+        profile.provider_config = Some(provider.clone());
         assert!(ResearchResources::declared_section_output_capacity(&profile, 3).is_none());
+        provider.context_window = Some(32_768);
+        profile.provider_config = Some(provider);
+        let context_bound =
+            ResearchResources::declared_section_output_capacity(&profile, 3).unwrap();
+        assert_eq!(context_bound.effective_output_cap_tokens, 24_576);
+        assert_eq!(context_bound.visible_body_ceiling_tokens, 22_016);
+        assert_eq!(context_bound.capacity_basis, "explicit_context_window");
+        let mut provider = profile.provider_config.take().unwrap();
+        provider.max_output_tokens = Some(50_000);
+        profile.provider_config = Some(provider);
+        assert_eq!(
+            ResearchResources::declared_section_output_capacity(&profile, 3)
+                .unwrap()
+                .capacity_basis,
+            "explicit_context_window"
+        );
     }
 
     #[test]
