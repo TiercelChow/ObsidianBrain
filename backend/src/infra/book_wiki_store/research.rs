@@ -840,11 +840,12 @@ impl BookWikiStore {
         })
     }
 
-    /// The latest attempted model Run may no longer be the current stage's
-    /// run_id after a preflight-only retry. Read it from the immutable Run
-    /// ledger so a later resume still honors its observed capacity and output
-    /// request, including databases created before failed stages were archived.
-    pub(crate) fn latest_research_stage_run(
+    /// The last truncated model Run may no longer be the current stage's
+    /// run_id after a preflight-only or transient retry. Read it from the
+    /// immutable Run ledger so a later resume still honors its output request
+    /// and observed capacity, including databases created before failed
+    /// stages were archived.
+    pub(crate) fn latest_research_stage_truncated_run(
         &self,
         task: &str,
         stage_key: &str,
@@ -856,6 +857,7 @@ impl BookWikiStore {
                  WHERE json_extract(input_json, '$.knowledge_task_id') = ?1
                    AND json_extract(input_json, '$.research_stage_key') = ?2
                    AND task_type LIKE 'knowledge_task_%'
+                   AND error LIKE '%stop_reason=max_tokens%'
                  ORDER BY created_at DESC, rowid DESC LIMIT 1",
                 params![task, stage_key],
                 |row| row.get::<_, String>(0),

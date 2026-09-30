@@ -1899,12 +1899,15 @@ impl BookWikiService {
             self.store
                 .get_research_stage_content(&task.id, "presentation", None)?;
         let previous_truncation = if previous_stage.stage.status == "failed" {
-            previous_stage
-                .stage
-                .run_id
+            // A preflight-only resume can replace the current stage state
+            // without creating a new Run. Keep the last paid attempt's output
+            // ceiling authoritative across that failure as well.
+            self.store
+                .latest_research_stage_truncated_run(&task.id, "presentation")?
                 .as_deref()
                 .map(|run_id| self.store.get_agent_run(run_id))
                 .transpose()?
+                .filter(|run| run_uses_active_model_route(&run.input, &profile))
                 .and_then(|run| {
                     run.error
                         .as_deref()
@@ -1950,6 +1953,7 @@ impl BookWikiService {
                 "skill_ids": [&presentation_skill.id],
                 "external_research": { "enabled": false },
                 "model": &profile.model,
+                "provider_id": &profile.provider_id,
             });
             let mut prompt = build_presentation_prompt(task, report, evidence, &presentation_skill);
             input["presentation_materialization"]=serde_json::json!({"mode":"full_report","report_characters":report.chars().count()});
@@ -3768,6 +3772,21 @@ fn is_harness_turn_limit(error: &BrainError) -> bool {
     matches!(error, BrainError::LlmApiError { provider, detail }
         if provider == "deepseek_harness"
             && detail.contains("stop_reason=max_turn_requests"))
+}
+
+fn run_uses_active_model_route(input: &serde_json::Value, profile: &RuntimeProfile) -> bool {
+    if input.get("model").and_then(serde_json::Value::as_str) != Some(profile.model.as_str()) {
+        return false;
+    }
+    match input.get("provider_id") {
+        Some(serde_json::Value::String(provider_id)) => {
+            profile.provider_id.as_deref() == Some(provider_id.as_str())
+        }
+        Some(serde_json::Value::Null) => profile.provider_id.is_none(),
+        // Older Run inputs did not persist provider identity. Their model name
+        // is the strongest available evidence for retaining the old bound.
+        _ => true,
+    }
 }
 
 fn presentation_output_limit_error(error: BrainError) -> BrainError {

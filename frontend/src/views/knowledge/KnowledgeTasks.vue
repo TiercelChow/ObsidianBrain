@@ -95,12 +95,14 @@
         <div v-else class="knowledge-modal-body research-brief-form">
           <div v-if="preflight" class="research-brief-summary"><strong>需求预分析</strong><p>{{ preflight.summary }}</p><span v-for="caution in preflight.cautions" :key="caution">{{ caution }}</span></div>
           <p v-else class="research-brief-fallback">未使用模型预分析；你仍可以直接确定材料偏好，研究将在创建后由你手动启动。</p>
-          <label class="research-brief-field" :class="{ 'is-focus': briefIsFocus('audience') }"><span>面向谁 <small v-if="briefIsFocus('audience')">建议确认</small></span><span v-if="briefDecision('audience')" class="research-decision-tip"><b>{{ briefDecision('audience')?.question }}</b><em>{{ briefDecision('audience')?.impact }}</em></span><el-select v-model="brief.audience" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="有一定背景的读者" value="general" /><el-option label="领域专家" value="specialist" /><el-option label="零基础读者" value="beginner" /><el-option label="仅供自己复盘" value="self" /></el-select></label>
-          <label class="research-brief-field" :class="{ 'is-focus': briefIsFocus('purpose') }"><span>材料用途 <small v-if="briefIsFocus('purpose')">建议确认</small></span><span v-if="briefDecision('purpose')" class="research-decision-tip"><b>{{ briefDecision('purpose')?.question }}</b><em>{{ briefDecision('purpose')?.impact }}</em></span><el-select v-model="brief.purpose" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="理解主题" value="understand" /><el-option label="辅助决策" value="decision" /><el-option label="讲解或教学" value="teach" /><el-option label="日后查阅" value="reference" /></el-select></label>
-          <label class="research-brief-field" :class="{ 'is-focus': briefIsFocus('tone') }"><span>表述方式 <small v-if="briefIsFocus('tone')">建议确认</small></span><span v-if="briefDecision('tone')" class="research-decision-tip"><b>{{ briefDecision('tone')?.question }}</b><em>{{ briefDecision('tone')?.impact }}</em></span><el-select v-model="brief.tone" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="严谨分析" value="analytical" /><el-option label="技术深入" value="technical" /><el-option label="叙事讲述" value="narrative" /><el-option label="简明直接" value="concise" /></el-select></label>
-          <label class="research-brief-field" :class="{ 'is-focus': briefIsFocus('depth') }"><span>内容深度 <small v-if="briefIsFocus('depth')">建议确认</small></span><span v-if="briefDecision('depth')" class="research-decision-tip"><b>{{ briefDecision('depth')?.question }}</b><em>{{ briefDecision('depth')?.impact }}</em></span><el-select v-model="brief.depth" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="简要" value="brief" /><el-option label="标准" value="standard" /><el-option label="深入" value="deep" /></el-select></label>
-          <label v-if="draft.deliverableType === 'presentation'" class="research-brief-field" :class="{ 'is-focus': briefIsFocus('presentation_theme') }"><span>PPT 视觉主题 <small v-if="briefIsFocus('presentation_theme')">建议确认</small></span><span v-if="briefDecision('presentation_theme')" class="research-decision-tip"><b>{{ briefDecision('presentation_theme')?.question }}</b><em>{{ briefDecision('presentation_theme')?.impact }}</em></span><el-select v-model="brief.presentation_theme" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="Editorial · 明亮编辑风" value="editorial" /><el-option label="Midnight · 深色聚焦" value="midnight" /><el-option label="Sage · 柔和人文" value="sage" /></el-select></label>
-          <label v-if="draft.deliverableType === 'presentation'" class="research-brief-field" :class="{ 'is-focus': briefIsFocus('presentation_format') }"><span>PPT 编排方式 <small v-if="briefIsFocus('presentation_format')">建议确认</small></span><span v-if="briefDecision('presentation_format')" class="research-decision-tip"><b>{{ briefDecision('presentation_format')?.question }}</b><em>{{ briefDecision('presentation_format')?.impact }}</em></span><el-select v-model="brief.presentation_format" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="论点式材料 · 连贯叙事" value="narrative" /><el-option label="问答式讲解 · 逐题讨论" value="qa" /></el-select></label>
+          <p v-if="preflight" class="research-brief-recommended">当前设置：{{ briefSummary(brief, draft.deliverableType) }}</p>
+          <label v-if="briefFieldVisible('audience')" class="research-brief-field" :class="{ 'is-focus': briefIsFocus('audience') }"><span>面向谁 <small v-if="briefIsFocus('audience')">建议确认</small></span><span v-if="briefDecision('audience')" class="research-decision-tip"><b>{{ briefDecision('audience')?.question }}</b><em>{{ briefDecision('audience')?.impact }}</em></span><el-select v-model="brief.audience" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="有一定背景的读者" value="general" /><el-option label="领域专家" value="specialist" /><el-option label="零基础读者" value="beginner" /><el-option label="仅供自己复盘" value="self" /></el-select></label>
+          <label v-if="briefFieldVisible('purpose')" class="research-brief-field" :class="{ 'is-focus': briefIsFocus('purpose') }"><span>材料用途 <small v-if="briefIsFocus('purpose')">建议确认</small></span><span v-if="briefDecision('purpose')" class="research-decision-tip"><b>{{ briefDecision('purpose')?.question }}</b><em>{{ briefDecision('purpose')?.impact }}</em></span><el-select v-model="brief.purpose" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="理解主题" value="understand" /><el-option label="辅助决策" value="decision" /><el-option label="讲解或教学" value="teach" /><el-option label="日后查阅" value="reference" /></el-select></label>
+          <label v-if="briefFieldVisible('tone')" class="research-brief-field" :class="{ 'is-focus': briefIsFocus('tone') }"><span>表述方式 <small v-if="briefIsFocus('tone')">建议确认</small></span><span v-if="briefDecision('tone')" class="research-decision-tip"><b>{{ briefDecision('tone')?.question }}</b><em>{{ briefDecision('tone')?.impact }}</em></span><el-select v-model="brief.tone" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="严谨分析" value="analytical" /><el-option label="技术深入" value="technical" /><el-option label="叙事讲述" value="narrative" /><el-option label="简明直接" value="concise" /></el-select></label>
+          <label v-if="briefFieldVisible('depth')" class="research-brief-field" :class="{ 'is-focus': briefIsFocus('depth') }"><span>内容深度 <small v-if="briefIsFocus('depth')">建议确认</small></span><span v-if="briefDecision('depth')" class="research-decision-tip"><b>{{ briefDecision('depth')?.question }}</b><em>{{ briefDecision('depth')?.impact }}</em></span><el-select v-model="brief.depth" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="简要" value="brief" /><el-option label="标准" value="standard" /><el-option label="深入" value="deep" /></el-select></label>
+          <label v-if="briefFieldVisible('presentation_theme')" class="research-brief-field" :class="{ 'is-focus': briefIsFocus('presentation_theme') }"><span>PPT 视觉主题 <small v-if="briefIsFocus('presentation_theme')">建议确认</small></span><span v-if="briefDecision('presentation_theme')" class="research-decision-tip"><b>{{ briefDecision('presentation_theme')?.question }}</b><em>{{ briefDecision('presentation_theme')?.impact }}</em></span><el-select v-model="brief.presentation_theme" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="Editorial · 明亮编辑风" value="editorial" /><el-option label="Midnight · 深色聚焦" value="midnight" /><el-option label="Sage · 柔和人文" value="sage" /></el-select></label>
+          <label v-if="briefFieldVisible('presentation_format')" class="research-brief-field" :class="{ 'is-focus': briefIsFocus('presentation_format') }"><span>PPT 编排方式 <small v-if="briefIsFocus('presentation_format')">建议确认</small></span><span v-if="briefDecision('presentation_format')" class="research-decision-tip"><b>{{ briefDecision('presentation_format')?.question }}</b><em>{{ briefDecision('presentation_format')?.impact }}</em></span><el-select v-model="brief.presentation_format" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="论点式材料 · 连贯叙事" value="narrative" /><el-option label="问答式讲解 · 逐题讨论" value="qa" /></el-select></label>
+          <div v-if="hasSecondaryBriefOptions" class="research-brief-more"><span>其他偏好会保留当前设置，也可以逐项调整。</span><button type="button" :aria-expanded="showAllBriefOptions" @click="showAllBriefOptions = !showAllBriefOptions">{{ showAllBriefOptions ? '只看关键选择' : '调整全部偏好' }}</button></div>
           <label class="research-brief-field"><span>特别强调（可选）</span><el-input v-model="brief.emphasis" :maxlength="500" show-word-limit placeholder="例如：多比较反例、面向非技术听众" /></label>
         </div>
         <p v-if="previewing" class="research-preflight-progress" role="status">正在分析任务目标和材料偏好；如输出不完整，会自动恢复一次。</p>
@@ -261,6 +263,7 @@ import { canFocusDocument } from '@/utils/modalFocusPolicy'
 import { knowledgeRunDiagnostics } from '@/utils/knowledgeRunDiagnostics'
 import { researchTaskCapacityFailure, researchTaskTurnLimitFailure } from '@/utils/knowledgeRuntimePolicy'
 import { hasFailedResearchStage } from '@/utils/knowledgeResearch'
+import { visibleResearchBriefFields, type ResearchBriefDecisionField } from '@/utils/researchBriefChoices'
 import { researchReadiness } from '@/utils/researchReadiness'
 import {
   createKnowledgeTask,
@@ -297,6 +300,7 @@ const readinessLoading = ref(false)
 const readinessError = ref('')
 const createStep = ref<'request' | 'preferences'>('request')
 const preflight = ref<ResearchPreflight | null>(null)
+const showAllBriefOptions = ref(false)
 const executingTaskId = ref('')
 const loadingResultId = ref('')
 const createVisible = ref(false)
@@ -325,14 +329,18 @@ const readiness = computed(() => selectedBase.value ? researchReadiness(selected
 const canPrepareBrief = computed(() => Boolean(!readinessLoading.value && !readinessError.value && readiness.value?.canCreate && draft.title.trim()))
 function defaultBrief(): ResearchBrief { return { confirmed: false, audience: 'general', purpose: 'understand', tone: 'analytical', depth: 'standard', presentation_theme: 'editorial', presentation_format: 'narrative', emphasis: '' } }
 const brief = reactive<ResearchBrief>(defaultBrief())
+const visibleBriefFields = computed(() => visibleResearchBriefFields(preflight.value, draft.deliverableType, showAllBriefOptions.value))
+const hasSecondaryBriefOptions = computed(() => visibleResearchBriefFields(preflight.value, draft.deliverableType, false).length < visibleResearchBriefFields(preflight.value, draft.deliverableType, true).length)
+function briefFieldVisible(field: ResearchBriefDecisionField) { return visibleBriefFields.value.includes(field) }
 function briefIsFocus(field: ResearchPreflight['focus_decisions'][number]) { return preflight.value?.focus_decisions.includes(field) ?? false }
 function briefDecision(field: ResearchPreflight['focus_decisions'][number]) { return preflight.value?.decision_points?.find(decision => decision.field === field) }
 function briefSummary(value: ResearchBrief, deliverable: KnowledgeTask['deliverable_type']) {
   const audience = { general: '背景读者', specialist: '领域专家', beginner: '入门读者', self: '个人复盘' }[value.audience]
   const purpose = { understand: '理解主题', decision: '辅助决策', teach: '讲解教学', reference: '日后查阅' }[value.purpose]
+  const tone = { analytical: '严谨分析', technical: '技术深入', narrative: '叙事讲述', concise: '简明直接' }[value.tone]
   const depth = { brief: '简要', standard: '标准', deep: '深入' }[value.depth]
   const theme = deliverable === 'presentation' ? ` · ${value.presentation_theme} 主题 · ${value.presentation_format === 'qa' ? '问答式' : '论点式'}` : ''
-  return `${audience} · ${purpose} · ${depth}${theme}`
+  return `${audience} · ${purpose} · ${tone} · ${depth}${theme}`
 }
 let viewActive = true
 let briefPreviewRequestId = 0
@@ -411,6 +419,7 @@ function openCreate() {
   previewing.value = false
   createStep.value = 'request'
   preflight.value = null
+  showAllBriefOptions.value = false
   Object.assign(brief, defaultBrief())
   draft.knowledgeBaseId = filterBaseId.value || bases.value[0]?.id || ''
   draft.title = ''
@@ -470,6 +479,7 @@ function openModelSettings() {
 function skipBrief() {
   if (!canPrepareBrief.value) return
   preflight.value = null
+  showAllBriefOptions.value = false
   Object.assign(brief, defaultBrief())
   createStep.value = 'preferences'
 }
@@ -484,6 +494,7 @@ async function prepareBrief() {
     if (requestId !== briefPreviewRequestId || !createVisible.value || requestSnapshot !== JSON.stringify({ ...draft })) return
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '预分析未完成')
     preflight.value = response.result
+    showAllBriefOptions.value = false
     Object.assign(brief, response.result.recommended, { confirmed: false })
     createStep.value = 'preferences'
   } catch (error) {
@@ -781,6 +792,9 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
 .research-brief-summary p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
 .research-brief-summary > span, .research-brief-fallback { color: var(--text-muted); font-size: 11px; line-height: 1.5; }
 .research-brief-fallback { margin: 0; }
+.research-brief-recommended { margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.research-brief-more { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border: 1px solid var(--border-faint); border-radius: 12px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.research-brief-more button { min-height: 30px; padding: 0 4px; border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; }
 .research-brief-field { min-width: 0; display: grid; gap: 6px; color: var(--text-secondary); font-size: 11px; font-weight: 650; }
 .research-brief-field > span { display: flex; align-items: center; gap: 7px; }
 .research-brief-field small { padding: 2px 6px; border-radius: 6px; background: var(--accent-light); color: var(--accent); font-size: 9px; }
@@ -898,6 +912,8 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
   .research-readiness > p, .research-readiness ul { font-size: 12px; }
   .research-readiness button { min-height: 44px; font-size: 12px; }
   .research-preflight-progress { font-size: 12px; }
+  .research-brief-recommended, .research-brief-more { font-size: 12px; }
+  .research-brief-more button { min-height: 44px; }
   .research-brief-field { font-size: 13px; }
   .research-decision-tip b { font-size: 13px; }
   .research-decision-tip em { font-size: 12px; }

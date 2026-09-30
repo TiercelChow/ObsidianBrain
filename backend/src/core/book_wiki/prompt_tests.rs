@@ -783,6 +783,38 @@ fn test_research_and_presentation_honor_per_phase_output_allocation() {
 }
 
 #[test]
+fn test_research_resume_only_reuses_capacity_from_the_same_model_route() {
+    let profile = RuntimeProfile {
+        id: "runtime".into(),
+        name: "runtime".into(),
+        runtime: "deepseek_harness".into(),
+        executable: "deepseek-harness".into(),
+        model: "same-model-name".into(),
+        provider_id: Some("provider-b".into()),
+        provider_config: None,
+        enabled: true,
+        revision: 1,
+        updated_at: String::new(),
+    };
+    assert!(run_uses_active_model_route(
+        &serde_json::json!({"model":"same-model-name","provider_id":"provider-b"}),
+        &profile
+    ));
+    assert!(!run_uses_active_model_route(
+        &serde_json::json!({"model":"same-model-name","provider_id":"provider-a"}),
+        &profile
+    ));
+    assert!(!run_uses_active_model_route(
+        &serde_json::json!({"model":"older-model","provider_id":"provider-b"}),
+        &profile
+    ));
+    assert!(run_uses_active_model_route(
+        &serde_json::json!({"model":"same-model-name"}),
+        &profile
+    ));
+}
+
+#[test]
 fn test_research_preflight_output_budget_respects_provider_and_context_headroom() {
     assert_eq!(
         preflight_output_budget(8192, None, None, 1000).unwrap(),

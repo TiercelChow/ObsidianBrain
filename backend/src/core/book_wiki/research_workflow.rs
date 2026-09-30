@@ -347,7 +347,7 @@ impl BookWikiService {
                 .claim_research_stage(&phase.task.id, &phase.key)?;
             let input = json!({"knowledge_task_id":phase.task.id,"research_stage_key":phase.key,"research_claim_id":claim.claim_id,"research_claim_attempt":claim.attempt,
                 "research_resources":phase.resources,"research_plan":phase.payload.get("plan"),"research_question":phase.payload.get("question"),
-                "evidence_entry_ids":evidence_ids,"skill_ids":skills,"model":phase.profile.model,"retry":retry,
+                "evidence_entry_ids":evidence_ids,"skill_ids":skills,"model":phase.profile.model,"provider_id":phase.profile.provider_id,"retry":retry,
                 "defer_research_citation_validation":phase.phase!="plan",
                 "research_manifest_projected":phase.phase=="synthesis" && phase.payload["integration_manifest"]["complete"]==false,
                 "research_manifest_topics":manifest_topics,
@@ -568,6 +568,9 @@ impl BookWikiService {
         else {
             return Ok(resources);
         };
+        if !run_uses_active_model_route(&run.input, profile) {
+            return Ok(resources);
+        }
         if !run
             .error
             .as_deref()
@@ -626,7 +629,9 @@ impl BookWikiService {
                 .stages
                 .iter()
                 .find(|stage| stage.stage_key == "plan");
-            let previous_run = self.store.latest_research_stage_run(&task.id, "plan")?;
+            let previous_run = self
+                .store
+                .latest_research_stage_truncated_run(&task.id, "plan")?;
             let resources = match self.resume_research_phase_resources(
                 &profile,
                 ResearchResources::new(&profile, None, None, catalog.len()),
@@ -658,7 +663,9 @@ impl BookWikiService {
             if stage.stage.status == "completed" {
                 continue;
             }
-            let previous_run = self.store.latest_research_stage_run(&task.id, &key)?;
+            let previous_run = self
+                .store
+                .latest_research_stage_truncated_run(&task.id, &key)?;
             let resources = match self.research_phase_resources(
                 &profile,
                 &plan,
@@ -714,7 +721,7 @@ impl BookWikiService {
         if synthesis.stage.status != "completed" {
             let previous_run = self
                 .store
-                .latest_research_stage_run(&task.id, "synthesis")?;
+                .latest_research_stage_truncated_run(&task.id, "synthesis")?;
             let mut question = ResearchQuestion {
                 id: "_synthesis".into(),
                 title: "综合结论与交叉核验".into(),
@@ -1954,6 +1961,25 @@ mod tests {
                 .unwrap(),
             1
         );
+        let transient = service
+            .store
+            .start_agent_run(
+                &task.knowledge_base_id,
+                "deepseek_harness",
+                "knowledge_task_research",
+                &json!({
+                    "knowledge_task_id": task.id,
+                    "research_stage_key": "plan",
+                    "model": profile.model,
+                    "provider_id": profile.provider_id,
+                    "request_max_output_tokens": 32_768,
+                }),
+            )
+            .unwrap();
+        service
+            .store
+            .fail_agent_run(&transient.id, "HTTP 503 暂时不可用")
+            .unwrap();
 
         let resumed = service.execute_research_workflow(&task).await.unwrap_err();
         assert!(resumed.to_string().contains("research_input_hard_limit"));
@@ -1986,6 +2012,23 @@ mod tests {
             .unwrap();
         assert_eq!(latest.stage.error, current.stage.error);
         assert_eq!(latest.stage.revision, current.stage.revision);
+
+        service
+            .store
+            .save_runtime_profile(
+                &profile.id,
+                &profile.executable,
+                "larger-context-model",
+                profile.provider_id.as_deref(),
+                true,
+                profile.revision,
+            )
+            .unwrap();
+        let _ = service.execute_research_workflow(&task).await;
+        assert!(
+            calls.lock().unwrap().len() > 3,
+            "更换模型后不应把旧模型的实测上下文容量套用到新模型"
+        );
     }
 
     #[tokio::test]
@@ -2517,6 +2560,68 @@ mod tests {
             service.get_task_result(&task.id).is_ok(),
             "已保存报告必须仍能查看"
         );
+        let transient = store
+            .start_agent_run(
+                &task.knowledge_base_id,
+                "deepseek_harness",
+                "knowledge_task_presentation_plan",
+                &json!({
+                    "knowledge_task_id": task.id,
+                    "research_stage_key": "presentation",
+                    "model": provider.model,
+                    "provider_id": provider.provider_id,
+                    "request_max_output_tokens": 2_048,
+                }),
+            )
+            .unwrap();
+        store
+            .fail_agent_run(&transient.id, "HTTP 503 暂时不可用")
+            .unwrap();
+        let tight_provider = store
+            .save_model_provider_profile(
+                &provider.provider_id,
+                &provider.display_name,
+                &provider.api_protocol,
+                &provider.base_url,
+                &provider.model,
+                &provider.credential_source,
+                &provider.api_key_env,
+                true,
+                true,
+                Some(8_192),
+                Some(4_096),
+                "off",
+                provider.revision,
+            )
+            .unwrap();
+        let preflight = service.execute_task(&task.id).await.unwrap_err();
+        assert!(
+            preflight.to_string().contains("research_input_hard_limit"),
+            "{preflight}"
+        );
+        assert!(store
+            .get_research_stage_content(&task.id, "presentation", None)
+            .unwrap()
+            .stage
+            .run_id
+            .is_none());
+        let restored_provider = store
+            .save_model_provider_profile(
+                &provider.provider_id,
+                &provider.display_name,
+                &provider.api_protocol,
+                &provider.base_url,
+                &provider.model,
+                &provider.credential_source,
+                &provider.api_key_env,
+                true,
+                true,
+                Some(32_768),
+                Some(2_048),
+                "off",
+                tight_provider.revision,
+            )
+            .unwrap();
         let second = service.execute_task(&task.id).await.unwrap_err();
         assert!(second
             .to_string()
@@ -2524,7 +2629,7 @@ mod tests {
         assert_eq!(
             *calls.lock().unwrap(),
             1,
-            "相同模型硬限下不得重复调用策划器"
+            "预检失败覆盖当前阶段后仍不得忘记历史截断 Run 并重播同预算策划"
         );
         store
             .save_model_provider_profile(
@@ -2540,7 +2645,7 @@ mod tests {
                 Some(32_768),
                 Some(16_384),
                 "off",
-                provider.revision,
+                restored_provider.revision,
             )
             .unwrap();
         *allow_success.lock().unwrap() = true;
