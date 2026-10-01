@@ -31,6 +31,25 @@ test('restoration refuses cross-book, completed and mismatched run records', () 
   assert.equal(recoverInterruptedQaRun({ ...failedRun, input: { question: '' } }, 'book-a', 'run-1'), null)
 })
 
+test('a completed answer missing from conversation history is restored only from its scoped recovery listing', () => {
+  const completed = {
+    ...failedRun,
+    status: 'completed',
+    output: { answer: '完整回答 [S1]' },
+    error: null,
+  }
+  assert.equal(recoverInterruptedQaRun(completed, 'book-a', 'run-1'), null)
+  assert.equal(recoverInterruptedQaRun(completed, 'book-b', 'run-1', true), null)
+  assert.deepEqual(recoverInterruptedQaRun(completed, 'book-a', 'run-1', true), {
+    runId: 'run-1',
+    question: '机制是什么？',
+    conversationId: 'conversation-a',
+    draft: '完整回答 [S1]',
+    error: '模型已生成完整回答，但没有写入会话历史；此处可以找回正文，后续追问暂不继承它。',
+    completedWithoutHistory: true,
+  })
+})
+
 test('a failed max_tokens run without answer text keeps its original scope without inventing a draft', () => {
   const recovered = recoverInterruptedQaRun({
     ...failedRun,

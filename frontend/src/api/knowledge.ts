@@ -407,6 +407,7 @@ export interface UnfinishedQaRun {
   run_id: string
   question: string
   conversation_id?: string | null
+  completed_without_history: boolean
   stop_reason?: string | null
   has_partial_answer: boolean
   error: string

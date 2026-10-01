@@ -809,6 +809,7 @@ pub struct UnfinishedQaRun {
     pub run_id: String,
     pub question: String,
     pub conversation_id: Option<String>,
+    pub completed_without_history: bool,
     pub stop_reason: Option<String>,
     pub has_partial_answer: bool,
     pub error: String,

@@ -297,6 +297,58 @@ fn heading_identity(value: &str) -> String {
 }
 
 fn validate_layout_payload(field: &str, slide: &PresentationSlide) -> Result<(), BrainError> {
+    if !matches!(
+        slide.layout,
+        PresentationLayout::Statement
+            | PresentationLayout::Metric
+            | PresentationLayout::Evidence
+            | PresentationLayout::Summary
+    ) && !slide.body.is_empty()
+    {
+        return Err(validation_error(&format!(
+            "{field}.body 不会显示在 {} 布局中，请移入该布局的可见字段",
+            layout_name(slide.layout)
+        )));
+    }
+    for (name, present, accepted) in [
+        (
+            "left/right",
+            slide.left.is_some() || slide.right.is_some(),
+            matches!(slide.layout, PresentationLayout::Split),
+        ),
+        (
+            "steps",
+            !slide.steps.is_empty(),
+            matches!(slide.layout, PresentationLayout::Process),
+        ),
+        (
+            "metric",
+            slide.metric.is_some(),
+            matches!(slide.layout, PresentationLayout::Metric),
+        ),
+        (
+            "chart",
+            slide.chart.is_some(),
+            matches!(slide.layout, PresentationLayout::Chart),
+        ),
+        (
+            "relationship",
+            slide.relationship.is_some(),
+            matches!(slide.layout, PresentationLayout::Relationship),
+        ),
+        (
+            "quote",
+            !slide.quote.trim().is_empty(),
+            matches!(slide.layout, PresentationLayout::Quote),
+        ),
+    ] {
+        if present && !accepted {
+            return Err(validation_error(&format!(
+                "{field}.{name} 不会显示在 {} 布局中，请移入该布局的可见字段",
+                layout_name(slide.layout)
+            )));
+        }
+    }
     match slide.layout {
         PresentationLayout::Split => {
             validate_panel(
@@ -446,6 +498,11 @@ fn validate_layout_payload(field: &str, slide: &PresentationSlide) -> Result<(),
         }
         PresentationLayout::Quote => {
             validate_text(&format!("{field}.quote"), &slide.quote, 240, false)?;
+        }
+        PresentationLayout::Summary if slide.body.len() > 4 => {
+            return Err(validation_error(&format!(
+                "{field}.body 在 summary 最多显示 4 条"
+            )));
         }
         _ => {}
     }
@@ -1808,6 +1865,9 @@ mod tests {
         spec.slides[3].citations = vec!["S1".into()];
         for slide in &mut spec.slides {
             slide.layout = PresentationLayout::Statement;
+            slide.left = None;
+            slide.right = None;
+            slide.steps.clear();
         }
         let error = validate_presentation_spec(&spec, 1).unwrap_err();
         assert!(error.to_string().contains("至少需要 3 种布局"), "{error}");
@@ -1853,6 +1913,40 @@ mod tests {
         let mut spec = sample_spec();
         spec.slides[2].title = "分层实施流程".into();
         assert!(validate_presentation_spec(&spec, 1).is_ok());
+    }
+
+    #[test]
+    fn test_summary_rejects_a_fifth_item_that_the_renderer_would_drop() {
+        let mut spec = sample_spec();
+        spec.slides[3].body = (1..=5).map(|number| format!("建议 {number}")).collect();
+        let error = validate_presentation_spec(&spec, 1).unwrap_err();
+        assert!(
+            error.to_string().contains("summary 最多显示 4 条"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn test_presentation_rejects_payload_that_layout_does_not_render() {
+        let mut spec = sample_spec();
+        spec.slides[0].layout = PresentationLayout::Chart;
+        spec.slides[0].chart = Some(PresentationChart {
+            unit: "%".into(),
+            categories: vec!["甲".into(), "乙".into()],
+            values: vec![80.0, 70.0],
+            highlight_index: None,
+        });
+        let error = validate_presentation_spec(&spec, 1).unwrap_err();
+        assert!(error.to_string().contains("body 不会显示"), "{error}");
+
+        let mut spec = sample_spec();
+        spec.slides[1].metric = Some(PresentationMetric {
+            value: "42%".into(),
+            label: "指标".into(),
+            context: "口径".into(),
+        });
+        let error = validate_presentation_spec(&spec, 1).unwrap_err();
+        assert!(error.to_string().contains("metric 不会显示"), "{error}");
     }
 
     #[test]

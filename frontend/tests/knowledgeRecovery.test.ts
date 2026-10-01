@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskCapacityFailure, researchTaskQuestionFromPlanning, researchTaskQuestionFromRun, researchTaskRouteFromQuestion, researchTaskStallFailure, researchTaskStartupFailure, researchTaskTurnLimitFailure, validateModelCapabilities } from '../src/utils/knowledgeRuntimePolicy.ts'
+import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, originalQuestionForSavedAnswer, researchTaskCapacityFailure, researchTaskQuestionFromPlanning, researchTaskQuestionFromRun, researchTaskRouteFromQuestion, researchTaskStallFailure, researchTaskStartupFailure, researchTaskTurnLimitFailure, validateModelCapabilities } from '../src/utils/knowledgeRuntimePolicy.ts'
 
 test('planning fallback remains visible as a retrieval adjustment', () => {
   assert.equal(labelForRuntimePhase('目录规划未完成，正在改用书内检索继续核查'), '正在调整检索方式')
@@ -116,6 +116,20 @@ test('research transfer retains the full resolved question in its editable descr
   const route = researchTaskRouteFromQuestion('book-a', question)
   assert.equal(route.query.title.length, 200)
   assert.equal(route.query.description, question)
+})
+
+test('a saved answer can recover only its adjacent user question for a later research handoff', () => {
+  const messages = [
+    { role: 'user', content: '旧问题' },
+    { role: 'assistant', content: '旧回答' },
+    { role: 'user', content: '  新问题  ' },
+    { role: 'assistant', content: '新回答' },
+    { role: 'assistant', content: '孤立回答' },
+  ]
+  assert.equal(originalQuestionForSavedAnswer(messages, 3), '新问题')
+  assert.equal(originalQuestionForSavedAnswer(messages, 4), undefined)
+  assert.equal(originalQuestionForSavedAnswer(messages, 2), undefined)
+  assert.equal(originalQuestionForSavedAnswer([{ role: 'user', content: 'x'.repeat(2001) }, { role: 'assistant', content: 'a' }], 1), undefined)
 })
 
 test('only a failed task whose failure header reached the Harness turn limit gets narrowing advice', () => {

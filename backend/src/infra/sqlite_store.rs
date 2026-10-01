@@ -330,6 +330,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "slide-level presentation editorial quality",
         sql: include_str!("../../migrations/056_presentation_editorial_quality.sql"),
     },
+    Migration {
+        version: 57,
+        description: "presentation visible payload rules",
+        sql: include_str!("../../migrations/057_presentation_visible_payload_rules.sql"),
+    },
 ];
 
 #[cfg(test)]
@@ -724,7 +729,7 @@ fn overwrite_structured_presentation_skill(conn: &Connection) -> Result<(), Brai
     let updated = conn.execute(
         "UPDATE skill_versions
          SET content_hash = ?1, release_state = 'published',
-             changelog = '按受众与用途组织材料；逐页审校独立职责、具体结论、证据边界与重复内容。'
+             changelog = '按受众与用途组织材料；逐页审校独立职责、证据边界，并只填写所选布局可见的载荷字段。'
          WHERE id = ?2 AND skill_id = ?3",
         params![&content_hash, version_id, skill_id],
     )?;
@@ -863,7 +868,7 @@ impl SqliteStore {
                 32 => compact_wiki_skill_versions(&conn),
                 33 => overwrite_structured_presentation_skill(&conn),
                 34 => overwrite_structured_presentation_skill(&conn),
-                54..=56 => overwrite_structured_presentation_skill(&conn),
+                54..=57 => overwrite_structured_presentation_skill(&conn),
                 38 | 42 | 45 | 47 => overwrite_harness_wiki_skills(&conn),
                 48 => crate::infra::book_wiki_store::backfill_source_impacts(&conn),
                 51 => migrate_research_execution_epoch(&conn),
@@ -1717,8 +1722,11 @@ mod tests {
         let store = SqliteStore::new(&db_path).unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version IN (54, 55, 56)", [])
-                .unwrap();
+            conn.execute(
+                "DELETE FROM _migrations WHERE version IN (54, 55, 56, 57)",
+                [],
+            )
+            .unwrap();
             conn.execute(
                 "UPDATE skill_files
                  SET content_text = '旧版演示指令', content_hash = 'legacy', size_bytes = 18
@@ -1763,7 +1771,7 @@ mod tests {
         let store = SqliteStore::new(&db_path).unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version IN (55, 56)", [])
+            conn.execute("DELETE FROM _migrations WHERE version IN (55, 56, 57)", [])
                 .unwrap();
             conn.execute(
                 "UPDATE skill_files
@@ -1805,8 +1813,11 @@ mod tests {
         let hash = hex::encode(Sha256::digest(content.as_bytes()));
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version IN (54, 55, 56)", [])
-                .unwrap();
+            conn.execute(
+                "DELETE FROM _migrations WHERE version IN (54, 55, 56, 57)",
+                [],
+            )
+            .unwrap();
             conn.execute(
                 "INSERT INTO skill_versions
                     (id, skill_id, revision, content_hash, release_state, created_at)
@@ -1855,7 +1866,7 @@ mod tests {
         let hash = hex::encode(Sha256::digest(content.as_bytes()));
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version IN (55, 56)", [])
+            conn.execute("DELETE FROM _migrations WHERE version IN (55, 56, 57)", [])
                 .unwrap();
             conn.execute(
                 "INSERT INTO skill_versions
@@ -1902,7 +1913,7 @@ mod tests {
         let store = SqliteStore::new(&db_path).unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version = 56", [])
+            conn.execute("DELETE FROM _migrations WHERE version IN (56, 57)", [])
                 .unwrap();
             conn.execute(
                 "UPDATE skill_files SET content_text='旧版演示指令', content_hash='legacy', size_bytes=18
@@ -1945,6 +1956,51 @@ mod tests {
     }
 
     #[test]
+    fn test_migration_057_refreshes_current_presentation_visible_payload_rules() {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("presentation-visible-payload-upgrade.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("DELETE FROM _migrations WHERE version = 57", [])
+                .unwrap();
+            conn.execute(
+                "UPDATE skill_files SET content_text='旧版演示指令', content_hash='legacy', size_bytes=18
+                 WHERE skill_version_id='skill-version-book-presentation-v3'
+                   AND relative_path='SKILL.md'",
+                [],
+            )
+            .unwrap();
+        }
+        drop(store);
+
+        let upgraded = SqliteStore::new(&db_path).unwrap();
+        let conn = upgraded.conn.lock().unwrap();
+        let body: String = conn
+            .query_row(
+                "SELECT f.content_text FROM skills s
+                 JOIN skill_files f ON f.skill_version_id=s.current_version_id
+                 WHERE s.id='skill-book-presentation' AND f.relative_path='SKILL.md'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            body,
+            include_str!("../../skills/book-presentation/SKILL.md")
+        );
+        assert!(body.contains("只填写所选布局会显示的载荷字段"));
+        let migration_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM _migrations WHERE version=57",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
+    }
+
+    #[test]
     fn test_migration_056_preserves_later_published_presentation_skill() {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("presentation-editorial-v4.db");
@@ -1954,7 +2010,7 @@ mod tests {
         let hash = hex::encode(Sha256::digest(content.as_bytes()));
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version = 56", [])
+            conn.execute("DELETE FROM _migrations WHERE version IN (56, 57)", [])
                 .unwrap();
             conn.execute(
                 "INSERT INTO skill_versions

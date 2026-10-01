@@ -3765,19 +3765,26 @@ impl BookWikiStore {
                        )) parent
                       WHERE typeof(parent.value)='text' AND parent.value<>''
                  )
-                 SELECT r.id, r.input_json, r.output_json, r.error, r.created_at
+                 SELECT r.id, r.status, r.input_json, r.output_json, r.error, r.created_at
                    FROM agent_runs r
                   WHERE r.knowledge_base_id=?1 AND r.task_type='knowledge_qa'
-                    AND r.status='failed'
+                    AND (r.status='failed'
+                         OR (r.status='completed'
+                             AND length(trim(COALESCE(json_extract(r.output_json, '$.answer'), '')))>0
+                             AND NOT EXISTS (SELECT 1 FROM knowledge_messages km
+                                              WHERE km.run_id=r.id AND km.role='assistant')))
                     AND r.id NOT IN (SELECT id FROM resolved)
                     AND NOT EXISTS (
                         SELECT 1 FROM agent_runs newer
                          WHERE newer.knowledge_base_id=?1
-                           AND newer.task_type='knowledge_qa' AND newer.status='failed'
+                           AND newer.task_type='knowledge_qa'
+                           AND newer.status IN ('failed','completed')
                            AND (json_extract(newer.input_json, '$.resume_run_id')=r.id
                                 OR json_extract(newer.input_json, '$.qa_retry_parent_run_id')=r.id)
                            AND (length(trim(COALESCE(json_extract(newer.output_json, '$.partial_answer'), '')))>0
-                                OR length(trim(COALESCE(json_extract(r.output_json, '$.partial_answer'), '')))=0)
+                                OR length(trim(COALESCE(json_extract(newer.output_json, '$.answer'), '')))>0
+                                OR (length(trim(COALESCE(json_extract(r.output_json, '$.partial_answer'), '')))=0
+                                    AND length(trim(COALESCE(json_extract(r.output_json, '$.answer'), '')))=0))
                     )
                   ORDER BY r.created_at DESC, r.rowid DESC
                   LIMIT ?2",
@@ -3786,15 +3793,16 @@ impl BookWikiStore {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
-                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
                 ))
             })?;
             runs.collect::<Result<Vec<_>, _>>().map_err(Into::into)
         })?;
         let mut unfinished = Vec::with_capacity(rows.len());
-        for (run_id, input_json, output_json, error, created_at) in rows {
+        for (run_id, status, input_json, output_json, error, created_at) in rows {
             let input: Value = serde_json::from_str(&input_json)
                 .map_err(|cause| BrainError::Internal(format!("问答运行输入解析失败: {cause}")))?;
             let question = input
@@ -3816,6 +3824,7 @@ impl BookWikiStore {
                     .get("conversation_id")
                     .and_then(Value::as_str)
                     .map(str::to_string),
+                completed_without_history: status == "completed",
                 stop_reason: output
                     .as_ref()
                     .and_then(|value| value.get("stop_reason"))
@@ -3826,12 +3835,17 @@ impl BookWikiStore {
                     .and_then(|value| value.get("partial_answer"))
                     .and_then(Value::as_str)
                     .is_some_and(|draft| !draft.trim().is_empty()),
-                error: output
-                    .as_ref()
-                    .and_then(|value| value.get("qa_recovery_message"))
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-                    .unwrap_or_else(|| error.unwrap_or_default()),
+                error: if status == "completed" {
+                    "模型已生成完整回答，但没有写入会话历史；此处可以找回正文，后续追问暂不继承它。"
+                        .to_string()
+                } else {
+                    output
+                        .as_ref()
+                        .and_then(|value| value.get("qa_recovery_message"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .unwrap_or_else(|| error.unwrap_or_default())
+                },
                 created_at,
             });
         }
@@ -11013,6 +11027,54 @@ mod tests {
             .unwrap()
             .iter()
             .any(|event| event.event_type == "run.qa_recovery_disposition"));
+    }
+
+    #[test]
+    fn test_completed_qa_answer_without_saved_exchange_is_discoverable_until_persisted() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[
+                sample_book("book-orphan-answer", "/tmp/book-orphan-answer"),
+                sample_book("other-orphan-answer", "/tmp/other-orphan-answer"),
+            ])
+            .unwrap();
+        let base = store.initialize_base("book-orphan-answer").unwrap();
+        let other = store.initialize_base("other-orphan-answer").unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({"question":"机制是什么？","conversation_id":null}),
+            )
+            .unwrap();
+        store
+            .complete_agent_run(&run.id, &serde_json::json!({"answer":"完整但未保存的回答"}))
+            .unwrap();
+
+        let pending = store.list_unfinished_qa_runs(&base.id, 10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].run_id, run.id);
+        assert_eq!(pending[0].question, "机制是什么？");
+        assert!(store
+            .list_unfinished_qa_runs(&other.id, 10)
+            .unwrap()
+            .is_empty());
+
+        store
+            .save_conversation_exchange(
+                &base.id,
+                None,
+                "机制是什么？",
+                "完整但未保存的回答",
+                &run.id,
+                &[],
+            )
+            .unwrap();
+        assert!(store
+            .list_unfinished_qa_runs(&base.id, 10)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

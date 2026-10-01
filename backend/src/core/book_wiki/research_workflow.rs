@@ -342,6 +342,20 @@ impl BookWikiService {
             // Rebuild capacity and seed metadata for the actual request; a
             // larger output allowance must not keep stale prompt budgets.
             let prepared = (|| {
+                if let Some(previous) = phase.resources.expanded_from_output_tokens {
+                    // A manual resume has not yet seen this attempt's full
+                    // prompt. Estimate it at the last viable output floor,
+                    // then share the true remaining space with tool reads.
+                    let expanded_output = phase.resources.output_tokens;
+                    phase.resources.output_tokens = previous.saturating_add(1);
+                    phase.resources.policy.max_output_tokens = Some(phase.resources.output_tokens);
+                    let baseline_prompt = self.research_phase_prompt(&phase);
+                    phase.resources.output_tokens = expanded_output;
+                    phase.resources.policy.max_output_tokens = Some(expanded_output);
+                    phase
+                        .resources
+                        .fit_expansion_to_input(estimated_tokens(&baseline_prompt?.0), previous)?;
+                }
                 let (prompt, evidence_ids) = self.research_phase_prompt(&phase)?;
                 let skills = self
                     .store
@@ -2045,6 +2059,80 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_manual_resume_reserves_room_for_research_tools_after_output_expansion() {
+        let (_dir, service, task, _calls) = plan_repair_fixture(false);
+        let profile = service.active_runtime_profile().unwrap();
+        let previous_output = 20_000;
+        let initial_phase = plan_phase(&task, &profile);
+        let prompt_tokens =
+            estimated_tokens(&service.research_phase_prompt(&initial_phase).unwrap().0);
+        let observed_capacity = prompt_tokens + u64::from(previous_output) + 20_000 + 6_144;
+        let previous = service
+            .store
+            .start_agent_run(
+                &task.knowledge_base_id,
+                "deepseek_harness",
+                "knowledge_task_research",
+                &json!({"knowledge_task_id":task.id,"research_stage_key":"plan","model":profile.model,"provider_id":profile.provider_id,"request_max_output_tokens":previous_output}),
+            )
+            .unwrap();
+        service
+            .store
+            .init_adaptive_run_budget(&previous.id, &initial_phase.resources.policy)
+            .unwrap();
+        service
+            .store
+            .observe_adaptive_context(&previous.id, 0, observed_capacity)
+            .unwrap();
+        service
+            .store
+            .append_agent_run_event(
+                &previous.id,
+                "run.runtime_completed",
+                Some("completion"),
+                "输出截断",
+                &json!({"stop_reason":"max_tokens","complete":false}),
+            )
+            .unwrap();
+        service
+            .store
+            .fail_agent_run(&previous.id, "stop_reason=max_tokens")
+            .unwrap();
+        let mut phase = plan_phase(&task, &profile);
+        phase.resources = service
+            .resume_research_phase_resources(&profile, phase.resources, Some(&previous.id))
+            .unwrap();
+        assert!(phase.resources.output_tokens > previous_output);
+        service
+            .persist_model_research_phase(phase, |claim, run, answer| {
+                let plan: ResearchPlan = parse_phase(answer)?;
+                service.store.save_research_plan(claim, run, &plan)
+            })
+            .await
+            .unwrap();
+        let stage = service
+            .store
+            .get_research_stage_content(&task.id, "plan", None)
+            .unwrap();
+        let run_id = stage.stage.run_id.unwrap();
+        let run = service.store.get_agent_run(&run_id).unwrap();
+        let output = run.input["request_max_output_tokens"].as_u64().unwrap();
+        let soft_retrieval = run.input["adaptive_budget"]["soft_retrieval_tokens"]
+            .as_u64()
+            .unwrap();
+        let prompt = service
+            .store
+            .get_agent_run_inspection(&run_id)
+            .unwrap()
+            .snapshot
+            .unwrap()
+            .prompt_text;
+        assert!(output > u64::from(previous_output));
+        assert!(soft_retrieval >= 2_048);
+        assert!(estimated_tokens(&prompt) + output + soft_retrieval + 4_096 <= observed_capacity);
+    }
+
+    #[tokio::test]
     async fn test_plan_manual_resume_respects_observed_context_before_model_call() {
         let (dir, original, task, _) = plan_repair_fixture(false);
         let calls = Arc::new(Mutex::new(Vec::new()));
@@ -2073,6 +2161,10 @@ mod tests {
             .stage
             .run_id
             .unwrap();
+        let previous_output = service.store.get_agent_run(&run_id).unwrap().input
+            ["request_max_output_tokens"]
+            .as_u64()
+            .unwrap();
         let previous_revision = service
             .store
             .get_research_stage_content(&task.id, "plan", None)
@@ -2084,8 +2176,8 @@ mod tests {
             connection
                 .execute(
                     "UPDATE agent_run_adaptive_budgets
-                     SET observed_context_window = 100000 WHERE run_id = ?1",
-                    [&run_id],
+                     SET observed_context_window = ?2 WHERE run_id = ?1",
+                    rusqlite::params![run_id, previous_output + 4_096],
                 )
                 .unwrap(),
             1
@@ -2111,7 +2203,10 @@ mod tests {
             .unwrap();
 
         let resumed = service.execute_research_workflow(&task).await.unwrap_err();
-        assert!(resumed.to_string().contains("research_input_hard_limit"));
+        assert!(
+            resumed.to_string().contains("research_output_hard_limit"),
+            "{resumed}"
+        );
         assert_eq!(calls.lock().unwrap().len(), 3);
         let current = service
             .store
@@ -2125,7 +2220,7 @@ mod tests {
             .error
             .as_deref()
             .unwrap()
-            .contains("research_input_hard_limit"));
+            .contains("research_output_hard_limit"));
         let old = service
             .store
             .get_research_stage_content(&task.id, "plan", Some(previous_revision))
@@ -2133,7 +2228,7 @@ mod tests {
         assert_eq!(old.stage.run_id.as_deref(), Some(run_id.as_str()));
 
         let repeated = service.execute_research_workflow(&task).await.unwrap_err();
-        assert!(repeated.to_string().contains("research_input_hard_limit"));
+        assert!(repeated.to_string().contains("research_output_hard_limit"));
         assert_eq!(calls.lock().unwrap().len(), 3);
         let latest = service
             .store

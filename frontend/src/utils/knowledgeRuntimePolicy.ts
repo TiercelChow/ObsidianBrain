@@ -67,6 +67,13 @@ export function researchTaskRouteFromQuestion(baseId: string, question: string) 
   }
 }
 
+/** A saved exchange may be handed to research only with its own adjacent question. */
+export function originalQuestionForSavedAnswer(messages: readonly { role: string; content: string }[], index: number): string | undefined {
+  if (messages[index]?.role !== 'assistant' || messages[index - 1]?.role !== 'user') return undefined
+  const question = messages[index - 1].content.trim()
+  return question && Array.from(question).length <= 2000 ? question : undefined
+}
+
 /** Only reuse a planner rewrite belonging to this exact book and user turn. */
 export function researchTaskQuestionFromRun(
   originalQuestion: string,

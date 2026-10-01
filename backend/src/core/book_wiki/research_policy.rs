@@ -21,6 +21,8 @@ pub(super) struct ResearchResources {
     pub prompt_token_limit: u64,
     pub initial_entry_target: usize,
     pub policy: AdaptiveBudgetPolicy,
+    #[serde(skip)]
+    pub expanded_from_output_tokens: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -171,6 +173,7 @@ impl ResearchResources {
             prompt_token_limit: resources.prompt_tokens,
             initial_entry_target: resources.initial_entry_target,
             policy,
+            expanded_from_output_tokens: None,
         }
     }
 
@@ -266,18 +269,36 @@ impl ResearchResources {
             .capacity_tokens
             .saturating_sub(prompt_tokens)
             .saturating_sub(6144);
-        self.output_tokens = self
-            .output_tokens
-            .min(available.min(u64::from(u32::MAX)) as u32);
+        let spare_after_previous = available.saturating_sub(u64::from(previous));
+        // Give the next independent agent room to fetch and compare evidence,
+        // instead of reserving every remaining context token for its answer.
+        let retrieval_reserve = self
+            .policy
+            .soft_retrieval_tokens
+            .max(2048)
+            .min(spare_after_previous / 2)
+            .max(1);
+        self.output_tokens = self.output_tokens.min(
+            available
+                .saturating_sub(retrieval_reserve)
+                .min(u64::from(u32::MAX)) as u32,
+        );
         if self.output_tokens <= previous {
             return Err(BrainError::KnowledgeValidation("(research_output_hard_limit) 当前完整输入与运行预留后已无输出扩容空间；未裁剪材料，部分结果仍保留，请调整实际容量或拆分主题".into()));
         }
         self.policy.max_output_tokens = Some(self.output_tokens);
-        self.prompt_token_limit = self
-            .capacity_tokens
-            .saturating_sub(u64::from(self.output_tokens))
-            .saturating_mul(2)
-            / 3;
+        let retrieval_room = available.saturating_sub(u64::from(self.output_tokens));
+        self.policy.soft_retrieval_tokens = retrieval_room
+            .min(self.policy.soft_retrieval_tokens.max(2048))
+            .max(1);
+        self.policy.hard_retrieval_tokens = self.policy.soft_retrieval_tokens.saturating_mul(4);
+        self.prompt_token_limit = self.prompt_token_limit.min(
+            self.capacity_tokens
+                .saturating_sub(u64::from(self.output_tokens))
+                .saturating_mul(2)
+                / 3,
+        );
+        self.expanded_from_output_tokens = None;
         Ok(())
     }
 
@@ -299,6 +320,7 @@ impl ResearchResources {
             return Err(BrainError::KnowledgeValidation("(research_output_hard_limit) 当前阶段输出已达配置或容量硬上限；已有阶段保留，请拆分主题或配置真实模型能力，不重复同一截断请求".into()));
         }
         self.output_tokens = output;
+        self.expanded_from_output_tokens = Some(previous);
         self.policy.max_output_tokens = Some(output);
         let available = self.capacity_tokens.saturating_sub(u64::from(output));
         self.prompt_token_limit = (available * 2 / 3).saturating_sub(1024);
@@ -499,8 +521,16 @@ mod tests {
             .expand_output_after_truncation(&profile, 20_000)
             .unwrap();
         observed.fit_expansion_to_input(30_000, 20_000).unwrap();
-        assert_eq!(observed.output_tokens, 29_392);
-        assert_eq!(observed.policy.max_output_tokens, Some(29_392));
+        assert_eq!(observed.output_tokens, 24_696);
+        assert_eq!(observed.policy.max_output_tokens, Some(24_696));
+        assert!(observed.policy.soft_retrieval_tokens >= 2_048);
+        assert!(
+            30_000
+                + u64::from(observed.output_tokens)
+                + observed.policy.soft_retrieval_tokens
+                + 6_144
+                <= observed.capacity_tokens
+        );
         assert!(observed.fit_expansion_to_input(45_000, 20_000).is_err());
     }
 
