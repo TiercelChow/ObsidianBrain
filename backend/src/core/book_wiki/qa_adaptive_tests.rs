@@ -567,6 +567,75 @@ async fn test_qa_idle_timeout_keeps_partial_run_without_automatic_replay() {
 }
 
 #[tokio::test]
+async fn test_qa_startup_timeout_retries_only_answer_without_replanning() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct StartupRuntime {
+        inner: AdaptiveFixtureRuntime,
+        planners: AtomicUsize,
+        answers: AtomicUsize,
+    }
+    #[async_trait]
+    impl AgentRuntime for StartupRuntime {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            if request.prompt.contains("只读检索规划器") {
+                self.planners.fetch_add(1, Ordering::SeqCst);
+            }
+            self.inner.prompt(request).await
+        }
+
+        async fn prompt_with_events(
+            &self,
+            request: AgentPromptRequest,
+            events: Option<tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+            _cancel: tokio::sync::watch::Receiver<bool>,
+        ) -> Result<String, BrainError> {
+            if request.prompt.contains("只读检索规划器") {
+                return self.prompt(request).await;
+            }
+            if self.answers.fetch_add(1, Ordering::SeqCst) == 0 {
+                if let Some(events) = events {
+                    events
+                        .send(AgentRuntimeEvent::Completed {
+                            stop_reason: "startup_timeout".into(),
+                            complete: false,
+                        })
+                        .unwrap();
+                }
+                return Err(BrainError::LlmApiError {
+                    provider: "deepseek_harness".into(),
+                    detail: "(startup_timeout) Harness 尚未完成会话初始化".into(),
+                });
+            }
+            self.inner.prompt(request).await
+        }
+    }
+
+    let (store, _dir, base) = fixture();
+    let runtime = Arc::new(StartupRuntime {
+        inner: AdaptiveFixtureRuntime {
+            requests: Arc::new(Mutex::new(vec![])),
+        },
+        planners: AtomicUsize::new(0),
+        answers: AtomicUsize::new(0),
+    });
+    let service = BookWikiService::new(store.clone(), runtime.clone());
+    let result = service.ask(&base, "全面分析全书机制", None).await.unwrap();
+    assert_eq!(result.answer, "本轮综合结论。[S1]");
+    assert_eq!(runtime.planners.load(Ordering::SeqCst), 1);
+    assert_eq!(runtime.answers.load(Ordering::SeqCst), 2);
+    let completed = store.get_agent_run(&result.run_id).unwrap();
+    let failed_id = completed.input["qa_retry_parent_run_id"].as_str().unwrap();
+    let failed = store.get_agent_run(failed_id).unwrap();
+    assert_eq!(failed.status, "failed");
+    assert_eq!(failed.output.unwrap()["stop_reason"], "startup_timeout");
+    assert_eq!(
+        completed.input["request_max_output_tokens"],
+        failed.input["request_max_output_tokens"]
+    );
+    assert_eq!(store.list_conversations(&base, 10).unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn test_qa_resume_uses_previous_run_observed_context_as_hard_limit() {
     let (store, _dir, base) = fixture();
     let question = "全面分析全书机制";
@@ -1059,6 +1128,13 @@ async fn test_qa_empty_max_tokens_stops_after_two_expansions_or_hard_cap() {
         let unfinished = store.list_unfinished_qa_runs(&base, 10).unwrap();
         assert_eq!(unfinished.len(), 1);
         assert_eq!(unfinished[0].stop_reason.as_deref(), Some("max_tokens"));
+        assert!(unfinished[0].error.contains(failure_code));
+        let failed = store.get_agent_run(&unfinished[0].run_id).unwrap();
+        assert_eq!(
+            failed.output.unwrap()["qa_recovery_disposition"],
+            failure_code
+        );
+        assert!(!failed.error.unwrap().contains(failure_code));
         assert!(!unfinished[0].has_partial_answer);
     }
 }

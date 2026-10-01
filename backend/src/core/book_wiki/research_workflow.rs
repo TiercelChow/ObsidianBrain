@@ -77,6 +77,54 @@ fn validate_new_research_plan(
     Ok(())
 }
 
+fn reader_heading_key(value: &str) -> String {
+    value
+        .trim()
+        .trim_end_matches(['?', '？', '。', '!', '！'])
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn validate_reader_facing_plan_titles(
+    plan: &ResearchPlan,
+    brief: &ResearchBrief,
+) -> Result<(), BrainError> {
+    // Older unconfirmed tasks keep their saved editorial contract. For a new
+    // confirmed brief, the planner's research questions are not the report TOC.
+    if !brief.confirmed {
+        return Ok(());
+    }
+    let title = plan.report_title.as_deref().unwrap_or_default().trim();
+    if title.ends_with(['?', '？']) || title.starts_with("问：") || title.starts_with("问:") {
+        return Err(BrainError::KnowledgeValidation(
+            "(research_editorial_title) report_title 必须是面向读者的材料标题，不能直接写成提问；请保留研究目标，改写完整规划".into(),
+        ));
+    }
+    let mut seen = HashSet::new();
+    for (index, question) in plan.questions.iter().enumerate() {
+        let title = question.title.trim();
+        let copied_question = reader_heading_key(title) == reader_heading_key(&question.question)
+            && question.question.trim().ends_with(['?', '？']);
+        if title.ends_with(['?', '？'])
+            || title.starts_with("问：")
+            || title.starts_with("问:")
+            || copied_question
+        {
+            return Err(BrainError::KnowledgeValidation(format!(
+                "(research_editorial_title) questions[{index}].title 直接照搬研究问题；question 保持内部取证提问，title 请改为材料中的对象、机制、条件或有据可查的论题"
+            )));
+        }
+        if !seen.insert(reader_heading_key(title)) {
+            return Err(BrainError::KnowledgeValidation(format!(
+                "(research_editorial_title) questions[{index}].title 与前面的章节标题重复；每个主题需要不同的阅读职责和标题，不能机械复述同一问题"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Keep all section identities in the synthesis prompt. Long findings remain
 /// available from the run-scoped paged manifest tool, never silently dropped.
 fn project_integration_manifest(manifest: &Value, token_budget: u64) -> Result<Value, BrainError> {
@@ -649,6 +697,7 @@ impl BookWikiService {
             self.persist_model_research_phase(ResearchPhase{task,profile:&profile,key:"plan".into(),phase:"plan",payload:json!({"goal":task.title,"description":task.description,"task_type":task.task_type}),resources,evidence:vec![]},|claim,run,answer| {
                 let plan:ResearchPlan=parse_phase(answer)?;
                 validate_new_research_plan(&plan, &profile)?;
+                validate_reader_facing_plan_titles(&plan, &task.brief)?;
                 if task.brief.confirmed && plan.depth != task.brief.depth {
                     return Err(BrainError::KnowledgeValidation(format!("研究规划 depth={} 与用户确认的 {} 不一致",plan.depth,task.brief.depth)));
                 }
@@ -867,6 +916,72 @@ mod tests {
         let mut empty = plan;
         empty.questions[0].expected_output_tokens = Some(0);
         assert!(validate_research_plan(&empty).is_err());
+    }
+
+    #[test]
+    fn test_confirmed_research_brief_rejects_question_and_duplicate_reader_headings() {
+        let mut plan: ResearchPlan = parse_phase(&phase_contract("plan").to_string()).unwrap();
+        let mut brief = ResearchBrief::default();
+        brief.confirmed = true;
+        plan.report_title = Some("这本书的机制是什么？".into());
+        assert!(validate_reader_facing_plan_titles(&plan, &brief).is_err());
+        plan.report_title = Some("书中机制与适用边界".into());
+        plan.questions[0].title = "机制是什么？".into();
+        assert!(validate_reader_facing_plan_titles(&plan, &brief).is_err());
+        plan.questions[0].title = "机制与适用条件".into();
+        plan.questions.push(ResearchQuestion {
+            id: "boundary".into(),
+            title: "机制与适用条件".into(),
+            question: "哪些情况超出机制的适用范围？".into(),
+            required_evidence: vec!["反例".into()],
+            expected_output_tokens: None,
+            target_entry_ids: vec![],
+        });
+        assert!(validate_reader_facing_plan_titles(&plan, &brief).is_err());
+        plan.questions[1].title = "失效条件与反例".into();
+        assert!(validate_reader_facing_plan_titles(&plan, &brief).is_ok());
+        brief.confirmed = false;
+        plan.questions[1].title = "机制与适用条件".into();
+        assert!(validate_reader_facing_plan_titles(&plan, &brief).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_confirmed_research_plan_repairs_question_heading_before_saving() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct EditorialPlanRuntime(AtomicUsize);
+        #[async_trait]
+        impl AgentRuntime for EditorialPlanRuntime {
+            async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+                if !request
+                    .prompt
+                    .contains("<research_phase>plan</research_phase>")
+                {
+                    return Err(BrainError::Internal("测试在规划后停止".into()));
+                }
+                let attempt = self.0.fetch_add(1, Ordering::SeqCst);
+                let mut plan = phase_contract("plan");
+                plan["questions"][0]["title"] = json!(if attempt == 0 {
+                    "这个机制是什么？"
+                } else {
+                    "机制与适用条件"
+                });
+                Ok(plan.to_string())
+            }
+        }
+        let (_dir, original, mut task, _) = plan_repair_fixture(false);
+        task.brief.confirmed = true;
+        let runtime = Arc::new(EditorialPlanRuntime(AtomicUsize::new(0)));
+        let service = BookWikiService::new(original.store.clone(), runtime.clone());
+        let error = service.execute_research_workflow(&task).await.unwrap_err();
+        assert!(error.to_string().contains("测试在规划后停止"));
+        assert_eq!(runtime.0.load(Ordering::SeqCst), 2);
+        let workspace = service
+            .store
+            .get_research_workspace(&task.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(workspace.plan.unwrap().questions[0].title, "机制与适用条件");
+        assert_eq!(workspace.stages[0].status, "completed");
     }
 
     struct PhasedRuntime {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskCapacityFailure, researchTaskIdleTimeoutFailure, researchTaskQuestionFromPlanning, researchTaskQuestionFromRun, researchTaskRouteFromQuestion, researchTaskTurnLimitFailure, validateModelCapabilities } from '../src/utils/knowledgeRuntimePolicy.ts'
+import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskCapacityFailure, researchTaskQuestionFromPlanning, researchTaskQuestionFromRun, researchTaskRouteFromQuestion, researchTaskStallFailure, researchTaskStartupFailure, researchTaskTurnLimitFailure, validateModelCapabilities } from '../src/utils/knowledgeRuntimePolicy.ts'
 
 test('planning fallback remains visible as a retrieval adjustment', () => {
   assert.equal(labelForRuntimePhase('目录规划未完成，正在改用书内检索继续核查'), '正在调整检索方式')
@@ -13,6 +13,7 @@ test('an interrupted provider-batched answer retains all received text, not only
   assert.equal(recovered.content, '已显示但还有待显示的正文')
   assert.equal(recovered.kind, 'truncated')
   assert.equal(recovered.canRetry, true)
+  assert.equal(recovered.researchSuggested, true)
   assert.match(recovered.notice, /不完整/)
 })
 
@@ -21,13 +22,23 @@ test('a confirmed output hard limit keeps the draft but does not offer a same-bu
   assert.equal(interrupted.kind, 'truncated')
   assert.equal(interrupted.content, '未完成正文')
   assert.equal(interrupted.canRetry, false)
+  assert.equal(interrupted.researchSuggested, true)
   assert.match(interrupted.notice, /调整.*最大输出|调整.*推理策略/)
+})
+
+test('exhausted answer expansions recommend staged research instead of repeating the same answer loop', () => {
+  const interrupted = interruptedKnowledgeAnswer('未完成正文', '未完成正文', new Error('(qa_output_retry_exhausted) 两次扩容机会已用完 (stop_reason=max_tokens)'))
+  assert.equal(interrupted.kind, 'truncated')
+  assert.equal(interrupted.canRetry, false)
+  assert.equal(interrupted.researchSuggested, true)
+  assert.match(interrupted.notice, /分阶段研究/)
 })
 
 test('a Harness turn limit is not mistaken for an output-token retry', () => {
   const interrupted = interruptedKnowledgeAnswer('已有分析', '已有分析', new Error('DeepSeek Harness 达到请求轮次上限 (stop_reason=max_turn_requests)'))
   assert.equal(interrupted.kind, 'turn_limit')
   assert.equal(interrupted.canRetry, false)
+  assert.equal(interrupted.researchSuggested, true)
   assert.equal(interrupted.content, '已有分析')
   assert.match(interrupted.notice, /研究任务/)
   assert.doesNotMatch(interrupted.notice, /提高输出/)
@@ -42,17 +53,31 @@ test('an idle Harness run keeps its draft and suggests explicit recovery, not ou
   assert.equal(interrupted.kind, 'stalled')
   assert.equal(interrupted.content, '已有分析与引用待核对')
   assert.equal(interrupted.canRetry, false)
+  assert.equal(interrupted.researchSuggested, true)
   assert.match(interrupted.notice, /检查.*连接|分阶段研究/)
   assert.doesNotMatch(interrupted.notice, /输出 token/)
-  assert.equal(researchTaskIdleTimeoutFailure({ status: 'failed', result_summary: '执行未完成：(idle_timeout) 当前阶段无进展' }), true)
-  assert.equal(researchTaskIdleTimeoutFailure({ status: 'completed', result_summary: '(idle_timeout)' }), false)
-  assert.equal(researchTaskIdleTimeoutFailure({ status: 'failed', result_summary: '普通错误\n\n报告正文提及 (idle_timeout)' }), false)
+  assert.equal(researchTaskStallFailure({ status: 'failed', result_summary: '执行未完成：(idle_timeout) 当前阶段无进展' }), true)
+  assert.equal(researchTaskStallFailure({ status: 'completed', result_summary: '(idle_timeout)' }), false)
+  assert.equal(researchTaskStallFailure({ status: 'failed', result_summary: '普通错误\n\n报告正文提及 (idle_timeout)' }), false)
+})
+
+test('a startup timeout is distinct from slow answer generation and can be retried explicitly', () => {
+  const interrupted = interruptedKnowledgeAnswer('', '', new Error('(startup_timeout) Harness 在 120 秒内未完成连接'))
+  assert.equal(interrupted.kind, 'stalled')
+  assert.match(interrupted.notice, /连接|启动/)
+  assert.equal(interrupted.researchSuggested, false)
+  assert.doesNotMatch(interrupted.notice, /已有内容保留/)
+  assert.equal(researchTaskStallFailure({ status: 'failed', result_summary: '执行未完成：(startup_timeout) Harness 未连接' }), true)
+  assert.equal(researchTaskStallFailure({ status: 'failed', result_summary: '普通错误\n\n报告正文提及 (startup_timeout)' }), false)
+  assert.equal(researchTaskStartupFailure({ status: 'failed', result_summary: '执行未完成：(startup_timeout) Harness 未连接' }), true)
+  assert.equal(researchTaskStartupFailure({ status: 'failed', result_summary: '执行未完成：(idle_timeout) 模型停滞' }), false)
 })
 
 test('a clearly infeasible answer plan offers staged research instead of an output retry', () => {
   const interrupted = interruptedKnowledgeAnswer('', '', new Error('(qa_output_scope_limit) 规划篇幅明显超过模型单次输出容量'))
   assert.equal(interrupted.kind, 'scope_limit')
   assert.equal(interrupted.canRetry, false)
+  assert.equal(interrupted.researchSuggested, true)
   assert.match(interrupted.notice, /分阶段研究任务/)
 })
 

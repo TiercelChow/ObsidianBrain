@@ -21,11 +21,14 @@ export function interruptedKnowledgeAnswer(displayedText: string, receivedText: 
   const credentials = /secure storage|凭据|keychain|User canceled the operation|permission denied|401|403/i.test(detail)
   const turnLimit = /max_turn_requests|qa_turn_limit/i.test(detail)
   const scopeLimit = detail.includes('qa_output_scope_limit')
-  const stalled = detail.includes('idle_timeout')
+  const stalled = /\((?:idle|startup)_timeout\)/.test(detail)
   const truncated = /max_tokens|max_turn_requests|max_output|token.{0,12}(limit|上限)|输出.{0,12}(截断|上限)/i.test(detail)
   const kind: KnowledgeInterruptionKind = cancelled ? 'cancelled' : credentials ? 'credentials' : turnLimit ? 'turn_limit' : scopeLimit ? 'scope_limit' : stalled ? 'stalled' : truncated ? 'truncated' : 'failed'
   const hardOutputLimit = detail.includes('qa_output_hard_limit')
-  const canRetry = kind === 'truncated' && !hardOutputLimit
+  const exhaustedExpansion = detail.includes('qa_output_retry_exhausted')
+  const canRetry = kind === 'truncated' && !hardOutputLimit && !exhaustedExpansion
+  const researchSuggested = kind === 'turn_limit' || kind === 'scope_limit' || kind === 'truncated'
+    || (kind === 'stalled' && !detail.includes('(startup_timeout)'))
   const content = receivedText || displayedText
   const notice = kind === 'cancelled'
     ? '已停止生成，内容可能不完整。'
@@ -36,15 +39,19 @@ export function interruptedKnowledgeAnswer(displayedText: string, receivedText: 
       : kind === 'scope_limit'
         ? '本轮规划的完整答案明显超出模型单次输出空间，尚未开始生成回答。可缩小问题、调整模型输出能力，或转为分阶段研究任务。'
       : kind === 'stalled'
-        ? '模型长时间没有新进展，本轮已停止；已有内容保留但尚未完成。请检查供应商连接，复杂问题可转为分阶段研究。'
+        ? detail.includes('(startup_timeout)')
+          ? 'Harness 连接或会话准备长时间未完成，本轮未开始生成。请检查运行命令和供应商连接后重新提问。'
+          : '模型长时间没有新进展，本轮已停止；已有内容保留但尚未完成。请检查供应商连接，复杂问题可转为分阶段研究。'
       : kind === 'truncated'
         ? hardOutputLimit
-          ? '模型单次输出已达到硬上限，未完成内容已保留。请先调整模型最大输出或推理策略，或缩小问题范围。'
+          ? '模型单次输出已达到硬上限，未完成内容已保留。可调整模型最大输出或推理策略；复杂问题建议转为分阶段研究。'
+          : exhaustedExpansion
+            ? '本轮两次输出扩容后仍未完成，草稿已保留。不建议以相同配置反复生成；可转为分阶段研究，仍要继续时会重新调用模型。'
           : content
           ? '本次输出达到运行上限，内容不完整。可继续完成完整答案，或缩小问题范围后重新提问。'
           : '本次输出达到运行上限且没有收到正文。请核对模型最大输出与推理策略，再继续生成或缩小问题范围重新提问。'
         : '本次回答未完成，已有内容已保留。下一次提问会再次尝试连接模型。'
-  return { content, kind, notice, detail, canRetry }
+  return { content, kind, notice, detail, canRetry, researchSuggested }
 }
 
 export function researchTaskRouteFromQuestion(baseId: string, question: string) {
@@ -104,10 +111,16 @@ export function researchTaskTurnLimitFailure(task: { status: string; result_summ
 }
 
 /** A stalled phase needs explicit inspection, not an output-token expansion. */
-export function researchTaskIdleTimeoutFailure(task: { status: string; result_summary: string } | null): boolean {
+export function researchTaskStallFailure(task: { status: string; result_summary: string } | null): boolean {
   if (task?.status !== 'failed') return false
   const failureHeader = task.result_summary.split(/\n\s*\n/, 1)[0]
-  return /\(idle_timeout\)|stop_reason=idle_timeout/.test(failureHeader)
+  return /\((?:idle|startup)_timeout\)|stop_reason=(?:idle|startup)_timeout/.test(failureHeader)
+}
+
+export function researchTaskStartupFailure(task: { status: string; result_summary: string } | null): boolean {
+  if (task?.status !== 'failed') return false
+  const failureHeader = task.result_summary.split(/\n\s*\n/, 1)[0]
+  return /\(startup_timeout\)|stop_reason=startup_timeout/.test(failureHeader)
 }
 
 /** Only the failure header is authoritative; report prose may mention old errors. */

@@ -42,3 +42,16 @@ test('a failed max_tokens run without answer text keeps its original scope witho
   assert.equal(recovered?.conversationId, undefined)
   assert.equal(recovered?.error, 'stop_reason=max_tokens')
 })
+
+test('terminal QA recovery advice survives inspection without replacing the raw run failure', () => {
+  const recovered = recoverInterruptedQaRun({
+    ...failedRun,
+    output: {
+      ...failedRun.output,
+      qa_recovery_disposition: 'qa_output_retry_exhausted',
+      qa_recovery_message: '(qa_output_retry_exhausted) 两次扩容仍未完成',
+    },
+  }, 'book-a', 'run-1')
+  assert.equal(recovered?.error, '(qa_output_retry_exhausted) 两次扩容仍未完成')
+  assert.equal(failedRun.error, 'stop_reason=max_tokens')
+})

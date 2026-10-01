@@ -17,6 +17,7 @@ use crate::models::book_wiki::{RuntimeHealth, RuntimeProfile};
 
 pub const AGENT_RUNTIME_CANCELLED: &str = "OBSIDIANBRAIN_AGENT_RUNTIME_CANCELLED";
 const AGENT_RUNTIME_IDLE_TIMEOUT: &str = "OBSIDIANBRAIN_AGENT_RUNTIME_IDLE_TIMEOUT";
+const AGENT_RUNTIME_STARTUP_TIMEOUT: &str = "OBSIDIANBRAIN_AGENT_RUNTIME_STARTUP_TIMEOUT";
 
 #[derive(Clone)]
 pub struct AgentPromptRequest {
@@ -93,6 +94,7 @@ pub trait AgentRuntime: Send + Sync {
 #[derive(Clone, Debug)]
 pub struct DeepSeekHarnessRuntime {
     timeout: Duration,
+    startup_timeout: Duration,
     idle_timeout: Duration,
 }
 
@@ -100,6 +102,7 @@ impl Default for DeepSeekHarnessRuntime {
     fn default() -> Self {
         Self {
             timeout: Duration::from_secs(180),
+            startup_timeout: Duration::from_secs(120),
             idle_timeout: Duration::from_secs(600),
         }
     }
@@ -118,6 +121,14 @@ impl DeepSeekHarnessRuntime {
     fn with_idle_timeout(idle_timeout: Duration) -> Self {
         Self {
             idle_timeout,
+            ..Self::default()
+        }
+    }
+
+    #[cfg(test)]
+    fn with_startup_timeout(startup_timeout: Duration) -> Self {
+        Self {
+            startup_timeout,
             ..Self::default()
         }
     }
@@ -143,6 +154,7 @@ impl DeepSeekHarnessRuntime {
         }
 
         let request_timeout = request.timeout.unwrap_or(self.timeout);
+        let startup_timeout = self.startup_timeout.min(request_timeout);
         let idle_timeout = self.idle_timeout.min(request_timeout);
         let mut command_parts = shell_words::split(&request.command)
             .map_err(|error| harness_error(format!("无法解析 ACP 启动命令: {error}")))?;
@@ -177,6 +189,8 @@ impl DeepSeekHarnessRuntime {
         let prompt = request.prompt;
         let operation_events = events.clone();
         let completion_events = events.clone();
+        let mut startup_cancel = cancel.clone();
+        let (prompt_sent, prompt_sent_rx) = tokio::sync::oneshot::channel();
 
         let operation = agent_client_protocol::Client
             .builder()
@@ -230,6 +244,7 @@ impl DeepSeekHarnessRuntime {
                                 .await?;
                         }
                         session.send_prompt(prompt)?;
+                        let _ = prompt_sent.send(());
                         emit_event(
                             operation_events.as_ref(),
                             AgentRuntimeEvent::Phase {
@@ -300,6 +315,35 @@ impl DeepSeekHarnessRuntime {
                     .await
             });
 
+        let operation = async {
+            tokio::pin!(operation);
+            let startup_timer = tokio::time::sleep(startup_timeout);
+            tokio::pin!(startup_timer);
+            tokio::pin!(prompt_sent_rx);
+            let mut cancel_channel_closed = false;
+            loop {
+                tokio::select! {
+                    result = &mut operation => break result,
+                    _ = &mut startup_timer => {
+                        break Err(agent_client_protocol::util::internal_error(
+                            AGENT_RUNTIME_STARTUP_TIMEOUT,
+                        ));
+                    }
+                    _ = &mut prompt_sent_rx => break (&mut operation).await,
+                    changed = startup_cancel.changed(), if !cancel_channel_closed => {
+                        match changed {
+                            Ok(()) if *startup_cancel.borrow() => {
+                                break Err(agent_client_protocol::util::internal_error(
+                                    AGENT_RUNTIME_CANCELLED,
+                                ));
+                            }
+                            Ok(()) => {}
+                            Err(_) => cancel_channel_closed = true,
+                        }
+                    }
+                }
+            }
+        };
         let (answer, stop_reason) = tokio::time::timeout(request_timeout, operation)
             .await
             .map_err(|_| {
@@ -318,6 +362,12 @@ impl DeepSeekHarnessRuntime {
                     harness_error(format!(
                         "(idle_timeout) DeepSeek Harness 连续 {}没有收到进展，已停止本次运行；部分输出保留",
                         duration_label(idle_timeout)
+                    ))
+                } else if error.to_string().contains(AGENT_RUNTIME_STARTUP_TIMEOUT) {
+                    emit_completion(completion_events.as_ref(), "startup_timeout", false);
+                    harness_error(format!(
+                        "(startup_timeout) DeepSeek Harness 在 {}内未能完成连接和会话准备，已停止本次运行",
+                        duration_label(startup_timeout)
                     ))
                 } else {
                     emit_completion(completion_events.as_ref(), "runtime_error", false);
@@ -1048,6 +1098,64 @@ done
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn test_acp_transport_startup_stall_stops_before_long_answer_deadline() {
+        let (workspace, mut request) = fake_acp_request("end_turn", "unused", false);
+        std::fs::write(workspace.path().join("fake-acp.sh"), "sleep 3\n").unwrap();
+        request.timeout = Some(Duration::from_secs(2));
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let (_guard, cancel) = tokio::sync::watch::channel(false);
+        let result = DeepSeekHarnessRuntime::with_startup_timeout(Duration::from_millis(150))
+            .prompt_with_events(request, Some(events), cancel)
+            .await;
+        assert!(result.unwrap_err().to_string().contains("startup_timeout"));
+        let mut completions = Vec::new();
+        while let Ok(event) = received.try_recv() {
+            if let AgentRuntimeEvent::Completed {
+                stop_reason,
+                complete,
+            } = event
+            {
+                completions.push((stop_reason, complete));
+            }
+        }
+        assert_eq!(completions, vec![("startup_timeout".to_string(), false)]);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_acp_transport_startup_can_be_cancelled_without_waiting_for_deadline() {
+        let (workspace, mut request) = fake_acp_request("end_turn", "unused", false);
+        std::fs::write(workspace.path().join("fake-acp.sh"), "sleep 3\n").unwrap();
+        request.timeout = Some(Duration::from_secs(2));
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let (cancel_sender, cancel) = tokio::sync::watch::channel(false);
+        let runtime = DeepSeekHarnessRuntime::with_startup_timeout(Duration::from_secs(1));
+        let operation = runtime.prompt_with_events(request, Some(events), cancel);
+        tokio::pin!(operation);
+        tokio::select! {
+            result = &mut operation => panic!("startup unexpectedly finished: {result:?}"),
+            () = tokio::time::sleep(Duration::from_millis(50)) => {}
+        }
+        cancel_sender.send(true).unwrap();
+        let result = tokio::time::timeout(Duration::from_millis(500), operation)
+            .await
+            .unwrap();
+        assert!(result.unwrap_err().to_string().contains("取消"));
+        let mut completions = Vec::new();
+        while let Ok(event) = received.try_recv() {
+            if let AgentRuntimeEvent::Completed {
+                stop_reason,
+                complete,
+            } = event
+            {
+                completions.push((stop_reason, complete));
+            }
+        }
+        assert_eq!(completions, vec![("cancelled".to_string(), false)]);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn test_acp_transport_progress_resets_idle_deadline() {
         let (workspace, mut request) = fake_acp_request("end_turn", "unused", false);
         let update = |text: &str| {
@@ -1083,10 +1191,14 @@ done
         request.timeout = Some(Duration::from_secs(5));
         let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
         let (_guard, cancel) = tokio::sync::watch::channel(false);
-        let answer = DeepSeekHarnessRuntime::with_idle_timeout(Duration::from_millis(1_800))
-            .prompt_with_events(request, Some(events), cancel)
-            .await
-            .unwrap();
+        let answer = DeepSeekHarnessRuntime {
+            startup_timeout: Duration::from_millis(150),
+            idle_timeout: Duration::from_millis(1_800),
+            ..DeepSeekHarnessRuntime::default()
+        }
+        .prompt_with_events(request, Some(events), cancel)
+        .await
+        .unwrap();
         assert_eq!(answer, "第一段第二段");
         let mut completion = None;
         while let Ok(event) = received.try_recv() {

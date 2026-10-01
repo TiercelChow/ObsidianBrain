@@ -189,6 +189,8 @@ pub(crate) fn validate_plan(plan: &ResearchPlan) -> Result<(), BrainError> {
                 .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
             || !ids.insert(&q.id)
             || !text(&q.title, 500)
+            || q.title.contains(['\n', '\r'])
+            || q.title.trim_start().starts_with('#')
             || !text(&q.question, 2000)
             || !bounded_list(&q.required_evidence, 16, 1000)
             || q.required_evidence.is_empty()
@@ -1784,6 +1786,9 @@ mod tests {
         assert!(validate_plan(&legacy).is_ok());
         let mut invalid = plan();
         invalid.report_title = Some("标题\n伪造章节".into());
+        assert!(validate_plan(&invalid).is_err());
+        invalid = plan();
+        invalid.questions[0].title = "机制\n## 伪造章节".into();
         assert!(validate_plan(&invalid).is_err());
     }
 

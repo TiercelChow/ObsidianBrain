@@ -680,9 +680,17 @@ impl BookWikiService {
         if let Some((_, previous_output)) = &resume {
             let limit = crate::models::agent_budget::output_limit(context_window, output_cap);
             if *previous_output >= limit {
-                return Err(BrainError::KnowledgeValidation(format!(
+                let message = format!(
                     "(qa_output_hard_limit) 上次问答已申请 {previous_output} token，当前单次有效输出上限为 {limit}，无法通过相同预算继续生成；未完成正文仍在原运行记录中。请提高模型最大输出、调整推理策略或缩小问题范围后重试 (stop_reason=max_tokens)"
-                )));
+                );
+                if let Some(run_id) = resume_run_id {
+                    self.store.mark_failed_qa_recovery_disposition(
+                        run_id,
+                        "qa_output_hard_limit",
+                        &message,
+                    )?;
+                }
+                return Err(BrainError::KnowledgeValidation(message));
             }
         }
         let reasoning_policy = profile
@@ -1069,10 +1077,16 @@ impl BookWikiService {
                         output_cap,
                     );
                     if expanded.output_tokens <= resources.output_tokens {
-                        return Err(BrainError::KnowledgeValidation(format!(
+                        let message = format!(
                             "(qa_output_hard_limit) 本轮问答已达到当前模型单次有效输出上限 {} token，无法再扩容；未完成正文保留。请提高最大输出、调整推理策略或缩小问题范围。原错误：{error}",
                             resources.output_tokens
-                        )));
+                        );
+                        self.store.mark_failed_qa_recovery_disposition(
+                            &attempted_run_id,
+                            "qa_output_hard_limit",
+                            &message,
+                        )?;
+                        return Err(BrainError::KnowledgeValidation(message));
                     }
                     if let Some(sender) = stream {
                         sender
@@ -1141,13 +1155,14 @@ impl BookWikiService {
                             effective_context_window,
                             output_cap,
                         );
-                    return Err(BrainError::KnowledgeValidation(format!(
+                    let code = if hard_limit {
+                        "qa_output_hard_limit"
+                    } else {
+                        "qa_output_retry_exhausted"
+                    };
+                    let message = format!(
                         "({}) 本轮问答{}；未完成正文保留。请{}后重新提问。原错误：{error}",
-                        if hard_limit {
-                            "qa_output_hard_limit"
-                        } else {
-                            "qa_output_retry_exhausted"
-                        },
+                        code,
                         if hard_limit {
                             "已达到模型单次有效输出上限"
                         } else {
@@ -1158,7 +1173,15 @@ impl BookWikiService {
                         } else {
                             "调整模型配置或缩小问题范围"
                         },
-                    )));
+                    );
+                    if !attempted_run_id.is_empty() {
+                        self.store.mark_failed_qa_recovery_disposition(
+                            &attempted_run_id,
+                            code,
+                            &message,
+                        )?;
+                    }
+                    return Err(BrainError::KnowledgeValidation(message));
                 }
                 Err(error) if is_harness_turn_limit(&error) => {
                     return Err(BrainError::KnowledgeValidation(format!(
@@ -3783,7 +3806,10 @@ fn qa_planning_allows_fallback(error: &BrainError) -> bool {
     // An empty/truncated planner or an explicit transient transport failure
     // may fall back to read-only retrieval. Deterministic provider failures
     // must surface directly instead of triggering another paid model request.
-    is_retryable_harness_failure(error) || is_harness_output_truncation(error)
+    // A startup stall means the provider was never reached; a second planner
+    // request during fallback would only repeat the same connection failure.
+    !matches!(error, BrainError::LlmApiError { detail, .. } if detail.contains("(startup_timeout)"))
+        && (is_retryable_harness_failure(error) || is_harness_output_truncation(error))
 }
 
 fn is_cancelled_agent_error(error: &BrainError) -> bool {
@@ -3904,6 +3930,7 @@ fn is_retryable_harness_failure(error: &BrainError) -> bool {
         return true;
     }
     [
+        "(startup_timeout)",
         "rate limit",
         "too many requests",
         "temporarily unavailable",

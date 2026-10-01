@@ -10,6 +10,7 @@ fn test_retryable_harness_failure_only_allows_clear_transient_conditions() {
         "ACP 调用失败: 429 rate limit",
         "ACP 调用失败: connection reset by peer",
         "DeepSeek Harness 返回了空回答 (stop_reason=end_turn)",
+        "(startup_timeout) DeepSeek Harness 连接阶段超时",
     ] {
         assert!(
             is_retryable_harness_failure(&BrainError::LlmApiError {
@@ -43,6 +44,10 @@ fn test_retryable_harness_failure_only_allows_clear_transient_conditions() {
     assert!(!is_retryable_harness_failure(
         &BrainError::KnowledgeValidation("JSON 合同不合法".into())
     ));
+    assert!(!qa_planning_allows_fallback(&BrainError::LlmApiError {
+        provider: "deepseek_harness".into(),
+        detail: "(startup_timeout) DeepSeek Harness 连接阶段超时".into(),
+    }));
 }
 
 #[test]

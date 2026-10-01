@@ -16,11 +16,12 @@ export function recoverInterruptedQaRun(run: QaRunRecord, baseId: string, runId:
   if (!question || Array.from(question).length > 2000 || (conversationId != null && typeof conversationId !== 'string')) return null
   const draft = typeof run.output?.partial_answer === 'string' ? run.output.partial_answer : ''
   const stopReason = typeof run.output?.stop_reason === 'string' ? run.output.stop_reason : ''
+  const recoveryMessage = typeof run.output?.qa_recovery_message === 'string' ? run.output.qa_recovery_message : ''
   return {
     runId,
     question,
     conversationId: conversationId || undefined,
     draft,
-    error: run.error || (stopReason ? `stop_reason=${stopReason}` : '模型运行未完成'),
+    error: recoveryMessage || run.error || (stopReason ? `stop_reason=${stopReason}` : '模型运行未完成'),
   }
 }

@@ -3826,7 +3826,12 @@ impl BookWikiStore {
                     .and_then(|value| value.get("partial_answer"))
                     .and_then(Value::as_str)
                     .is_some_and(|draft| !draft.trim().is_empty()),
-                error: error.unwrap_or_default(),
+                error: output
+                    .as_ref()
+                    .and_then(|value| value.get("qa_recovery_message"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| error.unwrap_or_default()),
                 created_at,
             });
         }
@@ -7025,6 +7030,53 @@ impl BookWikiStore {
             ));
         }
         self.get_agent_run(run_id)
+    }
+
+    /// Preserve the original runtime failure while recording the terminal QA recovery advice.
+    pub fn mark_failed_qa_recovery_disposition(
+        &self,
+        run_id: &str,
+        code: &str,
+        message: &str,
+    ) -> Result<(), BrainError> {
+        if !matches!(code, "qa_output_hard_limit" | "qa_output_retry_exhausted")
+            || !message.contains(code)
+        {
+            return Err(BrainError::KnowledgeValidation(
+                "无效的问答恢复状态".to_string(),
+            ));
+        }
+        let now = Utc::now().to_rfc3339();
+        let payload = serde_json::json!({ "code": code, "message": message }).to_string();
+        let updated = self.db.transaction(|conn| {
+            let updated = conn.execute(
+                "UPDATE agent_runs
+                 SET output_json = json_set(output_json,
+                     '$.qa_recovery_disposition', ?2,
+                     '$.qa_recovery_message', ?3)
+                 WHERE id = ?1 AND task_type = 'knowledge_qa' AND status = 'failed'
+                   AND json_extract(output_json, '$.stop_reason') = 'max_tokens'",
+                params![run_id, code, message],
+            )?;
+            if updated > 0 {
+                insert_agent_run_event(
+                    conn,
+                    run_id,
+                    "run.qa_recovery_disposition",
+                    Some("recovery"),
+                    "问答输出已达到本轮恢复边界",
+                    &payload,
+                    &now,
+                )?;
+            }
+            Ok(updated)
+        })?;
+        if updated == 0 {
+            return Err(BrainError::KnowledgeValidation(
+                "问答运行不符合输出截断恢复条件".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     pub fn cancel_agent_run(&self, run_id: &str) -> Result<AgentRun, BrainError> {
@@ -10903,6 +10955,64 @@ mod tests {
             assert_eq!(output["stop_reason"], "max_tokens");
             assert_ne!(terminal.status, "completed");
         }
+    }
+
+    #[test]
+    fn test_terminal_qa_recovery_disposition_preserves_raw_failure_and_scope() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("book-qa-recovery", "/tmp/book-qa-recovery")])
+            .unwrap();
+        let base = store.initialize_base("book-qa-recovery").unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({"question":"为什么？"}),
+            )
+            .unwrap();
+        assert!(store
+            .mark_failed_qa_recovery_disposition(
+                &run.id,
+                "qa_output_hard_limit",
+                "(qa_output_hard_limit) 模型已达上限",
+            )
+            .is_err());
+        store
+            .append_agent_run_event(
+                &run.id,
+                "run.runtime_completed",
+                Some("completion"),
+                "未完成",
+                &serde_json::json!({"stop_reason":"max_tokens","complete":false}),
+            )
+            .unwrap();
+        store.fail_agent_run(&run.id, "原始模型错误").unwrap();
+        assert!(store
+            .mark_failed_qa_recovery_disposition(&run.id, "invalid", "(invalid) 无效",)
+            .is_err());
+        store
+            .mark_failed_qa_recovery_disposition(
+                &run.id,
+                "qa_output_hard_limit",
+                "(qa_output_hard_limit) 模型已达上限",
+            )
+            .unwrap();
+        let saved = store.get_agent_run(&run.id).unwrap();
+        assert_eq!(saved.error.as_deref(), Some("原始模型错误"));
+        assert_eq!(
+            saved.output.unwrap()["qa_recovery_disposition"],
+            "qa_output_hard_limit"
+        );
+        assert!(store.list_unfinished_qa_runs(&base.id, 10).unwrap()[0]
+            .error
+            .contains("qa_output_hard_limit"));
+        assert!(store
+            .list_agent_run_events(&run.id)
+            .unwrap()
+            .iter()
+            .any(|event| event.event_type == "run.qa_recovery_disposition"));
     }
 
     #[test]
