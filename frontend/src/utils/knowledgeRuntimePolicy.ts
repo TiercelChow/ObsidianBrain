@@ -1,4 +1,4 @@
-export type KnowledgeInterruptionKind = 'cancelled' | 'credentials' | 'truncated' | 'turn_limit' | 'scope_limit' | 'failed'
+export type KnowledgeInterruptionKind = 'cancelled' | 'credentials' | 'truncated' | 'turn_limit' | 'scope_limit' | 'stalled' | 'failed'
 
 /** Launcher availability is not invalidated by a single failed model request. */
 export function knowledgeRuntimeMode(launcherAvailable: boolean): 'runtime' | 'evidence_only' {
@@ -21,8 +21,9 @@ export function interruptedKnowledgeAnswer(displayedText: string, receivedText: 
   const credentials = /secure storage|凭据|keychain|User canceled the operation|permission denied|401|403/i.test(detail)
   const turnLimit = /max_turn_requests|qa_turn_limit/i.test(detail)
   const scopeLimit = detail.includes('qa_output_scope_limit')
+  const stalled = detail.includes('idle_timeout')
   const truncated = /max_tokens|max_turn_requests|max_output|token.{0,12}(limit|上限)|输出.{0,12}(截断|上限)/i.test(detail)
-  const kind: KnowledgeInterruptionKind = cancelled ? 'cancelled' : credentials ? 'credentials' : turnLimit ? 'turn_limit' : scopeLimit ? 'scope_limit' : truncated ? 'truncated' : 'failed'
+  const kind: KnowledgeInterruptionKind = cancelled ? 'cancelled' : credentials ? 'credentials' : turnLimit ? 'turn_limit' : scopeLimit ? 'scope_limit' : stalled ? 'stalled' : truncated ? 'truncated' : 'failed'
   const hardOutputLimit = detail.includes('qa_output_hard_limit')
   const canRetry = kind === 'truncated' && !hardOutputLimit
   const content = receivedText || displayedText
@@ -34,6 +35,8 @@ export function interruptedKnowledgeAnswer(displayedText: string, receivedText: 
         ? 'Harness 请求轮次已用尽，内容不完整。增加输出 token 无法解决；复杂问题建议转为研究任务，按子问题独立分析后综合。'
       : kind === 'scope_limit'
         ? '本轮规划的完整答案明显超出模型单次输出空间，尚未开始生成回答。可缩小问题、调整模型输出能力，或转为分阶段研究任务。'
+      : kind === 'stalled'
+        ? '模型长时间没有新进展，本轮已停止；已有内容保留但尚未完成。请检查供应商连接，复杂问题可转为分阶段研究。'
       : kind === 'truncated'
         ? hardOutputLimit
           ? '模型单次输出已达到硬上限，未完成内容已保留。请先调整模型最大输出或推理策略，或缩小问题范围。'
@@ -98,6 +101,13 @@ export function researchTaskTurnLimitFailure(task: { status: string; result_summ
   if (task?.status !== 'failed') return false
   const failureHeader = task.result_summary.split(/\n\s*\n/, 1)[0]
   return /\((?:research|presentation)_turn_limit\)|stop_reason=max_turn_requests/.test(failureHeader)
+}
+
+/** A stalled phase needs explicit inspection, not an output-token expansion. */
+export function researchTaskIdleTimeoutFailure(task: { status: string; result_summary: string } | null): boolean {
+  if (task?.status !== 'failed') return false
+  const failureHeader = task.result_summary.split(/\n\s*\n/, 1)[0]
+  return /\(idle_timeout\)|stop_reason=idle_timeout/.test(failureHeader)
 }
 
 /** Only the failure header is authoritative; report prose may mention old errors. */

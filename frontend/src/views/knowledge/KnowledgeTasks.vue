@@ -166,6 +166,10 @@
             <strong>当前模型容量与研究范围不匹配</strong>
             <p>请核对上下文容量、单次最大输出和推理策略；若设置不变，直接恢复很可能重现同一问题。也可以缩小范围另建任务，已保存的阶段与报告不会被删除。</p>
           </div>
+          <div v-if="hasIdleTimeoutFailure" class="research-recovery-advice" role="status">
+            <strong>当前阶段长时间没有收到模型进展</strong>
+            <p>运行已停止，已完成章节和部分输出保留。请在运行检查器核对最后的工具与模型事件，并检查供应商连接；直接恢复会重新执行当前阶段，若问题反复出现，可缩小范围另建任务。</p>
+          </div>
           <KnowledgeResearchWorkspace :task-id="activeTask.id" :task-status="activeTask.status" :active="resultVisible && resultTab === 'stages'" @inspect="inspectStage" />
         </div>
         <div v-else class="task-result-scroll" role="region" aria-label="运行检查器">
@@ -237,9 +241,9 @@
           </div>
         </div>
         <div class="knowledge-modal-actions">
-          <el-button v-if="hasCapacityFailure" @click="openModelSettings">检查模型设置</el-button>
-          <el-button v-if="(hasTurnLimitFailure || hasCapacityFailure) && activeTask.task_type === 'research'" @click="openNarrowedTask(activeTask)">缩小范围另建任务</el-button>
-          <el-button v-if="['failed', 'cancelled'].includes(activeTask.status)" :loading="executingTaskId === activeTask.id" @click="runTask(activeTask)">{{ hasTurnLimitFailure ? '仍要恢复当前阶段' : '恢复未完成阶段' }}</el-button>
+          <el-button v-if="hasCapacityFailure || hasIdleTimeoutFailure" @click="openModelSettings">检查模型设置</el-button>
+          <el-button v-if="(hasTurnLimitFailure || hasCapacityFailure || hasIdleTimeoutFailure) && activeTask.task_type === 'research'" @click="openNarrowedTask(activeTask)">缩小范围另建任务</el-button>
+          <el-button v-if="['failed', 'cancelled'].includes(activeTask.status)" :loading="executingTaskId === activeTask.id" @click="runTask(activeTask)">{{ hasTurnLimitFailure || hasIdleTimeoutFailure ? '仍要恢复当前阶段' : '恢复未完成阶段' }}</el-button>
           <el-button v-if="['queued', 'running'].includes(activeTask.status)" @click="cancelTask(activeTask)">取消任务</el-button>
           <el-button type="primary" @click="resultVisible = false">完成</el-button>
         </div>
@@ -262,7 +266,7 @@ import KnowledgeCitationPreview from '@/components/knowledge/KnowledgeCitationPr
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import { canFocusDocument } from '@/utils/modalFocusPolicy'
 import { knowledgeRunDiagnostics } from '@/utils/knowledgeRunDiagnostics'
-import { researchTaskCapacityFailure, researchTaskTurnLimitFailure } from '@/utils/knowledgeRuntimePolicy'
+import { researchTaskCapacityFailure, researchTaskIdleTimeoutFailure, researchTaskTurnLimitFailure } from '@/utils/knowledgeRuntimePolicy'
 import { hasFailedResearchStage } from '@/utils/knowledgeResearch'
 import { visibleResearchBriefFields, type ResearchBriefDecisionField } from '@/utils/researchBriefChoices'
 import { researchReadiness } from '@/utils/researchReadiness'
@@ -311,6 +315,7 @@ const resultVisible = ref(false)
 const activeTask = ref<KnowledgeTask | null>(null)
 const hasTurnLimitFailure = computed(() => researchTaskTurnLimitFailure(activeTask.value))
 const hasCapacityFailure = computed(() => researchTaskCapacityFailure(activeTask.value))
+const hasIdleTimeoutFailure = computed(() => researchTaskIdleTimeoutFailure(activeTask.value))
 const activeEvidence = ref<KnowledgeEntrySummary[]>([])
 const activeArtifacts = ref<KnowledgeArtifact[]>([])
 const activeInspection = ref<AgentRunInspection | null>(null)

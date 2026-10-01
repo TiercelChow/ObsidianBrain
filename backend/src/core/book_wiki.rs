@@ -47,6 +47,7 @@ use crate::infra::book_wiki_store::{
 };
 use crate::infra::credential_store::{ProviderCredentialStore, SystemProviderCredentialStore};
 use crate::infra::deepseek_harness::{AgentPromptRequest, AgentRuntime, AgentRuntimeEvent};
+use crate::models::agent_budget::MAX_KNOWLEDGE_PHASE_TIMEOUT_SECONDS;
 use crate::models::book_wiki::{
     AgentTokenUsage, ConfigDocument, KnowledgeAnswer, KnowledgeBaseSummary, KnowledgeChangeSet,
     KnowledgeEntryDetail, KnowledgeEntrySummary, KnowledgeMessage, KnowledgeTask,
@@ -73,7 +74,8 @@ const QA_SELECTION_MAX_OUTPUT_TOKENS: u32 = 2_048;
 const MAX_QA_OUTPUT_EXPANSIONS: usize = 2;
 const MAX_PRESENTATION_OUTPUT_EXPANSIONS: usize = 2;
 const MAX_QA_TRANSIENT_RETRIES: usize = 1;
-const RESEARCH_TASK_TIMEOUT: Duration = Duration::from_secs(600);
+const RESEARCH_TASK_TIMEOUT: Duration =
+    Duration::from_secs(MAX_KNOWLEDGE_PHASE_TIMEOUT_SECONDS as u64);
 const PRESENTATION_PLAN_TIMEOUT: Duration = Duration::from_secs(180);
 const PRESENTATION_PLAN_MAX_OUTPUT_TOKENS: u32 = 6_144;
 const RESEARCH_PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(75);
@@ -2314,12 +2316,7 @@ impl BookWikiService {
                 return Err(error);
             }
         }
-        let request_timeout = input
-            .get("request_timeout_seconds")
-            .and_then(serde_json::Value::as_u64)
-            .filter(|value| *value > 0)
-            .map(|value| Duration::from_secs(value.min(600)))
-            .or_else(|| runtime_timeout_for_task(task_type));
+        let request_timeout = runtime_timeout_for_invocation(task_type, input);
         if let Some(attempt) = input
             .get("output_expansion_attempt")
             .and_then(serde_json::Value::as_u64)
@@ -3946,6 +3943,15 @@ fn runtime_timeout_for_task(task_type: &str) -> Option<Duration> {
         task_type if task_type.starts_with("knowledge_task_") => Some(RESEARCH_TASK_TIMEOUT),
         _ => None,
     }
+}
+
+fn runtime_timeout_for_invocation(task_type: &str, input: &serde_json::Value) -> Option<Duration> {
+    input
+        .get("request_timeout_seconds")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|value| *value > 0)
+        .map(|value| Duration::from_secs(value.min(u64::from(MAX_KNOWLEDGE_PHASE_TIMEOUT_SECONDS))))
+        .or_else(|| runtime_timeout_for_task(task_type))
 }
 
 fn runtime_max_output_tokens_for_task(task_type: &str) -> Option<u32> {
@@ -6868,6 +6874,82 @@ mod tests {
         );
         assert!(allowed_agent_tools("skill_benchmark", &serde_json::json!({})).is_empty());
         assert_eq!(capability_ttl_seconds(Some(Duration::from_secs(600))), 660);
+    }
+
+    #[test]
+    fn test_runtime_deadline_accepts_long_research_but_keeps_phase_guard() {
+        assert_eq!(
+            runtime_timeout_for_invocation(
+                "knowledge_task_research",
+                &serde_json::json!({"request_timeout_seconds":1_800}),
+            ),
+            Some(Duration::from_secs(1_800))
+        );
+        assert_eq!(
+            runtime_timeout_for_invocation(
+                "knowledge_task_research",
+                &serde_json::json!({"request_timeout_seconds":9_000}),
+            ),
+            Some(RESEARCH_TASK_TIMEOUT)
+        );
+        assert_eq!(
+            runtime_timeout_for_invocation(
+                "research_preflight",
+                &serde_json::json!({"request_timeout_seconds":75}),
+            ),
+            Some(Duration::from_secs(75))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_separate_runtime_invocations_get_isolated_harness_workspaces() {
+        struct WorkspaceRuntime(Arc<Mutex<Vec<(PathBuf, String)>>>);
+
+        #[async_trait]
+        impl AgentRuntime for WorkspaceRuntime {
+            async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+                assert!(request.cwd.is_absolute());
+                assert!(request.cwd.join("knowledge-readonly.patch.yml").is_file());
+                self.0.lock().unwrap().push((request.cwd, request.prompt));
+                Ok("阶段完成".into())
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = BookWikiStore::new(Arc::new(
+            SqliteStore::new(&dir.path().join("workspace-isolation.db")).unwrap(),
+        ));
+        let profile = store.list_runtime_profiles().unwrap().remove(0);
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let service = BookWikiService::new(store, Arc::new(WorkspaceRuntime(requests.clone())));
+        let (_cancel_sender, cancel) = tokio::sync::watch::channel(false);
+        for prompt in ["独立分析子问题一", "独立分析子问题二"] {
+            assert_eq!(
+                service
+                    .invoke_runtime(
+                        &profile,
+                        RuntimeInvocation {
+                            prompt: prompt.into(),
+                            timeout: None,
+                            max_output_tokens: None,
+                            bounded_extraction: false,
+                            capability_token: None,
+                            native_skills: Vec::new(),
+                            events: None,
+                            cancel: cancel.clone(),
+                        },
+                    )
+                    .await
+                    .unwrap(),
+                "阶段完成"
+            );
+        }
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_ne!(requests[0].0, requests[1].0);
+        assert_eq!(requests[0].1, "独立分析子问题一");
+        assert_eq!(requests[1].1, "独立分析子问题二");
+        assert!(requests.iter().all(|(path, _)| !path.exists()));
     }
 
     #[test]

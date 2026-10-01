@@ -80,11 +80,11 @@ async fn test_qa_declared_small_output_defers_oversized_plan_before_answer_run()
                     "plan":{
                         "goal":"全面分析全书机制和适用条件",
                         "constraints":[],
-                        "subquestions":["机制","证据","边界"],
+                        "subquestions":["机制"],
                         "evidence_requirements":["编译知识和原文"],
                         "depth":"comprehensive",
                         "scope":"whole_book",
-                        "expected_output_tokens":50_000
+                        "expected_output_tokens":5_000
                     },
                     "memory_update":{"objective":"全面分析全书机制和适用条件","constraints":[],"unresolved_questions":[],"entity_ids":[]}
                 })
@@ -504,6 +504,66 @@ async fn test_qa_turn_limit_stops_after_one_answer_run_without_output_expansion(
         Some("max_turn_requests")
     );
     assert!(!unfinished[0].has_partial_answer);
+}
+
+#[tokio::test]
+async fn test_qa_idle_timeout_keeps_partial_run_without_automatic_replay() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct IdleRuntime(AtomicUsize);
+    #[async_trait]
+    impl AgentRuntime for IdleRuntime {
+        async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            assert!(request.prompt.contains("只读检索规划器"));
+            Ok(serde_json::json!({
+                "standalone_question":"分析机制",
+                "candidate_ids":[],
+                "answer_mode":"book_lookup",
+                "plan":{"goal":"分析机制","constraints":[],"subquestions":["机制"],"depth":"standard","scope":"focused"}
+            }).to_string())
+        }
+
+        async fn prompt_with_events(
+            &self,
+            request: AgentPromptRequest,
+            events: Option<tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+            _cancel: tokio::sync::watch::Receiver<bool>,
+        ) -> Result<String, BrainError> {
+            if request.prompt.contains("只读检索规划器") {
+                return self.prompt(request).await;
+            }
+            self.0.fetch_add(1, Ordering::SeqCst);
+            if let Some(events) = events {
+                events
+                    .send(AgentRuntimeEvent::TextDelta {
+                        delta: "部分分析".into(),
+                    })
+                    .unwrap();
+                events
+                    .send(AgentRuntimeEvent::Completed {
+                        stop_reason: "idle_timeout".into(),
+                        complete: false,
+                    })
+                    .unwrap();
+            }
+            Err(BrainError::LlmApiError {
+                provider: "deepseek_harness".into(),
+                detail: "(idle_timeout) DeepSeek Harness 连续 600 秒没有收到进展".into(),
+            })
+        }
+    }
+
+    let (store, _dir, base) = fixture();
+    let runtime = Arc::new(IdleRuntime(AtomicUsize::new(0)));
+    let service = BookWikiService::new(store.clone(), runtime.clone());
+    let error = service.ask(&base, "分析机制", None).await.unwrap_err();
+    assert!(error.to_string().contains("idle_timeout"));
+    assert_eq!(runtime.0.load(Ordering::SeqCst), 2);
+    assert!(store.list_conversations(&base, 10).unwrap().is_empty());
+    let unfinished = store.list_unfinished_qa_runs(&base, 10).unwrap();
+    assert_eq!(unfinished.len(), 1);
+    assert_eq!(unfinished[0].stop_reason.as_deref(), Some("idle_timeout"));
+    assert!(unfinished[0].has_partial_answer);
 }
 
 #[tokio::test]

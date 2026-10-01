@@ -2,6 +2,12 @@
 
 pub const DEFAULT_AGENT_CONTEXT_TOKENS: u32 = 1_048_576;
 pub const MAX_AGENT_OUTPUT_TOKENS: u32 = 262_144;
+pub const MAX_KNOWLEDGE_PHASE_TIMEOUT_SECONDS: u32 = 2_400;
+
+/// A request-planning allowance, not a measured provider throughput.
+pub fn output_timeout_allowance_seconds(tokens: u32) -> u32 {
+    tokens.div_ceil(48)
+}
 
 pub fn context_capacity(declared: Option<u32>) -> u64 {
     u64::from(declared.unwrap_or(DEFAULT_AGENT_CONTEXT_TOKENS))
@@ -38,5 +44,14 @@ mod tests {
         assert_eq!(output_limit(Some(65_536), Some(40_000)), 40_000);
         assert_eq!(output_limit(Some(8192), Some(2048)), 2048);
         assert_eq!(output_limit(None, None), MAX_AGENT_OUTPUT_TOKENS);
+    }
+
+    #[test]
+    fn test_output_timeout_allowance_scales_without_claiming_provider_speed() {
+        assert_eq!(output_timeout_allowance_seconds(0), 0);
+        assert_eq!(output_timeout_allowance_seconds(1), 1);
+        assert_eq!(output_timeout_allowance_seconds(48), 1);
+        assert_eq!(output_timeout_allowance_seconds(49), 2);
+        assert_eq!(output_timeout_allowance_seconds(64_000), 1_334);
     }
 }

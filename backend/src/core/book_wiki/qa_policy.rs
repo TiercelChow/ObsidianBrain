@@ -1,7 +1,10 @@
 //! Business resource policy. Harness still owns reasoning and the tool loop.
 
 use crate::error::BrainError;
-use crate::models::agent_budget::{context_capacity, output_limit};
+use crate::models::agent_budget::{
+    context_capacity, output_limit, output_timeout_allowance_seconds, MAX_AGENT_OUTPUT_TOKENS,
+    MAX_KNOWLEDGE_PHASE_TIMEOUT_SECONDS,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -120,9 +123,9 @@ pub(super) struct QaResources {
 }
 
 impl QaResources {
-    /// Reject only a severe mismatch with an explicitly estimated answer and
-    /// known capacity. Smaller estimate errors should still get a chance to
-    /// produce a bounded answer; unknown provider limits are not invented.
+    /// Reject an estimated answer that will substantially exceed a known
+    /// request bound. Keep a wider tolerance when only the application guard
+    /// is known, because it is not a provider output capability declaration.
     pub fn check_visible_output_fit(
         plan: &QaPlan,
         context: Option<u32>,
@@ -145,7 +148,15 @@ impl QaResources {
         let extra_questions =
             u32::try_from(plan.subquestions.len().saturating_sub(1)).unwrap_or(u32::MAX);
         let planned = expected.saturating_add(extra_questions.saturating_mul(768));
-        if planned > visible.saturating_mul(2) {
+        let constrained = output_cap.is_some()
+            || context
+                .is_some_and(|window| output_limit(Some(window), None) < MAX_AGENT_OUTPUT_TOKENS);
+        let tolerance = if constrained {
+            visible.saturating_add(visible / 4)
+        } else {
+            visible.saturating_mul(2)
+        };
+        if planned > tolerance {
             return Err(BrainError::KnowledgeValidation(format!(
                 "(qa_output_scope_limit) 规划器估计本轮完整回答约需 {planned} token 可见正文；当前单次有效输出上限为 {cap} token，扣除估计推理余量后约有 {visible} token 可用于正文。该估计不是实际用量，但差距过大，按当前深度发起回答很可能截断；尚未启动回答 Run。请缩小问题、提高模型单次输出能力，或转为分阶段研究任务。"
             )));
@@ -183,8 +194,10 @@ impl QaResources {
             self.hard_retrieval_tokens = self.soft_retrieval_tokens.saturating_mul(4);
             self.timeout_seconds = self
                 .timeout_seconds
-                .saturating_add(output.saturating_sub(previous) / 128)
-                .min(600);
+                .saturating_add(output_timeout_allowance_seconds(
+                    output.saturating_sub(previous),
+                ))
+                .min(MAX_KNOWLEDGE_PHASE_TIMEOUT_SECONDS);
         }
         self
     }
@@ -213,8 +226,10 @@ impl QaResources {
         self.hard_retrieval_tokens = self.soft_retrieval_tokens.saturating_mul(4);
         self.timeout_seconds = self
             .timeout_seconds
-            .saturating_add(self.output_tokens.saturating_sub(previous) / 128)
-            .min(600);
+            .saturating_add(output_timeout_allowance_seconds(
+                self.output_tokens.saturating_sub(previous),
+            ))
+            .min(MAX_KNOWLEDGE_PHASE_TIMEOUT_SECONDS);
         self
     }
     pub fn new(
@@ -276,7 +291,9 @@ impl QaResources {
             hard_tool_calls,
             soft_retrieval_tokens,
             hard_retrieval_tokens: soft_retrieval_tokens.saturating_mul(4),
-            timeout_seconds: (90 + weight * 45 + questions * 10 + desired / 128).min(600),
+            timeout_seconds: (90 + weight * 45 + questions * 10)
+                .saturating_add(output_timeout_allowance_seconds(output_tokens))
+                .min(MAX_KNOWLEDGE_PHASE_TIMEOUT_SECONDS),
             planning_token_limit: capacity.saturating_mul(2).min(2_097_152),
             planning_seconds: 60 + breadth * 30,
             context_capacity_known: context.is_some(),
@@ -306,6 +323,25 @@ mod tests {
             "auto"
         )
         .is_ok());
+        plan.subquestions.truncate(1);
+        plan.expected_output_tokens = Some(5_000);
+        assert!(
+            QaResources::check_visible_output_fit(&plan, Some(1_048_576), Some(4_096), "auto")
+                .unwrap_err()
+                .to_string()
+                .contains("qa_output_scope_limit")
+        );
+        assert!(
+            QaResources::check_visible_output_fit(&plan, Some(8_192), None, "auto")
+                .unwrap_err()
+                .to_string()
+                .contains("qa_output_scope_limit")
+        );
+        plan.expected_output_tokens = Some(3_600);
+        assert!(
+            QaResources::check_visible_output_fit(&plan, Some(1_048_576), Some(4_096), "auto")
+                .is_ok()
+        );
         plan.expected_output_tokens = None;
         assert!(
             QaResources::check_visible_output_fit(&plan, Some(1_048_576), Some(4_096), "auto")
@@ -333,6 +369,24 @@ mod tests {
                 .output_tokens,
             12_000
         );
+    }
+
+    #[test]
+    fn test_large_answer_timeout_grows_with_requested_output_and_stays_bounded() {
+        let mut plan = QaPlan::fallback("系统梳理整本书的机制与反例");
+        plan.depth = "comprehensive".into();
+        plan.expected_output_tokens = Some(64_000);
+        let initial = QaResources::new(&plan, None, None, 20);
+        assert!(initial.timeout_seconds > 600);
+        assert!(initial.timeout_seconds < 2_400);
+        let expanded = initial.clone().with_reasoning_headroom(None, None, "auto");
+        assert!(expanded.timeout_seconds > initial.timeout_seconds);
+        assert!(expanded.timeout_seconds <= 2_400);
+        let resumed = expanded
+            .clone()
+            .for_resume(expanded.output_tokens, None, None);
+        assert!(resumed.timeout_seconds >= expanded.timeout_seconds);
+        assert!(resumed.timeout_seconds <= 2_400);
     }
 
     #[test]

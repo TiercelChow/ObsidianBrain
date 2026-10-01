@@ -16,6 +16,7 @@ use crate::error::BrainError;
 use crate::models::book_wiki::{RuntimeHealth, RuntimeProfile};
 
 pub const AGENT_RUNTIME_CANCELLED: &str = "OBSIDIANBRAIN_AGENT_RUNTIME_CANCELLED";
+const AGENT_RUNTIME_IDLE_TIMEOUT: &str = "OBSIDIANBRAIN_AGENT_RUNTIME_IDLE_TIMEOUT";
 
 #[derive(Clone)]
 pub struct AgentPromptRequest {
@@ -92,12 +93,14 @@ pub trait AgentRuntime: Send + Sync {
 #[derive(Clone, Debug)]
 pub struct DeepSeekHarnessRuntime {
     timeout: Duration,
+    idle_timeout: Duration,
 }
 
 impl Default for DeepSeekHarnessRuntime {
     fn default() -> Self {
         Self {
             timeout: Duration::from_secs(180),
+            idle_timeout: Duration::from_secs(600),
         }
     }
 }
@@ -105,7 +108,18 @@ impl Default for DeepSeekHarnessRuntime {
 impl DeepSeekHarnessRuntime {
     #[cfg(test)]
     pub fn with_timeout(timeout: Duration) -> Self {
-        Self { timeout }
+        Self {
+            timeout,
+            ..Self::default()
+        }
+    }
+
+    #[cfg(test)]
+    fn with_idle_timeout(idle_timeout: Duration) -> Self {
+        Self {
+            idle_timeout,
+            ..Self::default()
+        }
     }
 
     #[allow(unused_assignments)]
@@ -129,6 +143,7 @@ impl DeepSeekHarnessRuntime {
         }
 
         let request_timeout = request.timeout.unwrap_or(self.timeout);
+        let idle_timeout = self.idle_timeout.min(request_timeout);
         let mut command_parts = shell_words::split(&request.command)
             .map_err(|error| harness_error(format!("无法解析 ACP 启动命令: {error}")))?;
         if command_parts.is_empty() {
@@ -224,10 +239,14 @@ impl DeepSeekHarnessRuntime {
                         );
                         let mut output = String::new();
                         let mut cancel_channel_closed = false;
+                        let idle_timer = tokio::time::sleep(idle_timeout);
+                        tokio::pin!(idle_timer);
                         let stop_reason = loop {
                             tokio::select! {
                                 update = session.read_update() => {
-                                    match update? {
+                                    let update = update?;
+                                    idle_timer.as_mut().reset(tokio::time::Instant::now() + idle_timeout);
+                                    match update {
                                         SessionMessage::SessionMessage(dispatch) => {
                                             MatchDispatch::new(dispatch)
                                                 .if_notification(async |notification: SessionNotification| {
@@ -244,6 +263,11 @@ impl DeepSeekHarnessRuntime {
                                         SessionMessage::StopReason(reason) => break reason,
                                         _ => {}
                                     }
+                                }
+                                _ = &mut idle_timer => {
+                                    return Err(agent_client_protocol::util::internal_error(
+                                        AGENT_RUNTIME_IDLE_TIMEOUT,
+                                    ));
                                 }
                                 changed = cancel.changed(), if !cancel_channel_closed => {
                                     match changed {
@@ -289,6 +313,12 @@ impl DeepSeekHarnessRuntime {
                 if error.to_string().contains(AGENT_RUNTIME_CANCELLED) {
                     emit_completion(completion_events.as_ref(), "cancelled", false);
                     BrainError::KnowledgeValidation("Agent 运行已取消".to_string())
+                } else if error.to_string().contains(AGENT_RUNTIME_IDLE_TIMEOUT) {
+                    emit_completion(completion_events.as_ref(), "idle_timeout", false);
+                    harness_error(format!(
+                        "(idle_timeout) DeepSeek Harness 连续 {}没有收到进展，已停止本次运行；部分输出保留",
+                        duration_label(idle_timeout)
+                    ))
                 } else {
                     emit_completion(completion_events.as_ref(), "runtime_error", false);
                     harness_error(acp_error_message(
@@ -987,6 +1017,88 @@ done
         }
         assert_eq!(streamed, "未完成正文");
         assert_eq!(completion, Some(("timeout".to_string(), false)));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_acp_transport_stalled_after_partial_output_reports_idle_timeout() {
+        let (_workspace, mut request) = fake_acp_request("end_turn", "已有部分正文", true);
+        request.timeout = Some(Duration::from_secs(2));
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let (_guard, cancel) = tokio::sync::watch::channel(false);
+        let result = DeepSeekHarnessRuntime::with_idle_timeout(Duration::from_millis(150))
+            .prompt_with_events(request, Some(events), cancel)
+            .await;
+        assert!(result.unwrap_err().to_string().contains("idle_timeout"));
+        let mut streamed = String::new();
+        let mut completion = None;
+        while let Ok(event) = received.try_recv() {
+            match event {
+                AgentRuntimeEvent::TextDelta { delta } => streamed.push_str(&delta),
+                AgentRuntimeEvent::Completed {
+                    stop_reason,
+                    complete,
+                } => completion = Some((stop_reason, complete)),
+                _ => {}
+            }
+        }
+        assert_eq!(streamed, "已有部分正文");
+        assert_eq!(completion, Some(("idle_timeout".to_string(), false)));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_acp_transport_progress_resets_idle_deadline() {
+        let (workspace, mut request) = fake_acp_request("end_turn", "unused", false);
+        let update = |text: &str| {
+            serde_json::json!({
+                "jsonrpc":"2.0","method":"session/update",
+                "params":{"sessionId":"fixture-session","update":{
+                    "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":text}
+                }}
+            })
+            .to_string()
+        };
+        let script = format!(
+            r#"while IFS= read -r request; do
+    request_id=$(printf '%s\n' "$request" | sed -n 's/.*"id":\([^,}}]*\).*/\1/p')
+    case "$request" in
+        *'"method":"initialize"'*)
+            printf '{{"jsonrpc":"2.0","id":%s,"result":{{"protocolVersion":1,"agentCapabilities":{{}}}}}}\n' "$request_id" ;;
+        *'"method":"session/new"'*)
+            printf '{{"jsonrpc":"2.0","id":%s,"result":{{"sessionId":"fixture-session"}}}}\n' "$request_id" ;;
+        *'"method":"session/prompt"'*)
+            printf '%s\n' {first}
+            sleep 1
+            printf '%s\n' {second}
+            sleep 1
+            printf '{{"jsonrpc":"2.0","id":%s,"result":{{"stopReason":"end_turn"}}}}\n' "$request_id" ;;
+    esac
+done
+"#,
+            first = shell_words::quote(&update("第一段")),
+            second = shell_words::quote(&update("第二段")),
+        );
+        std::fs::write(workspace.path().join("fake-acp.sh"), script).unwrap();
+        request.timeout = Some(Duration::from_secs(5));
+        let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let (_guard, cancel) = tokio::sync::watch::channel(false);
+        let answer = DeepSeekHarnessRuntime::with_idle_timeout(Duration::from_millis(1_800))
+            .prompt_with_events(request, Some(events), cancel)
+            .await
+            .unwrap();
+        assert_eq!(answer, "第一段第二段");
+        let mut completion = None;
+        while let Ok(event) = received.try_recv() {
+            if let AgentRuntimeEvent::Completed {
+                stop_reason,
+                complete,
+            } = event
+            {
+                completion = Some((stop_reason, complete));
+            }
+        }
+        assert_eq!(completion, Some(("end_turn".to_string(), true)));
     }
 
     #[tokio::test]

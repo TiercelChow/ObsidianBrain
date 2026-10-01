@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskCapacityFailure, researchTaskQuestionFromPlanning, researchTaskQuestionFromRun, researchTaskRouteFromQuestion, researchTaskTurnLimitFailure, validateModelCapabilities } from '../src/utils/knowledgeRuntimePolicy.ts'
+import { interruptedKnowledgeAnswer, knowledgeRuntimeMode, labelForRuntimePhase, researchTaskCapacityFailure, researchTaskIdleTimeoutFailure, researchTaskQuestionFromPlanning, researchTaskQuestionFromRun, researchTaskRouteFromQuestion, researchTaskTurnLimitFailure, validateModelCapabilities } from '../src/utils/knowledgeRuntimePolicy.ts'
 
 test('planning fallback remains visible as a retrieval adjustment', () => {
   assert.equal(labelForRuntimePhase('目录规划未完成，正在改用书内检索继续核查'), '正在调整检索方式')
@@ -35,6 +35,18 @@ test('a Harness turn limit is not mistaken for an output-token retry', () => {
     path: '/knowledge/tasks',
     query: { create: '1', base: 'book-a', title: '分析机制与边界', description: '' },
   })
+})
+
+test('an idle Harness run keeps its draft and suggests explicit recovery, not output expansion', () => {
+  const interrupted = interruptedKnowledgeAnswer('已有分析', '已有分析与引用待核对', new Error('(idle_timeout) DeepSeek Harness 连续 600 秒没有收到进展'))
+  assert.equal(interrupted.kind, 'stalled')
+  assert.equal(interrupted.content, '已有分析与引用待核对')
+  assert.equal(interrupted.canRetry, false)
+  assert.match(interrupted.notice, /检查.*连接|分阶段研究/)
+  assert.doesNotMatch(interrupted.notice, /输出 token/)
+  assert.equal(researchTaskIdleTimeoutFailure({ status: 'failed', result_summary: '执行未完成：(idle_timeout) 当前阶段无进展' }), true)
+  assert.equal(researchTaskIdleTimeoutFailure({ status: 'completed', result_summary: '(idle_timeout)' }), false)
+  assert.equal(researchTaskIdleTimeoutFailure({ status: 'failed', result_summary: '普通错误\n\n报告正文提及 (idle_timeout)' }), false)
 })
 
 test('a clearly infeasible answer plan offers staged research instead of an output retry', () => {

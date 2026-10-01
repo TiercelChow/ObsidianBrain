@@ -3,7 +3,10 @@
 use super::qa_policy::{estimated_tokens, QaPlan, QaResources};
 use crate::error::BrainError;
 use crate::infra::book_wiki_store::AdaptiveBudgetPolicy;
-use crate::models::agent_budget::{context_capacity, output_limit, MAX_AGENT_OUTPUT_TOKENS};
+use crate::models::agent_budget::{
+    context_capacity, output_limit, output_timeout_allowance_seconds, MAX_AGENT_OUTPUT_TOKENS,
+    MAX_KNOWLEDGE_PHASE_TIMEOUT_SECONDS,
+};
 use crate::models::book_wiki::{ResearchPlan, ResearchQuestion, RuntimeProfile};
 use serde::Serialize;
 
@@ -305,8 +308,10 @@ impl ResearchResources {
         self.policy.timeout_seconds = self
             .policy
             .timeout_seconds
-            .saturating_add(output.saturating_sub(previous) / 128)
-            .min(600);
+            .saturating_add(output_timeout_allowance_seconds(
+                output.saturating_sub(previous),
+            ))
+            .min(MAX_KNOWLEDGE_PHASE_TIMEOUT_SECONDS);
         Ok(self)
     }
 }
@@ -480,6 +485,8 @@ mod tests {
             .unwrap();
         assert!(expanded.output_tokens >= resources.output_tokens * 2);
         assert!(expanded.output_tokens > 10_922);
+        assert!(expanded.policy.timeout_seconds > resources.policy.timeout_seconds);
+        assert!(expanded.policy.timeout_seconds <= MAX_KNOWLEDGE_PHASE_TIMEOUT_SECONDS);
         assert_eq!(resources.content_output_tokens, 3000);
         assert_eq!(resources.structure_output_tokens, 2560);
         assert_eq!(resources.reasoning_output_tokens, 8192);
