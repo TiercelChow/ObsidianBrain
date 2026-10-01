@@ -577,6 +577,15 @@ pub struct ResearchStageContent {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct ResearchUnpublishedOutput {
+    pub run_id: String,
+    /// interrupted: incomplete Run; rejected: complete model answer not saved as a stage.
+    pub kind: String,
+    pub text: String,
+    pub stop_reason: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct ConfigDocument {
     pub id: String,
     pub knowledge_base_id: Option<String>,

@@ -33,6 +33,7 @@
         <header><h4>{{ selected.stage.title }}</h4><span>{{ researchStageStatus(selected.stage.status) }} · {{ selected.stage.revision > 0 ? `版本 ${selected.stage.revision}` : '尚无保存版本' }}</span></header>
         <div v-if="selected.stage.run_id || selected.content_run_id || (currentStage?.revision || 0) > 0" class="stage-controls">
           <button v-if="selected.stage.run_id" type="button" @click="emit('inspect', selected.stage.run_id)">本次阶段检查器</button>
+          <button v-if="selected.stage.run_id && ['failed', 'cancelled'].includes(selected.stage.status)" type="button" :disabled="rawOutputLoading" @click="toggleRawOutput">{{ rawOutputExpanded ? '收起未保存输出' : '查看未保存输出' }}</button>
           <button v-if="selected.content_run_id && selected.content_run_id !== selected.stage.run_id" type="button" @click="emit('inspect', selected.content_run_id)">保留正文的来源运行</button>
           <label v-if="(currentStage?.revision || 0) > 0">历史版本 <el-input-number v-model="revision" :min="1" :max="currentStage?.revision" :precision="0" controls-position="right" aria-label="研究阶段历史版本" /></label>
           <button v-if="(currentStage?.revision || 0) > 0" type="button" :disabled="stageLoading" @click="readRevision">读取版本</button>
@@ -41,6 +42,17 @@
         <p v-if="selected.stage.error" class="stage-notice is-error">{{ selected.stage.error }}</p>
         <KnowledgeAnswerMarkdown v-if="selected.content_md" :content="selected.content_md" :evidence-count="evidenceCount" @citation="openCitation" />
         <p v-else class="stage-notice">此阶段尚未保存完整成果。失败、排队和运行中的内容不会冒充已完成报告。</p>
+        <section v-if="rawOutputExpanded" class="stage-raw-output" aria-label="未保存的模型原始输出">
+          <h4>未保存的模型原始输出</h4>
+          <p>仅供排查中断或校验失败；不是已校验的阶段成果或可引用证据，也不会进入最终报告。</p>
+          <p v-if="rawOutputLoading" role="status">正在读取本次运行…</p>
+          <p v-else-if="rawOutputError" role="alert">{{ rawOutputError }}</p>
+          <template v-else-if="rawOutput">
+            <small>{{ rawOutput.kind === 'interrupted' ? '运行中断时留下的草稿' : '已生成但未通过阶段保存的原文' }}<template v-if="rawOutput.stop_reason"> · {{ rawOutput.stop_reason }}</template></small>
+            <pre>{{ rawOutput.text }}</pre>
+          </template>
+          <p v-else>本次运行没有留下可查看的正文；可能是在模型开始输出前失败。</p>
+        </section>
         <section v-if="selected.findings.length" class="findings"><h4>发现与证据缺口</h4><p>以下是模型的公开判定；实际引用及版本由系统校验，不等于独立事实证明。</p><article v-for="(finding, index) in selected.findings" :key="index"><span :class="`is-${finding.status}`">{{ researchFindingStatus(finding.status) }}</span><strong>{{ finding.finding }}</strong><small v-if="finding.baseline_entry_id">核验对象：{{ finding.baseline_entry_id }}<template v-if="finding.baseline_claim_id"> · 主张 {{ finding.baseline_claim_id }}</template></small><ul v-if="finding.limitations.length"><li v-for="limitation in finding.limitations" :key="limitation">{{ limitation }}</li></ul><div class="finding-citations"><button v-for="index in finding.citation_indices" :key="index" type="button" @click="openCitation(index - 1)">S{{ index }} · 实际读取快照</button></div></article></section>
       </article>
     </template>
@@ -52,7 +64,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
-import { getKnowledgeResearchWorkspace, getKnowledgeResearchStage, type ResearchWorkspace, type ResearchStageContent, type ResearchStageSummary } from '@/api/knowledge'
+import { getKnowledgeResearchWorkspace, getKnowledgeResearchStage, getKnowledgeResearchUnpublishedOutput, type ResearchWorkspace, type ResearchStageContent, type ResearchStageSummary, type ResearchUnpublishedOutput } from '@/api/knowledge'
 import { researchCoverage, researchStageStatus, researchFindingStatus, pickResearchStageToOpen, shouldRefreshResearchStage } from '@/utils/knowledgeResearch'
 import KnowledgeAnswerMarkdown from './KnowledgeAnswerMarkdown.vue'
 import KnowledgeCitationPreview from './KnowledgeCitationPreview.vue'
@@ -72,11 +84,16 @@ const followLatest = ref(true)
 const citationVisible = ref(false)
 const citationRun = ref('')
 const citationIndex = ref(0)
+const rawOutputExpanded = ref(false)
+const rawOutputLoading = ref(false)
+const rawOutputError = ref('')
+const rawOutput = ref<ResearchUnpublishedOutput | null>(null)
 const coverage = computed(() => researchCoverage(workspace.value?.stages || []))
 const currentStage = computed(() => workspace.value?.stages.find(stage => stage.stage_key === selected.value?.stage.stage_key))
 const evidenceCount = computed(() => Math.max(0, ...(selected.value?.evidence.map(item => item.citation_index) || [])))
 let workspaceRequest = 0
 let stageRequest = 0
+let rawOutputRequest = 0
 let timer: ReturnType<typeof setTimeout> | undefined
 let alive = true
 function visible() { return alive && props.active && document.visibilityState === 'visible' }
@@ -109,6 +126,7 @@ async function loadWorkspace(quiet = false) {
 }
 async function loadStage(stage: ResearchStageSummary, requestedRevision?: number) {
   if (!visible()) return
+  clearRawOutput()
   const request = ++stageRequest
   stageLoading.value = true
   stageError.value = ''
@@ -124,6 +142,36 @@ async function loadStage(stage: ResearchStageSummary, requestedRevision?: number
   } catch (failure) { if (request === stageRequest && visible()) stageError.value = (failure as Error).message }
   finally { if (request === stageRequest) stageLoading.value = false }
 }
+function clearRawOutput() {
+  ++rawOutputRequest
+  rawOutputExpanded.value = false
+  rawOutputLoading.value = false
+  rawOutputError.value = ''
+  rawOutput.value = null
+}
+async function toggleRawOutput() {
+  if (rawOutputExpanded.value) { clearRawOutput(); return }
+  const stage = selected.value?.stage
+  const runId = stage?.run_id
+  if (!stage || !runId || !['failed', 'cancelled'].includes(stage.status)) return
+  const taskId = props.taskId
+  const request = ++rawOutputRequest
+  rawOutputExpanded.value = true
+  rawOutputLoading.value = true
+  rawOutputError.value = ''
+  rawOutput.value = null
+  try {
+    const response = await getKnowledgeResearchUnpublishedOutput(taskId, stage.stage_key, runId, stage.revision)
+    if (request !== rawOutputRequest || !visible() || props.taskId !== taskId || selected.value?.stage.run_id !== runId) return
+    if (response.status !== 'success') throw new Error(response.error?.message || '运行记录读取失败')
+    if (response.result && response.result.run_id !== runId) throw new Error('运行记录与所选阶段不一致')
+    rawOutput.value = response.result || null
+  } catch (failure) {
+    if (request === rawOutputRequest && visible()) rawOutputError.value = (failure as Error).message
+  } finally {
+    if (request === rawOutputRequest) rawOutputLoading.value = false
+  }
+}
 function readRevision() { if (currentStage.value) void loadStage(currentStage.value, revision.value) }
 function openCitation(index: number) {
   const run = selected.value?.content_run_id
@@ -132,16 +180,16 @@ function openCitation(index: number) {
   citationIndex.value = index
   citationVisible.value = true
 }
-function visibilityChanged() { if (visible()) void loadWorkspace(true); else { stop(); ++workspaceRequest; ++stageRequest; loading.value = false; stageLoading.value = false } }
+function visibilityChanged() { if (visible()) void loadWorkspace(true); else { stop(); ++workspaceRequest; ++stageRequest; clearRawOutput(); loading.value = false; stageLoading.value = false } }
 watch(() => [props.taskId, props.active], () => {
-  ++workspaceRequest; ++stageRequest; stop(); loading.value = false; stageLoading.value = false
+  ++workspaceRequest; ++stageRequest; clearRawOutput(); stop(); loading.value = false; stageLoading.value = false
   if (!props.active) { citationVisible.value = false; return }
   workspace.value = null; selected.value = null; followLatest.value = true; error.value = ''; stageError.value = ''
   void loadWorkspace()
 }, { immediate: true })
 watch(() => props.taskStatus, () => { if (visible()) void loadWorkspace(true) })
 onMounted(() => document.addEventListener('visibilitychange', visibilityChanged))
-onBeforeUnmount(() => { alive = false; stop(); ++workspaceRequest; ++stageRequest; document.removeEventListener('visibilitychange', visibilityChanged) })
+onBeforeUnmount(() => { alive = false; stop(); ++workspaceRequest; ++stageRequest; clearRawOutput(); document.removeEventListener('visibilitychange', visibilityChanged) })
 </script>
 
 <style scoped>
@@ -167,6 +215,9 @@ onBeforeUnmount(() => { alive = false; stop(); ++workspaceRequest; ++stageReques
 .stage-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0; }.stage-controls label { display: flex; align-items: center; gap: 6px; color: var(--text-muted); }.stage-controls :deep(.el-input-number) { width: 90px; }
 .stage-controls button, .finding-citations button, .stage-notice button { min-height: 36px; border: 0; border-radius: 9px; padding: 5px 10px; background: var(--accent-light); color: var(--accent); font: inherit; font-weight: 650; cursor: pointer; }
 .stage-controls button:disabled { opacity: .5; }.stage-notice { padding: 10px; margin: 10px 0 !important; border-radius: 10px; background: var(--accent-light); }.stage-notice.is-error { color: var(--danger,#d9342b); }
+.stage-raw-output { min-width: 0; display: grid; gap: 8px; margin: 12px 0; padding: 12px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); }
+.stage-raw-output h4 { margin: 0; }.stage-raw-output small { color: var(--text-secondary); }
+.stage-raw-output pre { min-width: 0; max-height: min(52dvh, 480px); margin: 0; padding: 12px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 10px; background: var(--bg-primary); color: var(--text-primary); font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .findings { display: grid; gap: 8px; margin-top: 14px; }.findings article { display: grid; gap: 5px; padding: 12px; border-radius: 12px; background: var(--bg-glass-subtle); }.findings article > span { color: var(--accent); font-size: 11px; }.findings .is-missing, .findings .is-conflict { color: var(--danger,#d9342b); }.findings small { overflow-wrap: anywhere; color: var(--text-muted); }.finding-citations { display: flex; flex-wrap: wrap; gap: 6px; }
 @media (max-width:768px) { .research-stages button { grid-template-columns: 10px minmax(0,1fr); }.research-stages em { grid-column: 2; }.research-scope summary { min-height: 44px; display: flex; align-items: center; }.stage-controls button, .finding-citations button, .stage-notice button { min-height: 44px; }.stage-controls label { flex: 1; }.workspace-overview, .research-scope, .selected-stage { padding: 12px; } }
 @media (prefers-reduced-motion:reduce) { .research-stages button { transition: none; } }

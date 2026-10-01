@@ -1411,6 +1411,7 @@ pub struct ExecuteKnowledgeTaskHandler;
 
 pub struct GetKnowledgeResearchWorkspaceHandler;
 pub struct GetKnowledgeResearchStageHandler;
+pub struct GetKnowledgeResearchUnpublishedOutputHandler;
 
 #[async_trait]
 impl ToolHandler for GetKnowledgeResearchWorkspaceHandler {
@@ -1457,6 +1458,35 @@ impl ToolHandler for GetKnowledgeResearchStageHandler {
             args.get("revision").and_then(Value::as_i64),
         )?)
         .map_err(|error| BrainError::Internal(format!("研究阶段序列化失败: {error}")))
+    }
+}
+
+#[async_trait]
+impl ToolHandler for GetKnowledgeResearchUnpublishedOutputHandler {
+    fn name(&self) -> &str {
+        "get_knowledge_research_unpublished_output"
+    }
+    fn description(&self) -> &str {
+        "仅供本地界面按任务、阶段、版本和 Run 查看未保存的诊断正文；不返回 Prompt 或完整检查记录"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"task_id":{"type":"string","minLength":1},"stage_key":{"type":"string","minLength":1,"maxLength":128},"run_id":{"type":"string","minLength":1},"revision":{"type":"integer","minimum":1}},"required":["task_id","stage_key","run_id"],"additionalProperties":false})
+    }
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(
+            ctx.book_wiki_service
+                .store()
+                .get_research_unpublished_output(
+                    required_string(&args, "task_id")?,
+                    required_string(&args, "stage_key")?,
+                    args.get("revision").and_then(Value::as_i64),
+                    required_string(&args, "run_id")?,
+                )?,
+        )
+        .map_err(|error| BrainError::Internal(format!("未保存研究输出序列化失败: {error}")))
     }
 }
 
@@ -2671,6 +2701,9 @@ mod tests {
         ctx.tool_registry
             .register(Arc::new(GetKnowledgeResearchStageHandler))
             .await;
+        ctx.tool_registry
+            .register(Arc::new(GetKnowledgeResearchUnpublishedOutputHandler))
+            .await;
         let app = crate::api::router::create_router(ctx.clone());
         for (arguments, tool, success, legacy) in [
             (
@@ -2688,6 +2721,12 @@ mod tests {
             (
                 json!({"task_id":task.id,"claim_id":"inject-write"}),
                 "get_knowledge_research_workspace",
+                false,
+                false,
+            ),
+            (
+                json!({"task_id":task.id,"stage_key":"plan","run_id":"run","unexpected":true}),
+                "get_knowledge_research_unpublished_output",
                 false,
                 false,
             ),
@@ -2731,6 +2770,33 @@ mod tests {
             .handle(json!({"task_id":task.id,"stage_key":"unknown"}), &ctx)
             .await
             .is_err());
+        let claim = store.claim_research_stage(&task.id, "plan").unwrap();
+        let run = store.start_agent_run(&base.id, "deepseek_harness", "knowledge_task_research", &json!({"knowledge_task_id":task.id,"research_stage_key":"plan","research_claim_id":claim.claim_id,"research_claim_attempt":claim.attempt})).unwrap();
+        store.attach_research_stage_run(&claim, &run.id).unwrap();
+        store
+            .append_agent_run_event(
+                &run.id,
+                "run.text_delta",
+                Some("answer"),
+                "",
+                &json!({"delta":"未完成规划"}),
+            )
+            .unwrap();
+        store
+            .fail_agent_run(&run.id, "stop_reason=max_tokens")
+            .unwrap();
+        store
+            .fail_research_stage(&claim, "输出截断", false)
+            .unwrap();
+        let raw = GetKnowledgeResearchUnpublishedOutputHandler
+            .handle(
+                json!({"task_id":task.id,"stage_key":"plan","run_id":run.id}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(raw["text"], "未完成规划");
+        assert!(raw.get("prompt_text").is_none());
     }
 
     #[test]

@@ -2637,8 +2637,9 @@ http-body-util = "0.1"
 
 - `get_knowledge_research_workspace`：必填 `task_id`，拒绝其他字段。返回完整业务目标、规划和阶段元数据/计数，不加载全部章节正文；旧任务没有工作区时返回 null，不补造历史阶段。
 - `get_knowledge_research_stage`：必填 `task_id`、`stage_key`；可选正整数 `revision`。按需返回单个阶段的完整正文、公开证据矩阵和冻结引用；不存在的任务/阶段/历史版本明确拒绝。`stage.run_id` 为当前尝试，`content_run_id` 为保留正文的真正产出运行，两者在恢复时可能不同。历史查询不替换为当前知识正文。
+- `get_knowledge_research_unpublished_output`：必填 `task_id`、`stage_key`、`run_id`，可选正整数 `revision`。仅失败/取消阶段可按需读取该阶段 Run 的未保存正文；后端核对当前或历史阶段版本、任务、书籍、阶段、Run 类型与身份，返回 `{run_id,kind,text,stop_reason}` 或 null。中断草稿 `kind=interrupted`；模型完整返回但阶段未保存的原文 `kind=rejected`。不返回 Prompt、完整事件、引用或正式成果，拒绝其他字段。
 
-两个接口只供本地应用查看，不加入 Harness 取证或写权限。规划、章节、综合核验、报告、结构与引用检查、PPTX 是业务成果边界，不是隐藏思维链；程序结构检查与 Agent 自报支持均不冒充事实正确性证明。workspace 的 baselines 只包含已冻结对象的元数据，不加载所有基线正文。阶段界面按需读取当前/历史成果，区分活动 Run 与保留正文的原始 Run，关闭或隐藏时停止轮询。
+三个接口只供本地应用查看，不加入 Harness 取证或写权限。规划、章节、综合核验、报告、结构与引用检查、PPTX 是业务成果边界，不是隐藏思维链；程序结构检查与 Agent 自报支持均不冒充事实正确性证明。workspace 的 baselines 只包含已冻结对象的元数据，不加载所有基线正文。阶段界面按需读取当前/历史成果，区分活动 Run 与保留正文的原始 Run，关闭或隐藏时停止轮询。
 
 原生研究工具 `knowledge_get_research_baseline`：必填 `entry_id`；可选非负 `offset_chars`、`metadata_offset`、`source_basis_index` 及 1–12000 的 `max_chars`。服务端从当前能力令牌的 Run 确定 task_id 和 section 的 question_id，拒绝自行指定任务/问题、跨书或未冻结对象。分页返回旧版正文、主张和来源元数据；source_basis_index 可读取指定旧版原文。has_more/metadata_has_more 表示还有输入，不静默忽略后段。它占用真实工具/负载预算，但不分配当前证据 S 编号；只能作为核验/刷新对照，不自动认证当前事实，也不扩大网络或写权限。
 

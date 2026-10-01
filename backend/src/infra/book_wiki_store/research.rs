@@ -5,7 +5,7 @@ use crate::error::BrainError;
 use crate::models::book_wiki::{
     ResearchBaselineSummary, ResearchBrief, ResearchEvidenceReference, ResearchFinding,
     ResearchPlan, ResearchSectionOutput, ResearchStageContent, ResearchStageSummary,
-    ResearchSynthesisOutput, ResearchWorkspace,
+    ResearchSynthesisOutput, ResearchUnpublishedOutput, ResearchWorkspace,
 };
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -842,6 +842,67 @@ impl BookWikiStore {
         })
     }
 
+    /// A diagnostic view, never a validated stage deliverable or citation source.
+    /// Bind the immutable Run to the exact task, book and stage revision before
+    /// returning only its unpublished body (not the full prompt/inspection).
+    pub fn get_research_unpublished_output(
+        &self,
+        task_id: &str,
+        stage_key: &str,
+        revision: Option<i64>,
+        run_id: &str,
+    ) -> Result<Option<ResearchUnpublishedOutput>, BrainError> {
+        let task = self.get_task(task_id)?;
+        let stage = self
+            .get_research_stage_content(task_id, stage_key, revision)?
+            .stage;
+        if !matches!(stage.status.as_str(), "failed" | "cancelled")
+            || stage.run_id.as_deref() != Some(run_id)
+        {
+            return Err(invalid("未保存输出不属于所选的失败研究阶段及版本"));
+        }
+        let run = self.get_agent_run(run_id)?;
+        if run.knowledge_base_id.as_deref() != Some(task.knowledge_base_id.as_str())
+            || !run.task_type.starts_with("knowledge_task_")
+            || run.input["knowledge_task_id"] != task_id
+            || run.input["research_stage_key"] != stage_key
+        {
+            return Err(invalid("未保存输出的运行记录与当前书籍任务不匹配"));
+        }
+        let output = run.output.as_ref();
+        let partial = output
+            .and_then(|value| value.get("partial_answer"))
+            .and_then(Value::as_str)
+            .filter(|text| !text.trim().is_empty());
+        if matches!(run.status.as_str(), "failed" | "cancelled")
+            && output.and_then(|value| value.get("complete")) != Some(&Value::Bool(true))
+        {
+            return Ok(partial.map(|text| ResearchUnpublishedOutput {
+                run_id: run_id.to_string(),
+                kind: "interrupted".into(),
+                text: text.into(),
+                stop_reason: output
+                    .and_then(|value| value.get("stop_reason"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            }));
+        }
+        let answer = output
+            .and_then(|value| value.get("answer"))
+            .and_then(Value::as_str)
+            .filter(|text| !text.trim().is_empty());
+        Ok(if run.status == "completed" {
+            answer.map(|text| ResearchUnpublishedOutput {
+                run_id: run_id.to_string(),
+                kind: "rejected".into(),
+                text: text.into(),
+                stop_reason: None,
+            })
+        } else {
+            None
+        })
+    }
+
     /// The last truncated model Run may no longer be the current stage's
     /// run_id after a preflight-only or transient retry. Read it from the
     /// immutable Run ledger so a later resume still honors its output request
@@ -1466,6 +1527,143 @@ mod tests {
                 .unwrap();
             assert_eq!(store.get_task(&task).unwrap().status, expected);
         }
+    }
+
+    #[test]
+    fn test_unpublished_research_output_requires_matching_failed_stage_and_run() {
+        let (store, _dir, base, task) = fixture();
+        setup_plan(&store, &base, &task);
+        let claim = store
+            .claim_research_stage(&task, "section:mechanism")
+            .unwrap();
+        let run = attach(&store, &base, &task, &claim);
+        store
+            .append_agent_run_event(
+                &run,
+                "run.text_delta",
+                Some("answer"),
+                "",
+                &json!({"delta":"未完成 JSON"}),
+            )
+            .unwrap();
+        store
+            .append_agent_run_event(
+                &run,
+                "run.runtime_completed",
+                Some("completion"),
+                "截断",
+                &json!({"stop_reason":"max_tokens","complete":false}),
+            )
+            .unwrap();
+        store
+            .fail_agent_run(&run, "stop_reason=max_tokens")
+            .unwrap();
+        store
+            .fail_research_stage(&claim, "输出截断", false)
+            .unwrap();
+
+        let failed_revision = store
+            .get_research_stage_content(&task, "section:mechanism", None)
+            .unwrap()
+            .stage
+            .revision;
+        let output = store
+            .get_research_unpublished_output(
+                &task,
+                "section:mechanism",
+                Some(failed_revision),
+                &run,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(output.run_id, run);
+        assert_eq!(output.kind, "interrupted");
+        assert_eq!(output.text, "未完成 JSON");
+        assert_eq!(output.stop_reason.as_deref(), Some("max_tokens"));
+        assert!(store
+            .get_research_unpublished_output(&task, "section:boundary", None, &run)
+            .is_err());
+        assert!(store
+            .get_research_unpublished_output(&task, "section:mechanism", None, "wrong-run")
+            .is_err());
+
+        store
+            .save_reader_books(&[
+                sample_book("research", "/tmp/research"),
+                sample_book("other-research", "/tmp/other-research"),
+            ])
+            .unwrap();
+        let other_base = store.initialize_base("other-research").unwrap();
+        let other_task = store
+            .create_task(&other_base.id, "另一项任务", "不共享草稿", "research")
+            .unwrap();
+        store.start_task_execution(&other_task.id).unwrap();
+        store.ensure_research_workspace(&other_task.id).unwrap();
+        assert!(store
+            .get_research_unpublished_output(&other_task.id, "plan", None, &run)
+            .is_err());
+
+        let retry = store
+            .claim_research_stage(&task, "section:mechanism")
+            .unwrap();
+        assert!(store
+            .get_research_unpublished_output(&task, "section:mechanism", None, &run)
+            .is_err());
+        assert_eq!(
+            store
+                .get_research_unpublished_output(
+                    &task,
+                    "section:mechanism",
+                    Some(failed_revision),
+                    &run
+                )
+                .unwrap()
+                .unwrap()
+                .text,
+            "未完成 JSON"
+        );
+        store
+            .fail_research_stage(&retry, "重试未开始", false)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_unpublished_research_output_distinguishes_rejected_answer_and_empty_run() {
+        let (store, _dir, base, task) = fixture();
+        setup_plan(&store, &base, &task);
+        let claim = store
+            .claim_research_stage(&task, "section:mechanism")
+            .unwrap();
+        let run = attach(&store, &base, &task, &claim);
+        store
+            .complete_agent_run(&run, &json!({"answer":"{invalid json"}))
+            .unwrap();
+        store
+            .fail_research_stage(&claim, "JSON 校验失败", false)
+            .unwrap();
+        let output = store
+            .get_research_unpublished_output(&task, "section:mechanism", None, &run)
+            .unwrap()
+            .unwrap();
+        assert_eq!(output.kind, "rejected");
+        assert_eq!(output.text, "{invalid json");
+        assert_eq!(output.stop_reason, None);
+
+        let retry = store
+            .claim_research_stage(&task, "section:mechanism")
+            .unwrap();
+        let empty = attach(&store, &base, &task, &retry);
+        store.fail_agent_run(&empty, "启动失败").unwrap();
+        store
+            .fail_research_stage(&retry, "启动失败", false)
+            .unwrap();
+        assert!(store
+            .get_research_unpublished_output(&task, "section:mechanism", None, &empty)
+            .unwrap()
+            .is_none());
+        assert!(store
+            .get_research_unpublished_output(&task, "plan", None, &run)
+            .is_err());
     }
     fn plan() -> ResearchPlan {
         ResearchPlan {

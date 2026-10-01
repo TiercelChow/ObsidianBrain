@@ -315,6 +315,13 @@ export interface ResearchStageContent {
   evidence: { run_id: string; citation_index: number; kind: string; object_id: string; version_id: string; snapshot_hash: string }[]
 }
 
+export interface ResearchUnpublishedOutput {
+  run_id: string
+  kind: 'interrupted' | 'rejected'
+  text: string
+  stop_reason: string | null
+}
+
 export interface ConfigDocument {
   id: string
   knowledge_base_id?: string | null
@@ -1178,6 +1185,10 @@ export function getKnowledgeResearchWorkspace(taskId: string) {
 
 export function getKnowledgeResearchStage(taskId: string, stageKey: string, revision?: number) {
   return callTool('get_knowledge_research_stage', { task_id: taskId, stage_key: stageKey, ...(revision == null ? {} : { revision }) }) as unknown as Promise<ToolEnvelope<ResearchStageContent>>
+}
+
+export function getKnowledgeResearchUnpublishedOutput(taskId: string, stageKey: string, runId: string, revision: number) {
+  return callTool('get_knowledge_research_unpublished_output', { task_id: taskId, stage_key: stageKey, run_id: runId, revision }) as unknown as Promise<ToolEnvelope<ResearchUnpublishedOutput | null>>
 }
 
 export function cancelKnowledgeTask(taskId: string) {

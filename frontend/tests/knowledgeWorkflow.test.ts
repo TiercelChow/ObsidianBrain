@@ -132,6 +132,20 @@ test('research workspace distinguishes the internal goal from the reader-facing 
   assert.match(workspace, /材料标题/)
 })
 
+test('failed research stages can inspect unpublished output without presenting it as a report', async () => {
+  const [workspace, api] = await Promise.all([
+    source('src/components/knowledge/KnowledgeResearchWorkspace.vue'),
+    source('src/api/knowledge.ts'),
+  ])
+  assert.match(workspace, /查看未保存输出/)
+  assert.match(workspace, /getKnowledgeResearchUnpublishedOutput\(taskId, stage\.stage_key, runId, stage\.revision\)/)
+  assert.doesNotMatch(workspace, /getAgentRunInspection/)
+  assert.match(api, /callTool\('get_knowledge_research_unpublished_output'/)
+  assert.match(workspace, /不是已校验的阶段成果或可引用证据/)
+  assert.match(workspace, /<pre[^>]*>\{\{ rawOutput\.text \}\}<\/pre>/)
+  assert.match(workspace, /\+\+rawOutputRequest/)
+})
+
 test('knowledge chat previews numbered sources before an explicit workspace navigation', async () => {
   const [chat, api] = await Promise.all([
     source('src/views/knowledge/KnowledgeChat.vue'),
