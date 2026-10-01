@@ -621,6 +621,29 @@ impl BookWikiService {
         .await
     }
 
+    pub fn recover_completed_qa_answer(
+        &self,
+        base_id: &str,
+        run_id: &str,
+    ) -> Result<KnowledgeAnswer, BrainError> {
+        let conversation_id = self.store.recover_completed_qa_exchange(base_id, run_id)?;
+        let conversation = self.store.get_conversation(&conversation_id)?;
+        let message = conversation
+            .messages
+            .into_iter()
+            .find(|message| {
+                message.role == "assistant" && message.run_id.as_deref() == Some(run_id)
+            })
+            .ok_or_else(|| BrainError::Internal("补存后未找到对应的助手消息".into()))?;
+        Ok(KnowledgeAnswer {
+            run_id: run_id.to_string(),
+            conversation_id,
+            answer: message.content,
+            runtime: "deepseek_harness".into(),
+            evidence: message.evidence,
+        })
+    }
+
     async fn ask_inner(
         &self,
         base_id: &str,

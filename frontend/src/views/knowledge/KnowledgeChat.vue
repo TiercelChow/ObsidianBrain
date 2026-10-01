@@ -93,7 +93,7 @@
                   <span class="chat-run-label">{{ streamPhase || '正在处理你的问题' }}</span>
                 </div>
                 <div v-if="message.restoredFailed && message.content" class="restored-answer-draft"><strong>未完成草稿 · 引用待重新核对</strong><p>{{ message.content }}</p></div>
-                <div v-else-if="message.unsavedAnswer && message.content" class="restored-answer-draft"><strong>回答已生成，但未写入会话</strong><span>这段正文从运行记录找回；引用需在运行检查器核对，后续追问不会自动继承它。</span><KnowledgeAnswerMarkdown :content="message.content" :evidence-count="0" @rendered="followAnswer" /></div>
+                <div v-else-if="message.unsavedAnswer && message.content" class="restored-answer-draft"><strong>回答已生成，但未写入会话</strong><span>这段正文从运行记录找回；引用需在运行检查器核对。补存成功前，后续追问不会自动继承它。</span><KnowledgeAnswerMarkdown :content="message.content" :evidence-count="0" @rendered="followAnswer" /></div>
                 <KnowledgeAnswerMarkdown
                   v-else-if="message.content"
                   :content="message.content"
@@ -114,7 +114,8 @@
                 <button v-if="message.originalQuestion && activeBaseId && message.interruption.researchSuggested" type="button" :disabled="searching || !!researchTransferMessageId" @click="openResearchTask(message)">{{ researchTransferMessageId === message.id ? '正在恢复问题…' : '转为分阶段研究任务' }}</button>
               </div>
               <button v-if="message.role === 'assistant' && message.runId && message.id !== streamingMessageId" type="button" class="save-answer" @click="inspectRun(message.runId)">查看本轮目标与取证预算</button>
-              <button v-if="message.role === 'assistant' && message.runId && !message.interruption && message.id !== streamingMessageId" class="save-answer" type="button" :disabled="savingRunId === message.runId" @click="saveAnswer(message)">
+              <button v-if="message.unsavedAnswer && message.runId" class="save-answer" type="button" :disabled="searching || savingHistoryRunId === message.runId" @click="persistRecoveredAnswer(message)">{{ savingHistoryRunId === message.runId ? '正在补存…' : '补存到会话历史' }}</button>
+              <button v-if="message.role === 'assistant' && message.runId && !message.interruption && !message.unsavedAnswer && message.id !== streamingMessageId" class="save-answer" type="button" :disabled="savingRunId === message.runId" @click="saveAnswer(message)">
                 <el-icon :class="{ 'is-loading': savingRunId === message.runId }"><Loading v-if="savingRunId === message.runId" /><Checked v-else /></el-icon>{{ savingRunId === message.runId ? '正在生成候选' : '保存到 Wiki' }}
               </button>
               <button v-if="message.role === 'assistant' && message.runId && !message.interruption && message.originalQuestion && message.id !== streamingMessageId" class="save-answer" type="button" :disabled="searching || !!researchTransferMessageId" @click="openResearchTask(message)">{{ researchTransferMessageId === message.id ? '正在准备研究…' : '深入研究此问题' }}</button>
@@ -260,6 +261,7 @@ import {
   listKnowledgeConversations,
   listUnfinishedQaRuns,
   listKnowledgeEntries,
+  recoverCompletedQaAnswer,
   saveKnowledgeAnswer,
   streamBookKnowledge,
   type KnowledgeBaseSummary,
@@ -293,6 +295,7 @@ const contextVisible = ref(false)
 const conversations = ref<KnowledgeConversationSummary[]>([])
 const unfinishedRuns = ref<UnfinishedQaRun[]>([])
 const openingRunId = ref('')
+const savingHistoryRunId = ref('')
 const activeConversationId = ref('')
 const draft = ref('')
 const composerIsComposing = ref(false)
@@ -716,6 +719,37 @@ async function ask(question: string, recovery?: ChatMessage) {
     searching.value = false
     followAnswer()
     void loadUnfinishedRuns()
+  }
+}
+
+async function persistRecoveredAnswer(message: ChatMessage) {
+  const baseId = activeBaseId.value
+  if (!baseId || !message.runId || !message.unsavedAnswer || savingHistoryRunId.value) return
+  const conversationAtStart = activeConversationId.value
+  savingHistoryRunId.value = message.runId
+  try {
+    const response = await recoverCompletedQaAnswer(baseId, message.runId)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '补存失败')
+    if (!viewActive || activeBaseId.value !== baseId || response.result.run_id !== message.runId) return
+    if (activeConversationId.value !== conversationAtStart || !messages.value.includes(message)) {
+      await Promise.allSettled([refreshConversationList(), loadUnfinishedRuns()])
+      return
+    }
+    message.unsavedAnswer = false
+    message.content = response.result.answer
+    message.evidence = response.result.evidence
+    activeConversationId.value = response.result.conversation_id
+    replaceChatQuery()
+    ElMessage.success('回答已补存到会话历史')
+    try {
+      await Promise.all([refreshConversationList(), loadUnfinishedRuns()])
+    } catch {
+      ElMessage.warning('回答已补存，但历史列表暂未刷新')
+    }
+  } catch (error) {
+    if (viewActive && activeBaseId.value === baseId) ElMessage.error((error as Error).message)
+  } finally {
+    savingHistoryRunId.value = ''
   }
 }
 

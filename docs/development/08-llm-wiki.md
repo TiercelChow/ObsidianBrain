@@ -756,7 +756,7 @@ Skill 详情查询必须一次返回当前绑定状态、当前内容及候选�
 
 对话和消息保存在 ObsidianBrain SQLite。Harness Session ID 仅为一次运行的诊断关联，不作为恢复对话的唯一依据。
 
-当前实现使用 `knowledge_conversations`、`knowledge_conversation_scopes`、`knowledge_messages` 和 `knowledge_message_citations`。每次成功问答在同一事务中写入用户消息、助手消息及有序来源；页面加载时按知识库列出会话并恢复最近一项。继续会话时，目录规划 Run 最多读取最近十六条消息辅助理解指代，上一条助手回答最多保留六千字符，其余用户/助手消息分别最多保留一千/一千五百字符。完整历史不再进入回答 Run，历史消息不能替代本轮数据库证据。失败回答不写入正式会话；`list_unfinished_qa_runs` 从同书不可变 Agent Run 账本读取最近失败项及已完成但没有助手消息的回答，并排除已由成功且确实写入会话的后继 Run 覆盖的祖先。页面刷新后可在独立列表打开记录，重新校验书籍、运行类型、状态和原会话：失败 Run 以普通文本展示未完成草稿，已完成但未保存的 Run 展示完整 Markdown 正文并明确标注不在会话历史；两者的旧引用都不作为可点击的本轮证据。没有有效草稿但明确记录 `max_tokens` 的运行可显式恢复，重新生成完整答案而不是虚构草稿；其他失败仍只能重新提问。
+当前实现使用 `knowledge_conversations`、`knowledge_conversation_scopes`、`knowledge_messages` 和 `knowledge_message_citations`。每次成功问答在同一事务中写入用户消息、助手消息及有序来源；页面加载时按知识库列出会话并恢复最近一项。继续会话时，目录规划 Run 最多读取最近十六条消息辅助理解指代，上一条助手回答最多保留六千字符，其余用户/助手消息分别最多保留一千/一千五百字符。完整历史不再进入回答 Run，历史消息不能替代本轮数据库证据。失败回答不写入正式会话；`list_unfinished_qa_runs` 从同书不可变 Agent Run 账本读取最近失败项及已完成但没有助手消息的回答，并排除已由成功且确实写入会话的后继 Run 覆盖的祖先。页面刷新后可在独立列表打开记录，重新校验书籍、运行类型、状态和原会话：失败 Run 以普通文本展示未完成草稿，已完成但未保存的 Run 展示完整 Markdown 正文并明确标注不在会话历史；两者的旧引用都不作为可点击的本轮证据。完整回答的“补存到会话历史”操作在单一 SQLite 事务中校验原 Run 的书籍、任务、完成状态、原问题、正文和原会话，重复调用返回同一会话；若原会话在该 Run 之后已有新消息则拒绝追加，避免篡改时序。补存后从持久化会话读取来源快照并恢复可点击引用。没有有效草稿但明确记录 `max_tokens` 的运行可显式恢复，重新生成完整答案而不是虚构草稿；其他失败仍只能重新提问。
 
 迁移 044 增加独立的结构化会话记忆，只保存用户目标、明确约束、未解决问题及本书有效实体 ID，不把旧模型结论总结成事实。当前问题可以修改或清空旧目标/约束；简单寒暄不覆盖已有研究目标。保存必须对应同书已完成且最新的问答交换，并使用 revision 乐观锁；迟到的旧 Run、部分输出和并发冲突不能覆盖较新记忆。记忆写入失败不撤销已经保存的回答与历史。规划器读取小型意图记忆，最终回答只获得当前有效目标与约束，不继承旧引用编号。
 
@@ -909,7 +909,7 @@ Prompt 将确认的 `purpose/audience/tone/depth` 展开成不同的材料蓝图
 
 当前页面继续复用已有 Tool API Envelope；Skill ZIP 上传和成果下载使用资源型 HTTP 端点。下面列出的是逐步迁移后的目标资源 API，不代表每条路由已经存在。
 
-当前新增 Tool 包括 `compile_book_knowledge_base`、`cancel_book_knowledge_compile`、`list_knowledge_change_sets`、`resolve_knowledge_change_set`、`lint_book_knowledge_base`、`save_knowledge_answer`、`cancel_knowledge_task`、`list_wiki_skills`、`get_wiki_skill_detail`、`save_custom_wiki_skill`、`evaluate_wiki_skill_version`、`start_wiki_skill_benchmark`、`get_wiki_skill_benchmark`、`publish_wiki_skill_version`、`rollback_wiki_skill_version`、`set_wiki_skill_binding`、`get_agent_run_events` 和 `get_agent_run_inspection`；智能编译、真实模型基准和研究任务的启动 Tool 都只负责入队。资源端点覆盖 Skill ZIP 上传、成果下载、数据库快照下载/上传恢复与单书 JSON/Markdown 导出；`book_fetch_external` 仅存在于带能力令牌的本机 Agent MCP 端点，不进入普通页面 Tool API。
+当前新增 Tool 包括 `compile_book_knowledge_base`、`cancel_book_knowledge_compile`、`list_knowledge_change_sets`、`resolve_knowledge_change_set`、`lint_book_knowledge_base`、`save_knowledge_answer`、`recover_completed_qa_answer`、`cancel_knowledge_task`、`list_wiki_skills`、`get_wiki_skill_detail`、`save_custom_wiki_skill`、`evaluate_wiki_skill_version`、`start_wiki_skill_benchmark`、`get_wiki_skill_benchmark`、`publish_wiki_skill_version`、`rollback_wiki_skill_version`、`set_wiki_skill_binding`、`get_agent_run_events` 和 `get_agent_run_inspection`；智能编译、真实模型基准和研究任务的启动 Tool 都只负责入队。资源端点覆盖 Skill ZIP 上传、成果下载、数据库快照下载/上传恢复与单书 JSON/Markdown 导出；`book_fetch_external` 仅存在于带能力令牌的本机 Agent MCP 端点，不进入普通页面 Tool API。
 
 ### 13.1 前端 API
 

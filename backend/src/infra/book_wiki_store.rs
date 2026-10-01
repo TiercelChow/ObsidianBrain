@@ -3989,99 +3989,123 @@ impl BookWikiStore {
                 "消息引用不能跨越当前书籍知识边界".to_string(),
             ));
         }
-        let id = conversation_id
-            .map(str::to_string)
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let user_message_id = uuid::Uuid::new_v4().to_string();
-        let assistant_message_id = uuid::Uuid::new_v4().to_string();
-        let now = Utc::now().to_rfc3339();
-        let title = conversation_title(question);
         self.db.transaction(|conn| {
-            if conversation_id.is_some() {
-                let in_scope = conn
-                    .query_row(
-                        "SELECT 1 FROM knowledge_conversation_scopes
-                         WHERE conversation_id = ?1 AND knowledge_base_id = ?2",
-                        params![id, base_id],
-                        |_| Ok(()),
-                    )
-                    .optional()?;
-                if in_scope.is_none() {
-                    return Err(BrainError::KnowledgeValidation(
-                        "会话不存在或不属于当前知识库".to_string(),
-                    ));
-                }
-            } else {
-                conn.execute(
-                    "INSERT INTO knowledge_conversations (id, title, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?3)",
-                    params![id, title, now],
-                )?;
-                conn.execute(
-                    "INSERT INTO knowledge_conversation_scopes
-                     (conversation_id, knowledge_base_id, ordinal) VALUES (?1, ?2, 0)",
-                    params![id, base_id],
-                )?;
-            }
-            let next_ordinal = conn.query_row(
-                "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM knowledge_messages
-                 WHERE conversation_id = ?1",
-                params![id],
-                |row| row.get::<_, i64>(0),
-            )?;
-            conn.execute(
-                "INSERT INTO knowledge_messages
-                 (id, conversation_id, ordinal, role, content, run_id, created_at)
-                 VALUES (?1, ?2, ?3, 'user', ?4, NULL, ?5)",
-                params![user_message_id, id, next_ordinal, question, now],
-            )?;
-            conn.execute(
-                "INSERT INTO knowledge_messages
-                 (id, conversation_id, ordinal, role, content, run_id, created_at)
-                 VALUES (?1, ?2, ?3, 'assistant', ?4, ?5, ?6)",
-                params![
-                    assistant_message_id,
-                    id,
-                    next_ordinal + 1,
-                    answer,
-                    run_id,
-                    now
-                ],
-            )?;
-            let numbered: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM agent_run_citations WHERE run_id=?1)",
-                [run_id],
+            insert_conversation_exchange(
+                conn,
+                base_id,
+                conversation_id,
+                question,
+                answer,
+                run_id,
+                evidence,
+            )
+        })
+    }
+
+    /// Persist a completed answer whose model Run succeeded but whose history write failed.
+    /// The Run is authoritative; callers cannot substitute a different question or body.
+    pub fn recover_completed_qa_exchange(
+        &self,
+        base_id: &str,
+        run_id: &str,
+    ) -> Result<String, BrainError> {
+        self.get_active_base(base_id)?;
+        self.db.transaction(|conn| {
+            let active: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM knowledge_bases WHERE id=?1 AND lifecycle='active')",
+                [base_id],
                 |row| row.get(0),
             )?;
-            for (ordinal, entry) in evidence.iter().enumerate().filter(|_| !numbered) {
-                let inserted = conn.execute(
-                    "INSERT INTO knowledge_message_citations
-                     (message_id, ordinal, entry_id, entry_revision,
-                      knowledge_base_id_snapshot, entry_type_snapshot, slug_snapshot,
-                      title_snapshot, summary_snapshot, status_snapshot, confidence_snapshot,
-                      source_path_snapshot, updated_at_snapshot)
-                     SELECT ?1, ?2, ke.id, ke.revision, ke.knowledge_base_id, ke.entry_type,
-                            ke.slug, ke.title, ke.summary, ke.status, ke.confidence,
-                            sd.relative_path, ke.updated_at
-                     FROM knowledge_entries ke
-                     LEFT JOIN source_documents sd ON sd.id = ke.origin_document_id
-                     WHERE ke.id = ?3 AND ke.knowledge_base_id = ?4",
-                    params![assistant_message_id, ordinal as i64, entry.id, base_id],
+            if !active {
+                return Err(BrainError::KnowledgeValidation(
+                    "知识库状态已变化，请刷新后再补存回答".into(),
+                ));
+            }
+            let row = conn
+                .query_row(
+                    "SELECT knowledge_base_id, task_type, status, input_json, output_json, created_at
+                     FROM agent_runs WHERE id=?1",
+                    [run_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, Option<String>>(4)?,
+                            row.get::<_, String>(5)?,
+                        ))
+                    },
+                )
+                .optional()?
+                .ok_or_else(|| BrainError::KnowledgeNotFound(run_id.to_string()))?;
+            if row.0.as_deref() != Some(base_id) || row.1 != "knowledge_qa" || row.2 != "completed" {
+                return Err(BrainError::KnowledgeValidation(
+                    "只能补存当前书籍已完成的问答运行".into(),
+                ));
+            }
+            let input: Value = serde_json::from_str(&row.3)
+                .map_err(|error| BrainError::Internal(format!("问答输入解析失败: {error}")))?;
+            let output: Value = serde_json::from_str(row.4.as_deref().unwrap_or("null"))
+                .map_err(|error| BrainError::Internal(format!("问答输出解析失败: {error}")))?;
+            let question = input.get("question").and_then(Value::as_str).unwrap_or_default().trim();
+            let answer = output.get("answer").and_then(Value::as_str).unwrap_or_default();
+            if question.is_empty() || question.chars().count() > 2_000 || answer.trim().is_empty() {
+                return Err(BrainError::KnowledgeValidation(
+                    "运行记录没有可补存的完整问答".into(),
+                ));
+            }
+            let conversation_id = match input.get("conversation_id") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(id)) if !id.is_empty() => Some(id.as_str()),
+                _ => {
+                    return Err(BrainError::KnowledgeValidation(
+                        "运行记录的原会话无效".into(),
+                    ))
+                }
+            };
+            let existing = conn
+                .query_row(
+                    "SELECT km.conversation_id, km.content, previous.content, kcs.knowledge_base_id
+                     FROM knowledge_messages km
+                     LEFT JOIN knowledge_messages previous
+                       ON previous.conversation_id=km.conversation_id
+                      AND previous.ordinal=km.ordinal-1 AND previous.role='user'
+                     JOIN knowledge_conversation_scopes kcs
+                       ON kcs.conversation_id=km.conversation_id AND kcs.ordinal=0
+                     WHERE km.run_id=?1 AND km.role='assistant' LIMIT 1",
+                    [run_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, String>(3)?)),
+                )
+                .optional()?;
+            if let Some((id, saved_answer, saved_question, saved_base)) = existing {
+                if saved_base != base_id || conversation_id.is_some_and(|expected| expected != id)
+                    || saved_answer != answer || saved_question.as_deref() != Some(question)
+                {
+                    return Err(BrainError::KnowledgeValidation(
+                        "该运行已写入其他内容，不能重复补存".into(),
+                    ));
+                }
+                return Ok(id);
+            }
+            if let Some(id) = conversation_id {
+                let newer_messages: bool = conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM knowledge_messages km
+                                    JOIN knowledge_conversation_scopes kcs
+                                      ON kcs.conversation_id=km.conversation_id AND kcs.ordinal=0
+                                   WHERE km.conversation_id=?1 AND kcs.knowledge_base_id=?2
+                                     AND km.created_at > ?3)",
+                    params![id, base_id, row.5],
+                    |row| row.get(0),
                 )?;
-                if inserted == 0 {
-                    return Err(BrainError::KnowledgeValidation(format!(
-                        "消息引用的知识条目不存在: {}",
-                        entry.id
-                    )));
+                if newer_messages {
+                    return Err(BrainError::KnowledgeValidation(
+                        "原会话已有更新的消息；为避免改变对话顺序，不能把旧回答补到末尾".into(),
+                    ));
                 }
             }
-            conn.execute(
-                "UPDATE knowledge_conversations SET updated_at = ?2 WHERE id = ?1",
-                params![id, now],
-            )?;
-            Ok(())
-        })?;
-        Ok(id)
+            insert_conversation_exchange(conn, base_id, conversation_id, question, answer, run_id, &[])
+        })
     }
 
     pub fn list_tasks(&self, base_id: Option<&str>) -> Result<Vec<KnowledgeTask>, BrainError> {
@@ -7313,6 +7337,127 @@ fn accumulate_usage(total: &mut AgentUsageTotals, row: &AgentUsageRow) {
     total.cache_read_tokens += row.cache_read_tokens;
     total.cache_write_tokens += row.cache_write_tokens;
     total.total_tokens += row.input_tokens + row.output_tokens;
+}
+
+fn insert_conversation_exchange(
+    conn: &rusqlite::Connection,
+    base_id: &str,
+    conversation_id: Option<&str>,
+    question: &str,
+    answer: &str,
+    run_id: &str,
+    evidence: &[KnowledgeEntrySummary],
+) -> Result<String, BrainError> {
+    let existing = conn
+        .query_row(
+            "SELECT km.conversation_id
+             FROM knowledge_messages km
+             JOIN knowledge_messages previous
+               ON previous.conversation_id=km.conversation_id
+              AND previous.ordinal=km.ordinal-1 AND previous.role='user'
+             JOIN knowledge_conversation_scopes kcs
+               ON kcs.conversation_id=km.conversation_id AND kcs.ordinal=0
+             WHERE km.run_id=?1 AND km.role='assistant' AND km.content=?2
+               AND previous.content=?3 AND kcs.knowledge_base_id=?4
+               AND (?5 IS NULL OR km.conversation_id=?5)
+             LIMIT 1",
+            params![run_id, answer, question, base_id, conversation_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+    let id = conversation_id
+        .map(str::to_string)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let user_message_id = uuid::Uuid::new_v4().to_string();
+    let assistant_message_id = uuid::Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+    let title = conversation_title(question);
+    if conversation_id.is_some() {
+        let in_scope = conn
+            .query_row(
+                "SELECT 1 FROM knowledge_conversation_scopes
+                 WHERE conversation_id = ?1 AND knowledge_base_id = ?2",
+                params![id, base_id],
+                |_| Ok(()),
+            )
+            .optional()?;
+        if in_scope.is_none() {
+            return Err(BrainError::KnowledgeValidation(
+                "会话不存在或不属于当前知识库".to_string(),
+            ));
+        }
+    } else {
+        conn.execute(
+            "INSERT INTO knowledge_conversations (id, title, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?3)",
+            params![id, title, now],
+        )?;
+        conn.execute(
+            "INSERT INTO knowledge_conversation_scopes
+             (conversation_id, knowledge_base_id, ordinal) VALUES (?1, ?2, 0)",
+            params![id, base_id],
+        )?;
+    }
+    let next_ordinal = conn.query_row(
+        "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM knowledge_messages
+         WHERE conversation_id = ?1",
+        params![id],
+        |row| row.get::<_, i64>(0),
+    )?;
+    conn.execute(
+        "INSERT INTO knowledge_messages
+         (id, conversation_id, ordinal, role, content, run_id, created_at)
+         VALUES (?1, ?2, ?3, 'user', ?4, NULL, ?5)",
+        params![user_message_id, id, next_ordinal, question, now],
+    )?;
+    conn.execute(
+        "INSERT INTO knowledge_messages
+         (id, conversation_id, ordinal, role, content, run_id, created_at)
+         VALUES (?1, ?2, ?3, 'assistant', ?4, ?5, ?6)",
+        params![
+            assistant_message_id,
+            id,
+            next_ordinal + 1,
+            answer,
+            run_id,
+            now
+        ],
+    )?;
+    let numbered: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM agent_run_citations WHERE run_id=?1)",
+        [run_id],
+        |row| row.get(0),
+    )?;
+    for (ordinal, entry) in evidence.iter().enumerate().filter(|_| !numbered) {
+        let inserted = conn.execute(
+            "INSERT INTO knowledge_message_citations
+             (message_id, ordinal, entry_id, entry_revision,
+              knowledge_base_id_snapshot, entry_type_snapshot, slug_snapshot,
+              title_snapshot, summary_snapshot, status_snapshot, confidence_snapshot,
+              source_path_snapshot, updated_at_snapshot)
+             SELECT ?1, ?2, ke.id, ke.revision, ke.knowledge_base_id, ke.entry_type,
+                    ke.slug, ke.title, ke.summary, ke.status, ke.confidence,
+                    sd.relative_path, ke.updated_at
+             FROM knowledge_entries ke
+             LEFT JOIN source_documents sd ON sd.id = ke.origin_document_id
+             WHERE ke.id = ?3 AND ke.knowledge_base_id = ?4",
+            params![assistant_message_id, ordinal as i64, entry.id, base_id],
+        )?;
+        if inserted == 0 {
+            return Err(BrainError::KnowledgeValidation(format!(
+                "消息引用的知识条目不存在: {}",
+                entry.id
+            )));
+        }
+    }
+    conn.execute(
+        "UPDATE knowledge_conversations SET updated_at = ?2 WHERE id = ?1",
+        params![id, now],
+    )?;
+    Ok(id)
 }
 
 fn load_message_evidence(
@@ -11075,6 +11220,175 @@ mod tests {
             .list_unfinished_qa_runs(&base.id, 10)
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn test_recover_completed_qa_exchange_persists_once_in_original_book() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[
+                sample_book("recovery-book", "/tmp/recovery-book"),
+                sample_book("foreign-recovery-book", "/tmp/foreign-recovery-book"),
+            ])
+            .unwrap();
+        let base = store.initialize_base("recovery-book").unwrap();
+        let foreign = store.initialize_base("foreign-recovery-book").unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({"question":"原问题？","conversation_id":null}),
+            )
+            .unwrap();
+        store
+            .complete_agent_run(&run.id, &serde_json::json!({"answer":"可恢复的完整回答"}))
+            .unwrap();
+
+        assert!(store
+            .recover_completed_qa_exchange(&foreign.id, &run.id)
+            .is_err());
+        let conversation_id = store
+            .recover_completed_qa_exchange(&base.id, &run.id)
+            .unwrap();
+        assert_eq!(
+            store
+                .recover_completed_qa_exchange(&base.id, &run.id)
+                .unwrap(),
+            conversation_id
+        );
+        let conversation = store.get_conversation(&conversation_id).unwrap();
+        assert_eq!(conversation.messages.len(), 2);
+        assert_eq!(conversation.messages[0].content, "原问题？");
+        assert_eq!(conversation.messages[1].content, "可恢复的完整回答");
+        assert_eq!(
+            conversation.messages[1].run_id.as_deref(),
+            Some(run.id.as_str())
+        );
+        assert!(store
+            .list_unfinished_qa_runs(&base.id, 10)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn test_recover_completed_qa_exchange_rejects_incomplete_and_out_of_order_runs() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("ordered-recovery", "/tmp/ordered-recovery")])
+            .unwrap();
+        let base = store.initialize_base("ordered-recovery").unwrap();
+        let failed = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({"question":"失败的问题？","conversation_id":null}),
+            )
+            .unwrap();
+        store.fail_agent_run(&failed.id, "无正文").unwrap();
+        assert!(store
+            .recover_completed_qa_exchange(&base.id, &failed.id)
+            .is_err());
+
+        let first = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({"question":"第一问？","conversation_id":null}),
+            )
+            .unwrap();
+        store
+            .complete_agent_run(&first.id, &serde_json::json!({"answer":"第一答"}))
+            .unwrap();
+        let conversation_id = store
+            .save_conversation_exchange(&base.id, None, "第一问？", "第一答", &first.id, &[])
+            .unwrap();
+        let orphan = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({"question":"迟到的问题？","conversation_id":conversation_id}),
+            )
+            .unwrap();
+        store
+            .complete_agent_run(&orphan.id, &serde_json::json!({"answer":"迟到的回答"}))
+            .unwrap();
+        let newer = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({"question":"更新的问题？","conversation_id":conversation_id}),
+            )
+            .unwrap();
+        store
+            .save_conversation_exchange(
+                &base.id,
+                Some(&conversation_id),
+                "更新的问题？",
+                "更新的回答",
+                &newer.id,
+                &[],
+            )
+            .unwrap();
+        assert!(store
+            .recover_completed_qa_exchange(&base.id, &orphan.id)
+            .is_err());
+        assert_eq!(
+            store
+                .get_conversation(&conversation_id)
+                .unwrap()
+                .messages
+                .len(),
+            4
+        );
+    }
+
+    #[test]
+    fn test_recover_completed_qa_exchange_appends_to_unchanged_original_conversation() {
+        let (store, _dir) = test_store();
+        store
+            .save_reader_books(&[sample_book("followup-recovery", "/tmp/followup-recovery")])
+            .unwrap();
+        let base = store.initialize_base("followup-recovery").unwrap();
+        let first = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({"question":"第一问？","conversation_id":null}),
+            )
+            .unwrap();
+        store
+            .complete_agent_run(&first.id, &serde_json::json!({"answer":"第一答"}))
+            .unwrap();
+        let conversation_id = store
+            .save_conversation_exchange(&base.id, None, "第一问？", "第一答", &first.id, &[])
+            .unwrap();
+        let followup = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &serde_json::json!({"question":"第二问？","conversation_id":conversation_id}),
+            )
+            .unwrap();
+        store
+            .complete_agent_run(&followup.id, &serde_json::json!({"answer":"第二答"}))
+            .unwrap();
+        assert_eq!(
+            store
+                .recover_completed_qa_exchange(&base.id, &followup.id)
+                .unwrap(),
+            conversation_id
+        );
+        let conversation = store.get_conversation(&conversation_id).unwrap();
+        assert_eq!(conversation.messages.len(), 4);
+        assert_eq!(conversation.messages[2].content, "第二问？");
+        assert_eq!(conversation.messages[3].content, "第二答");
     }
 
     #[test]

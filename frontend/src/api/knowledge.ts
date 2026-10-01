@@ -1077,6 +1077,13 @@ export function saveKnowledgeAnswer(knowledgeBaseId: string, runId: string) {
   }) as unknown as Promise<ToolEnvelope<KnowledgeChangeSet>>
 }
 
+export function recoverCompletedQaAnswer(knowledgeBaseId: string, runId: string) {
+  return callTool('recover_completed_qa_answer', {
+    knowledge_base_id: knowledgeBaseId,
+    run_id: runId,
+  }) as unknown as Promise<ToolEnvelope<KnowledgeAnswer>>
+}
+
 export function listKnowledgeConversations(knowledgeBaseId: string, limit = 30) {
   return callTool('list_knowledge_conversations', {
     knowledge_base_id: knowledgeBaseId,

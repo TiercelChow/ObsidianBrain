@@ -919,6 +919,43 @@ pub struct AskBookKnowledgeHandler;
 
 pub struct SaveKnowledgeAnswerHandler;
 
+pub struct RecoverCompletedQaAnswerHandler;
+
+#[async_trait]
+impl ToolHandler for RecoverCompletedQaAnswerHandler {
+    fn name(&self) -> &str {
+        "recover_completed_qa_answer"
+    }
+
+    fn description(&self) -> &str {
+        "把模型已完成但会话写入失败的原始问答补存到同书历史，不重新调用模型"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": { "type": "string" },
+                "run_id": { "type": "string" }
+            },
+            "required": ["knowledge_base_id", "run_id"],
+            "additionalProperties": false
+        })
+    }
+
+    fn module(&self) -> &str {
+        "book_wiki"
+    }
+
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        serde_json::to_value(ctx.book_wiki_service.recover_completed_qa_answer(
+            required_string(&args, "knowledge_base_id")?,
+            required_string(&args, "run_id")?,
+        )?)
+        .map_err(|error| BrainError::Internal(format!("补存问答结果序列化失败: {error}")))
+    }
+}
+
 #[async_trait]
 impl ToolHandler for SaveKnowledgeAnswerHandler {
     fn name(&self) -> &str {
@@ -2538,6 +2575,74 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn test_recover_completed_qa_answer_tool_restores_history_without_model_run() {
+        use crate::models::book_wiki::{BookKind, ReaderBook};
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let (ctx, dir, _vault) = crate::AppContext::for_test();
+        let store = ctx.book_wiki_service.store();
+        store
+            .save_reader_books(&[ReaderBook {
+                id: "tool-recovery".into(),
+                path: dir.path().display().to_string(),
+                kind: BookKind::Folder,
+                name: "补存测试".into(),
+                description: String::new(),
+                category: String::new(),
+                added_at: 1,
+                progress: None,
+            }])
+            .unwrap();
+        let base = store.initialize_base("tool-recovery").unwrap();
+        let run = store
+            .start_agent_run(
+                &base.id,
+                "deepseek_harness",
+                "knowledge_qa",
+                &json!({"question":"原问题？","conversation_id":null}),
+            )
+            .unwrap();
+        store
+            .complete_agent_run(&run.id, &json!({"answer":"模型已完成的回答"}))
+            .unwrap();
+        ctx.tool_registry
+            .register(Arc::new(RecoverCompletedQaAnswerHandler))
+            .await;
+        let app = crate::api::router::create_router(ctx.clone());
+        for _ in 0..2 {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post("/v1/tools/call")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            json!({"tool":"recover_completed_qa_answer","arguments":{"knowledge_base_id":base.id,"run_id":run.id}}).to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let raw = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .unwrap();
+            let value: Value = serde_json::from_slice(&raw).unwrap();
+            assert_eq!(value["status"], "success");
+            assert_eq!(value["result"]["answer"], "模型已完成的回答");
+            assert_eq!(value["result"]["run_id"], run.id);
+            let conversation_id = value["result"]["conversation_id"].as_str().unwrap();
+            assert_eq!(
+                store
+                    .get_conversation(conversation_id)
+                    .unwrap()
+                    .messages
+                    .len(),
+                2
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn test_research_read_tools_distinguish_legacy_pending_content_and_invalid_mutations() {
         use crate::models::book_wiki::{BookKind, ReaderBook};
         use axum::{body::Body, http::Request};
@@ -2649,6 +2754,21 @@ mod tests {
         assert_eq!(schema["required"][0], "knowledge_base_id");
         assert_eq!(schema["properties"]["limit"]["maximum"], 30);
         assert_eq!(schema["additionalProperties"], false);
+    }
+
+    #[test]
+    fn test_recover_completed_qa_answer_handler_requires_scoped_run() {
+        let handler = RecoverCompletedQaAnswerHandler;
+        assert_eq!(handler.module(), "book_wiki");
+        let schema = handler.input_schema();
+        let validator = jsonschema::JSONSchema::compile(&schema).unwrap();
+        assert!(validator
+            .validate(&json!({"knowledge_base_id":"book-a","run_id":"run-a"}))
+            .is_ok());
+        assert!(validator.validate(&json!({"run_id":"run-a"})).is_err());
+        assert!(validator
+            .validate(&json!({"knowledge_base_id":"book-a","run_id":"run-a","answer":"forged"}))
+            .is_err());
     }
 
     #[test]

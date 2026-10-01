@@ -2614,7 +2614,9 @@ http-body-util = "0.1"
 
 `POST /v1/knowledge/chat/stream` 提供可选 `resume_run_id`。只能恢复同书、同原问题、同会话、已失败且明确记录 `max_tokens` 的问答，允许正文为空；`max_turn_requests`、凭据拒绝、普通服务失败、取消和正常完成均不走输出扩容续答。用户明确触发后建立新 Run，重新规划/读取当前证据、适度增加受模型能力约束的输出额度；若有旧草稿，其 S 编号移除且不作为事实来源，新 Run 输出完整答案而非仅拼接尾巴。原失败运行和部分正文保留。HTTP 非流式问答客户端需允许最长约 810 秒的规划加执行期限，前端问答使用 SSE。
 
-`list_unfinished_qa_runs`（`book_wiki`）：必填 `knowledge_base_id`，可选 `limit`（1–30，默认 10）；返回同书失败回答 Run 的问题、原会话、截断原因、是否有草稿和运行 ID，不返回整段草稿。已被成功恢复且正式保存到会话的失败祖先不再列出；多次空回答只保留最新尝试，若新尝试无正文则保留较早的有效草稿。页面按 Run ID 再读检查器并校验书籍和状态，旧草稿只作未完成文本展示，不把旧引用当作本轮证据。该工具不加入 Harness Run 的能力白名单，不扩大单轮 Agent 的书籍权限。
+`list_unfinished_qa_runs`（`book_wiki`）：必填 `knowledge_base_id`，可选 `limit`（1–30，默认 10）；返回同书失败回答 Run 或已完成但未写入会话的回答的问题、原会话、截断原因、是否有草稿、`completed_without_history` 和运行 ID，不返回整段正文。已被成功恢复且正式保存到会话的失败祖先不再列出；多次空回答只保留最新尝试，若新尝试无正文则保留较早的有效草稿。页面按 Run ID 再读检查器并校验书籍和状态，旧草稿只作未完成文本展示，不把旧引用当作本轮证据。该工具不加入 Harness Run 的能力白名单，不扩大单轮 Agent 的书籍权限。
+
+`recover_completed_qa_answer`（`book_wiki`）：必填 `knowledge_base_id`、`run_id`；仅把同书已完成且有完整正文、但会话交换尚未保存的问答补存为正式会话，不重新调用模型。问题、正文和原会话只能从 Run 读取，重复调用返回同一会话；原会话已有更新消息时拒绝补存，避免把旧答插到不相干的追问之后。返回正式 `KnowledgeAnswer` 及持久化后的来源快照，不允许用失败草稿或跨书 Run 冒充完整回答。
 
 `update_knowledge_task_brief`（`book_wiki`）：必填 `task_id`、列表中读取的 `expected_updated_at` 和完整 `brief`。仅更新尚未启动的研究草稿的已确认编辑合同；任务状态或版本已变化时返回冲突提示，调用方刷新后重试。`create_knowledge_task` 的 `brief` 参数允许可选 `presentation_format`（`narrative` 或 `qa`），旧客户端缺省时仍取 `narrative`。
 
