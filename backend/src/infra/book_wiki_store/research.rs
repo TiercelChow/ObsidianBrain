@@ -8,6 +8,7 @@ use crate::models::book_wiki::{
     ResearchSynthesisOutput, ResearchUnpublishedOutput, ResearchWorkspace,
 };
 use chrono::Utc;
+use pulldown_cmark::{Event, Options, Parser, Tag};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
@@ -102,8 +103,73 @@ fn read_manifest_page_events(conn: &Connection, run: &str) -> Result<Vec<Value>,
     pages
 }
 
-/// Keep the saved stage text intact; only suppress exact duplication introduced
-/// by the report wrapper. Its summary remains available in stage metadata.
+/// Nest actual Markdown headings below the report's H2 section wrapper. Offset
+/// edits preserve the raw body, fenced code, quotes, tables and citation labels;
+/// immutable stage content is never rewritten. Quoted/list headings stay quoted.
+fn nest_report_headings(content: &str) -> String {
+    let mut depth = 0_usize;
+    let mut headings = Vec::new();
+    for (event, range) in Parser::new_ext(content, Options::all()).into_offset_iter() {
+        match event {
+            Event::Start(tag) => {
+                if depth == 0 {
+                    if let Tag::Heading { level, .. } = tag {
+                        headings.push((range, level as usize));
+                    }
+                }
+                depth += 1;
+            }
+            Event::End(_) => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    let shift = headings
+        .iter()
+        .map(|(_, level)| *level)
+        .min()
+        .map_or(0, |level| 3_usize.saturating_sub(level));
+    if shift == 0 {
+        return content.to_owned();
+    }
+    let mut result = content.to_owned();
+    for (range, level) in headings.into_iter().rev() {
+        let heading = &content[range.clone()];
+        let indentation = heading.bytes().take_while(|byte| *byte == b' ').count();
+        let marker_count = heading[indentation..]
+            .bytes()
+            .take_while(|byte| *byte == b'#')
+            .count();
+        let marker = "#".repeat((level + shift).min(6));
+        if marker_count == level {
+            let start = range.start + indentation;
+            result.replace_range(start..start + marker_count, &marker);
+        } else {
+            // Setext headings use an underline instead of an ATX marker. Keep
+            // their inline Markdown and original line ending, only changing
+            // the heading syntax; soft-wrapped title lines become spaces.
+            let without_newline = heading.trim_end_matches(['\r', '\n']);
+            if let Some((title, _underline)) = without_newline.rsplit_once('\n') {
+                let title = title
+                    .trim_end_matches('\r')
+                    .lines()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let newline = if heading.ends_with("\r\n") {
+                    "\r\n"
+                } else if heading.ends_with('\n') {
+                    "\n"
+                } else {
+                    ""
+                };
+                result.replace_range(range, &format!("{marker} {title}{newline}"));
+            }
+        }
+    }
+    result
+}
+
+/// Suppress exact wrapper duplication and nest distinct headings. The original
+/// saved stage and its summary remain available independently in stage metadata.
 fn append_report_section(body: &mut String, title: &str, summary: &str, content: &str) {
     let content = content.trim_matches('\n');
     let (first_line, rest) = content.split_once('\n').unwrap_or((content, ""));
@@ -126,7 +192,7 @@ fn append_report_section(body: &mut String, title: &str, summary: &str, content:
         body.push_str(summary);
         body.push_str("\n\n");
     }
-    body.push_str(content);
+    body.push_str(&nest_report_headings(content));
     body.push_str("\n\n");
 }
 
@@ -1749,6 +1815,54 @@ mod tests {
         assert!(distinct.contains("### 反例"));
     }
 
+    #[test]
+    fn test_report_section_nests_distinct_stage_titles_without_changing_evidence() {
+        let content = "# 综合结论\n\n## 证据与条件\n\nCLOCK 平均 1.8 ms [S2]。\n\n### 公式\n\n$$B=2LHDTb$$\n\nTAIL";
+        let mut body = String::new();
+        append_report_section(&mut body, "执行摘要与判断", "", content);
+        assert_eq!(
+            body,
+            "## 执行摘要与判断\n\n### 综合结论\n\n#### 证据与条件\n\nCLOCK 平均 1.8 ms [S2]。\n\n##### 公式\n\n$$B=2LHDTb$$\n\nTAIL\n\n"
+        );
+        assert!(content.starts_with("# 综合结论"));
+        assert_eq!(
+            nest_report_headings("正文与 `# 字符` [S1]。"),
+            "正文与 `# 字符` [S1]。"
+        );
+        assert_eq!(
+            nest_report_headings("# 根标题\n\n###### 深层标题\n\nTAIL"),
+            "### 根标题\n\n###### 深层标题\n\nTAIL"
+        );
+    }
+
+    #[test]
+    fn test_report_section_heading_normalization_preserves_code_quotes_and_tables() {
+        let content = "## 条件\n\n```markdown\n# 原样代码\n## 二级代码\n```\n\n> # 引文标题\n> 不能修改引文。\n\n| 策略 | 平均延迟 |\n| --- | --- |\n| CLOCK | 1.8 ms [S1] |\n\n### 局限\n\n未测 P99。";
+        let mut body = String::new();
+        append_report_section(&mut body, "研究章节", "", content);
+        assert!(body.contains("\n### 条件\n"));
+        assert!(body.contains("\n#### 局限\n"));
+        assert!(body.contains("```markdown\n# 原样代码\n## 二级代码\n```"));
+        assert!(body.contains("> # 引文标题\n> 不能修改引文。"));
+        assert!(body.contains("| CLOCK | 1.8 ms [S1] |"));
+    }
+
+    #[test]
+    fn test_report_section_normalizes_setext_headings_and_preserves_crlf() {
+        let mut body = String::new();
+        append_report_section(
+            &mut body,
+            "研究章节",
+            "",
+            "机制与条件\r\n===\r\n\r\n数据 [S1]。\r\n\r\n反例\r\n---\r\n\r\nTAIL",
+        );
+        assert!(
+            body.contains("### 机制与条件\r\n\r\n数据 [S1]。"),
+            "{body:?}"
+        );
+        assert!(body.contains("#### 反例\r\n\r\nTAIL"));
+    }
+
     fn complete_section_only(store: &BookWikiStore, base: &str, task: &str, key: &str) {
         let claim = store.claim_research_stage(task, key).unwrap();
         let run = attach(store, base, task, &claim);
@@ -1849,6 +1963,15 @@ mod tests {
         assert!(report.content_md.contains("$$d_k=d_v=128$$"));
         assert!(report.content_md.contains("[S1]"));
         assert!(report.content_md.contains("[S2]"));
+        assert!(report.content_md.contains("### 机制\n"));
+        assert_eq!(
+            store
+                .get_research_stage_content(&task, "section:mechanism", None)
+                .unwrap()
+                .content_md,
+            output().content_md,
+            "组装只规范报告标题，不改写保存的章节正文"
+        );
         assert_eq!(report.evidence.len(), 2);
         assert_eq!(report.findings[0].citation_indices, vec![1]);
         assert_eq!(report.findings[1].citation_indices, vec![2]);

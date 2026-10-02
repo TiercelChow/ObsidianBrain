@@ -4159,7 +4159,21 @@ fn build_provider_patch(
         model["maxTokens"] = serde_json::json!(max_tokens);
     }
     if bounded_extraction || provider.reasoning_policy == "off" {
-        model["reasoningEfforts"] = serde_json::json!(false);
+        if bailian_deepseek_hybrid(provider, &profile.model) {
+            // `false` means a non-reasoning model to Harness; it does not send a
+            // vendor off switch. Bailian uses enable_thinking, even for DeepSeek.
+            // Keep the capability and select off so pi-ai's qwen dialect emits
+            // enable_thinking=false. Do not infer this from a route's user alias.
+            model["reasoningEfforts"] = serde_json::json!({"off": null, "high": "high"});
+            provider_profile["reasoning"] = serde_json::json!("off");
+            provider_profile["compat"] = serde_json::json!({
+                "thinkingFormat": "qwen",
+                "supportsDeveloperRole": false,
+                "maxTokensField": "max_tokens",
+            });
+        } else {
+            model["reasoningEfforts"] = serde_json::json!(false);
+        }
     } else if provider.reasoning_policy != "auto" {
         let level = &provider.reasoning_policy;
         model["reasoningEfforts"] = serde_json::json!({level:level});
@@ -4196,6 +4210,36 @@ fn build_provider_patch(
     ]))
     .map(Some)
     .map_err(|error| BrainError::Internal(format!("Harness 供应商 Patch 生成失败: {error}")))
+}
+
+fn bailian_deepseek_hybrid(provider: &ModelProviderProfile, model: &str) -> bool {
+    if provider.api_protocol != "openai-completions"
+        || !matches!(
+            model,
+            "deepseek-v3.1"
+                | "deepseek-v3.2"
+                | "deepseek-v3.2-exp"
+                | "deepseek-v4.1-flash"
+                | "deepseek-v4-flash"
+                | "deepseek-v4-pro"
+                | "deepseek-v4-flash-0731"
+                | "deepseek-v4-pro-0813"
+        )
+    {
+        return false;
+    }
+    let Ok(url) = reqwest::Url::parse(&provider.base_url) else {
+        return false;
+    };
+    url.scheme() == "https"
+        && url.host_str().is_some_and(|host| {
+            matches!(
+                host,
+                "dashscope.aliyuncs.com"
+                    | "dashscope-intl.aliyuncs.com"
+                    | "dashscope-us.aliyuncs.com"
+            ) || host.ends_with(".maas.aliyuncs.com")
+        })
 }
 
 fn provider_credential_env(provider: &ModelProviderProfile) -> &str {
@@ -6631,6 +6675,209 @@ mod tests {
             .await
             .expect_err("environment mode must reject inline api_key");
         assert!(error.to_string().contains("环境变量"));
+    }
+
+    #[test]
+    fn test_bailian_compilation_patch_turns_thinking_off_without_erasing_capability() {
+        let profile = bailian_patch_test_profile();
+        let patch: serde_json::Value = serde_json::from_str(
+            &build_provider_patch(&profile, Some(10_016), true)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        let provider = &patch[0]["config"]["providers"]["acceptance-route"];
+        assert_eq!(provider["compat"]["thinkingFormat"], "qwen");
+        assert_eq!(provider["reasoning"], "off");
+        assert!(provider["models"][0]["reasoningEfforts"].is_object());
+        assert!(provider["models"][0]["reasoningEfforts"]["off"].is_null());
+        assert_eq!(provider["models"][0]["reasoningEfforts"]["high"], "high");
+        assert_eq!(provider["models"][0]["maxTokens"], 10_016);
+
+        let auto: serde_json::Value = serde_json::from_str(
+            &build_provider_patch(&profile, Some(16_000), false)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        let auto = &auto[0]["config"]["providers"]["acceptance-route"];
+        assert!(auto.get("reasoning").is_none());
+        assert!(auto.get("compat").is_none());
+        assert!(auto["models"][0].get("reasoningEfforts").is_none());
+        assert!(auto.get("retryPolicy").is_none());
+
+        let mut explicit = profile;
+        explicit.provider_config.as_mut().unwrap().reasoning_policy = "off".into();
+        let patch: serde_json::Value = serde_json::from_str(
+            &build_provider_patch(&explicit, Some(16_000), false)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        let provider = &patch[0]["config"]["providers"]["acceptance-route"];
+        assert_eq!(provider["compat"]["thinkingFormat"], "qwen");
+        assert_eq!(provider["reasoning"], "off");
+        assert!(provider.get("retryPolicy").is_none());
+    }
+
+    #[test]
+    fn test_bailian_thinking_dialect_does_not_match_other_hosts_protocols_or_reasoning_only_models()
+    {
+        for (url, protocol, model) in [
+            (
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "openai-completions",
+                "deepseek-v4.1-flash",
+            ),
+            (
+                "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+                "openai-completions",
+                "deepseek-v3.2",
+            ),
+            (
+                "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+                "openai-completions",
+                "deepseek-v4-pro",
+            ),
+            (
+                "https://dashscope.aliyuncs.com.evil.test/compatible-mode/v1",
+                "openai-completions",
+                "deepseek-v4.1-flash",
+            ),
+            (
+                "https://other.example/compatible-mode/v1",
+                "openai-completions",
+                "deepseek-v4.1-flash",
+            ),
+            (
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "anthropic-messages",
+                "deepseek-v4.1-flash",
+            ),
+            (
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "openai-completions",
+                "deepseek-r1",
+            ),
+            (
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "openai-completions",
+                "future-unknown-model",
+            ),
+        ] {
+            let mut profile = bailian_patch_test_profile();
+            profile.model = model.into();
+            let config = profile.provider_config.as_mut().unwrap();
+            config.base_url = url.into();
+            config.api_protocol = protocol.into();
+            let patch: serde_json::Value = serde_json::from_str(
+                &build_provider_patch(&profile, Some(10_016), true)
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+            let provider = &patch[0]["config"]["providers"]["acceptance-route"];
+            let expected = protocol == "openai-completions"
+                && (url.contains(".maas.aliyuncs.com/")
+                    || url.contains("dashscope.aliyuncs.com/")
+                    || url.contains("dashscope-intl.aliyuncs.com/"))
+                && model.starts_with("deepseek-v");
+            assert_eq!(
+                provider["compat"]["thinkingFormat"] == "qwen",
+                expected,
+                "{url} {protocol} {model}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "requires an installed Harness module in HARNESS_PI_AI_MODULE; local dummy HTTP only"]
+    fn test_bailian_harness_wire_disables_thinking_and_preserves_qa_auto() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let module = std::env::var("HARNESS_PI_AI_MODULE").expect("Harness module path");
+        let mut profile = bailian_patch_test_profile();
+        let compile: serde_json::Value = serde_json::from_str(
+            &build_provider_patch(&profile, Some(10_016), true)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        let auto: serde_json::Value = serde_json::from_str(
+            &build_provider_patch(&profile, Some(10_016), false)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        profile.provider_config.as_mut().unwrap().reasoning_policy = "off".into();
+        let explicit_off: serde_json::Value = serde_json::from_str(
+            &build_provider_patch(&profile, Some(10_016), false)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        let mut child = Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/scripts/harness-provider-wire-check.mjs"
+            ))
+            .arg(module)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(
+                serde_json::to_string(
+                    &serde_json::json!({"compile":compile,"auto":auto,"explicit_off":explicit_off}),
+                )
+                .unwrap()
+                .as_bytes(),
+            )
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout).lines().count(), 3);
+    }
+
+    fn bailian_patch_test_profile() -> RuntimeProfile {
+        RuntimeProfile {
+            id: "runtime-test".into(),
+            name: "Harness".into(),
+            runtime: "deepseek_harness".into(),
+            executable: "dsh --profile acp".into(),
+            model: "deepseek-v4.1-flash".into(),
+            provider_id: Some("acceptance-route".into()),
+            provider_config: Some(ModelProviderProfile {
+                provider_id: "acceptance-route".into(),
+                display_name: "Custom alias".into(),
+                api_protocol: "openai-completions".into(),
+                base_url: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+                    .into(),
+                model: "deepseek-v4.1-flash".into(),
+                credential_source: "environment".into(),
+                api_key_env: "TEST_ONLY_API_KEY".into(),
+                api_key_configured: false,
+                enabled: true,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning_policy: "auto".into(),
+                revision: 1,
+                updated_at: String::new(),
+            }),
+            enabled: true,
+            revision: 1,
+            updated_at: String::new(),
+        }
     }
 
     #[test]
