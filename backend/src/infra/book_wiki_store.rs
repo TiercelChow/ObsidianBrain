@@ -8226,7 +8226,7 @@ fn preserve_incomplete_run_output(
 ) -> Result<(), BrainError> {
     let mut stmt = conn.prepare(
         "SELECT event_type, payload_json FROM agent_run_events
-         WHERE run_id=?1 AND event_type IN ('run.text_delta','run.runtime_completed')
+         WHERE run_id=?1 AND event_type IN ('run.text_delta','run.text_replace','run.runtime_completed')
          ORDER BY sequence",
     )?;
     let rows = stmt.query_map([run_id], |row| {
@@ -8242,6 +8242,10 @@ fn preserve_incomplete_run_output(
         if event_type == "run.text_delta" {
             if let Some(delta) = payload.get("delta").and_then(serde_json::Value::as_str) {
                 partial_answer.push_str(delta);
+            }
+        } else if event_type == "run.text_replace" {
+            if let Some(text) = payload.get("text").and_then(serde_json::Value::as_str) {
+                partial_answer = text.to_string();
             }
         } else if payload.get("complete").and_then(serde_json::Value::as_bool) == Some(false) {
             incomplete_event_seen = true;
@@ -8273,6 +8277,7 @@ fn validate_agent_event_type(value: &str) -> Result<(), BrainError> {
             | "run.validation_rejected"
             | "run.progress"
             | "run.text_delta"
+            | "run.text_replace"
             | "run.usage"
             | "run.usage_cost"
             | "run.budget_changed"
@@ -11073,6 +11078,24 @@ mod tests {
                     "deepseek_harness",
                     "knowledge_qa",
                     &serde_json::json!({}),
+                )
+                .unwrap();
+            store
+                .append_agent_run_event(
+                    &run.id,
+                    "run.text_delta",
+                    Some("generation"),
+                    "",
+                    &serde_json::json!({"delta":"失败的旧回合"}),
+                )
+                .unwrap();
+            store
+                .append_agent_run_event(
+                    &run.id,
+                    "run.text_replace",
+                    Some("generation"),
+                    "",
+                    &serde_json::json!({"text":""}),
                 )
                 .unwrap();
             store

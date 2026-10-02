@@ -86,6 +86,12 @@ export function summarizeStream(timeline) {
   const phase = timeline.find(item => ['phase', 'planning_ready', 'tool_started'].includes(item.event.type))
   const firstEvidence = timeline.findIndex(item => item.event.type === 'evidence')
   const lastDelta = timeline.findLastIndex(item => item.event.type === 'text_delta' && item.event.delta)
+  let displayed = ''
+  for (const { event } of timeline) {
+    if (event.type === 'run_started') displayed = ''
+    if (event.type === 'text_replace') displayed = event.text
+    if (event.type === 'text_delta') displayed += event.delta
+  }
   return {
     completed: Boolean(terminal) && !failure,
     duration_ms: timeline.at(-1)?.elapsed_ms ?? null,
@@ -93,7 +99,7 @@ export function summarizeStream(timeline) {
     first_content_ms: deltas[0]?.elapsed_ms ?? null,
     delta_count: deltas.length,
     streamed_characters: deltas.reduce((total, item) => total + item.event.delta.length, 0),
-    stream_matches_final: terminal ? deltas.map(item => item.event.delta).join('') === terminal.event.result?.answer : null,
+    stream_matches_final: terminal ? displayed === terminal.event.result?.answer : null,
     evidence_before_content_end: firstEvidence !== -1 && lastDelta !== -1 && firstEvidence < lastDelta,
     delivery: deltas.length > 1 ? 'incremental' : deltas.length === 1 ? 'single_delta' : 'completion_only',
     run_id: terminal?.event.result?.run_id ?? timeline.find(item => item.event.run_id)?.event.run_id ?? null,

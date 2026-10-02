@@ -335,6 +335,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "presentation visible payload rules",
         sql: include_str!("../../migrations/057_presentation_visible_payload_rules.sql"),
     },
+    Migration {
+        version: 58,
+        description: "wiki acceptance citation and editorial quality contracts",
+        sql: include_str!("../../migrations/058_wiki_acceptance_quality_contracts.sql"),
+    },
 ];
 
 #[cfg(test)]
@@ -869,6 +874,8 @@ impl SqliteStore {
                 33 => overwrite_structured_presentation_skill(&conn),
                 34 => overwrite_structured_presentation_skill(&conn),
                 54..=57 => overwrite_structured_presentation_skill(&conn),
+                58 => overwrite_harness_wiki_skills(&conn)
+                    .and_then(|()| overwrite_structured_presentation_skill(&conn)),
                 38 | 42 | 45 | 47 => overwrite_harness_wiki_skills(&conn),
                 48 => crate::infra::book_wiki_store::backfill_source_impacts(&conn),
                 51 => migrate_research_execution_epoch(&conn),
@@ -1649,6 +1656,32 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_migration_058_refreshes_all_stock_skills_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("quality-upgrade.db");
+        let store = SqliteStore::new(&db_path).unwrap();
+        store.with_connection(|conn| {
+            conn.execute("DELETE FROM _migrations WHERE version=58", [])?;
+            conn.execute("UPDATE skill_files SET content_text='legacy',content_hash='legacy' WHERE relative_path='SKILL.md' AND skill_version_id IN ('skill-version-book-ingest-v3','skill-version-book-query-v3','skill-version-book-research-v3','skill-version-book-presentation-v3')", [])?;
+            Ok(())
+        }).unwrap();
+        drop(store);
+        for _ in 0..2 {
+            let store = SqliteStore::new(&db_path).unwrap();
+            store.with_connection(|conn| {
+                for (name, text) in [("ingest",include_str!("../../skills/book-ingest/SKILL.md")),("query",include_str!("../../skills/book-query/SKILL.md")),("research",include_str!("../../skills/book-research/SKILL.md")),("presentation",include_str!("../../skills/book-presentation/SKILL.md"))] {
+                    let (body, hash):(String,String) = conn.query_row("SELECT content_text,content_hash FROM skill_files WHERE skill_version_id=?1 AND relative_path='SKILL.md'", [format!("skill-version-book-{name}-v3")], |r| Ok((r.get(0)?,r.get(1)?)))?;
+                    assert_eq!(body,text);
+                    assert_eq!(hash,hex::encode(Sha256::digest(text.as_bytes())));
+                }
+                let count:i64=conn.query_row("SELECT COUNT(*) FROM _migrations WHERE version=58",[],|r|r.get(0))?;
+                assert_eq!(count,1);
+                Ok(())
+            }).unwrap();
+        }
+    }
     use tempfile::TempDir;
 
     #[test]
@@ -1723,7 +1756,7 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "DELETE FROM _migrations WHERE version IN (54, 55, 56, 57)",
+                "DELETE FROM _migrations WHERE version IN (54, 55, 56, 57, 58)",
                 [],
             )
             .unwrap();
@@ -1771,8 +1804,11 @@ mod tests {
         let store = SqliteStore::new(&db_path).unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version IN (55, 56, 57)", [])
-                .unwrap();
+            conn.execute(
+                "DELETE FROM _migrations WHERE version IN (55, 56, 57, 58)",
+                [],
+            )
+            .unwrap();
             conn.execute(
                 "UPDATE skill_files
                  SET content_text='旧版演示指令', content_hash='legacy', size_bytes=18
@@ -1814,7 +1850,7 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "DELETE FROM _migrations WHERE version IN (54, 55, 56, 57)",
+                "DELETE FROM _migrations WHERE version IN (54, 55, 56, 57, 58)",
                 [],
             )
             .unwrap();
@@ -1866,8 +1902,11 @@ mod tests {
         let hash = hex::encode(Sha256::digest(content.as_bytes()));
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version IN (55, 56, 57)", [])
-                .unwrap();
+            conn.execute(
+                "DELETE FROM _migrations WHERE version IN (55, 56, 57, 58)",
+                [],
+            )
+            .unwrap();
             conn.execute(
                 "INSERT INTO skill_versions
                     (id, skill_id, revision, content_hash, release_state, created_at)
@@ -1913,7 +1952,7 @@ mod tests {
         let store = SqliteStore::new(&db_path).unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version IN (56, 57)", [])
+            conn.execute("DELETE FROM _migrations WHERE version IN (56, 57, 58)", [])
                 .unwrap();
             conn.execute(
                 "UPDATE skill_files SET content_text='旧版演示指令', content_hash='legacy', size_bytes=18
@@ -1962,7 +2001,7 @@ mod tests {
         let store = SqliteStore::new(&db_path).unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version = 57", [])
+            conn.execute("DELETE FROM _migrations WHERE version IN (57, 58)", [])
                 .unwrap();
             conn.execute(
                 "UPDATE skill_files SET content_text='旧版演示指令', content_hash='legacy', size_bytes=18
@@ -2010,7 +2049,7 @@ mod tests {
         let hash = hex::encode(Sha256::digest(content.as_bytes()));
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version IN (56, 57)", [])
+            conn.execute("DELETE FROM _migrations WHERE version IN (56, 57, 58)", [])
                 .unwrap();
             conn.execute(
                 "INSERT INTO skill_versions

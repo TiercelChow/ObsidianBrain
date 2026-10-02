@@ -7,6 +7,14 @@ const read = (path) => readFile(new URL(path, root), 'utf8')
 
 const chapters = ['overview', 'sources', 'compile', 'review', 'workspace', 'qa', 'budgets', 'tasks', 'config', 'security', 'limits']
 
+test('streaming documentation distinguishes real agent frames from committed ACP messages', async () => {
+  const html = await read('llm-wiki/index.html')
+  assert.match(html, /agent\/assistant-stream/)
+  assert.match(html, /text_replace/)
+  assert.match(html, /Run 级 <code>insert<\/code>/)
+  assert.match(html, /不靠前端延迟播放/)
+})
+
 function section(html, id) {
   const match = html.match(new RegExp(`<section id="${id}"[^>]*>([\\s\\S]*?)</section>`))
   assert.ok(match, `missing section #${id}`)

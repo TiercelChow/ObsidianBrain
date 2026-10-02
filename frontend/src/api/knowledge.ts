@@ -722,6 +722,7 @@ export type KnowledgeChatStreamEvent =
   | { type: 'planning_ready'; knowledge_base_id: string; question: string; standalone_question: string }
   | { type: 'run_started'; run_id: string }
   | { type: 'text_delta'; run_id: string; delta: string }
+  | { type: 'text_replace'; run_id: string; text: string }
   | { type: 'phase'; run_id: string; message: string }
   | { type: 'tool_started'; run_id: string; title: string; kind: string }
   | { type: 'tool_finished'; run_id: string; title?: string | null; status: string }

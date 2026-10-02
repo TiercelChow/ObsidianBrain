@@ -244,6 +244,10 @@ pub enum KnowledgeChatStreamEvent {
         run_id: String,
         delta: String,
     },
+    TextReplace {
+        run_id: String,
+        text: String,
+    },
     Phase {
         run_id: String,
         message: String,
@@ -2706,7 +2710,7 @@ impl BookWikiService {
                     }
                     if let Some(stream_event) = chat_stream_event(&run.id, &event)
                         .filter(|event| task_type != "knowledge_qa_select"
-                            || !matches!(event, KnowledgeChatStreamEvent::TextDelta { .. })) {
+                            || !matches!(event, KnowledgeChatStreamEvent::TextDelta { .. } | KnowledgeChatStreamEvent::TextReplace { .. })) {
                         if stream.is_some_and(|stream| stream.send(stream_event).is_err()) {
                             let _ = cancel_tx.send(true);
                         }
@@ -2734,7 +2738,11 @@ impl BookWikiService {
                 }
                 if let Some(stream_event) = chat_stream_event(&run.id, &event).filter(|event| {
                     task_type != "knowledge_qa_select"
-                        || !matches!(event, KnowledgeChatStreamEvent::TextDelta { .. })
+                        || !matches!(
+                            event,
+                            KnowledgeChatStreamEvent::TextDelta { .. }
+                                | KnowledgeChatStreamEvent::TextReplace { .. }
+                        )
                 }) {
                     if stream.is_some_and(|stream| stream.send(stream_event).is_err()) {
                         let _ = cancel_tx.send(true);
@@ -2858,6 +2866,7 @@ impl BookWikiService {
             patch_paths.push(tool_patch_path);
         }
         patch_paths.push(safety_patch_path);
+        patch_paths.push(harness_skills::materialize_stream_bridge(workspace.path())?);
         if let Some(root) = materialize_skills(workspace.path(), &invocation.native_skills)? {
             let native_skill_patch_path = workspace.path().join("wiki-skills.patch.json");
             std::fs::write(&native_skill_patch_path, skill_patch(&root)?)?;
@@ -3728,6 +3737,12 @@ fn persist_runtime_event(
             "",
             serde_json::json!({ "delta": delta }),
         ),
+        AgentRuntimeEvent::TextReplace { text } => (
+            "run.text_replace",
+            Some("answer"),
+            "",
+            serde_json::json!({ "text": text }),
+        ),
         AgentRuntimeEvent::Thinking => (
             "run.phase_changed",
             Some("thinking"),
@@ -3797,6 +3812,10 @@ fn chat_stream_event(run_id: &str, event: &AgentRuntimeEvent) -> Option<Knowledg
         AgentRuntimeEvent::TextDelta { delta } => Some(KnowledgeChatStreamEvent::TextDelta {
             run_id: run_id.to_string(),
             delta: delta.clone(),
+        }),
+        AgentRuntimeEvent::TextReplace { text } => Some(KnowledgeChatStreamEvent::TextReplace {
+            run_id: run_id.to_string(),
+            text: text.clone(),
         }),
         AgentRuntimeEvent::Thinking => Some(KnowledgeChatStreamEvent::Phase {
             run_id: run_id.to_string(),
@@ -4106,7 +4125,7 @@ fn project_compile_runtime_event(
             "thinking",
             format!("模型正在分析第 {current_batch}/{total_batches} 批书籍内容"),
         ),
-        AgentRuntimeEvent::TextDelta { .. } => (
+        AgentRuntimeEvent::TextDelta { .. } | AgentRuntimeEvent::TextReplace { .. } => (
             "generating",
             format!("模型正在生成第 {current_batch}/{total_batches} 批知识候选"),
         ),
@@ -4491,8 +4510,8 @@ fn build_agent_mcp_patch(gateway_url: &str, token: &str) -> Result<String, Brain
             "Agent 工具能力令牌不能为空".to_string(),
         ));
     }
-    serde_json::to_string_pretty(&serde_json::json!([{
-        "id": "mcp-obsidianbrain",
+    serde_json::to_string_pretty(&serde_json::json!([{"insert":[{
+        "id": "mcp-obsidianbrain-run",
         "name": "@deepseek-ai/dsh-mcp-client",
         "config": {
             "serverName": "obsidianbrain",
@@ -4505,7 +4524,7 @@ fn build_agent_mcp_patch(gateway_url: &str, token: &str) -> Result<String, Brain
             "failOnStartupError": true,
             "reconnect": { "enabled": false },
         },
-    }]))
+    }]}]))
     .map_err(|error| BrainError::Internal(format!("Harness MCP Patch 生成失败: {error}")))
 }
 
@@ -6974,10 +6993,13 @@ mod tests {
         .unwrap();
         let value: serde_json::Value = serde_json::from_str(&patch).unwrap();
 
-        assert_eq!(value[0]["name"], "@deepseek-ai/dsh-mcp-client");
-        assert_eq!(value[0]["config"]["transport"], "streamable-http");
+        assert_eq!(value[0]["insert"][0]["name"], "@deepseek-ai/dsh-mcp-client");
         assert_eq!(
-            value[0]["config"]["headers"]["Authorization"],
+            value[0]["insert"][0]["config"]["transport"],
+            "streamable-http"
+        );
+        assert_eq!(
+            value[0]["insert"][0]["config"]["headers"]["Authorization"],
             "Bearer obw_test_capability"
         );
         assert!(!patch.contains("claude"));
@@ -6992,6 +7014,39 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("回环地址"));
+    }
+
+    #[test]
+    #[ignore = "requires pinned Harness CLI; config-only, dummy capability, no model call"]
+    fn test_real_harness_composition_inserts_run_scoped_mcp_tools() {
+        let workspace = tempfile::tempdir().unwrap();
+        let patch = workspace.path().join("mcp.json");
+        std::fs::write(
+            &patch,
+            build_agent_mcp_patch(
+                "http://127.0.0.1:19988/v1/knowledge/agent-mcp",
+                "dummy-test-only",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let output = std::process::Command::new("npx")
+            .args([
+                "-y",
+                "@deepseek-ai/dsh@0.1.5-rc.1",
+                "--profile",
+                "acp",
+                "--dump-config",
+                "--patch",
+            ])
+            .arg(&patch)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let config = String::from_utf8(output.stdout).unwrap();
+        assert!(config.contains("id: mcp-obsidianbrain-run"));
+        assert!(config.contains("http://127.0.0.1:19988/v1/knowledge/agent-mcp"));
+        assert!(config.contains("Bearer dummy-test-only"));
     }
 
     #[test]

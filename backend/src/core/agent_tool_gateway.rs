@@ -120,8 +120,8 @@ pub fn agent_knowledge_tool_schemas() -> Vec<Value> {
         ),
         tool_schema(
             "knowledge_get_research_baseline",
-            "分页读取当前研究主题选定的冻结正文、主张及旧版来源；它是待核验的历史输入，没有S编号，不能冒充当前证据。metadata_offset继续读取主张/来源元数据，source_basis_index读取指定旧版原文",
-            object_schema(json!({"entry_id":{"type":"string"},"offset_chars":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000},"metadata_offset":{"type":"integer","minimum":0},"source_basis_index":{"type":"integer","minimum":0}}), &["entry_id"]),
+            "分页读取冻结正文、主张及旧版来源；章节只读本主题，综合须指定本任务的question_id。历史输入没有S编号，不是当前证据。metadata_offset补读元数据，source_basis_index读取保留的旧原文（即使当前span已替换）",
+            object_schema(json!({"entry_id":{"type":"string"},"question_id":{"type":"string","minLength":1,"maxLength":80},"offset_chars":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000},"metadata_offset":{"type":"integer","minimum":0},"source_basis_index":{"type":"integer","minimum":0}}), &["entry_id"]),
         ),
         tool_schema("knowledge_get_research_section", "仅在本任务综合阶段分页读取已保存章节；旧编号不是本轮证据，核对当前实体/原文后才能获得S引用", object_schema(json!({"question_id":{"type":"string","minLength":1,"maxLength":80},"offset_chars":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000}}), &["question_id"])),
         tool_schema("knowledge_get_research_manifest", "仅在本任务综合阶段分页读取保存的发现矩阵和引用对象；可用 question_id 定向读取单章，按 offset_chars 连续补读，旧编号不是本轮证据", object_schema(json!({"question_id":{"type":"string","minLength":1,"maxLength":80},"offset_chars":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000}}), &[])),
@@ -401,12 +401,28 @@ pub fn call_agent_knowledge_tool(
             let task = run.input["knowledge_task_id"]
                 .as_str()
                 .ok_or_else(|| BrainError::KnowledgeValidation("当前Run没有研究任务身份".into()))?;
-            let question = run.input["research_stage_key"]
-                .as_str()
-                .and_then(|key| key.strip_prefix("section:"))
-                .ok_or_else(|| {
-                    BrainError::KnowledgeValidation("只能读取当前研究章节的冻结基线".into())
-                })?;
+            let stage_key = run.input["research_stage_key"].as_str().unwrap_or_default();
+            let question = if let Some(question) = stage_key.strip_prefix("section:") {
+                if args.question_id.as_deref().is_some_and(|id| id != question) {
+                    return Err(BrainError::KnowledgeValidation(
+                        "章节不能读取其他主题的冻结基线".into(),
+                    ));
+                }
+                question
+            } else if stage_key == "synthesis" {
+                args.question_id
+                    .as_deref()
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| {
+                        BrainError::KnowledgeValidation(
+                            "综合读取冻结基线必须指定本任务的question_id".into(),
+                        )
+                    })?
+            } else {
+                return Err(BrainError::KnowledgeValidation(
+                    "仅研究章节或综合可读取本任务冻结基线".into(),
+                ));
+            };
             let knowledge_task = store.get_task(task)?;
             require_scope(&grant, &knowledge_task.knowledge_base_id)?;
             let mut result = store.read_research_baseline_page(
@@ -626,6 +642,7 @@ struct ReadEntryArgs {
 #[serde(deny_unknown_fields)]
 struct ResearchBaselineArgs {
     entry_id: String,
+    question_id: Option<String>,
     offset_chars: Option<usize>,
     max_chars: Option<usize>,
     metadata_offset: Option<usize>,

@@ -105,6 +105,9 @@ pub struct PresentationMetric {
 #[serde(deny_unknown_fields)]
 pub struct PresentationChart {
     pub unit: String,
+    /// Visible measurement conditions. Default keeps saved v1.0 plans readable.
+    #[serde(default)]
+    pub context: String,
     pub categories: Vec<String>,
     pub values: Vec<f64>,
     #[serde(default)]
@@ -409,6 +412,7 @@ fn validate_layout_payload(field: &str, slide: &PresentationSlide) -> Result<(),
                 .as_ref()
                 .ok_or_else(|| validation_error(&format!("{field}.chart 不能为空")))?;
             validate_text(&format!("{field}.chart.unit"), &chart.unit, 16, true)?;
+            validate_text(&format!("{field}.chart.context"), &chart.context, 160, true)?;
             if !(2..=6).contains(&chart.categories.len()) {
                 return Err(validation_error(&format!(
                     "{field}.chart.categories 必须包含 2 到 6 项"
@@ -591,6 +595,7 @@ fn slide_character_count(slide: &PresentationSlide) -> usize {
     }
     if let Some(chart) = &slide.chart {
         values.push(chart.unit.as_str());
+        values.push(chart.context.as_str());
         values.extend(chart.categories.iter().map(String::as_str));
     }
     if let Some(relationship) = &slide.relationship {
@@ -1287,6 +1292,21 @@ fn render_chart(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         "l",
     ));
     let maximum = chart.values.iter().copied().fold(0.0_f64, f64::max);
+    if !chart.context.is_empty() {
+        out.push_str(&text_box(
+            5,
+            "图表条件",
+            780_000,
+            5_480_000,
+            10_100_000,
+            560_000,
+            &chart.context,
+            1_250,
+            p.muted,
+            false,
+            "l",
+        ));
+    }
     let row_height = 3_200_000 / chart.values.len().max(1);
     for (index, (category, value)) in chart.categories.iter().zip(chart.values.iter()).enumerate() {
         let y = 2_100_000 + index * row_height;
@@ -1932,6 +1952,7 @@ mod tests {
         spec.slides[0].layout = PresentationLayout::Chart;
         spec.slides[0].chart = Some(PresentationChart {
             unit: "%".into(),
+            context: "同版本、同工作负载".into(),
             categories: vec!["甲".into(), "乙".into()],
             values: vec![80.0, 70.0],
             highlight_index: None,
@@ -2000,6 +2021,27 @@ mod tests {
 
         let error = parse_presentation_spec(&value.to_string(), 1).unwrap_err();
         assert!(error.to_string().contains("不能为负数"));
+    }
+
+    #[test]
+    fn test_chart_renders_conditions_next_to_data_without_dropping_them() {
+        let mut shapes = String::new();
+        let mut slide = sample_spec().slides[0].clone();
+        slide.chart = Some(PresentationChart {
+            unit: "ms（平均延迟）".into(),
+            context: "v1.1 · 4线程 · 2MiB · 同CPU · 100000请求 · 显式TTL60秒 · 未测P99".into(),
+            categories: vec!["LRU".into(), "CLOCK".into()],
+            values: vec![2.4, 1.8],
+            highlight_index: Some(1),
+        });
+        render_chart(
+            &mut shapes,
+            &slide,
+            &Palette::for_theme(PresentationTheme::Midnight),
+        );
+        assert!(shapes.contains("显式TTL60秒"));
+        assert!(shapes.contains("未测P99"));
+        assert!(shapes.contains("ms（平均延迟）"));
     }
 
     #[test]

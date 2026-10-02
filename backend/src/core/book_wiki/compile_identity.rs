@@ -16,6 +16,15 @@ pub(super) fn select_identities(
     catalog: &[CompileCatalogEntry],
     budget: u64,
 ) -> Vec<CompileCatalogEntry> {
+    // Small books fit the complete identity catalogue. Lexical preselection
+    // would hide cross-chapter synonyms before the model can recognize them.
+    let total = catalog
+        .iter()
+        .map(|entry| estimated_tokens(&identity_row(entry)) + 8)
+        .sum::<u64>();
+    if total <= budget {
+        return catalog.to_vec();
+    }
     let source = source.to_lowercase();
     let mut ranked = catalog
         .iter()
@@ -96,6 +105,22 @@ pub(super) fn validate_identity_types(
 mod tests {
     use super::*;
     use crate::infra::book_wiki_store::CompileCatalogEntry;
+
+    #[test]
+    fn test_compile_identity_keeps_nonlexical_themes_when_full_catalog_fits() {
+        let entry = CompileCatalogEntry {
+            id: "ttl".into(),
+            slug: "time-to-live".into(),
+            title: "到期策略".into(),
+            entry_type: "concept".into(),
+            summary: "读取过期与后台清理".into(),
+            aliases: vec!["TTL".into()],
+            status: "verified".into(),
+            revision: 1,
+        };
+        assert_eq!(select_identities("默认值变化", &[entry], 2000).len(), 1);
+        assert!(select_identities("默认值变化", &[], 0).is_empty());
+    }
 
     #[test]
     fn test_compile_identity_finds_late_alias_and_keeps_complete_keys() {

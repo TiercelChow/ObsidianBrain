@@ -253,6 +253,7 @@ impl BookWikiService {
             .flatten();
         prompt.push_str(&format!("<phase_capacity>\n{}\n</phase_capacity>\n阶段输出受模型容量和供应商单次输出能力约束；未知容量是应用护栏，不冒充真实模型上限。\n",json!({"capacity_tokens":phase.resources.capacity_tokens,"capacity_basis":phase.resources.capacity_basis,"phase_output_tokens":phase.resources.output_tokens,"declared_max_output_tokens":declared_cap,"section_output_capacity_one_requirement":one_requirement,"section_output_capacity_current":current_section})));
         if phase.phase == "plan" {
+            prompt.push_str("constraints 仅保存读者的业务边界（对象、版本、允许来源、实验条件、交付范围）；不得保存 JSON 字段、阶段名称、stage_key/revision、工具策略、‘本阶段只规划’等执行说明。acceptance 是材料需要回答的问题，不能写成格式检查或调用工具的承诺。\n");
             prompt.push_str("规划 depth 只选 brief、standard、deep。expected_output_tokens 是每个主题的必要正文篇幅估计（1至262144为安全边界），不是必须凑齐的长度；依据目标、复杂度、完整公式/论证需求估计。当 section_output_capacity_one_requirement 非 null 时，每个主题必须填写估计值，不可为 null；章节至少预留 1024 token JSON/发现结构，每多一项 required_evidence 再预留 768 token，并按当前推理策略保留规划余量；正文估计不可超过剩余空间。超过时按独立可研究的主题拆分，不能删除关键论证来求短。未知供应商输出能力且没有较小显式上下文约束时可用 null，不能把默认 1M 上下文当作输出能力。\n");
             prompt.push_str("本阶段只确定业务目标、约束、验收条件、术语与报告主题；这不是隐藏思维链。report_title 是面向读者的完整材料标题，应概括论题和材料用途，使用单行陈述式标题而非直接照搬用户提问；goal 仍是内部研究目标。主题数量按实际问题规模确定，1至24是安全边界而非必须凑满，不固定两到四个。每个子问题的 question 是内部取证问题，title 用面向读者的章节标题，写成材料中的论题而非“什么是/如何/为什么”的问答标题；不同标题应形成递进或对照，不机械重复任务原话。可通过只读工具浏览编译知识、查找具体核验对象，不在本阶段编造研究结论。review 必须在子问题中明确待核验的真实条目与具体主张；refresh 必须明确真实基线条目与待比较的依据。找不到基线则把它列为具体缺口，不编造旧版变化。返回规划，不生成长报告或幻灯片。\n");
             if phase.task.brief.confirmed {
@@ -263,6 +264,7 @@ impl BookWikiService {
                 ));
             }
         } else if phase.phase == "synthesis" {
+            prompt.push_str("综合只提供整体判断、跨主题取舍、决定性条件和会改变判断的缺口；机制推导/完整表格已在章节中保存，不逐章重写。不要公开阶段 key、revision、调用工具说明或研究操作日志。资料未报告某项指标时写‘当前材料未提供测量’，不能升级为‘该指标无法测量’。\n");
             prompt.push_str("综合 finding.status 只选 supported、partial、missing、conflict。\n");
             prompt.push_str("phase_scope.synthesis_output_adaptation 是按逐章对照结构和模型单次输出能力计算的本阶段篇幅规划。allocated_body_tokens 小于 requested_body_tokens 时，只压缩综合段落的重复表述，不删 section_checks、不省略关键冲突或条件；完整章节和证据仍在工作区，不能声称短综合替代了全部研究。\n");
             prompt.push_str("本阶段综合全部已保存主题，回答整体目标，不再逐章重复研究。integration_manifest 是完整矩阵，或标有 complete=false 的容量内投影；投影仍列出全部主题身份和版本，但未预载的摘要、发现与引用对象并非不存在。需要这些信息时用 knowledge_get_research_manifest 按 question_id 定向读取有关章节，或不指定 question_id 浏览全部；按 offset_chars 分页，has_more 时继续。按需用 knowledge_get_research_section 分页查看完整章节。未核查的部分不能自报已证实一致。这些章节成果是待核验输入，不是本轮原始证据；旧章节引用已中性化，不能直接复制为本轮S引用。关键事实需通过当前实体/原文工具取得本轮编号。逐项对照全部主题的目标覆盖、术语、比较维度、适用条件/版本、同源重复、反例和矛盾；不得以术语统一抹平条件差异。section_checks 必须覆盖全部主题且精确对应版本；对照判断只是模型自报，不能冒充独立事实证明。明显冲突保留双方依据和条件，未知列出缺口，不强行得出一致结论。证据不足可输出 partial/missing；supported/conflict 仍必须有本轮实际已读引用。使用预算/覆盖/扩展工具按缺口补查，不固定top-k。question_index 按本阶段预算工具的 required_evidence 列表填写。禁止生成幻灯片、删去原报告章节或伪装历史对象核验。\n");
@@ -274,11 +276,15 @@ impl BookWikiService {
                 }
             }
         } else {
+            prompt.push_str("本主题只完成自己的阅读职责，不在每章重新罗列全部其他主题和所有缺口。必须核对的精确数字、公式、默认值版本差异或强结论，请先从 knowledge_get_entry 的 source_basis 取得真实 source_span_id，再调用 book_read_source_span 回读对应原文；不能仅说‘仍需回读’却复述摘要为实测事实。未返回直接原文时保留明确未核对限定。引用一律 [S<n>]，包括表格、summary、findings 和 limitations；禁止裸写 S5、S1–S6、S1 与 S2。代码/产品标识 S5 使用行内代码以区别来源。\n");
             prompt.push_str("章节 finding.status 只选 supported、partial、missing、conflict。当前阶段容量中的章节正文上限是规划估计，不能为满足字数而省略必要条件；若证据或容量不足，应保留有界结论并具体说明缺口。\n");
             prompt.push_str("只完成当前明确主题，完整呈现论证、条件和反例；其他主题由独立阶段保存。研究深度、召回和输出随问题决定，不固定 top-k。优先读取编译知识；必要时核对原文。使用 knowledge_get_run_budget、knowledge_request_budget_extension 与 knowledge_report_evidence_coverage 按缺口扩展（question_index 对应预算工具中的要求）。连续补查无新依据则停止，诚实交付缺口。统一 plan.terminology，但不能为统一用词抹去条件差异。presentation 任务此阶段仍保存完整研究章节，禁止提前压成幻灯片要点。每项 finding 的引用只来自本阶段真实已读编号；上阶段编号不能直接沿用。\n");
         }
         if phase.phase != "synthesis" {
             prompt.push_str("review/refresh 在规划中用 target_entry_ids 选择通过工具找到的真实编译条目，不能捏造ID或把章节兜底当作知识实体。章节阶段用 knowledge_get_research_baseline 分页读取已冻结的正文、具体主张和旧版来源，has_more/metadata_has_more 时补读。旧版输入不是当前证据，不可用它生成S引用；再读当前知识/原文完成对照。每个选定条目必须有对应 finding.baseline_entry_id，核验具体主张同时填 baseline_claim_id。review 明确原主张、支持/反驳依据、适用条件及缺口；refresh 明确旧版判断、当前判断、变化原因、未变和缺口，不虚构版本变化。不曾找到基线时只能输出 partial/missing。\n");
+        }
+        if phase.phase != "plan" && matches!(phase.task.task_type.as_str(), "review" | "refresh") {
+            prompt.push_str("历史对照必须回读冻结基线而非只读当前版：knowledge_get_research_baseline 先返回正文与带source_basis_index的旧来源清单，再用同一工具的source_basis_index读取source_basis_page.baseline_source_content。旧source_span_id从当前来源列表消失不代表旧原文丢失，不对旧ID反复调用只读当前版的book_read_source_span。综合阶段同时传已保存主题的question_id，只读取本任务选择的基线；这是历史对照输入，无S编号，不能写成当前事实或在综合findings中冒充新的baseline核验。规划里的旧数值仅是待核验请求，不能盖过当前取证，也不要把来源版本更新误称编译错误。\n");
         }
         prompt.push_str(&format!("<phase_output_contract>\n{}\n</phase_output_contract>\n只输出单个完整 JSON 对象；不输出围栏、前后解释、第二个对象、占位符或隐藏思考。上方是字段合同示意，必须替换示例值；枚举只选一个合法值。阶段由 research_phase 标签确定，不增加 kind、phase、type 等合同外字段，也不包装外层对象。当前阶段合同优先于通用 Skill 的默认最终报告格式。\n",phase_contract(phase.phase)));
         if phase.task.brief.confirmed && phase.phase != "plan" {

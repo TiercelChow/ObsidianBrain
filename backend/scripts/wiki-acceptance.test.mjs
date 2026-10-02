@@ -106,6 +106,14 @@ test('stream metrics distinguish first status, first content and complete delive
 })
 
 test('acceptance does not report a successful stream after a terminal transport error', () => {
+  const corrected = summarizeStream([
+    { elapsed_ms: 1, event: { type: 'text_delta', delta: '失败残片' } },
+    { elapsed_ms: 2, event: { type: 'text_replace', text: '' } },
+    { elapsed_ms: 3, event: { type: 'text_delta', delta: '正文' } },
+    { elapsed_ms: 4, event: { type: 'text_replace', text: '最终正文' } },
+    { elapsed_ms: 5, event: { type: 'completed', result: { answer: '最终正文' } } },
+  ])
+  assert.equal(corrected.stream_matches_final, true)
   const result = summarizeStream([
     { elapsed_ms: 1, event: { type: 'evidence', evidence: [] } },
     { elapsed_ms: 2, event: { type: 'text_delta', delta: '不完整' } },

@@ -436,6 +436,7 @@ fn stage_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<ResearchStageSumma
 const SUMMARY_COLUMNS:&str="stage_key,title,kind,ordinal,status,revision,run_id,summary,length(content_md),json_array_length(findings_json),error,updated_at";
 
 fn body_indices(content: &str) -> Result<HashSet<usize>, BrainError> {
+    validate_citation_spelling(content)?;
     let mut result = HashSet::new();
     for suffix in content.split("[S").skip(1) {
         let digits = suffix.bytes().take_while(u8::is_ascii_digit).count();
@@ -450,6 +451,48 @@ fn body_indices(content: &str) -> Result<HashSet<usize>, BrainError> {
         }
     }
     Ok(result)
+}
+
+/// Reject clear bare-source notation for bounded repair rather than guessing a
+/// replacement. Literal product identifiers in code/math are never rewritten.
+fn validate_citation_spelling(content: &str) -> Result<(), BrainError> {
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+    let mut in_code = false;
+    for event in Parser::new(content) {
+        match event {
+            Event::Start(Tag::CodeBlock(_)) => in_code = true,
+            Event::End(TagEnd::CodeBlock) => in_code = false,
+            Event::Text(text) if !in_code => {
+                let bytes = text.as_bytes();
+                for (offset, _) in text.match_indices('S') {
+                    let digits = bytes[offset + 1..]
+                        .iter()
+                        .take_while(|b| b.is_ascii_digit())
+                        .count();
+                    if digits == 0 {
+                        continue;
+                    }
+                    let before = &text[..offset];
+                    let after = text[offset + 1 + digits..].trim_start();
+                    let boundary = before
+                        .chars()
+                        .next_back()
+                        .is_none_or(|c| !c.is_ascii_alphanumeric() && c != '_' && c != '$');
+                    let source_context = ["来源", "引用", "依据", "参考", "见"]
+                        .iter()
+                        .any(|prefix| before.trim_end().ends_with(prefix));
+                    let source_form = ["来自", "同源", "与 S", "的四个数值", "（", "–S", "–"]
+                        .iter()
+                        .any(|suffix| after.starts_with(suffix));
+                    if boundary && (source_context || source_form) && !before.ends_with('[') {
+                        return Err(invalid("(research_citation_spelling) 来源编号必须使用完整 [S<n>]，不能裸写 S1、S1–S6 或 S1 与 S2；产品名、代码与公式中的 S 标识可保留为行内代码。请只修正本阶段引用合同，不改写事实或创建新编号"));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn neutral_section_text(content: &str) -> Result<String, BrainError> {
@@ -1021,7 +1064,7 @@ impl BookWikiStore {
             let basis=snapshot["source_basis"].as_array().cloned().unwrap_or_default();
             snapshot["content_md"]=json!(page);
             snapshot["claims"]=json!(claims.iter().skip(claims_offset).take(16).collect::<Vec<_>>());
-            snapshot["source_basis"]=json!(basis.iter().skip(claims_offset).take(16).map(|v| {let mut v=v.clone();if let Some(m)=v.as_object_mut() {m.remove("baseline_source_content");} v}).collect::<Vec<_>>());
+            snapshot["source_basis"]=json!(basis.iter().enumerate().skip(claims_offset).take(16).map(|(index,v)| {let mut v=v.clone();if let Some(m)=v.as_object_mut() {m.remove("baseline_source_content");m.insert("source_basis_index".into(),json!(index));} v}).collect::<Vec<_>>());
             snapshot["claims_offset"]=json!(claims_offset);
             snapshot["claim_count"]=json!(claims.len());
             snapshot["source_basis_count"]=json!(basis.len());
@@ -1031,7 +1074,7 @@ impl BookWikiStore {
             snapshot["has_more"]=json!(offset.saturating_add(limit)<total);
             snapshot["captured_at"]=json!(captured);
             snapshot["historical_baseline"]=json!(true);
-            snapshot["evidence_notice"]=json!("这是待核验的历史输入，不是当前已读证据，没有S编号。请读取当前编译内容/原文后引用；旧版与当前版不得混淆。");
+            snapshot["evidence_notice"]=json!("这是待核验的历史输入，没有S编号。旧原文已保留：用本工具的source_basis_index读取source_basis中对应序号，正文在source_basis_page.baseline_source_content；旧span不在当前列表不等于快照丢失。核验当前事实仍需读取当前实体/原文获得S引用，旧版与当前版不得混淆。");
             Ok(snapshot)
         })
     }
@@ -1445,6 +1488,27 @@ mod tests {
         ResearchBrief, ResearchFinding, ResearchPlan, ResearchQuestion, ResearchSectionOutput,
     };
     use serde_json::json;
+
+    #[test]
+    fn test_research_citation_contract_rejects_bare_sources_not_literal_identifiers() {
+        for text in [
+            "来源 S1–S6 是编译条目",
+            "S2 来自旧文档",
+            "S1 与 S2 同源",
+            "S5（实验记录）",
+        ] {
+            assert!(validate_citation_spelling(text).is_err(), "{text}");
+        }
+        for text in [
+            "来源 [S1] 与 [S2]。",
+            "S5 手机及 AS128 型号",
+            "`S2 来自` 是示例代码",
+            "```text\nS2 来自旧文档\n```",
+            "$S5$ 是符号",
+        ] {
+            assert!(validate_citation_spelling(text).is_ok(), "{text}");
+        }
+    }
 
     #[test]
     fn test_manifest_page_coverage_requires_every_character_from_one_version() {
@@ -2879,6 +2943,13 @@ mod tests {
             json!({"entry_id":entry.id,"task_id":"spoofed"})
         )
         .is_err());
+        assert!(tool(
+            &store,
+            &token.token,
+            "knowledge_get_research_baseline",
+            json!({"entry_id":entry.id,"question_id":"boundary"})
+        )
+        .is_err());
         assert!(store.list_agent_run_citations(&run).unwrap().is_empty());
         store
             .record_visible_agent_evidence(
@@ -2896,7 +2967,7 @@ mod tests {
         assert!(store
             .save_research_section(&section, &run, &finding)
             .is_err());
-        finding.findings[0].baseline_entry_id = Some(entry.id);
+        finding.findings[0].baseline_entry_id = Some(entry.id.clone());
         finding.findings[0].baseline_claim_id = Some("fake-claim".into());
         assert!(store
             .save_research_section(&section, &run, &finding)
@@ -2905,6 +2976,47 @@ mod tests {
         store
             .save_research_section(&section, &run, &finding)
             .unwrap();
+        complete_section_only(&store, &base, &task, "section:boundary");
+        let synthesis_claim = store.claim_research_stage(&task, "synthesis").unwrap();
+        let synthesis_run = attach(&store, &base, &task, &synthesis_claim);
+        let synthesis_token = store
+            .issue_agent_run_capability(
+                &synthesis_run,
+                std::slice::from_ref(&base),
+                &["knowledge_get_research_baseline".into()],
+                300,
+            )
+            .unwrap();
+        let historical = tool(
+            &store,
+            &synthesis_token.token,
+            "knowledge_get_research_baseline",
+            json!({"entry_id":entry.id,"question_id":"mechanism","source_basis_index":0}),
+        )
+        .unwrap();
+        assert_eq!(historical["historical_baseline"], true);
+        assert!(historical["source_basis_page"]["baseline_source_content"]
+            .as_str()
+            .unwrap()
+            .contains("正文"));
+        assert_eq!(historical["source_basis"][0]["source_basis_index"], 0);
+        for args in [
+            json!({"entry_id":entry.id}),
+            json!({"entry_id":entry.id,"question_id":"boundary"}),
+            json!({"entry_id":"cross-book","question_id":"mechanism"}),
+        ] {
+            assert!(tool(
+                &store,
+                &synthesis_token.token,
+                "knowledge_get_research_baseline",
+                args
+            )
+            .is_err());
+        }
+        assert!(store
+            .list_agent_run_citations(&synthesis_run)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

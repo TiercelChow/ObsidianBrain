@@ -253,7 +253,7 @@ source_spans_fts：来源标题 / 章节标题 / 原文 / cjk_terms
 &lt;current_compile_candidates&gt;{相关前批候选身份}&lt;/current_compile_candidates&gt;
 &lt;book_configuration&gt;{有效书籍配置}&lt;/book_configuration&gt;
 
-没有固定“前若干条实体”截断；身份选择按相关词与 token 预算，整行发送。
+没有固定“前若干条实体”截断；全目录能放入本批预算时全部发送，否则按相关词与 token 预算选择完整身份行。
 原文、规则、配置不能静默删尾；无法容纳则报告容量问题。
 后续归并另接收有效基线的完整正文与全部有效原子，不把过期正文当新证据。</code></pre>
             <h3 class="how">生成什么 — 当前编译合同</h3>
@@ -474,11 +474,13 @@ source_spans_fts：来源标题 / 章节标题 / 原文 / cjk_terms
             <h3 class="how">怎么输出 — 原生流式与明确终态</h3>
             <pre class="command-block compact"><code>run_started / phase      → 准备、连接、分析、工具等公开阶段
 tool_started / finished  → 真实工具调用反馈
-text_delta               → ACP AgentMessageChunk 经 SSE 直接追加正文
+text_delta               → Run 级实时事件桥接经 ACP / SSE 追加正文
+text_replace             → 新尝试、工具回合或最终提交校正，不重复追加全文
 usage                    → 上下文占用 / 容量；不是完整计费 token
 completed                → 正常完成、引用校验、单事务保存交换与来源
 error / cancelled        → 保留已收到的部分内容，明确原因</code></pre>
             <p>正文使用安全 Markdown 渲染，最终校正完整结果；检索来源在输出结束后展示，首 token 前用公开阶段提示过程，不展示或存储隐藏思维链。断开前台问答流会取消该 Run，后台编译与研究则不依赖页面存活。</p>
+            <p>Harness 默认 ACP 在已提交消息后可能只给整段正文。应用的临时插件订阅公开的 <code>agent/assistant-stream</code>，按模型尝试身份转发真实增量，再用提交事件校正；不靠前端延迟播放冒充模型流式。插件与受限 MCP 工具用 Run 级 <code>insert</code> 配置加载，不修改全局 Harness 或扩大工具权限。</p>
             <p>输出或轮数截断不伪装为完整成功。用户可选择<strong>“继续完成完整答案”</strong>，建立关联新 Run，重新规划、取证和引用，并在硬能力范围内调整输出预留；旧草稿仍保留。临时失败不会永久切换后续问答为检索模式，取消或凭据拒绝不会自动反复续写。</p>
             <div class="callout why"><span class="callout-icon">💡</span><span><strong>为什么目录不跟着答案走？</strong>目录是候选索引，不是证据。把未选材料和旧模型结论不断拼接，会消耗上下文并混淆依据。保留意图、舍弃无关候选、重读真实证据，才能兼顾追问连贯性与引用可靠性。</span></div>
           </section>
@@ -576,7 +578,7 @@ error / cancelled        → 保留已收到的部分内容，明确原因</code
             <h3 class="how">review / refresh — 真正冻结旧版基线</h3>
             <ol class="how-steps">
               <li><strong>选真实对象</strong>：规划使用 <code>target_entry_ids</code>，同一事务冻结这些条目的完整正文、具体主张、原始来源与版本。</li>
-              <li><strong>分页看基线</strong>：<code>knowledge_get_research_baseline</code> 限当前 task / question / Run。历史材料不获得本轮 S 编号，不能冒充当前证据。</li>
+              <li><strong>分页看基线</strong>：<code>knowledge_get_research_baseline</code> 限当前 task / question / Run。章节只读本主题，综合指定同一任务的 <code>question_id</code>；用 <code>source_basis_index</code> 回读保留的旧原文，即使旧片段已被当前版本替换。历史材料不获得本轮 S 编号，不能冒充当前证据。</li>
               <li><strong>对照当前证据</strong>：核验连接真实基线条目 / 主张 ID，再读当前知识与原文。review 检查支持、反对及条件；refresh 区分变化、未变与未知。</li>
               <li><strong>缺基线不伪造</strong>：找不到基线时只能输出 <code>partial/missing</code>，不能声称已核验或发现版本变化。</li>
             </ol>

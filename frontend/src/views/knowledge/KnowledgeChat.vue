@@ -665,6 +665,12 @@ async function ask(question: string, recovery?: ChatMessage) {
           } else if (event.type === 'text_delta') {
             receivedText += event.delta
             textBuffer.push(event.delta)
+          } else if (event.type === 'text_replace') {
+            textBuffer.cancel()
+            receivedText = event.text
+            assistantMessage.content = event.text
+            textBuffer = createStreamedTextBuffer(chunk => { assistantMessage.content += chunk })
+            activeTextBuffer = textBuffer
           } else if (event.type === 'phase') {
             const label = labelForRuntimePhase(event.message)
             if (label) setActivity(label)

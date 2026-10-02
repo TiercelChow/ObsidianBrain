@@ -4,6 +4,21 @@ use std::path::{Path, PathBuf};
 use crate::error::BrainError;
 use crate::models::book_wiki::WikiSkill;
 
+pub(super) fn materialize_stream_bridge(workspace: &Path) -> Result<PathBuf, BrainError> {
+    let plugin = workspace.join("obsidianbrain-stream.mjs");
+    std::fs::write(
+        &plugin,
+        include_str!("../../../plugins/harness-stream-bridge.mjs"),
+    )?;
+    let patch = workspace.join("obsidianbrain-stream.patch.json");
+    let body = serde_json::to_string(&serde_json::json!([{"insert":[{
+        "id": "obsidianbrain-stream", "name": plugin, "disabled": false
+    }]}]))
+    .map_err(|e| BrainError::Internal(format!("流式插件序列化失败: {e}")))?;
+    std::fs::write(&patch, body)?;
+    Ok(patch)
+}
+
 /// Materialize only the version-frozen, book-scoped text selected for this Run.
 /// The Harness filesystem provider must not scan the user's own skill roots.
 pub(super) fn materialize_skills(

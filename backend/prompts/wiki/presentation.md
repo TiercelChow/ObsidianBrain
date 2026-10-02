@@ -80,7 +80,7 @@
       "eyebrow": "对照数据",
       "title": "同口径数值比较的具体对象",
       "takeaway": "数据真正支持的判断",
-      "chart": {"unit": "%", "categories": ["类别 A", "类别 B"], "values": [42, 31], "highlight_index": 0},
+      "chart": {"unit": "%", "context": "来源中的版本、样本、负载和显式配置；不能推测未提供条件", "categories": ["类别 A", "类别 B"], "values": [42, 31], "highlight_index": 0},
       "citations": ["S2"]
     },
     {

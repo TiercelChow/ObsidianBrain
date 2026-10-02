@@ -963,21 +963,17 @@ POST   /v1/wiki-skills/import
 
 ### 13.2 SSE
 
-问答已通过 SSE 消费原生增量；研究任务继续使用持久化 `agent_run_events`，智能编译使用知识库上的持久化阶段与进度，两者都由前端状态轮询恢复，因此允许离开页面。SSE 连接断开会触发问答运行取消，持久化事件仍是审计和恢复事实来源。
+问答通过 SSE 消费 Harness 的实时模型增量。已验证的 Harness `0.1.5-rc.1` 原生 ACP 把已提交的 assistant message 转成全文通知，单靠 ACP 默认通知不等于实时流式。应用为每个 Run 临时装配 `backend/plugins/harness-stream-bridge.mjs`：订阅公开的 `agent/assistant-stream` 与 `session/event`，通过标准 ACP `session/update` 的版本化 `_meta["obsidianbrain/stream"]` 传递尝试身份、增量和最终提交；插件不提供工具，也不输出隐藏 reasoning 正文。不修改全局 Harness 安装或重新实现 Agent Loop。升级 Harness 时须显式重跑原生集成验证。
 
-事件至少包括：
+运行级 MCP 与流式插件均用组合配置的 `insert` 指令添加。普通 `{id,name,config}` patch 仅覆盖已存在的插件，未知 ID 会被 Harness 跳过，不能当作新增。MCP 使用独立 Run ID 配置、单次 capability 与受控白名单；原生配置 dump 回归确认其确已插入。
 
-- `run.started`
-- `run.phase_changed`
-- `run.progress`
-- `run.tool_started`
-- `run.tool_finished`
-- `run.review_required`
-- `run.completed`
-- `run.failed`
-- `run.cancelled`
+SSE 的 `type` 包括 `run_started`、`phase`、`planning_ready`、`evidence`、`tool_started`、`tool_finished`、`text_delta`、`text_replace`、`usage`、`completed` 和 `error`。`text_replace` 是提交校正/清空事件，不能按 delta 追加；它同时落为持久化 `run.text_replace`，未完成正文恢复按顺序重放。新模型尝试或工具回合清空临时正文，最终全文只校正一次，原生 ACP 的重复全文不再追加。前端停止旧缓冲后应用校正，来源在当前回答完成后展示。
 
-断线重连通过事件自增序号和 `Last-Event-ID` 补发数据库中的事件。
+研究任务继续使用持久化 `agent_run_events`，智能编译使用知识库上的持久化阶段与进度，两者由前端状态轮询恢复，因此允许离开页面。SSE 连接断开会触发问答运行取消；当前不是通过 `Last-Event-ID` 自动接着原连接生成，需从未完成 Run 的保存记录显式恢复或找回已完成答案。
+
+迁移 058 原地刷新当前内置编译/问答/研究/演示 Skill 合同，不额外积累旧内置版本；合法后续用户发布版本仍保持。研究强调规范 `[S<n>]`、精确数据回读原文、读者约束与阶段指令分离、综合不复制所有章节。明显裸引用触发有限合同修复，不全局改写代码、公式或产品编号。PPT 图表新增可见 `chart.context`，用来显示版本、单位、负载和统计口径；旧保存规格缺此字段仍可读取。
+
+review/refresh 的旧原文保存在冻结基线的 `source_basis`，不是依赖当前 `source_spans` 的存活。`knowledge_get_research_baseline` 用 `source_basis_index` 读取旧原文；返回的元数据明确标出实际序号。章节只能读自身主题，综合可指定同一任务已冻结主题的 `question_id`，不能跨任务或任意读取旧条目。旧版输入无 S 编号，不加入当前证据台账；综合仍须读取当前实体/原文生成引用，且不得冒充章节的历史核验发现。
 
 ---
 

@@ -25,7 +25,7 @@
           <div v-if="task.status === 'running' && taskActivity[task.id]" class="task-live" role="status">
             <i></i><span>{{ taskActivity[task.id] }}</span>
           </div>
-          <p v-if="task.result_summary" class="task-result-preview">{{ task.result_summary }}</p>
+          <p v-if="task.result_summary" class="task-result-preview">{{ taskResultPreview(task.result_summary) }}</p>
           <footer><span>{{ typeLabel(task.task_type) }}</span><span>{{ task.deliverable_type === 'presentation' ? 'PPTX 演示文稿' : '研究报告' }}</span><span v-if="task.external_research_enabled">外部资料 {{ task.external_requests_used }}/{{ task.external_request_limit }}</span><span v-if="task.knowledge_change_state === 'proposed'">待知识审核</span><time>{{ formatDate(task.updated_at) }}</time></footer>
         </div>
         <div class="task-card-actions">
@@ -123,7 +123,7 @@
         <div class="task-result-tabs" role="group" aria-label="研究任务结果内容">
           <button type="button" :aria-pressed="resultTab === 'stages'" :class="{ 'is-active': resultTab === 'stages' }" @click="resultTab = 'stages'">研究阶段</button>
           <button type="button" :aria-pressed="resultTab === 'report'" :class="{ 'is-active': resultTab === 'report' }" @click="openResult(activeTask)">研究报告</button>
-          <button type="button" :aria-pressed="resultTab === 'inspector'" :class="{ 'is-active': resultTab === 'inspector' }" @click="resultTab = 'inspector'"><el-icon><View /></el-icon>运行检查器</button>
+          <button type="button" :aria-pressed="resultTab === 'inspector'" :class="{ 'is-active': resultTab === 'inspector' }" @click="openTaskInspection"><el-icon><View /></el-icon>运行检查器</button>
         </div>
         <div v-if="resultTab === 'report'" class="task-result-scroll" role="region" aria-label="研究报告">
           <div v-if="activeTask.artifact_state === 'failed'" class="artifact-failure" role="status"><strong>PPTX 生成失败，研究报告已保留</strong><span>可在下方阅读完整报告，或打开运行检查器定位原因后重新运行。</span></div>
@@ -330,7 +330,7 @@ const resultTab = ref<'report' | 'inspector' | 'stages'>('report')
 const inspectionLoading = ref(false)
 const inspectionError = ref('')
 const taskActivity = ref<Record<string, string>>({})
-const inspectionEvents = computed(() => (activeInspection.value?.events || []).filter(event => event.event_type !== 'run.text_delta'))
+const inspectionEvents = computed(() => (activeInspection.value?.events || []).filter(event => !['run.text_delta', 'run.text_replace'].includes(event.event_type)))
 const runtimeDiagnostics = computed(() => knowledgeRunDiagnostics(activeInspection.value?.events || [], activeInspection.value?.snapshot?.evidence_refs.runtime_budget))
 const draft = reactive({ knowledgeBaseId: '', title: '', description: '', taskType: 'research' as KnowledgeTask['task_type'], deliverableType: 'report' as KnowledgeTask['deliverable_type'], externalResearchEnabled: false, externalDomains: '', externalRequestLimit: 6 })
 const selectedBase = computed(() => bases.value.find(base => base.id === draft.knowledgeBaseId))
@@ -421,6 +421,35 @@ function inspectStage(runId: string) {
   activeRunId.value = runId
   resultTab.value = 'inspector'
   void loadRunInspection(runId)
+}
+
+function taskResultPreview(content: string) {
+  const preview = content.slice(0, 280).replace(/\s+/g, ' ').trim()
+  return content.length > 280 ? `${preview}…` : preview
+}
+
+async function openTaskInspection() {
+  resultTab.value = 'inspector'
+  if (activeRunId.value) {
+    await loadRunInspection(activeRunId.value)
+    return
+  }
+  const taskId = activeTask.value?.id
+  if (!taskId) return
+  const requestId = ++inspectionRequestId
+  inspectionLoading.value = true
+  inspectionError.value = ''
+  try {
+    const response = await getKnowledgeTaskActivity(taskId)
+    if (requestId !== inspectionRequestId || activeTask.value?.id !== taskId || !resultVisible.value || !viewActive) return
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '运行记录加载失败')
+    activeRunId.value = response.result.run?.id || ''
+    await loadRunInspection(response.result.run?.id || '')
+  } catch (error) {
+    if (requestId === inspectionRequestId) inspectionError.value = (error as Error).message
+  } finally {
+    if (requestId === inspectionRequestId) inspectionLoading.value = false
+  }
 }
 
 function openCreate() {

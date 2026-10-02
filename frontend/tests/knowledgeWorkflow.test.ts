@@ -27,6 +27,8 @@ test('knowledge chat persists conversations and restores their cited messages', 
   assert.match(chat, /askController\.signal,\s*recovery\?\.runId/)
   assert.match(api, /resume_run_id: resumeRunId/)
   assert.match(chat, /event\.type === 'text_delta'/)
+  assert.match(api, /type: 'text_replace'; run_id: string; text: string/)
+  assert.match(chat, /event\.type === 'text_replace'[\s\S]*?textBuffer\.cancel\(\)[\s\S]*?receivedText = event\.text[\s\S]*?assistantMessage\.content = event\.text/)
   assert.match(chat, /let answerEvidenceDelivered = false/)
   assert.match(chat, /if \(answerEvidenceDelivered\) \{/)
   assert.match(chat, /assistantMessage\.runId = event\.run_id/)
@@ -82,6 +84,16 @@ test('research inspector distinguishes native skills and lists evidence actually
   assert.match(tasks, /实际读取的证据/)
   assert.match(tasks, /activeInspection\.evidence/)
   assert.match(api, /evidence: Array<\{/)
+})
+
+test('opening the task inspector from stages resolves a run or shows an explicit empty state', async () => {
+  const tasks = await source('src/views/knowledge/KnowledgeTasks.vue')
+  assert.match(tasks, /@click="openTaskInspection"/)
+  assert.match(tasks, /async function openTaskInspection\(\)/)
+  assert.match(tasks, /getKnowledgeTaskActivity\(taskId\)/)
+  assert.match(tasks, /activeTask\.value\?\.id !== taskId/)
+  assert.match(tasks, /await loadRunInspection\(response\.result\.run\?\.id \|\| ''\)/)
+  assert.match(tasks, /taskResultPreview\(task\.result_summary\)/)
 })
 
 test('research creation confirms an analyzed brief before persisting or running', async () => {

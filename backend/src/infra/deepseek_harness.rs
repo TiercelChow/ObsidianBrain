@@ -40,6 +40,9 @@ pub enum AgentRuntimeEvent {
     TextDelta {
         delta: String,
     },
+    TextReplace {
+        text: String,
+    },
     Thinking,
     ToolStarted {
         tool_call_id: String,
@@ -253,6 +256,7 @@ impl DeepSeekHarnessRuntime {
                             },
                         );
                         let mut output = String::new();
+                        let mut bridge = StreamBridge::default();
                         let mut cancel_channel_closed = false;
                         let idle_timer = tokio::time::sleep(idle_timeout);
                         tokio::pin!(idle_timer);
@@ -265,8 +269,9 @@ impl DeepSeekHarnessRuntime {
                                         SessionMessage::SessionMessage(dispatch) => {
                                             MatchDispatch::new(dispatch)
                                                 .if_notification(async |notification: SessionNotification| {
-                                                    handle_session_update(
-                                                        notification.update,
+                                                    bridge.handle(
+                                                        notification,
+                                                        &session.session_id().0,
                                                         &mut output,
                                                         events.as_ref(),
                                                     );
@@ -460,6 +465,107 @@ fn handle_session_update(
             }
         }
         _ => {}
+    }
+}
+
+/// The extension carries provisional tokens; native ACP carries the durable full
+/// message. Never concatenate the two, tool commentary, or a retried generation.
+#[derive(Default)]
+struct StreamBridge {
+    call_id: Option<String>,
+}
+
+impl StreamBridge {
+    fn handle(
+        &mut self,
+        notification: SessionNotification,
+        session_id: &str,
+        output: &mut String,
+        events: Option<&tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+    ) {
+        if notification.session_id.0.as_ref() != session_id {
+            return;
+        }
+        if let Some(meta) = notification
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("obsidianbrain/stream"))
+        {
+            // An unknown extension must not silently become an empty answer.
+            if meta.get("version").and_then(serde_json::Value::as_u64) != Some(1) {
+                return;
+            }
+            let Some(id) = meta
+                .get("call_id")
+                .and_then(serde_json::Value::as_str)
+                .filter(|id| !id.is_empty())
+            else {
+                return;
+            };
+            let op = meta
+                .get("op")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            if op == "begin" {
+                self.call_id = Some(id.to_string());
+                replace_stream_text(output, String::new(), events);
+                return;
+            }
+            if self.call_id.as_deref() != Some(id) {
+                return;
+            }
+            match op {
+                "append" => {
+                    if let Some(text) = meta.get("text").and_then(serde_json::Value::as_str) {
+                        output.push_str(text);
+                        emit_event(
+                            events,
+                            AgentRuntimeEvent::TextDelta {
+                                delta: text.to_string(),
+                            },
+                        );
+                    }
+                }
+                "thinking" => emit_event(events, AgentRuntimeEvent::Thinking),
+                "finish"
+                    if meta.get("tool_round").and_then(serde_json::Value::as_bool)
+                        == Some(true) =>
+                {
+                    replace_stream_text(output, String::new(), events);
+                }
+                "commit" => {
+                    let text = if meta.get("tool_round").and_then(serde_json::Value::as_bool)
+                        == Some(true)
+                    {
+                        Some("")
+                    } else {
+                        meta.get("text").and_then(serde_json::Value::as_str)
+                    };
+                    if let Some(text) = text {
+                        replace_stream_text(output, text.to_string(), events);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+        if self.call_id.is_some()
+            && matches!(notification.update, SessionUpdate::AgentMessageChunk(_))
+        {
+            return;
+        }
+        handle_session_update(notification.update, output, events);
+    }
+}
+
+fn replace_stream_text(
+    output: &mut String,
+    text: String,
+    events: Option<&tokio::sync::mpsc::UnboundedSender<AgentRuntimeEvent>>,
+) {
+    if *output != text {
+        *output = text.clone();
+        emit_event(events, AgentRuntimeEvent::TextReplace { text });
     }
 }
 
@@ -662,6 +768,165 @@ fn acp_error_message(detail: &str, credential_env: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn stream_frame(session: &str, data: serde_json::Value) -> SessionNotification {
+        serde_json::from_value(serde_json::json!({
+            "sessionId":session,
+            "update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":""}},
+            "_meta":{"obsidianbrain/stream": data}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn test_stream_bridge_tool_round_retry_commit_and_session_isolation() {
+        let mut bridge = StreamBridge::default();
+        let mut output = String::new();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        for (session, op, id, text, tools) in [
+            ("s", "begin", "1", "", false),
+            ("s", "append", "1", "准备查找", false),
+            ("s", "finish", "1", "", true),
+            ("s", "commit", "1", "准备查找", true),
+            ("s", "begin", "2", "", false),
+            ("s", "append", "2", "失败残片", false),
+            ("s", "begin", "3", "", false),
+            ("other", "append", "3", "越界", false),
+            ("s", "append", "2", "迟到", false),
+            ("s", "append", "3", "最终", false),
+            ("s", "append", "3", "答案", false),
+            ("s", "commit", "3", "最终答案。", false),
+        ] {
+            bridge.handle(stream_frame(session, serde_json::json!({"version":1,"op":op,"call_id":id,"text":text,"tool_round":tools})), "s", &mut output, Some(&tx));
+        }
+        bridge.handle(
+            SessionNotification::new(
+                "s",
+                SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                    agent_client_protocol::schema::v1::TextContent::new("最终答案。"),
+                ))),
+            ),
+            "s",
+            &mut output,
+            Some(&tx),
+        );
+        assert_eq!(output, "最终答案。");
+        let mut projected = String::new();
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                AgentRuntimeEvent::TextDelta { delta } => projected.push_str(&delta),
+                AgentRuntimeEvent::TextReplace { text } => projected = text,
+                _ => {}
+            }
+        }
+        assert_eq!(projected, output);
+    }
+
+    #[test]
+    fn test_stream_bridge_unsupported_metadata_keeps_legacy_fallback() {
+        let mut bridge = StreamBridge::default();
+        let mut output = String::new();
+        bridge.handle(
+            stream_frame(
+                "s",
+                serde_json::json!({"version":2,"op":"begin","call_id":"x"}),
+            ),
+            "s",
+            &mut output,
+            None,
+        );
+        bridge.handle(
+            SessionNotification::new(
+                "s",
+                SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                    agent_client_protocol::schema::v1::TextContent::new("旧版回答"),
+                ))),
+            ),
+            "s",
+            &mut output,
+            None,
+        );
+        assert_eq!(output, "旧版回答");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires pinned Harness CLI; loopback dummy model only, no real credentials"]
+    async fn test_real_harness_stream_plugin_delivers_multiple_deltas_without_duplicate_commit() {
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        let body = concat!(
+            "data: {\"id\":\"test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"first \"},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"test\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"second\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"test\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+        Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(body),
+            )
+            .mount(&server)
+            .await;
+        let workspace = tempfile::tempdir().unwrap();
+        let plugin = workspace.path().join("stream.mjs");
+        std::fs::write(
+            &plugin,
+            include_str!("../../plugins/harness-stream-bridge.mjs"),
+        )
+        .unwrap();
+        let patch = workspace.path().join("bridge.json");
+        let config = serde_json::json!([
+            {"id":"llm-pi-ai","config":{"providers":{"bridge-test":{"api":"openai-completions","baseURL":server.uri(),"apiKeyEnv":"OBRAIN_BRIDGE_DUMMY_KEY","models":[{"id":"test-model","name":"Test","contextWindow":32000,"maxTokens":1024,"reasoningEfforts":false}]}}}},
+            {"id":"agent-default-model","config":{"provider":"bridge-test","model":"test-model"}},
+            {"id":"acp","config":{"provider":"bridge-test","model":"test-model"}},
+            {"insert":[{"id":"obsidianbrain-stream","name":plugin,"disabled":false}]}
+        ]);
+        std::fs::write(&patch, config.to_string()).unwrap();
+        let dump = std::process::Command::new("npx")
+            .args([
+                "-y",
+                "@deepseek-ai/dsh@0.1.5-rc.1",
+                "--profile",
+                "acp",
+                "--dump-config",
+                "--patch",
+            ])
+            .arg(&patch)
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&dump.stdout).contains(plugin.to_string_lossy().as_ref()),
+            "plugin absent from composed profile"
+        );
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (_guard, cancel) = tokio::sync::watch::channel(false);
+        let answer = DeepSeekHarnessRuntime::with_timeout(Duration::from_secs(45))
+            .prompt_with_events(
+                AgentPromptRequest {
+                    command: "npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp".into(),
+                    model: String::new(),
+                    cwd: workspace.path().into(),
+                    prompt: "Say hello without tools".into(),
+                    patch_paths: vec![patch],
+                    credential_env: Some("OBRAIN_BRIDGE_DUMMY_KEY".into()),
+                    credential_value: Some("dummy-loopback-only".into()),
+                    timeout: Some(Duration::from_secs(45)),
+                },
+                Some(tx),
+                cancel,
+            )
+            .await
+            .unwrap();
+        assert_eq!(answer, "first second");
+        let mut deltas = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            if let AgentRuntimeEvent::TextDelta { delta } = event {
+                deltas.push(delta);
+            }
+        }
+        assert_eq!(deltas, vec!["first ", "second"]);
+    }
 
     #[test]
     fn test_duration_label_reports_the_effective_request_deadline() {
