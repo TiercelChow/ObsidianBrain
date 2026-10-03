@@ -42,3 +42,12 @@ test('neutral actions preserve accessible interaction and avoid nested filters',
   assert.match(material, /\.mock-sidebar[\s\S]*?backdrop-filter:\s*none/)
   assert.match(material, /@media print/)
 })
+
+test('website navigation uses the shared bounded lens and releases it during hot reload', async () => {
+  const main = await read('src/main.js')
+  assert.match(main, /import \{ attachGlassLens \} from ['"]\.\.\/\.\.\/frontend\/src\/utils\/glassOptics\.ts['"]/)
+  assert.match(main, /querySelectorAll\('\.header-inner'\)/)
+  assert.match(main, /import\.meta\.hot\.dispose\(/)
+  assert.doesNotMatch(main, /cloneNode|html2canvas|captureStream/)
+  assert.match(await read('src/materials.css'), /@media print[\s\S]+?\.glass-optics\s*\{\s*display:\s*none/)
+})

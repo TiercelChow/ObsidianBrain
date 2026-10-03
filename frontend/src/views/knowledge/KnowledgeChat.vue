@@ -139,7 +139,7 @@
           </template>
         </div>
 
-        <form class="chat-composer" @submit.prevent="ask(draft)">
+        <form v-glass-lens class="chat-composer" data-glass-rim @submit.prevent="ask(draft)">
           <button class="chat-short-context-button" type="button" aria-label="问答历史与设置" @click="contextVisible = true"><el-icon><ChatLineSquare /></el-icon></button>
           <textarea v-model="draft" :disabled="!activeBaseId" rows="1" placeholder="询问本书中的概念、章节或观点…" @compositionstart="composerIsComposing = true" @compositionend="finishComposerComposition" @keydown="handleComposerKeydown"></textarea>
           <button v-if="searching && runtimeReady" type="button" class="is-stop" aria-label="停止生成" @click="stopAnswer"><span class="stop-square"></span></button>
@@ -916,8 +916,8 @@ onBeforeUnmount(() => {
 .runtime-state { display: grid; justify-items: start; gap: 8px; }
 .runtime-state p { color: var(--text-muted); font-size: 11px; line-height: 1.6; }
 .boundary-note { display: flex; align-items: flex-start; gap: 7px; padding-top: 14px; border-top: 1px solid var(--border-faint); color: var(--text-faint); font-size: 10px; line-height: 1.5; }
-.chat-panel { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
-.message-list { min-width: 0; flex: 1; max-height: calc(100vh - 290px); min-height: 480px; overflow: auto; padding: 28px clamp(16px, 5vw, 70px); }
+.chat-panel { position: relative; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+.message-list { grid-area: 1 / 1; min-width: 0; max-height: calc(100vh - 210px); min-height: 480px; overflow: auto; padding: 28px clamp(16px, 5vw, 70px) 100px; scroll-padding-bottom: 100px; }
 .chat-welcome { min-height: 390px; display: grid; place-content: center; justify-items: center; gap: 10px; text-align: center; }
 .welcome-symbol { width: 65px; height: 65px; display: grid; place-items: center; margin-bottom: 5px; border-radius: 22px; background: radial-gradient(circle at 32% 24%, color-mix(in srgb, white 42%, transparent), transparent 42%), var(--accent-light); color: var(--accent); font-size: 28px; box-shadow: var(--shadow-md), var(--inset-highlight); }
 .chat-welcome h2 { font-size: 20px; }
@@ -957,10 +957,10 @@ onBeforeUnmount(() => {
 .evidence-grid strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .evidence-grid p { display: -webkit-box; overflow: hidden; color: var(--text-muted); font-size: 11px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .evidence-grid em { display: flex; align-items: center; gap: 3px; margin-top: 3px; color: var(--accent); font-size: 10px; font-style: normal; }
-.chat-composer { display: flex; align-items: flex-end; gap: 8px; margin: 0 16px 16px; padding: 9px 9px 9px 15px; border: 1px solid var(--border-subtle); border-radius: 18px; background: var(--bg-glass-strong); box-shadow: var(--shadow-md), var(--inset-highlight); }
+.chat-composer { grid-area: 1 / 1; align-self: end; z-index: 1; display: flex; align-items: flex-end; gap: 8px; margin: 0 16px 16px; padding: 9px 9px 9px 15px; border: 1px solid var(--border-subtle); border-radius: 28px; background: var(--bg-glass-strong); box-shadow: var(--shadow-md), var(--inset-highlight); }
 .chat-composer:focus-within { border-color: var(--accent-border); }
 .chat-composer textarea { min-width: 0; flex: 1; min-height: 38px; max-height: 120px; padding: 8px 0; resize: none; border: 0; outline: none; background: transparent; color: var(--text-primary); font: inherit; line-height: 1.5; }
-.chat-composer button { width: 38px; height: 38px; display: grid; place-items: center; flex: none; border: 0; border-radius: 12px; cursor: pointer; }
+.chat-composer button { width: 38px; height: 38px; display: grid; place-items: center; flex: none; border: 0; border-radius: 50%; cursor: pointer; }
 .chat-composer button:disabled { opacity: .35; cursor: default; }
 .chat-composer .chat-short-context-button { display: none; }
 .chat-composer button.is-stop { background: var(--text-primary); }
@@ -988,7 +988,7 @@ onBeforeUnmount(() => {
 @keyframes chat-status-shimmer { to { background-position: 0% 0; } }
 @media (min-width: 1151px) {
   .chat-layout, .chat-panel { min-height: 0; }
-  .message-list { min-height: 0; max-height: none; padding: 20px clamp(16px, 3vw, 40px); }
+  .message-list { min-height: 0; max-height: none; padding: 20px clamp(16px, 3vw, 40px) 100px; }
   .chat-welcome { min-height: 100%; }
   .chat-composer { margin: 0 12px 12px; }
 }
@@ -1006,7 +1006,7 @@ onBeforeUnmount(() => {
   .chat-mobile-context { min-width: 0; flex: none; display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: stretch; gap: 8px; margin-bottom: 10px; }
   .chat-mobile-context > button { min-height: 44px; display: grid; place-items: center; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); color: var(--accent); font-size: 20px; cursor: pointer; }
   .chat-panel { min-height: 0; flex: 1; }
-  .message-list { min-height: 0; max-height: none; padding: 16px 12px; overscroll-behavior-y: contain; }
+  .message-list { min-height: 0; max-height: none; padding: 16px 12px 100px; overscroll-behavior-y: contain; }
   .chat-welcome { min-height: 100%; }
   .message { max-width: 92%; }
   .evidence-grid { grid-template-columns: 1fr; }

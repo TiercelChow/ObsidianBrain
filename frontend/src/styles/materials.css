@@ -3,18 +3,24 @@
    !important bridges their existing scoped paint rules, never their geometry. */
 :root,
 :root[data-theme] {
-  --glass-floating-filter: blur(10px) saturate(145%) contrast(1.04);
+  --glass-floating-filter: blur(3px) saturate(120%) contrast(1.03);
+  --glass-lens-edge-filter: blur(7px) saturate(115%);
+  --glass-reader-toolbar-soften-filter: blur(5px);
+  --glass-reader-toolbar-edge-filter: blur(10px) saturate(125%);
+  --glass-reader-toolbar-sheen: linear-gradient(165deg, color-mix(in srgb, var(--glass-rim-light) 14%, transparent), transparent 18% 82%, color-mix(in srgb, var(--glass-rim-shadow) 14%, transparent));
+  --glass-scroll-edge-filter: blur(12px) saturate(110%);
+  --glass-scroll-edge-fade: 36px;
   --glass-panel-filter: blur(16px) saturate(120%);
-  --glass-structural-filter: blur(12px) saturate(120%);
+  --glass-structural-filter: blur(5px) saturate(115%);
   --glass-content-filter: none;
   --glass-control-filter: none;
   --glass-scrim-filter: blur(4px) saturate(95%);
-  --glass-sheen: linear-gradient(165deg, rgba(255, 255, 255, .075), transparent 18% 76%, rgba(255, 255, 255, .015));
+  --glass-sheen: linear-gradient(175deg, rgba(255, 255, 255, .08), transparent 8% 92%, rgba(255, 255, 255, .025));
   --glass-media-fill: rgba(36, 38, 44, .64);
   --glass-media-label: #f7f7fa;
   --glass-media-edge: rgba(255, 255, 255, .24);
   --glass-inner-edge: inset 0 1px 0 var(--glass-rim-light), inset 1px 0 0 var(--glass-rim-side), inset 0 -1px 0 var(--glass-rim-bottom), inset -1px 0 0 var(--glass-rim-shadow);
-  --glass-floating-shadow: var(--glass-inner-edge), 0 0 0 .5px var(--glass-outer-edge), inset 0 0 8px var(--glass-inner-light), 0 8px 24px var(--glass-shadow), 0 2px 4px var(--glass-contact-shadow);
+  --glass-floating-shadow: var(--glass-inner-edge), 0 0 0 .5px var(--glass-outer-edge), inset 0 2px 5px var(--glass-inner-light), inset 0 -2px 5px var(--glass-contact-shadow), 0 6px 18px var(--glass-shadow), 0 1px 3px var(--glass-contact-shadow);
   --glass-panel-shadow: var(--glass-inner-edge), 0 20px 56px var(--glass-shadow), 0 4px 12px var(--glass-contact-shadow);
   --glass-content-shadow: inset 0 1px 0 var(--glass-content-edge), 0 2px 6px var(--glass-contact-shadow);
   --glass-label: var(--text-secondary);
@@ -35,19 +41,20 @@
   --bg-card: var(--glass-solid);
   --border-glass: var(--glass-edge);
   --border-subtle: var(--glass-edge-soft);
-  --glass-blur: 10px;
-  --glass-saturate: 135%;
+  --glass-blur: 3px;
+  --glass-saturate: 120%;
   --inset-highlight: var(--glass-inner-edge);
 }
 :root,
 :root[data-theme="light"] {
-  --glass-floating-fill: rgba(255, 255, 255, .22);
-  --glass-panel-fill: rgba(248, 250, 253, .90);
-  --glass-structural-fill: rgba(217, 226, 239, .36);
+  --glass-floating-fill: rgba(255, 255, 255, .12);
+  --glass-panel-fill: rgba(248, 250, 253, .85);
+  --glass-structural-fill: rgba(226, 231, 238, .24);
   --glass-content-fill: rgba(255, 255, 255, .82);
   --glass-control-fill: rgba(255, 255, 255, .25);
   --glass-scrim-fill: rgba(12, 14, 22, .25);
   --glass-solid: #f8fafc;
+  --glass-reader-toolbar-fill: color-mix(in srgb, var(--glass-solid) 66%, transparent);
   --glass-edge: rgba(255, 255, 255, .66);
   --glass-edge-soft: rgba(66, 81, 108, .13);
   --glass-outer-edge: rgba(47, 64, 91, .15);
@@ -55,7 +62,7 @@
   --glass-rim-side: rgba(255, 255, 255, .48);
   --glass-rim-bottom: rgba(255, 255, 255, .62);
   --glass-rim-shadow: rgba(44, 64, 94, .22);
-  --glass-inner-light: rgba(255, 255, 255, .025);
+  --glass-inner-light: rgba(255, 255, 255, .065);
   --glass-content-edge: rgba(255, 255, 255, .36);
   --glass-shadow: rgba(35, 40, 63, .13);
   --glass-contact-shadow: rgba(35, 40, 63, .045);
@@ -64,13 +71,14 @@
   --glass-success-label: #24723e;
 }
 :root[data-theme="dark"] {
-  --glass-floating-fill: rgba(53, 64, 81, .34);
-  --glass-panel-fill: rgba(27, 34, 46, .93);
-  --glass-structural-fill: rgba(36, 46, 63, .50);
+  --glass-floating-fill: rgba(36, 38, 42, .26);
+  --glass-panel-fill: rgba(27, 34, 46, .89);
+  --glass-structural-fill: rgba(31, 35, 43, .32);
   --glass-content-fill: rgba(28, 34, 45, .90);
   --glass-control-fill: rgba(255, 255, 255, .04);
   --glass-scrim-fill: rgba(0, 0, 0, .48);
   --glass-solid: #1c222d;
+  --glass-reader-toolbar-fill: color-mix(in srgb, var(--glass-solid) 70%, transparent);
   --glass-edge: rgba(235, 244, 255, .21);
   --glass-edge-soft: rgba(255, 255, 255, .10);
   --glass-outer-edge: rgba(0, 0, 0, .30);
@@ -78,7 +86,7 @@
   --glass-rim-side: rgba(255, 255, 255, .19);
   --glass-rim-bottom: rgba(255, 255, 255, .28);
   --glass-rim-shadow: rgba(0, 0, 0, .28);
-  --glass-inner-light: rgba(255, 255, 255, .025);
+  --glass-inner-light: rgba(255, 255, 255, .075);
   --glass-content-edge: rgba(255, 255, 255, .085);
   --glass-shadow: rgba(0, 0, 0, .32);
   --glass-contact-shadow: rgba(0, 0, 0, .18);
@@ -87,13 +95,14 @@
   --glass-success-label: #78d69a;
 }
 :root[data-theme="eye-care"] {
-  --glass-floating-fill: rgba(243, 251, 232, .24);
-  --glass-panel-fill: rgba(231, 240, 218, .92);
-  --glass-structural-fill: rgba(194, 210, 181, .36);
+  --glass-floating-fill: rgba(243, 251, 232, .14);
+  --glass-panel-fill: rgba(231, 240, 218, .87);
+  --glass-structural-fill: rgba(208, 219, 197, .25);
   --glass-content-fill: rgba(241, 246, 233, .82);
   --glass-control-fill: rgba(247, 254, 236, .24);
   --glass-scrim-fill: rgba(19, 35, 20, .28);
   --glass-solid: #e7efdc;
+  --glass-reader-toolbar-fill: color-mix(in srgb, var(--glass-solid) 70%, transparent);
   --glass-edge: rgba(245, 255, 232, .49);
   --glass-edge-soft: rgba(54, 83, 40, .18);
   --glass-outer-edge: rgba(43, 69, 35, .16);
@@ -101,7 +110,7 @@
   --glass-rim-side: rgba(245, 255, 232, .35);
   --glass-rim-bottom: rgba(245, 255, 232, .51);
   --glass-rim-shadow: rgba(40, 66, 28, .18);
-  --glass-inner-light: rgba(248, 255, 233, .025);
+  --glass-inner-light: rgba(248, 255, 233, .055);
   --glass-content-edge: rgba(245, 255, 232, .38);
   --glass-shadow: rgba(30, 58, 22, .15);
   --glass-contact-shadow: rgba(30, 58, 22, .055);
@@ -329,7 +338,7 @@
   box-shadow: none !important;
 }
 /* Opt-in only: hosts are positioned and do not already own ::before.
-   No copied backdrop, no displacement texture, no hit-area or text overlay. */
+   Rim and background optics never intercept input or filter foreground labels. */
 :where(.task-toolbar, .reader-topbar, .search-box)[data-glass-rim] { position: relative; }
 @supports ((mask-composite: exclude) or (-webkit-mask-composite: xor)) {
   [data-glass-rim]::before {
@@ -347,6 +356,102 @@
     mask-composite: exclude;
   }
 }
+/* The host must not itself be a filtered backdrop root: the independent lens
+   samples the actual scrolling document, not a previously frosted parent. */
+.chat-composer { position: relative; }
+:root[data-theme] [data-glass-lens] {
+  isolation: isolate;
+  background: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.glass-optics-defs { position: fixed; width: 0; height: 0; pointer-events: none; }
+.glass-optics {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--glass-sheen), var(--glass-floating-fill);
+  backdrop-filter: var(--glass-lens-filter, var(--glass-floating-filter));
+  -webkit-backdrop-filter: var(--glass-lens-filter, var(--glass-floating-filter));
+}
+/* A continuous edge haze remains available in WebKit without SVG refraction.
+   The two masks form a feathered perimeter, not a white glow in the center. */
+.glass-optics__edge {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  backdrop-filter: var(--glass-lens-edge-filter);
+  -webkit-backdrop-filter: var(--glass-lens-edge-filter);
+  -webkit-mask-image: linear-gradient(to bottom, #000, transparent 12px calc(100% - 12px), #000), linear-gradient(to right, #000, transparent 12px calc(100% - 12px), #000);
+  mask-image: linear-gradient(to bottom, #000, transparent 12px calc(100% - 12px), #000), linear-gradient(to right, #000, transparent 12px calc(100% - 12px), #000);
+  -webkit-mask-composite: source-over;
+  mask-composite: add;
+}
+/* SVG already bends the rounded perimeter; the secondary haze is gentler. */
+[data-glass-lens="svg"] .glass-optics__edge { opacity: .55; }
+/* Reading controls sit over dense moving text, so their glass is thicker than
+   chips. Keep the bounded refraction, but soften legible background letterforms
+   and tint the center enough to protect foreground icons/title in every theme. */
+:root[data-theme] .reader-mobile-toolbar {
+  --material-border: color-mix(in srgb, var(--glass-rim-light) 45%, var(--glass-edge));
+}
+.reader-mobile-toolbar > .glass-optics {
+  background: var(--glass-reader-toolbar-sheen), var(--glass-reader-toolbar-fill);
+  backdrop-filter: var(--glass-lens-filter, var(--glass-floating-filter)) var(--glass-reader-toolbar-soften-filter);
+  -webkit-backdrop-filter: var(--glass-lens-filter, var(--glass-floating-filter)) var(--glass-reader-toolbar-soften-filter);
+}
+.reader-mobile-toolbar .glass-optics__edge {
+  opacity: .8;
+  backdrop-filter: var(--glass-reader-toolbar-edge-filter);
+  -webkit-backdrop-filter: var(--glass-reader-toolbar-edge-filter);
+}
+:root[data-theme] .reader-mobile-toolbar button { color: var(--text-primary); }
+/* A header is an open scroll edge, not a closed floating capsule. No stroke,
+   rim sheen or contact shadow: only the background blur/tint tapers out. */
+:root[data-theme] [data-glass="scroll-edge"] {
+  isolation: isolate;
+  overflow: visible;
+  background: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.reader-topbar[data-glass="scroll-edge"] { position: relative; z-index: 2; }
+[data-glass="scroll-edge"] > .glass-optics {
+  bottom: calc(var(--glass-scroll-edge-fade) * -1);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--bg-base) 35%, transparent);
+  backdrop-filter: var(--glass-floating-filter);
+  -webkit-backdrop-filter: var(--glass-floating-filter);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - var(--glass-scroll-edge-fade) - 8px), rgba(0, 0, 0, .72) calc(100% - 28px), rgba(0, 0, 0, .24) calc(100% - 12px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - var(--glass-scroll-edge-fade) - 8px), rgba(0, 0, 0, .72) calc(100% - 28px), rgba(0, 0, 0, .24) calc(100% - 12px), transparent 100%);
+}
+[data-glass="scroll-edge"] .glass-optics__edge {
+  border-radius: 0;
+  backdrop-filter: var(--glass-scroll-edge-filter);
+  -webkit-backdrop-filter: var(--glass-scroll-edge-filter);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, .85) 35%, transparent 75%);
+  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, .85) 35%, transparent 75%);
+}
+.mobile-global-header[data-glass="scroll-edge"] > .glass-optics {
+  opacity: 0;
+  transition: opacity var(--motion-normal) var(--ease-emphasized);
+}
+.mobile-global-header.header-scrolled[data-glass="scroll-edge"] > .glass-optics { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .mobile-global-header[data-glass="scroll-edge"] > .glass-optics { transition: none; }
+}
+.chat-composer :is(textarea, button), .reader-document-label {
+  text-shadow: 0 1px 2px color-mix(in srgb, var(--bg-base) 85%, transparent);
+}
+:root[data-theme] .chat-composer textarea::placeholder { color: var(--text-secondary) !important; }
+.reader-page.is-fs-transitioning .glass-optics { display: none; }
 /* Solid values propagate through aliases and surface roles, including lazy pages. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   :root[data-theme] {
@@ -356,11 +461,17 @@
     --glass-content-fill: var(--glass-solid);
     --glass-control-fill: var(--glass-solid);
     --glass-floating-filter: none;
+    --glass-lens-edge-filter: none;
+    --glass-reader-toolbar-soften-filter: none;
+    --glass-reader-toolbar-edge-filter: none;
+    --glass-scroll-edge-filter: none;
     --glass-panel-filter: none;
     --glass-structural-filter: none;
     --glass-scrim-filter: none;
     --glass-media-fill: #202127;
   }
+  :root[data-theme] [data-glass="scroll-edge"] { background: var(--glass-solid) !important; }
+  [data-glass="scroll-edge"] > .glass-optics { display: none; }
 }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   :root[data-theme] {
@@ -370,6 +481,10 @@
     --glass-content-fill: var(--glass-solid);
     --glass-control-fill: var(--glass-solid);
     --glass-floating-filter: none;
+    --glass-lens-edge-filter: none;
+    --glass-reader-toolbar-soften-filter: none;
+    --glass-reader-toolbar-edge-filter: none;
+    --glass-scroll-edge-filter: none;
     --glass-panel-filter: none;
     --glass-structural-filter: none;
     --glass-scrim-filter: none;
@@ -378,6 +493,9 @@
     --glass-action-sheen: linear-gradient(transparent, transparent);
   }
   [data-glass-rim]::before { display: none; }
+  :root[data-theme] [data-glass-lens] { background: var(--glass-solid) !important; }
+  :root[data-theme] [data-glass="scroll-edge"] { background: var(--glass-solid) !important; }
+  .glass-optics { display: none; }
 }
 @media (prefers-contrast: more) {
   :root[data-theme] { --glass-edge: var(--text-muted); --glass-edge-soft: var(--text-muted); --glass-field-edge: var(--text-muted); }
@@ -391,6 +509,10 @@
     --glass-content-fill: Canvas;
     --glass-control-fill: Canvas;
     --glass-floating-filter: none;
+    --glass-lens-edge-filter: none;
+    --glass-reader-toolbar-soften-filter: none;
+    --glass-reader-toolbar-edge-filter: none;
+    --glass-scroll-edge-filter: none;
     --glass-panel-filter: none;
     --glass-structural-filter: none;
     --glass-scrim-filter: none;
@@ -410,4 +532,7 @@
     --glass-success-label: ButtonText;
   }
   [data-glass-rim]::before { display: none; }
+  :root[data-theme] [data-glass-lens] { background: Canvas !important; }
+  :root[data-theme] [data-glass="scroll-edge"] { background: Canvas !important; }
+  .glass-optics { display: none; }
 }

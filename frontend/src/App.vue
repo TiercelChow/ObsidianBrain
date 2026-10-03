@@ -5,7 +5,7 @@
     :class="{ 'mobile-focus': isMobile && mobileFocusMode, 'has-mobile-subnav': !!mobileSubnav?.items.length }"
   >
     <!-- Mobile root header: one title. Page-level actions occupy the right slot. -->
-    <div v-if="isMobile && !mobileFocusMode" class="mobile-global-header" :class="{ 'header-scrolled': isScrolled }">
+    <div v-if="isMobile && !mobileFocusMode" v-glass-lens="'css'" class="mobile-global-header" data-glass="scroll-edge" :class="{ 'header-scrolled': isScrolled }">
       <div class="mobile-header-spacer"></div>
       <span class="mobile-page-title">{{ currentTitle }}</span>
       <div class="mobile-header-spacer"></div>
@@ -491,14 +491,6 @@ code, pre, .code-block { font-family: var(--font-mono); }
   display: flex;
   align-items: center;
   padding: var(--safe-top) calc(12px + var(--safe-right)) 0 calc(12px + var(--safe-left));
-  transition: background-color var(--motion-normal) var(--ease-emphasized),
-              box-shadow var(--motion-normal) var(--ease-emphasized);
-}
-.mobile-global-header.header-scrolled {
-  background: var(--bg-glass-strong);
-  backdrop-filter: var(--glass-floating-filter);
-  -webkit-backdrop-filter: var(--glass-floating-filter);
-  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
 }
 
 .mobile-page-title {

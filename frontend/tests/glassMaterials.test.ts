@@ -13,7 +13,7 @@ test('one material entry owns all three themes and distinct surface weights', as
       assert.match(block, new RegExp(`--glass-${token}:`), `${theme}: ${token}`)
     }
   }
-  assert.match(css, /--glass-floating-filter:\s*blur\(10px\)/)
+  assert.match(css, /--glass-floating-filter:\s*blur\(3px\)/)
   assert.match(css, /--glass-panel-filter:\s*blur\(16px\)/)
   assert.match(css, /--bg-primary:\s*var\(--glass-solid\)/)
 })
@@ -28,7 +28,7 @@ test('floating controls and overlays share optics while content and nested field
   assert.match(css, /\.task-toolbar\s+\.task-search[\s\S]+?--material-filter:\s*none/)
 })
 
-test('curved highlights are a pointer-transparent masked perimeter, not a bright spot or extra filter', async () => {
+test('rim highlights stay pointer-transparent and filter-free beside the independent optical layer', async () => {
   const [css, dock] = await Promise.all([source('styles/materials.css'), source('components/MobileDock.vue')])
   assert.match(dock, /class="mobile-dock dock-glass"\s+data-glass-rim/)
   assert.match(dock, /class="mobile-sub-dock dock-glass"\s+data-glass-rim/)
@@ -53,8 +53,8 @@ test('transparency, contrast, forced colors and unsupported filters have opaque 
 
 test('reader title shares optics and preserves its transition-time flattening', async () => {
   const reader = await source('views/Reader.vue')
-  assert.match(reader, /--title-glass-fill:\s*var\(--glass-floating-fill\)/)
-  assert.match(reader, /backdrop-filter:\s*var\(--glass-floating-filter\)/)
+  assert.match(reader, /heading\.setAttribute\('data-glass', 'scroll-edge'\)/)
+  assert.match(reader, /attachGlassLens\(heading, \{ mode: 'css' \}\)/)
   assert.match(reader, /\.reader-page\.is-fs-transitioning[\s\S]+?backdrop-filter:\s*none\s*!important/)
 })
 

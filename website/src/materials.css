@@ -1,4 +1,4 @@
-/* CSS-only shared optics: no application runtime, data or API dependency. */
+/* Shared optics and a small geometry-only lens helper; no app/data dependency. */
 @import '../../frontend/src/styles/materials.css';
 
 .header-inner { position: relative; }
@@ -129,6 +129,8 @@ html:not(.js) :is(.theme-toggle, .menu-toggle) { display: none; }
 }
 
 @media print {
+  .glass-optics { display: none; }
+  html[data-theme] [data-glass-lens] { background: white !important; box-shadow: none !important; }
   html[data-theme] :is(.feature-card, .guide-card, .diagram, .glass-card, .glass-panel, .handbook-cover) {
     background: white !important;
     border-color: #777 !important;

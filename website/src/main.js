@@ -1,5 +1,9 @@
 import './style.css'
 import './materials.css'
+import { attachGlassLens } from '../../frontend/src/utils/glassOptics.ts'
+
+const glassCleanup = [...document.querySelectorAll('.header-inner')].map(host => attachGlassLens(host))
+if (import.meta.hot) import.meta.hot.dispose(() => glassCleanup.forEach(cleanup => cleanup()))
 
 const root = document.documentElement
 const themeButton = document.querySelector('[data-theme-toggle]')

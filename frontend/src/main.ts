@@ -1,4 +1,4 @@
-import { createApp } from 'vue'
+import { createApp, type DirectiveBinding } from 'vue'
 import { createPinia } from 'pinia'
 import {
   ElButton,
@@ -26,6 +26,7 @@ import './styles/motion.css'
 import './styles/knowledge.css'
 import App from './App.vue'
 import router from './router'
+import { attachGlassLens, detachGlassLens } from './utils/glassOptics'
 
 // Apply saved theme BEFORE app mount to prevent flash of wrong theme
 const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | 'eye-care' | null
@@ -59,5 +60,11 @@ for (const [name, component] of Object.entries(elementComponents)) {
 
 app.use(createPinia())
 app.use(router)
+app.directive('glass-lens', {
+  mounted: (host: HTMLElement, binding: DirectiveBinding) => {
+    attachGlassLens(host, { mode: binding.value === 'css' ? 'css' : 'auto' })
+  },
+  beforeUnmount: detachGlassLens,
+})
 
 app.mount('#app')

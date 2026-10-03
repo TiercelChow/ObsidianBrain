@@ -15,7 +15,7 @@
     :data-settled="progress === 0 || progress === 100"
     :data-rebound="rebound"
   >
-    <nav v-if="subnav?.items.length" class="mobile-sub-dock dock-glass" data-glass-rim :aria-label="subnav.label">
+    <nav v-if="subnav?.items.length" v-glass-lens class="mobile-sub-dock dock-glass" data-glass-rim :aria-label="subnav.label">
       <template v-for="item in subnav.items" :key="item.id">
         <router-link v-if="item.to" :to="item.to" class="mobile-sub-dock-item" :class="{ active: item.active }" :aria-current="item.active ? 'page' : undefined" :aria-label="item.label">
           {{ item.compactLabel || item.label }}
@@ -26,7 +26,7 @@
       </template>
     </nav>
 
-    <div class="mobile-dock dock-glass" data-glass-rim>
+    <div v-glass-lens class="mobile-dock dock-glass" data-glass-rim>
       <nav id="mobile-main-navigation" class="mobile-dock-links" aria-label="主要导航" :aria-hidden="compact ? 'true' : undefined" :inert="compact ? true : undefined">
         <router-link :to="{ path: '/reader', query: { view: 'shelf' } }" class="mobile-dock-item" :class="{ active: section === 'reader' }" :aria-current="section === 'reader' ? 'page' : undefined">
           <el-icon><Files /></el-icon><span>阅境轩</span>

@@ -20,7 +20,7 @@
 
     <!-- Compact trigger bar — always visible; the view switch leads it like
          the Tasks toolbar, reading controls join in read view. -->
-    <div class="reader-topbar glass-surface" data-glass-rim>
+    <div v-glass-lens="'css'" class="reader-topbar glass-surface" data-glass="scroll-edge">
       <div class="view-switch" aria-label="视图切换">
         <span class="switch-indicator" :class="{ read: viewMode === 'read' }"></span>
         <button type="button" :class="{ active: viewMode === 'shelf' }" @click="changeView('shelf')">书架</button>
@@ -208,6 +208,7 @@
     <div
       v-if="viewMode === 'read' && mobileToolbarState.rendered"
       class="reader-mobile-toolbar"
+      v-glass-lens
       data-glass-rim
       :class="{
         'is-visible': mobileToolbarState.visible,
@@ -339,6 +340,7 @@ import { makeReaderImageResolvers } from '@/utils/readerImages'
 import { resolveRelativePath } from '@/utils/markdownImages'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { normalizeHeadingAnchor } from '@/markdown/headingAnchors'
+import { attachGlassLens, detachGlassLens } from '@/utils/glassOptics'
 import { useBookshelf } from '@/composables/useBookshelf'
 import { clampPdfPage } from '@/utils/readerBooks'
 import {
@@ -682,6 +684,21 @@ const contentRef = ref<HTMLElement | null>(null)
 const readerPageRef = ref<HTMLElement | null>(null)
 const readerBodyRef = ref<HTMLElement | null>(null)
 const isFullscreen = ref(false)
+let titleLensCleanup: (() => void) | undefined
+function syncTitleLens(article?: HTMLElement) {
+  titleLensCleanup?.()
+  titleLensCleanup = undefined
+  if (!isFullscreen.value) return
+  const heading = (article ?? currentMarkdownBody())?.querySelector<HTMLElement>('h1')
+  if (!heading) return
+  heading.setAttribute('data-glass', 'scroll-edge')
+  const dispose = attachGlassLens(heading, { mode: 'css' })
+  titleLensCleanup = () => {
+    dispose()
+    heading.removeAttribute('data-glass')
+  }
+}
+watch(isFullscreen, () => syncTitleLens(), { flush: 'post' })
 const isMobileImmersive = ref(false)
 const isImmersive = computed(() => isFullscreen.value || isMobileImmersive.value)
 // Hide the mobile toolbar grip while immersed/fullscreen (the header + toolbar
@@ -1088,6 +1105,7 @@ async function onSelectFile(path: string) {
 async function onArticleEnter(el: Element) {
   // Only the markdown <article> needs enhancing; PdfViewer handles itself.
   if (el.tagName !== 'ARTICLE') return
+  syncTitleLens(el as HTMLElement)
   // Don't reset scroll if we're jumping to a cross-file anchor.
   if (contentRef.value && !pendingAnchor.value) contentRef.value.scrollTop = 0
   buildToc(el as HTMLElement)
@@ -1116,6 +1134,8 @@ async function onArticleEnter(el: Element) {
 }
 
 function onContentAfterLeave(el: Element) {
+  const heading = el.querySelector<HTMLElement>('h1')
+  if (heading) detachGlassLens(heading)
   if (el.tagName === 'ARTICLE') cleanupMarkdown(el as HTMLElement)
 }
 
@@ -1336,6 +1356,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  titleLensCleanup?.()
   leaveMobileImmersive()
   flushProgressNow() // route-leave flush point (FR-16)
   stopRestoreCorrection()
@@ -1438,13 +1459,9 @@ onBeforeUnmount(() => {
 .reader-page:fullscreen .markdown-body {
   --fullscreen-document-gutter: 14px;
 }
-/* The glass uses the same outer width as .markdown-body. Its layered, static
-   highlights imply refraction without adding a perpetual paint animation. */
+/* An open scroll edge spans the document width. Only its background fades;
+   the shared optical plane extends below the title, without a capsule rim. */
 .reader-page:fullscreen .markdown-body :deep(h1:first-of-type) {
-  --title-glass-fill: var(--glass-floating-fill);
-  --title-glass-edge: var(--glass-edge);
-  --title-glass-glint: var(--glass-rim-light);
-  --title-glass-shadow: var(--glass-shadow);
   position: sticky;
   top: 0;
   z-index: 10;
@@ -1452,17 +1469,17 @@ onBeforeUnmount(() => {
   max-width: none;
   margin: 0 calc(var(--fullscreen-document-gutter) * -1) 24px;
   padding: 14px var(--fullscreen-document-gutter);
-  overflow: hidden;
+  overflow: visible;
   isolation: isolate;
   color: var(--text-primary);
   font-weight: 680;
   letter-spacing: -0.025em;
-  background: var(--glass-sheen), var(--title-glass-fill);
-  border: 1px solid var(--title-glass-edge);
-  border-radius: 18px;
-  backdrop-filter: var(--glass-floating-filter);
-  -webkit-backdrop-filter: var(--glass-floating-filter);
-  box-shadow: var(--glass-floating-shadow);
+  background: none;
+  border: 0;
+  border-radius: 0;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
   text-shadow: 0 1px 0 color-mix(in srgb, var(--bg-base) 46%, transparent);
 }
 /* Desktop fullscreen: wider document, more breathing room. */
@@ -1495,8 +1512,8 @@ onBeforeUnmount(() => {
 }
 .reader-page.is-fs-transitioning .pane { background: var(--bg-glass-strong); }
 .reader-page.is-fs-transitioning .markdown-body :deep(h1:first-of-type) {
-  background: var(--title-glass-fill);
-  box-shadow: inset 0 1px 0 var(--title-glass-glint), 0 6px 20px var(--title-glass-shadow);
+  background: transparent;
+  box-shadow: none;
 }
 
 /* Floating fullscreen UI — auto-hides after inactivity. */

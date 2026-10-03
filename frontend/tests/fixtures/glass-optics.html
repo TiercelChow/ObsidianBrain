@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>清透玻璃 — 文字背景验证</title>
+  <link rel="stylesheet" href="../../src/styles/tokens.css">
+  <link rel="stylesheet" href="../../src/styles/materials.css">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #050608; color: #f3f4f6; font-family: system-ui, sans-serif; }
+    html[data-theme="light"] body { background: #e9edf2; color: #172033; }
+    html[data-theme="eye-care"] body { background: #d8e0d0; color: #1b3020; }
+    article { max-width: 640px; margin: auto; padding: 110px 24px 50px; }
+    article p { font-size: 24px; font-weight: 570; line-height: 1.8; margin: 0 0 34px; }
+    article h1 { font-size: 30px; }
+    header { position: fixed; top: 0; left: 0; right: 0; min-height: 82px; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; z-index: 1; }
+    header strong { font-size: 24px; }
+    .round { position: relative; border-radius: 50%; width: 52px; height: 52px; font-size: 23px; }
+    button { border: 1px solid var(--glass-edge); color: var(--text-primary); cursor: pointer; font: inherit; }
+    .bottom { position: fixed; bottom: 18px; left: 16px; right: 16px; z-index: 1; }
+    .chips { display: flex; gap: 8px; margin-bottom: 12px; }
+    .chip { position: relative; min-height: 42px; border-radius: 22px; flex: 1; font-size: 14px; }
+    .composer { position: relative; border: 1px solid var(--glass-edge); border-radius: 34px; min-height: 68px; padding: 12px 16px; display: flex; align-items: center; gap: 14px; }
+    .composer input { width: 100%; min-width: 0; color: var(--text-primary); border: 0; font: inherit; font-size: 18px; background: transparent; outline: none; }
+    .composer button { border: 0; background: transparent; font-size: 28px; padding: 0; }
+  </style>
+</head>
+<body>
+  <header data-glass="scroll-edge"><button class="round" data-glass="floating" data-glass-rim aria-label="切换主题">◐</button><strong>清透阅读</strong><button class="round" data-glass="floating" data-glass-rim aria-label="切换折射兼容模式">⋯</button></header>
+  <article>
+    <h1>清透，而不是毛玻璃</h1>
+    <p>玻璃中央保留背景的层次，文字沿着弧形边缘，逐渐弯折、散开，又平滑地回到清晰的正文。</p>
+    <p>云朵缝好了，小灰鼠小心地把它揣进怀里，要用它把缺了一块的月亮补圆。</p>
+    <p>看着天天变小的月亮，小灰鼠急得满头大汗。每次站到树顶，都离月亮差一大截——只有找到林子里最高的树，够到月亮，才能缝补。</p>
+    <p>功夫不负有心人，小灰鼠继续在森林里找着，终于找到了那棵最高的望天树。它兴奋地跑过去，趁着月亮还没出来，早早爬上树梢。</p>
+    <p>一颗流星擦亮夜空，小灰鼠急忙问：“请问月亮什么时候出来？”流星一闪而过，根本没听清它说什么。</p>
+    <p>整整一个晚上，小灰鼠连月亮的影子都没看到。天蒙蒙亮，它仍在寻找月亮，直到太阳公公醒了。</p>
+    <p>滚动穿过底部玻璃，背景字形有轻微的折射，按钮与输入的文字保持清楚。没有截取正文，没有把整页复制一遍。</p>
+  </article>
+  <div class="bottom">
+    <div class="chips"><button class="chip" data-glass="floating" data-glass-rim>深度思考</button><button class="chip" data-glass="floating" data-glass-rim>知识问答</button><button class="chip" data-glass="floating" data-glass-rim>研究任务</button></div>
+    <form class="composer" data-glass="floating" data-glass-rim><button type="button" aria-label="声音">◎</button><input aria-label="消息" placeholder="发消息或按住说话"><button type="button" aria-label="添加">⊕</button></form>
+  </div>
+  <script type="module">
+    import { attachGlassLens } from '../../src/utils/glassOptics.ts'
+    attachGlassLens(document.querySelector('header'), { mode: 'css' })
+    const hosts = [...document.querySelectorAll('[data-glass="floating"]')]
+    let cleanup = hosts.map(host => attachGlassLens(host))
+    let mode = 'auto'
+    document.querySelector('[aria-label="切换主题"]').addEventListener('click', () => {
+      const themes = ['dark', 'light', 'eye-care']
+      document.documentElement.dataset.theme = themes[(themes.indexOf(document.documentElement.dataset.theme) + 1) % themes.length]
+    })
+    document.querySelector('[aria-label="切换折射兼容模式"]').addEventListener('click', () => {
+      cleanup.forEach(dispose => dispose())
+      mode = mode === 'auto' ? 'css' : 'auto'
+      cleanup = hosts.map(host => attachGlassLens(host, { mode }))
+    })
+    document.querySelector('form').addEventListener('submit', event => event.preventDefault())
+  </script>
+</body>
+</html>
