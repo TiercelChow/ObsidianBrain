@@ -9,6 +9,7 @@
       'is-mobile-immersive': isMobileImmersive,
       'is-read-view': viewMode === 'read',
       'has-document': Boolean(displayedFile),
+      'is-pdf-reading': viewMode === 'read' && fileKind === 'pdf' && Boolean(displayedFile),
     }"
   >
     <header class="page-header">
@@ -44,6 +45,11 @@
         <span v-if="rootPath" class="pt-path">搜索当前目录中的 Markdown 与 PDF</span>
         <span v-else class="pt-hint">请先从书架选择书籍</span>
       </button>
+      <div v-if="viewMode === 'read' && fileKind === 'pdf' && displayedFile" class="reader-pdf-controls" aria-label="PDF 缩放">
+        <button type="button" class="icon-btn" aria-label="缩小 PDF" :disabled="pdfZoomRatio <= .6" @click="setPdfZoom(-1)"><el-icon><Minus /></el-icon></button>
+        <button type="button" class="pdf-fit-btn" aria-label="PDF 适宽" title="恢复整页适宽" @click="fitPdf">{{ Math.round(pdfZoomRatio * 100) }}%</button>
+        <button type="button" class="icon-btn" aria-label="放大 PDF" :disabled="pdfZoomRatio >= 4" @click="setPdfZoom(1)"><el-icon><Plus /></el-icon></button>
+      </div>
       <el-button v-show="viewMode === 'read'" class="icon-btn reader-fullscreen-btn" :title="isImmersive ? '退出沉浸阅读' : '沉浸阅读'" @click="toggleFullscreen">
         <el-icon><FullScreen /></el-icon>
       </el-button>
@@ -136,6 +142,7 @@
         class="pane pane-center"
         @scroll="onContentScroll"
         @touchmove.passive="revealMobileToolbar"
+        @click="fileKind === 'pdf' && revealMobileToolbar()"
         @mouseup="captureMarkdownSelection"
         @touchend="captureMarkdownSelection"
       >
@@ -152,6 +159,7 @@
             @outline="onPdfOutline"
             @pagechange="onPdfPageChange"
             @pagecount="onPdfPageCount"
+            @zoomchange="pdfZoomRatio = $event"
           />
           <article
             v-else-if="renderedHtml"
@@ -237,20 +245,21 @@
         type="button"
         class="reader-document-center"
         :aria-label="`${mobileDocumentLabel}，点按恢复适宽`"
+        title="双指缩放 · 横向滑动查看 · 点按恢复整页适宽"
         @click="fitPdf"
       >
         <span class="reader-document-label">{{ mobileDocumentLabel }}</span>
-        <small>{{ pdfCurrentPage || 1 }} / {{ pdfPageCount || '—' }}</small>
+        <small>{{ pdfCurrentPage || 1 }} / {{ pdfPageCount || '—' }} · {{ Math.round(pdfZoomRatio * 100) }}%</small>
       </button>
       <div v-else class="reader-document-center" :aria-label="mobileDocumentLabel">
         <span class="reader-document-label">{{ mobileDocumentLabel }}</span>
       </div>
       <div class="mobile-toolbar-side mobile-toolbar-right">
         <template v-if="fileKind === 'pdf' && displayedFile">
-          <button type="button" aria-label="缩小 PDF" title="缩小" @click="setPdfZoom(-1)">
+          <button type="button" aria-label="缩小 PDF" title="缩小" :disabled="pdfZoomRatio <= .6" @click="setPdfZoom(-1)">
             <el-icon><Minus /></el-icon>
           </button>
-          <button type="button" aria-label="放大 PDF" title="放大" @click="setPdfZoom(1)">
+          <button type="button" aria-label="放大 PDF" title="放大" :disabled="pdfZoomRatio >= 4" @click="setPdfZoom(1)">
             <el-icon><Plus /></el-icon>
           </button>
         </template>
@@ -327,6 +336,7 @@
 import {
   computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch,
 } from 'vue'
+import { nextPdfZoomRatio } from '@/components/reader/pdfRenderPolicy'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -865,17 +875,16 @@ const pdfViewerRef = ref<{
 } | null>(null)
 const pdfCurrentPage = ref(1)
 const pdfPageCount = ref(0)
-const pdfZoomIndex = ref(2)
-const pdfZoomLevels = [0.7, 0.85, 1, 1.2, 1.45, 1.75]
+const pdfZoomRatio = ref(1)
 
 function fitPdf() {
-  pdfZoomIndex.value = 2
+  pdfZoomRatio.value = 1
   pdfViewerRef.value?.setZoom('fit')
 }
 
 function setPdfZoom(direction: -1 | 1) {
-  pdfZoomIndex.value = Math.max(0, Math.min(pdfZoomLevels.length - 1, pdfZoomIndex.value + direction))
-  pdfViewerRef.value?.setZoomRatio(pdfZoomLevels[pdfZoomIndex.value])
+  pdfZoomRatio.value = nextPdfZoomRatio(pdfZoomRatio.value, direction)
+  pdfViewerRef.value?.setZoomRatio(pdfZoomRatio.value)
 }
 const transitionDir = ref<'page-next' | 'page-prev'>('page-next')
 
@@ -1055,7 +1064,7 @@ async function onSelectFile(path: string) {
       fileKind.value = 'pdf'
       pdfCurrentPage.value = 1
       pdfPageCount.value = 0
-      pdfZoomIndex.value = 2
+      pdfZoomRatio.value = 1
       renderedHtml.value = '' // ensure PdfViewer branch shows
       displayedFile.value = path
       toc.value = [] // outline arrives via onPdfOutline after load
@@ -1330,6 +1339,8 @@ function scrollToHeading(id: string) {
 }
 
 onMounted(async () => {
+  // Persisted read view must also reserve the contextual dock area on refresh.
+  if (route.query.view !== viewMode.value) void router.replace({ query: { ...route.query, view: viewMode.value } })
   document.addEventListener('fullscreenchange', onFullscreenChange)
   document.addEventListener('keydown', onReaderKeydown)
   // Flush pending md progress when the app is backgrounded or the tab is
@@ -1696,6 +1707,10 @@ onBeforeUnmount(() => {
 .overlay-pop-leave-to { opacity: 0; transform: scale(0.98) translateY(-8px); }
 
 .reader-mobile-toolbar { display: none; }
+.reader-pdf-controls { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.reader-pdf-controls button { border: 0; background: transparent; color: var(--text-primary); cursor: pointer; border-radius: 10px; }
+.reader-pdf-controls button:disabled { opacity: .35; cursor: default; }
+.pdf-fit-btn { min-width: 54px; min-height: 36px; font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; }
 
 
 /* ── Body / panes ── */
@@ -1873,8 +1888,13 @@ onBeforeUnmount(() => {
     gap: 6px;
   }
   .reader-page.is-read-view {
-    height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 16px);
+    height: 100%;
+    min-height: 0;
   }
+  .reader-page.is-pdf-reading { gap: 2px; }
+  .reader-page.is-pdf-reading .reader-topbar { padding-block: 2px; }
+  .reader-page.is-pdf-reading .reader-body { margin-inline: calc(-1 * max(12px, var(--safe-left))) calc(-1 * max(12px, var(--safe-right))); }
+  .reader-page.is-pdf-reading .pane-center { overflow-x: auto; border: 0; border-radius: 0; touch-action: pan-x pan-y; overscroll-behavior-x: contain; }
   /* Tasks-Hub mobile pattern: the toolbar wraps and the switch takes its own row. */
   .reader-topbar { flex-wrap: wrap; padding: 7px; }
   .view-switch { width: 100%; }
@@ -1899,6 +1919,7 @@ onBeforeUnmount(() => {
   .reader-shelf-add:active { transform: scale(.96); }
   .reader-file-search-trigger,
   .reader-fullscreen-btn { display: none !important; }
+  .reader-pdf-controls { display: none !important; }
   .path-trigger { min-height: var(--tap-target); padding-block: 8px; }
   .reader-topbar .icon-btn { width: 44px; height: 44px; }
   .pane-left, .pane-right { display: none; }
@@ -1964,6 +1985,7 @@ onBeforeUnmount(() => {
   }
   .reader-mobile-toolbar button .el-icon { font-size: 24px; }
   .reader-mobile-toolbar button:active { transform: scale(0.94); background: var(--accent-light); }
+  .reader-mobile-toolbar button:disabled { opacity: .35; }
   .mobile-toolbar-side {
     height: 52px;
     display: grid;
@@ -2005,7 +2027,12 @@ onBeforeUnmount(() => {
   .reader-page.is-mobile-immersive .page-header,
   .reader-page.is-mobile-immersive .reader-topbar { display: none !important; }
   .reader-page.is-mobile-immersive .reader-body { min-height: 0; }
+  .reader-page.is-mobile-immersive.is-pdf-reading .reader-body { margin-inline: 0; }
   .reader-page.is-mobile-immersive .pane-center { border: 0; border-radius: 0; }
+}
+
+@media (max-width: 480px) {
+  .reader-page.is-pdf-reading:not(.is-mobile-immersive) .reader-body { margin-inline: calc(-1 * max(10px, var(--safe-left))) calc(-1 * max(10px, var(--safe-right))); }
 }
 
 @media (max-width: 768px) and (prefers-reduced-motion: reduce) {

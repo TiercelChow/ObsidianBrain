@@ -9,6 +9,54 @@ export const MAX_RENDER_DPR = 3
 /** Bound every live page canvas to roughly 16 MB of RGBA pixels. */
 export const MAX_CANVAS_PIXELS = 4_000_000
 
+export const PDF_ZOOM_LEVELS = [0.6, 0.8, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4] as const
+
+/** Match the real viewer padding, including a desktop page border. */
+export function computePdfFitScale(width: number, pageWidth: number, padding = 0, border = 0): number {
+  if (!Number.isFinite(width) || !Number.isFinite(pageWidth) || width <= 0 || pageWidth <= 0) return 0
+  return Math.max(1, width - Math.max(0, padding) - Math.max(0, border)) / pageWidth
+}
+
+/** Modest text-margin focus on phones; narrow columns/unknown bounds stay full-page. */
+export function computePdfReadingRatio(pageWidth: number, left: number, right: number): number {
+  const contentWidth = right - left
+  if (![pageWidth, left, right].every(Number.isFinite) || pageWidth <= 0
+    || left < 0 || right > pageWidth || contentWidth < pageWidth * .6) return 1
+  return Math.min(1.4, Math.max(1, pageWidth / contentWidth))
+}
+
+export function nextPdfZoomRatio(ratio: number, direction: -1 | 1): number {
+  const current = Number.isFinite(ratio) ? ratio : 1
+  return direction === 1
+    ? PDF_ZOOM_LEVELS.find(value => value > current + .01) ?? 4
+    : [...PDF_ZOOM_LEVELS].reverse().find(value => value < current - .01) ?? .6
+}
+
+/** Keep a page-local point under the finger/viewport centre after relayout. */
+export function computePdfZoomAnchorScroll(
+  scroll: number, pageStart: number, pageSize: number, fraction: number,
+  anchor: number, scrollSize: number, viewportSize: number,
+): number {
+  const target = scroll + pageStart + pageSize * Math.max(0, Math.min(1, fraction)) - anchor
+  return Math.max(0, Math.min(target, Math.max(0, scrollSize - viewportSize)))
+}
+
+export interface PdfRect { left: number; top: number; width: number; height: number }
+
+/** A bounded viewport tile, not another full-page retina allocation. */
+export function computePdfDetailRegion(page: PdfRect, root: PdfRect, overscan = 32): PdfRect | null {
+  if (![page.left, page.top, page.width, page.height, root.left, root.top, root.width, root.height].every(Number.isFinite)
+    || page.width <= 0 || page.height <= 0 || root.width <= 0 || root.height <= 0
+    || page.top >= root.top + root.height || page.top + page.height <= root.top
+    || page.left >= root.left + root.width || page.left + page.width <= root.left) return null
+  const margin = Math.max(0, overscan)
+  const left = Math.max(0, Math.floor(root.left - page.left - margin))
+  const top = Math.max(0, Math.floor(root.top - page.top - margin))
+  const right = Math.min(page.width, Math.ceil(root.left + root.width - page.left + margin))
+  const bottom = Math.min(page.height, Math.ceil(root.top + root.height - page.top + margin))
+  return { left, top, width: right - left, height: bottom - top }
+}
+
 /**
  * Restore scroll after a zoom while keeping the same document point under the
  * viewport center. This is more stable than preserving scrollTop/maxScroll:
@@ -73,7 +121,7 @@ export function computeRenderDpr(
 /** Apply toolbar zoom relative to the immutable fit-width baseline. */
 export function computePdfZoomScale(fitScale: number, ratio: number): number {
   const safeFitScale = Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1
-  const safeRatio = Number.isFinite(ratio) ? Math.max(0.6, Math.min(2, ratio)) : 1
+  const safeRatio = Number.isFinite(ratio) ? Math.max(0.6, Math.min(4, ratio)) : 1
   return safeFitScale * safeRatio
 }
 
