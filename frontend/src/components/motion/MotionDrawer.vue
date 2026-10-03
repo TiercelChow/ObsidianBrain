@@ -29,6 +29,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useModalEnvironment } from '@/composables/useModalEnvironment'
 import { animateSpring, projectMotion } from '@/utils/motionSpring'
+import { panelDragPosition, presentationOffset } from '@/utils/panelGesture'
 
 const props = withDefaults(defineProps<{
   modelValue: boolean
@@ -46,6 +47,7 @@ const settling = ref(false)
 const dragX = ref(0)
 let pointerId: number | null = null
 let startX = 0
+let grabX = 0
 let startY = 0
 let axis: 'pending' | 'horizontal' | 'vertical' = 'pending'
 let samples: Array<{ x: number; time: number }> = []
@@ -59,10 +61,6 @@ const scrimStyle = computed(() => {
   return { opacity: String(progress) }
 })
 
-function rubberband(overshoot: number, dimension: number, constant = 0.55) {
-  return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot))
-}
-
 function close() {
   emit('update:modelValue', false)
 }
@@ -75,7 +73,10 @@ function stopSpring() {
 
 function onPointerDown(event: PointerEvent) {
   if (event.pointerType === 'mouse' && event.button !== 0) return
+  if ((event.target as Element).closest('button, a, input, textarea, select, [contenteditable="true"]')) return
   stopSpring()
+  grabX = panelRef.value ? presentationOffset(getComputedStyle(panelRef.value).transform, 'x', dragX.value) : dragX.value
+  dragX.value = grabX
   pointerId = event.pointerId
   startX = event.clientX
   startY = event.clientY
@@ -91,7 +92,7 @@ function onPointerMove(event: PointerEvent) {
     if (Math.max(Math.abs(dx), Math.abs(dy)) < 10) return
     axis = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical'
     if (axis === 'vertical') {
-      resetGesture()
+      onPointerCancel(event)
       return
     }
     dragging.value = true
@@ -99,11 +100,8 @@ function onPointerMove(event: PointerEvent) {
   }
 
   event.preventDefault()
-  const closingDistance = dx * directionSign.value
   const width = panelRef.value?.offsetWidth || 320
-  dragX.value = closingDistance >= 0
-    ? dx
-    : rubberband(dx, width, 0.25)
+  dragX.value = panelDragPosition(grabX, event.clientX, startX, width, directionSign.value)
   const now = performance.now()
   samples.push({ x: event.clientX, time: now })
   samples = samples.filter((sample) => now - sample.time <= 100)
@@ -151,11 +149,19 @@ function resetGesture() {
 function onPointerUp(event: PointerEvent) {
   if (event.pointerId !== pointerId) return
   if (axis === 'horizontal') finishGesture()
-  else resetGesture()
+  else onPointerCancel(event)
 }
 
 function onPointerCancel(event: PointerEvent) {
-  if (event.pointerId === pointerId) resetGesture()
+  if (event.pointerId !== pointerId) return
+  if (panelRef.value?.hasPointerCapture(event.pointerId)) panelRef.value.releasePointerCapture(event.pointerId)
+  pointerId = null
+  dragging.value = false
+  settling.value = true
+  cancelSpring = animateSpring(dragX.value, 0, 0, value => { dragX.value = value }, () => {
+    cancelSpring = null
+    settling.value = false
+  })
 }
 
 watch(() => props.modelValue, (open) => {
@@ -221,6 +227,8 @@ onBeforeUnmount(() => {
 .is-dragging .motion-drawer__scrim,
 .is-settling .motion-drawer__panel,
 .is-settling .motion-drawer__scrim { transition: none; }
+.motion-drawer.is-dragging .motion-drawer__panel,
+.motion-drawer.is-settling .motion-drawer__panel { transform: translate3d(var(--motion-drawer-x), 0, 0); }
 
 .motion-drawer-left-enter-active,
 .motion-drawer-left-leave-active,

@@ -24,7 +24,7 @@
             @pointerdown="onPointerDown"
             @pointermove="onPointerMove"
             @pointerup="onPointerUp"
-            @pointercancel="resetGesture"
+            @pointercancel="cancelGesture"
           ><span /></div>
           <slot />
         </section>
@@ -37,6 +37,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useModalEnvironment } from '@/composables/useModalEnvironment'
 import { animateSpring, projectMotion } from '@/utils/motionSpring'
+import { panelDragPosition, presentationOffset } from '@/utils/panelGesture'
 
 const props = withDefaults(defineProps<{
   modelValue: boolean
@@ -55,6 +56,7 @@ const visualHeight = ref(window.visualViewport?.height ?? window.innerHeight)
 const visualOffsetTop = ref(window.visualViewport?.offsetTop ?? 0)
 let pointerId: number | null = null
 let startY = 0
+let grabY = 0
 let samples: Array<{ y: number; time: number }> = []
 let cancelSpring: (() => void) | null = null
 let captureTarget: HTMLElement | null = null
@@ -65,9 +67,6 @@ const overlayStyle = computed(() => ({
   '--motion-viewport-top': `${visualOffsetTop.value}px`,
 }))
 
-function rubberband(overshoot: number, dimension: number, constant = 0.35) {
-  return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot))
-}
 function isMobile() { return window.matchMedia('(max-width: 768px)').matches }
 function close() { emit('update:modelValue', false) }
 
@@ -85,6 +84,8 @@ function updateVisualViewport() {
 function onPointerDown(event: PointerEvent) {
   if (!isMobile() || (event.pointerType === 'mouse' && event.button !== 0)) return
   stopSpring()
+  grabY = panelRef.value ? presentationOffset(getComputedStyle(panelRef.value).transform, 'y', dragY.value) : dragY.value
+  dragY.value = grabY
   pointerId = event.pointerId
   startY = event.clientY
   samples = [{ y: event.clientY, time: performance.now() }]
@@ -95,9 +96,8 @@ function onPointerDown(event: PointerEvent) {
 function onPointerMove(event: PointerEvent) {
   if (event.pointerId !== pointerId) return
   event.preventDefault()
-  const dy = event.clientY - startY
   const height = panelRef.value?.offsetHeight || 500
-  dragY.value = dy >= 0 ? dy : rubberband(dy, height)
+  dragY.value = panelDragPosition(grabY, event.clientY, startY, height)
   const now = performance.now()
   samples.push({ y: event.clientY, time: now })
   samples = samples.filter((sample) => now - sample.time <= 100)
@@ -138,6 +138,18 @@ function resetGesture() {
   pointerId = null
   dragging.value = false
   dragY.value = 0
+}
+function cancelGesture() {
+  if (pointerId === null) return
+  if (captureTarget?.hasPointerCapture(pointerId)) captureTarget.releasePointerCapture(pointerId)
+  captureTarget = null
+  pointerId = null
+  dragging.value = false
+  settling.value = true
+  cancelSpring = animateSpring(dragY.value, 0, 0, value => { dragY.value = value }, () => {
+    cancelSpring = null
+    settling.value = false
+  })
 }
 watch(() => props.modelValue, (open) => {
   if (open) resetGesture()
@@ -189,8 +201,8 @@ onBeforeUnmount(() => {
 }
 .motion-modal-enter-from,
 .motion-modal-leave-to { opacity: 0; }
-.motion-modal-enter-from .motion-modal__panel { transform: translateY(12px) scale(0.97); opacity: 0; }
-.motion-modal-leave-to .motion-modal__panel { transform: translateY(8px) scale(0.985); opacity: 0; }
+.motion-modal-enter-from .motion-modal__panel,
+.motion-modal-leave-to .motion-modal__panel { transform: translateY(10px) scale(0.98); opacity: 0; }
 
 @media (max-width: 768px) {
   .motion-modal {
@@ -202,7 +214,7 @@ onBeforeUnmount(() => {
   }
   .motion-modal__panel {
     width: 100%;
-    max-height: min(88dvh, 760px);
+    max-height: min(88dvh, 760px, calc(var(--motion-viewport-height) - 16px));
     border-radius: 24px 24px 0 0 !important;
     transform: translate3d(0, var(--motion-sheet-y), 0);
     touch-action: pan-y;
@@ -235,6 +247,8 @@ onBeforeUnmount(() => {
   .is-settling .motion-modal__panel { transition: none; will-change: transform; }
   .motion-modal-enter-from .motion-modal__panel,
   .motion-modal-leave-to .motion-modal__panel { transform: translateY(100%); opacity: 1; }
+  .motion-modal.is-dragging .motion-modal__panel,
+  .motion-modal.is-settling .motion-modal__panel { transform: translate3d(0, var(--motion-sheet-y), 0); transition: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

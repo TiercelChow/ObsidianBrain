@@ -47,7 +47,7 @@
       >
         <div class="route-stage">
           <router-view v-slot="{ Component, route }">
-            <transition name="page-slide">
+            <transition name="page-slide" @before-leave="disableLeavingPage">
               <component :is="Component" :key="route.path" />
             </transition>
           </router-view>
@@ -92,6 +92,10 @@ const mobileSubnav = provideMobileSubnav()
 // Mobile detection
 const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => isPhoneViewport(windowWidth.value))
+// An expanded desktop rail must not become an unsolicited modal on resize.
+watch(isMobile, (mobile) => {
+  if (mobile) appStore.setSidebarCollapsed(true)
+})
 const mobileFocusMode = computed(() => isMobileFocusRoute(route.path, route.query))
 const mobileNavSection = computed(() => getMobileNavSection(route.path))
 const { progress: dockProgress, keyboardOpen: dockKeyboardOpen, expand: expandDock } = useMobileDockMotion(
@@ -116,6 +120,12 @@ function openMobileSidebar() {
 
 function closeMobileSidebar() {
   appStore.setSidebarCollapsed(true)
+}
+
+function disableLeavingPage(element: Element) {
+  // Fixed descendants can override pointer-events:none; inert also removes
+  // outgoing controls from keyboard/assistive navigation during the cross-fade.
+  if (element instanceof HTMLElement) element.inert = true
 }
 
 // Scroll detection for mobile header (shared via store so the Reader's internal
@@ -156,7 +166,7 @@ html, body, #app {
   background: var(--bg-base);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: var(--font-ui);
   line-height: var(--leading-normal);
   font-optical-sizing: auto;
   -webkit-font-smoothing: antialiased;
@@ -182,7 +192,8 @@ code, pre, .code-block { font-family: var(--font-mono); }
 }
 .page-title {
   font-size: 22px;
-  font-weight: 600;
+  font-weight: 650;
+  line-height: var(--leading-tight);
   color: var(--text-primary);
   letter-spacing: var(--tracking-tight);
   margin: 0;
@@ -259,116 +270,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
   background: rgba(0, 0, 0, 0.15);
 }
 
-/* ═══════════════════════════════════════════════════
-   Theme System — CSS Custom Properties
-   ═══════════════════════════════════════════════════ */
-
-/* ── Light Theme (default) ── */
-:root, :root[data-theme="light"] {
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-right: env(safe-area-inset-right, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --safe-left: env(safe-area-inset-left, 0px);
-  --mobile-header-height: 56px;
-  --mobile-dock-height: 62px;
-  --mobile-sub-dock-height: 50px;
-  --mobile-navigation-height: var(--mobile-dock-height);
-  --tap-target: 44px;
-  --page-gutter: 40px;
-  --bg-base: #f0f0f3;
-  --bg-hover: rgba(255, 255, 255, 0.4);
-  --border-faint: rgba(0, 0, 0, 0.05);
-
-  --text-primary: #18181b;
-  --text-secondary: #27272a;
-  --text-tertiary: #52525b;
-  --text-muted: #71717a;
-  --text-faint: #a1a1aa;
-
-  --accent: #6366f1;
-  --accent-light: rgba(129, 140, 248, 0.12);
-  --accent-border: rgba(129, 140, 248, 0.4);
-
-  --code-bg: rgba(24, 24, 27, 0.06);
-  --code-inline-color: #c026d3;
-  --code-block-bg: #1e1e2e;
-  --code-block-text: #cdd6f4;
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.08);
-
-  /* ── Design Tokens (Apple Design) ── */
-  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
-  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
-  --ease-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-ios: cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  --duration-fast: var(--motion-fast);
-  --duration-normal: var(--motion-normal);
-  --duration-slow: var(--motion-slow);
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  --font-mono: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
-  --tracking-tight: -0.02em;
-  --tracking-normal: 0;
-  --tracking-wide: 0.02em;
-  --leading-tight: 1.2;
-  --leading-normal: 1.5;
-  --leading-relaxed: 1.75;
-}
-
-/* ── Dark Theme — Deep Black ── */
-:root[data-theme="dark"] {
-  --bg-base: #000000;
-  --bg-hover: rgba(40, 40, 45, 0.4);
-  --border-faint: rgba(255, 255, 255, 0.04);
-
-  --text-primary: #ffffff;
-  --text-secondary: #e5e5e5;
-  --text-tertiary: #b3b3b3;
-  --text-muted: #808080;
-  --text-faint: #555555;
-
-  --accent: #7c7cff;
-  --accent-light: rgba(124, 124, 255, 0.12);
-  --accent-border: rgba(124, 124, 255, 0.35);
-
-  --code-bg: rgba(255, 255, 255, 0.06);
-  --code-inline-color: #ff79c6;
-  --code-block-bg: #0d0d0d;
-  --code-block-text: #e5e5e5;
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.25);
-
-}
-
-/* ── Eye-Care Theme — Soft Green ── */
-:root[data-theme="eye-care"] {
-  --bg-base: #c5d5b8;
-  --bg-hover: rgba(135, 185, 120, 0.5);
-  --border-faint: rgba(30, 60, 20, 0.12);
-
-  --text-primary: #152618;
-  --text-secondary: #1e3320;
-  --text-tertiary: #355030;
-  --text-muted: #4e6e45;
-  --text-faint: #708e60;
-
-  --accent: #2e7d4a;
-  --accent-light: rgba(46, 125, 74, 0.18);
-  --accent-border: rgba(46, 125, 74, 0.5);
-
-  --code-bg: rgba(20, 50, 15, 0.12);
-  --code-inline-color: #1b6e2e;
-  --code-block-bg: #152612;
-  --code-block-text: #9dd495;
-
-  --shadow-sm: 0 1px 2px rgba(30, 60, 20, 0.08);
-  --shadow-md: 0 2px 8px rgba(30, 60, 20, 0.1), 0 1px 2px rgba(30, 60, 20, 0.06);
-  --shadow-lg: 0 8px 32px rgba(30, 60, 20, 0.12);
-
-}
+/* Theme colors and shared geometry are owned by styles/tokens.css. */
 
 /* Material palettes and surface weights are owned by styles/materials.css. */
 
@@ -459,28 +361,6 @@ code, pre, .code-block { font-family: var(--font-mono); }
 }
 
 /* ── Dark theme Element Plus overrides — Deep Black ── */
-:root[data-theme="dark"] {
-  --el-bg-color: #141414;
-  --el-bg-color-overlay: #1a1a1a;
-  --el-bg-color-page: #000000;
-  --el-text-color-primary: #ffffff;
-  --el-text-color-regular: #e5e5e5;
-  --el-text-color-secondary: #b3b3b3;
-  --el-text-color-placeholder: #555555;
-  --el-border-color: rgba(55, 55, 55, 0.6);
-  --el-border-color-light: rgba(45, 45, 45, 0.5);
-  --el-border-color-lighter: rgba(40, 40, 40, 0.4);
-  --el-fill-color: rgba(28, 28, 28, 0.6);
-  --el-fill-color-light: rgba(28, 28, 28, 0.5);
-  --el-fill-color-lighter: rgba(28, 28, 28, 0.3);
-  --el-fill-color-blank: transparent;
-  --el-color-primary: #7c7cff;
-  --el-mask-color: rgba(0, 0, 0, 0.7);
-  --el-overlay-color: rgba(0, 0, 0, 0.7);
-  --el-disabled-bg-color: rgba(28, 28, 28, 0.5);
-  --el-disabled-text-color: #555555;
-  --el-disabled-border-color: rgba(45, 45, 45, 0.5);
-}
 
 /* Dark: el-input, el-select, el-date-picker */
 :root[data-theme="dark"] .el-input__wrapper {
@@ -747,28 +627,6 @@ code, pre, .code-block { font-family: var(--font-mono); }
 }
 
 /* Eye-care: el-dialog + el-overlay */
-:root[data-theme="eye-care"] {
-  --el-bg-color: #a8c9a0;
-  --el-bg-color-overlay: #b5d4ac;
-  --el-bg-color-page: #a8c9a0;
-  --el-text-color-primary: #152618;
-  --el-text-color-regular: #243818;
-  --el-text-color-secondary: #355030;
-  --el-text-color-placeholder: #5a7048;
-  --el-border-color: rgba(100, 155, 85, 0.5);
-  --el-border-color-light: rgba(85, 140, 70, 0.4);
-  --el-border-color-lighter: rgba(70, 120, 55, 0.3);
-  --el-fill-color: rgba(150, 195, 135, 0.3);
-  --el-fill-color-light: rgba(135, 185, 120, 0.25);
-  --el-fill-color-lighter: rgba(120, 175, 105, 0.15);
-  --el-fill-color-blank: transparent;
-  --el-color-primary: #2e7d4a;
-  --el-mask-color: rgba(30, 60, 20, 0.5);
-  --el-overlay-color: rgba(30, 60, 20, 0.5);
-  --el-disabled-bg-color: rgba(120, 165, 105, 0.3);
-  --el-disabled-text-color: #708e60;
-  --el-disabled-border-color: rgba(85, 140, 70, 0.4);
-}
 :root[data-theme="eye-care"] .el-dialog {
   background: var(--bg-glass-strong) !important;
   border: 1px solid var(--border-glass) !important;
@@ -870,6 +728,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
   position: relative;
   overflow: hidden;
   background: var(--bg-base);
+  transition: background-color var(--motion-fast) var(--ease-emphasized);
   --mobile-sidebar-x: -260px;
   --mobile-sidebar-progress: 0;
   --mobile-content-scale: 1;
@@ -891,7 +750,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
 
 .app-main {
   background: transparent;
-  padding: 32px 40px;
+  padding: 32px var(--page-gutter);
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -905,23 +764,19 @@ code, pre, .code-block { font-family: var(--font-mono); }
 
 /* ── Page Transition — stable cross-fade, without locking navigation ── */
 .page-slide-enter-active {
-  transition: opacity var(--motion-page) var(--ease-emphasized),
-              transform var(--motion-page) var(--ease-emphasized);
+  transition: opacity var(--motion-page) var(--ease-emphasized);
 }
 .page-slide-leave-active {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  transition: opacity var(--motion-fast) var(--ease-emphasized),
-              transform var(--motion-fast) var(--ease-emphasized);
+  transition: opacity var(--motion-fast) var(--ease-emphasized);
 }
 .page-slide-enter-from {
   opacity: 0;
-  transform: translateY(var(--motion-distance-sm)) scale(0.992);
 }
 .page-slide-leave-to {
   opacity: 0;
-  transform: translateY(-4px) scale(0.996);
 }
 
 /* ── Mobile Global Header ── */
@@ -1044,12 +899,6 @@ code, pre, .code-block { font-family: var(--font-mono); }
     box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.18);
   }
 
-  .page-slide-enter-from {
-    transform: translateY(5px);
-  }
-  .page-slide-leave-to {
-    transform: translateY(-3px);
-  }
 }
 
 @media (max-width: 480px) {
@@ -1061,3 +910,5 @@ code, pre, .code-block { font-family: var(--font-mono); }
 </style>
 
 <style src="./styles/materials.css"></style>
+<style src="./styles/tokens.css"></style>
+<style src="./styles/controls.css"></style>

@@ -3,24 +3,26 @@
    !important bridges their existing scoped paint rules, never their geometry. */
 :root,
 :root[data-theme] {
-  --glass-floating-filter: blur(10px) saturate(135%) contrast(1.02);
+  --glass-floating-filter: blur(10px) saturate(145%) contrast(1.04);
   --glass-panel-filter: blur(16px) saturate(120%);
   --glass-structural-filter: blur(12px) saturate(120%);
   --glass-content-filter: none;
   --glass-control-filter: none;
   --glass-scrim-filter: blur(4px) saturate(95%);
-  --glass-sheen: linear-gradient(150deg, rgba(255, 255, 255, .025), transparent 18% 82%, rgba(0, 0, 0, .015));
+  --glass-sheen: linear-gradient(165deg, rgba(255, 255, 255, .075), transparent 18% 76%, rgba(255, 255, 255, .015));
   --glass-media-fill: rgba(36, 38, 44, .64);
   --glass-media-label: #f7f7fa;
   --glass-media-edge: rgba(255, 255, 255, .24);
   --glass-inner-edge: inset 0 1px 0 var(--glass-rim-light), inset 1px 0 0 var(--glass-rim-side), inset 0 -1px 0 var(--glass-rim-bottom), inset -1px 0 0 var(--glass-rim-shadow);
-  --glass-floating-shadow: var(--glass-inner-edge), inset 0 0 8px var(--glass-inner-light), 0 8px 24px var(--glass-shadow), 0 1px 3px var(--glass-contact-shadow);
+  --glass-floating-shadow: var(--glass-inner-edge), 0 0 0 .5px var(--glass-outer-edge), inset 0 0 8px var(--glass-inner-light), 0 8px 24px var(--glass-shadow), 0 2px 4px var(--glass-contact-shadow);
   --glass-panel-shadow: var(--glass-inner-edge), 0 20px 56px var(--glass-shadow), 0 4px 12px var(--glass-contact-shadow);
-  --glass-content-shadow: inset 0 1px 0 var(--glass-content-edge), 0 2px 8px var(--glass-contact-shadow);
-  --glass-label: color-mix(in srgb, var(--text-primary) 72%, var(--glass-solid));
-  --glass-action-fill: color-mix(in srgb, var(--text-primary) 6%, var(--glass-floating-fill));
-  --glass-action-hover: color-mix(in srgb, var(--text-primary) 10%, var(--glass-floating-fill));
-  --glass-action-pressed: color-mix(in srgb, var(--text-primary) 14%, var(--glass-floating-fill));
+  --glass-content-shadow: inset 0 1px 0 var(--glass-content-edge), 0 2px 6px var(--glass-contact-shadow);
+  --glass-label: var(--text-secondary);
+  --glass-action-fill: color-mix(in srgb, var(--text-primary) 9%, var(--glass-floating-fill));
+  --glass-action-hover: color-mix(in srgb, var(--text-primary) 13%, var(--glass-floating-fill));
+  --glass-action-pressed: color-mix(in srgb, var(--text-primary) 16%, var(--glass-floating-fill));
+  --glass-field-fill: color-mix(in srgb, var(--glass-solid) 55%, transparent);
+  --glass-field-edge: color-mix(in srgb, var(--text-primary) 13%, transparent);
   --glass-action-sheen: linear-gradient(155deg, color-mix(in srgb, var(--glass-rim-light) 16%, transparent), transparent 36% 74%, color-mix(in srgb, var(--glass-rim-shadow) 18%, transparent));
   --glass-action-edge: color-mix(in srgb, var(--text-primary) 16%, var(--glass-edge));
   --glass-action-shadow: var(--glass-inner-edge), 0 3px 10px var(--glass-contact-shadow);
@@ -39,19 +41,20 @@
 }
 :root,
 :root[data-theme="light"] {
-  --glass-floating-fill: rgba(255, 255, 255, .26);
-  --glass-panel-fill: rgba(250, 250, 253, .78);
-  --glass-structural-fill: rgba(247, 248, 252, .44);
-  --glass-content-fill: rgba(247, 248, 251, .60);
-  --glass-control-fill: rgba(255, 255, 255, .14);
+  --glass-floating-fill: rgba(255, 255, 255, .22);
+  --glass-panel-fill: rgba(248, 250, 253, .90);
+  --glass-structural-fill: rgba(217, 226, 239, .36);
+  --glass-content-fill: rgba(255, 255, 255, .82);
+  --glass-control-fill: rgba(255, 255, 255, .25);
   --glass-scrim-fill: rgba(12, 14, 22, .25);
-  --glass-solid: #f7f7fa;
-  --glass-edge: rgba(255, 255, 255, .54);
-  --glass-edge-soft: rgba(117, 122, 145, .15);
-  --glass-rim-light: rgba(255, 255, 255, .74);
-  --glass-rim-side: rgba(255, 255, 255, .32);
-  --glass-rim-bottom: rgba(255, 255, 255, .42);
-  --glass-rim-shadow: rgba(80, 86, 108, .14);
+  --glass-solid: #f8fafc;
+  --glass-edge: rgba(255, 255, 255, .66);
+  --glass-edge-soft: rgba(66, 81, 108, .13);
+  --glass-outer-edge: rgba(47, 64, 91, .15);
+  --glass-rim-light: rgba(255, 255, 255, .95);
+  --glass-rim-side: rgba(255, 255, 255, .48);
+  --glass-rim-bottom: rgba(255, 255, 255, .62);
+  --glass-rim-shadow: rgba(44, 64, 94, .22);
   --glass-inner-light: rgba(255, 255, 255, .025);
   --glass-content-edge: rgba(255, 255, 255, .36);
   --glass-shadow: rgba(35, 40, 63, .13);
@@ -61,16 +64,17 @@
   --glass-success-label: #24723e;
 }
 :root[data-theme="dark"] {
-  --glass-floating-fill: rgba(48, 49, 55, .42);
-  --glass-panel-fill: rgba(31, 32, 38, .86);
-  --glass-structural-fill: rgba(32, 33, 40, .52);
-  --glass-content-fill: rgba(23, 24, 30, .72);
+  --glass-floating-fill: rgba(53, 64, 81, .34);
+  --glass-panel-fill: rgba(27, 34, 46, .93);
+  --glass-structural-fill: rgba(36, 46, 63, .50);
+  --glass-content-fill: rgba(28, 34, 45, .90);
   --glass-control-fill: rgba(255, 255, 255, .04);
   --glass-scrim-fill: rgba(0, 0, 0, .48);
-  --glass-solid: #202127;
-  --glass-edge: rgba(255, 255, 255, .18);
+  --glass-solid: #1c222d;
+  --glass-edge: rgba(235, 244, 255, .21);
   --glass-edge-soft: rgba(255, 255, 255, .10);
-  --glass-rim-light: rgba(255, 255, 255, .48);
+  --glass-outer-edge: rgba(0, 0, 0, .30);
+  --glass-rim-light: rgba(235, 244, 255, .53);
   --glass-rim-side: rgba(255, 255, 255, .19);
   --glass-rim-bottom: rgba(255, 255, 255, .28);
   --glass-rim-shadow: rgba(0, 0, 0, .28);
@@ -83,15 +87,16 @@
   --glass-success-label: #78d69a;
 }
 :root[data-theme="eye-care"] {
-  --glass-floating-fill: rgba(224, 241, 212, .28);
-  --glass-panel-fill: rgba(210, 229, 197, .84);
-  --glass-structural-fill: rgba(214, 232, 201, .50);
-  --glass-content-fill: rgba(214, 231, 202, .64);
-  --glass-control-fill: rgba(240, 251, 229, .12);
+  --glass-floating-fill: rgba(243, 251, 232, .24);
+  --glass-panel-fill: rgba(231, 240, 218, .92);
+  --glass-structural-fill: rgba(194, 210, 181, .36);
+  --glass-content-fill: rgba(241, 246, 233, .82);
+  --glass-control-fill: rgba(247, 254, 236, .24);
   --glass-scrim-fill: rgba(19, 35, 20, .28);
-  --glass-solid: #d2e3c6;
+  --glass-solid: #e7efdc;
   --glass-edge: rgba(245, 255, 232, .49);
   --glass-edge-soft: rgba(54, 83, 40, .18);
+  --glass-outer-edge: rgba(43, 69, 35, .16);
   --glass-rim-light: rgba(250, 255, 242, .64);
   --glass-rim-side: rgba(245, 255, 232, .35);
   --glass-rim-bottom: rgba(245, 255, 232, .51);
@@ -375,7 +380,7 @@
   [data-glass-rim]::before { display: none; }
 }
 @media (prefers-contrast: more) {
-  :root[data-theme] { --glass-edge: var(--text-muted); --glass-edge-soft: var(--text-muted); }
+  :root[data-theme] { --glass-edge: var(--text-muted); --glass-edge-soft: var(--text-muted); --glass-field-edge: var(--text-muted); }
 }
 @media (forced-colors: active) {
   :root[data-theme] {

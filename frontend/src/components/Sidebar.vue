@@ -43,6 +43,10 @@
 
     <!-- Collapse Toggle -->
     <div class="sidebar-footer">
+      <button class="collapse-btn theme-toggle" data-glass-action type="button" :aria-label="`切换主题，当前${themeName}`" :title="`切换主题，当前${themeName}`" @click="appStore.toggleTheme()">
+        <el-icon :size="18"><component :is="themeIcon" /></el-icon>
+        <span class="nav-label" :aria-hidden="isCollapsed ? true : undefined">外观 · {{ themeName }}</span>
+      </button>
       <button class="collapse-btn" type="button" :aria-label="isCollapsed ? '展开导航' : '收起导航'" :aria-expanded="!isCollapsed" aria-controls="app-navigation" @click="appStore.toggleSidebar()">
         <el-icon :size="16">
           <component :is="isCollapsed ? Expand : Fold" />
@@ -70,12 +74,17 @@ import {
   Setting,
   Expand,
   Fold,
+  Sunny,
+  Moon,
+  View,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const appStore = useAppStore()
 const props = defineProps<{ expandedOnMobile?: boolean }>()
 const isCollapsed = computed(() => appStore.sidebarCollapsed && !props.expandedOnMobile)
+const themeName = computed(() => ({ light: '浅色', dark: '深色', 'eye-care': '护眼' }[appStore.theme]))
+const themeIcon = computed(() => ({ light: Sunny, dark: Moon, 'eye-care': View }[appStore.theme]))
 const navListRef = ref<HTMLElement | null>(null)
 const activeIndicator = reactive({ top: 0, height: 0, visible: false })
 const activeIndicatorStyle = computed(() => ({
@@ -210,7 +219,7 @@ function isActive(path: string) {
   align-items: center;
   padding: 6px 12px 4px;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -241,7 +250,7 @@ function isActive(path: string) {
   text-decoration: none;
   color: var(--text-muted);
   font-size: 14px;
-  font-weight: 450;
+  font-weight: 500;
   cursor: pointer;
   position: relative;
   z-index: 1;
@@ -258,13 +267,13 @@ function isActive(path: string) {
 .nav-item.active {
   background: transparent;
   color: var(--text-primary);
-  font-weight: 500;
+  font-weight: 650;
 }
 
 .nav-icon {
   justify-self: center;
   flex-shrink: 0;
-  opacity: 0.6;
+  opacity: 0.85;
   transition: opacity var(--motion-fast) var(--ease-emphasized);
 }
 
@@ -378,13 +387,15 @@ function isActive(path: string) {
   }
   .mobile-sidebar-close:active { transform: scale(0.94); }
   .sidebar-footer {
-    display: none;
+    padding: 8px 0 max(12px, var(--safe-bottom));
   }
+  .collapse-btn:not(.theme-toggle) { display: none; }
+  .theme-toggle { display: flex; gap: 10px; justify-content: center; background: var(--bg-glass-subtle); }
   .nav-list { gap: 12px; padding-bottom: max(18px, var(--safe-bottom)); }
   .nav-active-indicator { display: none; }
   .nav-group {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
   }
   .nav-group-label { grid-column: 1 / -1; padding: 2px 4px 0; }
@@ -406,7 +417,7 @@ function isActive(path: string) {
   }
   .nav-item.active { background: color-mix(in srgb, var(--accent) 11%, var(--bg-glass)); border-color: var(--accent-border); color: var(--accent); }
   .nav-icon { font-size: 22px; opacity: .85; }
-  .nav-label { width: 100%; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-label { width: 100%; padding: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
   .nav-group + .nav-group { margin-top: 0; }
   .nav-group-label { font-size: 11px; }
 }

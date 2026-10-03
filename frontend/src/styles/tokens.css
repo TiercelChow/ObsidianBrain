@@ -1,0 +1,133 @@
+/* Palette and geometry have one owner. Materials consume these tokens;
+   pages choose layout, never another text or control palette. */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --mobile-header-height: 56px;
+  --mobile-dock-height: 62px;
+  --mobile-sub-dock-height: 50px;
+  --mobile-navigation-height: var(--mobile-dock-height);
+  --tap-target: 44px;
+  --page-gutter: clamp(20px, 3vw, 32px);
+  --radius-control: 12px;
+  --radius-content: 20px;
+  --radius-panel: 26px;
+  --control-height: 40px;
+  --font-ui: 15px;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.01em;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.75;
+  --space-1: .25rem;
+  --space-2: .5rem;
+  --space-3: .75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-ios: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --duration-fast: var(--motion-fast);
+  --duration-normal: var(--motion-normal);
+  --duration-slow: var(--motion-slow);
+}
+:root, :root[data-theme="light"] {
+  color-scheme: light;
+  --bg-base: #e9edf2;
+  --bg-hover: rgba(255, 255, 255, .48);
+  --border-faint: rgba(39, 52, 73, .08);
+  --text-primary: #172033;
+  --text-secondary: #323e51;
+  --text-tertiary: #4c586a;
+  --text-muted: #586578;
+  --text-faint: #5d697a;
+  --accent: #5558d8;
+  --accent-light: rgba(85, 88, 216, .10);
+  --accent-border: rgba(85, 88, 216, .36);
+  --code-bg: rgba(24, 32, 51, .06);
+  --code-inline-color: #a1269d;
+  --code-block-bg: #1e2330;
+  --code-block-text: #d4dded;
+  --shadow-sm: 0 1px 3px rgba(31, 44, 66, .055);
+  --shadow-md: 0 3px 12px rgba(31, 44, 66, .065);
+  --shadow-lg: 0 16px 42px rgba(31, 44, 66, .14);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-base: #0c1018;
+  --bg-hover: rgba(255, 255, 255, .065);
+  --border-faint: rgba(225, 233, 247, .08);
+  --text-primary: #f3f6fc;
+  --text-secondary: #d5ddeb;
+  --text-tertiary: #bac4d5;
+  --text-muted: #a2abbc;
+  --text-faint: #8e9aaf;
+  --accent: #a3a6ff;
+  --accent-light: rgba(163, 166, 255, .12);
+  --accent-border: rgba(163, 166, 255, .38);
+  --code-bg: rgba(255, 255, 255, .065);
+  --code-inline-color: #ef9bdd;
+  --code-block-bg: #10151f;
+  --code-block-text: #d5ddeb;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, .18);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, .18);
+  --shadow-lg: 0 18px 44px rgba(0, 0, 0, .34);
+}
+:root[data-theme="eye-care"] {
+  color-scheme: light;
+  --bg-base: #d8e0d0;
+  --bg-hover: rgba(249, 255, 241, .38);
+  --border-faint: rgba(41, 65, 35, .10);
+  --text-primary: #1b3020;
+  --text-secondary: #2d4230;
+  --text-tertiary: #3e543b;
+  --text-muted: #495d43;
+  --text-faint: #51644e;
+  --accent: #276b43;
+  --accent-light: rgba(39, 107, 67, .10);
+  --accent-border: rgba(39, 107, 67, .36);
+  --code-bg: rgba(28, 53, 24, .08);
+  --code-inline-color: #265e31;
+  --code-block-bg: #1b2a1b;
+  --code-block-text: #c5dcc0;
+  --shadow-sm: 0 1px 3px rgba(40, 59, 34, .055);
+  --shadow-md: 0 3px 12px rgba(40, 59, 34, .065);
+  --shadow-lg: 0 16px 42px rgba(40, 59, 34, .14);
+}
+/* Native and Element Plus controls follow the same three-theme palette. */
+:root[data-theme] {
+  --el-color-primary: var(--accent);
+  --el-bg-color: var(--glass-solid);
+  --el-bg-color-overlay: var(--glass-solid);
+  --el-bg-color-page: var(--bg-base);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-secondary);
+  --el-text-color-secondary: var(--text-tertiary);
+  --el-text-color-placeholder: var(--text-faint);
+  --el-border-color: var(--border-subtle);
+  --el-border-color-light: var(--border-faint);
+  --el-border-color-lighter: var(--border-faint);
+  --el-fill-color: var(--glass-control-fill);
+  --el-fill-color-light: var(--bg-hover);
+  --el-fill-color-lighter: var(--bg-hover);
+  --el-fill-color-blank: transparent;
+  --el-disabled-bg-color: var(--glass-control-fill);
+  --el-disabled-text-color: var(--text-faint);
+  --el-disabled-border-color: var(--border-faint);
+  --el-mask-color: var(--glass-scrim-fill);
+  --el-overlay-color: var(--glass-scrim-fill);
+}
+@media (max-width: 768px) {
+  :root {
+    --font-ui: 16px;
+    --control-height: 44px;
+    --page-gutter: 12px;
+  }
+}

@@ -4,8 +4,8 @@
   --motion-fast: 180ms;
   --motion-normal: 260ms;
   --motion-slow: 360ms;
-  --motion-page: 280ms;
-  --motion-distance-sm: 8px;
+  --motion-page: 220ms;
+  --motion-distance-sm: 6px;
   --motion-distance-md: 16px;
   --ease-emphasized: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-spring-gentle: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -93,11 +93,8 @@ select:focus-visible,
   transition-duration: var(--motion-instant);
 }
 
-.el-card:active,
-.stat-card:active,
 .module-card:active,
-.repo-card:active,
-.memo-card-body:active {
+.repo-card[role="button"]:active {
   transform: scale(0.985);
   transition-duration: 140ms;
 }
@@ -157,8 +154,8 @@ select:focus-visible,
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .el-button:not(.is-disabled):hover,
-  .glass-btn:not(:disabled):hover {
+  .el-button:not(.is-disabled):not(:active):hover,
+  .glass-btn:not(:disabled):not(:active):hover {
     transform: translateY(-1px);
   }
 }
@@ -201,6 +198,9 @@ select:focus-visible,
   .overlay-pop-leave-to,
   .dialog-enter-from .dialog-content,
   .dialog-leave-to .dialog-content {
+    transform: none !important;
+  }
+  :is(.el-button, .glass-btn, .glass-icon-btn, .collapse-btn, .path-trigger, .pane-title-btn, .fab, .chip, .toc-item, .ft-row, .nav-item):is(:active, :hover) {
     transform: none !important;
   }
 }

@@ -1,0 +1,42 @@
+/* Shared control geometry/state, separate from optical materials and layout.
+   Tint belongs to the parent layer: fields never perform another blur pass. */
+:root[data-theme] :is(.el-input__wrapper, .el-select__wrapper, .el-range-editor, .el-textarea__inner) {
+  min-height: var(--control-height);
+  border-radius: var(--radius-control) !important;
+  background: var(--glass-field-fill) !important;
+  box-shadow: inset 0 0 0 1px var(--glass-field-edge) !important;
+  color: var(--text-primary);
+  transition: background-color var(--motion-fast) var(--ease-emphasized), box-shadow var(--motion-fast) var(--ease-emphasized);
+}
+:root[data-theme] :is(.el-input__wrapper, .el-select__wrapper, .el-range-editor, .el-textarea__inner):focus-within,
+:root[data-theme] :is(.el-input__wrapper.is-focus, .el-select__wrapper.is-focused, .el-textarea__inner:focus) {
+  box-shadow: inset 0 0 0 1.5px var(--accent-border) !important;
+  background: color-mix(in srgb, var(--glass-solid) 78%, transparent) !important;
+}
+:root[data-theme] :is(.el-input__inner, .el-range-input, .el-select__selected-item, .el-textarea__inner) { color: var(--text-primary) !important; }
+:root[data-theme] :is(input, textarea)::placeholder,
+:root[data-theme] :is(.el-select__placeholder.is-transparent, .el-select__input::placeholder) { color: var(--text-faint) !important; }
+:root[data-theme] .el-form-item.is-error :is(.el-input__wrapper, .el-select__wrapper, .el-textarea__inner) {
+  box-shadow: inset 0 0 0 1.5px var(--glass-danger-label) !important;
+}
+:root[data-theme] .el-button {
+  min-height: var(--control-height);
+  border-radius: var(--radius-control) !important;
+  font-weight: 580 !important;
+}
+:root[data-theme] .el-button--primary { font-weight: 650 !important; }
+:root[data-theme] :is(.el-button, .glass-btn, .glass-icon-btn) .el-icon { font-size: 18px; }
+:root[data-theme] .el-switch { --el-switch-on-color: var(--accent); --el-switch-off-color: var(--glass-field-edge); }
+:root[data-theme] .el-switch__core { background: var(--glass-field-edge) !important; border-color: transparent !important; }
+:root[data-theme] .el-switch.is-checked .el-switch__core { background: var(--accent) !important; }
+:root[data-theme] :is(.el-checkbox, .el-radio) { --el-checkbox-checked-text-color: var(--text-primary); --el-radio-checked-text-color: var(--text-primary); }
+:root[data-theme] .el-checkbox__input.is-checked .el-checkbox__inner,
+:root[data-theme] .el-radio__input.is-checked .el-radio__inner { background: var(--accent); border-color: var(--accent); }
+:root[data-theme] .el-select-dropdown__item { color: var(--text-secondary); }
+:root[data-theme] .el-select-dropdown__item.is-selected { color: var(--accent); font-weight: 650; }
+@media (hover: hover) and (pointer: fine) {
+  :root[data-theme] :is(.el-input__wrapper, .el-select__wrapper, .el-range-editor):not(:focus-within):hover { box-shadow: inset 0 0 0 1px var(--text-faint) !important; }
+}
+@media (prefers-contrast: more), (forced-colors: active) {
+  :root[data-theme] :is(.el-input__wrapper, .el-select__wrapper, .el-range-editor, .el-textarea__inner):focus-within { outline: 2px solid var(--text-primary) !important; outline-offset: 2px; }
+}
