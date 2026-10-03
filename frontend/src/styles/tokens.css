@@ -37,6 +37,9 @@
   --duration-fast: var(--motion-fast);
   --duration-normal: var(--motion-normal);
   --duration-slow: var(--motion-slow);
+  --success: var(--glass-success-label);
+  --warning: var(--glass-warning-label);
+  --danger: var(--glass-danger-label);
 }
 :root, :root[data-theme="light"] {
   color-scheme: light;
@@ -49,6 +52,7 @@
   --text-muted: #586578;
   --text-faint: #5d697a;
   --accent: #5558d8;
+  --accent-contrast: #ffffff;
   --accent-light: rgba(85, 88, 216, .10);
   --accent-border: rgba(85, 88, 216, .36);
   --code-bg: rgba(24, 32, 51, .06);
@@ -70,6 +74,7 @@
   --text-muted: #a2abbc;
   --text-faint: #8e9aaf;
   --accent: #a3a6ff;
+  --accent-contrast: #111827;
   --accent-light: rgba(163, 166, 255, .12);
   --accent-border: rgba(163, 166, 255, .38);
   --code-bg: rgba(255, 255, 255, .065);
@@ -91,6 +96,7 @@
   --text-muted: #495d43;
   --text-faint: #51644e;
   --accent: #276b43;
+  --accent-contrast: #ffffff;
   --accent-light: rgba(39, 107, 67, .10);
   --accent-border: rgba(39, 107, 67, .36);
   --code-bg: rgba(28, 53, 24, .08);

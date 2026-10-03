@@ -179,7 +179,7 @@ function importanceLabel(importance: TaskImportance) {
   transition: transform var(--motion-fast) var(--ease-spring), background var(--motion-fast) ease;
 }
 .status-orb:hover { transform: scale(1.08); }
-.status-completed { background: color-mix(in srgb, #34c759 17%, transparent); border-color: #34c759; color: #248a3d; }
+.status-completed { background: color-mix(in srgb, var(--success) 17%, transparent); border-color: var(--success); color: var(--success); }
 .status-cancelled { background: color-mix(in srgb, var(--text-faint) 12%, transparent); }
 .status-in_progress { border-color: var(--accent); box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent); }
 .status-blocked { border-color: #ff9500; }
@@ -192,13 +192,15 @@ function importanceLabel(importance: TaskImportance) {
    line stays single-row on phones without shipping a resize listener. */
 .tree-dates { min-width: 0; }
 .dates-compact { display: none; }
-.importance-high { color: #ff9500; }
-.importance-urgent { color: #ff3b30; }
+.importance-high { color: var(--warning); }
+.importance-urgent { color: var(--danger); }
 .tree-empty { padding: 28px; text-align: center; color: var(--text-faint); font-size: 14px; }
 
 @media (max-width: 768px) {
-  .tree-row { --indent: min(calc(var(--tree-depth) * 15px), 45px); grid-template-columns: 22px 30px minmax(0, 1fr); padding-left: calc(3px + var(--indent)); }
-  .disclosure, .disclosure-spacer { width: 22px; }
+  .tree-row { --indent: min(calc(var(--tree-depth) * 15px), 45px); grid-template-columns: 44px minmax(0, 1fr); padding-left: calc(3px + var(--indent)); }
+  .disclosure, .disclosure-spacer { width: 44px; min-height: 44px; }
+  .status-orb { display: none; }
+  .tree-title { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .dates-full { display: none; }
   .dates-compact { display: inline; }
 }

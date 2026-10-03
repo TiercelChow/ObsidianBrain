@@ -541,7 +541,7 @@ async function confirmRemove(b: ReaderBook) {
 .bc-more {
   display: none;
 }
-@media (hover: none) {
+@media (max-width: 768px), (hover: none) {
   .bc-actions {
     display: none;
   }
@@ -551,20 +551,20 @@ async function confirmRemove(b: ReaderBook) {
     position: absolute;
     top: 7px;
     right: 7px;
-    width: 24px;
-    height: 24px;
+    width: var(--tap-target);
+    height: var(--tap-target);
     border: 0;
     border-radius: 7px;
     background: rgba(0, 0, 0, 0.22);
     color: rgba(255, 255, 255, 0.88);
-    font-size: 13px;
+    font-size: 20px;
     cursor: pointer;
   }
   .bc-more:active {
     transform: scale(0.92);
   }
   .bc-title {
-    padding-right: 38px;
+    padding-right: 54px;
   }
 }
 

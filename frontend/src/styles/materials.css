@@ -124,7 +124,7 @@
   .reader-mobile-toolbar, .mobile-context-actions, .fs-fab, .sidebar,
   :where(.mobile-global-header.header-scrolled), .knowledge-modal-card, .task-sheet,
   .archive-dialog, .child-task-dialog, .path-card, .ppm-panel,
-  .motion-drawer__panel, .el-dialog, .el-drawer, .el-popper, .glass-picker, .el-message
+  .motion-drawer__panel, .el-dialog, .el-message-box, .el-drawer, .el-popper, .glass-picker, .el-message
 ) {
   --material-fill: var(--glass-content-fill);
   --material-sheen: none;
@@ -163,7 +163,7 @@
 :root[data-theme] :is(
   [data-glass="panel"], .glass-surface-heavy, .knowledge-modal-card,
   .task-sheet, .archive-dialog, .child-task-dialog, .path-card, .ppm-panel,
-  .motion-drawer__panel, .el-dialog, .el-drawer, .el-popper,
+  .motion-drawer__panel, .el-dialog, .el-message-box, .el-drawer, .el-popper,
   .system-select-popper, .glass-picker, .el-message
 ) {
   --material-fill: var(--glass-panel-fill);

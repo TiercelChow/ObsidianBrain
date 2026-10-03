@@ -50,11 +50,15 @@ html[data-theme] :is(.button-primary, .showcase-tabs button[aria-selected='true'
   border-color: var(--glass-action-edge);
   box-shadow: var(--glass-action-shadow);
 }
-html[data-theme] :is(.button, .theme-toggle, .github-button, .menu-toggle, .showcase-tabs button):hover {
+html[data-theme] :is(.button, .theme-toggle, .github-button, .menu-toggle, .showcase-tabs button):not(:active):hover {
   background: var(--glass-action-sheen), var(--glass-action-hover);
 }
 html[data-theme] :is(.button, .theme-toggle, .github-button, .menu-toggle, .showcase-tabs button):active {
   background: var(--glass-action-sheen), var(--glass-action-pressed);
+  transform: scale(.97);
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme] :is(.button, .theme-toggle, .github-button, .menu-toggle, .showcase-tabs button):active { transform: none; }
 }
 html[data-theme] :is(.button, .theme-toggle, .github-button, .menu-toggle, .showcase-tabs button):focus-visible {
   outline: 2px solid var(--text-muted);

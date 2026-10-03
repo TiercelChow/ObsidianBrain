@@ -1057,7 +1057,7 @@ onMounted(async () => {
 .card-topline strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .kind-badge { flex: none; padding: 2px 6px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--text-muted); font-size: 9px; }
 .card-footer { display: flex; justify-content: space-between; gap: 6px; color: var(--text-faint); font-size: 12px; }
-.danger { color: #ff3b30; }
+.danger { color: var(--danger); }
 .mini-progress { height: 3px; border-radius: 3px; background: color-mix(in srgb, var(--text-primary) 7%, transparent); overflow: hidden; }
 .mini-progress i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width var(--motion-slow) var(--ease-spring-gentle); }
 .card-chevron { align-self: center; color: var(--text-faint); font-size: 20px; }
@@ -1372,7 +1372,7 @@ onMounted(async () => {
   .column-scroll { overflow: visible; }
   .progress-column-header { padding: 8px 16px 0; }
   .task-breakdown .column-heading { margin: 0 -16px; padding: 8px 16px 0; }
-  .column-heading button, .progress-column-header button { min-height: 44px; }
+  .column-heading button, .progress-column-header button { display: none; }
   .task-detail-zone.mobile-section-progress .task-breakdown { display: none; }
   .task-detail-zone.mobile-section-breakdown .task-progress-panel { display: none; }
   .mobile-context-actions {

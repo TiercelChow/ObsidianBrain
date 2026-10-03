@@ -8,7 +8,6 @@ const menuButton = document.querySelector('[data-menu-toggle]')
 const navigation = document.querySelector('[data-navigation]')
 const themes = ['light', 'dark', 'eye-care']
 const themeNames = { light: '浅色', dark: '深色', 'eye-care': '护眼' }
-const themeColors = { light: '#f0f0f3', dark: '#000000', 'eye-care': '#c5d5b8' }
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 if (reducedMotion) {
@@ -29,7 +28,7 @@ function setTheme(theme) {
   root.dataset.theme = theme
   root.style.colorScheme = theme === 'dark' ? 'dark' : 'light'
   try { localStorage.setItem('ob-website-theme', theme) } catch { /* Session-only theme. */ }
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColors[theme])
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(root).getPropertyValue('--bg-base').trim())
   if (themeLabel) themeLabel.textContent = themeNames[theme]
   if (themeButton) themeButton.setAttribute('aria-label', `当前为${themeNames[theme]}主题，切换主题`)
 }

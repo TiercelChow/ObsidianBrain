@@ -209,7 +209,7 @@ const saving = ref(false)
 const verifyingLlm = ref(false)
 
 const stats = computed(() => [
-  { icon: Notebook, label: '笔记总数', value: memStats.value?.total_notes ?? '—', color: '#6366f1' },
+  { icon: Notebook, label: '笔记总数', value: memStats.value?.total_notes ?? '—', color: 'var(--accent)' },
   { icon: DataLine, label: '已注册工具', value: health.value?.tools_count ?? '—', color: '#06b6d4' },
   { icon: Calendar, label: '小记数', value: memoStats.value?.total_memos ?? '—', color: '#10b981' },
   { icon: FolderOpened, label: '代码仓', value: repoCount.value ?? '—', color: '#f59e0b' },
@@ -330,22 +330,22 @@ onMounted(() => { loadAll() })
   border: 1px solid var(--border-subtle);
 }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.status-dot.ok { background: #10b981; box-shadow: 0 0 6px rgba(16,185,129,0.3); }
+.status-dot.ok { background: var(--glass-success-label); }
 .status-dot.inactive { background: #d4d4d8; }
 .status-name { flex: 1; font-size: 13px; color: var(--text-tertiary); font-weight: 500; text-transform: capitalize; }
 .status-value { font-size: 12px; font-weight: 600; }
-.status-value.ok { color: #10b981; }
+.status-value.ok { color: var(--glass-success-label); }
 .status-value.inactive { color: var(--text-faint); }
 .status-empty { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 20px; color: var(--text-faint); font-size: 13px; }
 .loading-spinner {
-  width: 14px; height: 14px; border: 2px solid #e4e4e7; border-top-color: #6366f1;
+  width: 14px; height: 14px; border: 2px solid #e4e4e7; border-top-color: var(--accent);
   border-radius: 50%; animation: spin 0.8s linear infinite;
 }
 
 /* Config */
 .config-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   align-items: stretch;
 }
@@ -362,9 +362,9 @@ onMounted(() => { loadAll() })
   font-size: 14px; font-weight: 600; color: var(--text-primary);
   margin-bottom: 14px;
 }
-.config-group-title .el-icon { color: #6366f1; }
+.config-group-title .el-icon { color: var(--accent); }
 .config-fields { display: flex; flex-direction: column; gap: 10px; }
-.config-field { display: flex; flex-direction: column; gap: 4px; }
+.config-field { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .config-field label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
 .field-hint { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
 .config-field.inline { flex-direction: row; align-items: center; gap: 12px; }

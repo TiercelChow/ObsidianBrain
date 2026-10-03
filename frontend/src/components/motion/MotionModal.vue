@@ -190,6 +190,7 @@ onBeforeUnmount(() => {
   transition: transform var(--motion-normal) var(--ease-spring-gentle);
 }
 .motion-modal__panel.is-wide { width: min(840px, calc(100vw - 48px)); }
+.motion-modal__panel > :deep(:not(.motion-modal__handle)) { max-height: inherit; }
 .motion-modal__handle { display: none; }
 
 .motion-modal-enter-active,

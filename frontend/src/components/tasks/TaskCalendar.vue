@@ -367,7 +367,7 @@ onUnmounted(() => {
 .date-badge { display: contents; }
 .lunar-date { position: absolute; top: 12px; left: 10px; max-width: calc(100% - 50px); overflow: hidden; color: var(--text-faint); font-size: 10px; line-height: 1; white-space: nowrap; }
 .day-number { position: absolute; top: 7px; right: 7px; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; font-size: 15px; font-weight: 590; font-variant-numeric: tabular-nums; transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-fast) var(--ease-spring-gentle); }
-.calendar-day.today .day-number { background: var(--accent); color: white; font-weight: 700; box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 28%, transparent); }
+.calendar-day.today .day-number { background: var(--accent); color: var(--accent-contrast); font-weight: 700; box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 28%, transparent); }
 .calendar-day.selected:not(.today) .day-number { color: var(--accent); font-weight: 700; }
 .day-events { display: grid; gap: 3px; margin-top: 36px; }
 .event-pill { display: block; min-width: 0; padding: 4px 7px; border-radius: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text-secondary); font-size: 11px; line-height: 1.35; }
@@ -424,9 +424,9 @@ onUnmounted(() => {
   .date-badge { position: absolute; top: 50%; left: 50%; width: min(44px, calc(100% - 2px)); aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; border-radius: 50%; transform: translate(-50%, -50%); transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-fast) var(--ease-spring-gentle); }
   .lunar-date { position: static; width: auto; max-width: 40px; color: var(--text-muted); font-size: 10px; line-height: 11px; text-align: center; }
   .day-number { position: static; width: auto; height: auto; border-radius: 0; font-size: 21px; line-height: 23px; }
-  .calendar-day.today .date-badge { background: var(--accent); color: white; box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 28%, transparent); }
-  .calendar-day.today .day-number { background: transparent; color: white; box-shadow: none; }
-  .calendar-day.today .lunar-date { color: color-mix(in srgb, white 78%, transparent); }
+  .calendar-day.today .date-badge { background: var(--accent); color: var(--accent-contrast); box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 28%, transparent); }
+  .calendar-day.today .day-number { background: transparent; color: var(--accent-contrast); box-shadow: none; }
+  .calendar-day.today .lunar-date { color: color-mix(in srgb, var(--accent-contrast) 78%, transparent); }
   .calendar-day.selected:not(.today) .lunar-date { color: var(--accent); }
   .day-events { display: none; }
   .mobile-dots { position: absolute; right: 3px; bottom: 3px; display: flex; align-items: center; justify-content: center; gap: 2px; }
@@ -442,10 +442,9 @@ onUnmounted(() => {
 }
 
 @media (max-width: 360px) {
-  .task-calendar { width: calc(100% + 30px); margin-inline: -15px; padding: 10px 4px; }
+  .task-calendar { padding: 10px 4px; }
   .calendar-grid { gap: 0; }
   .calendar-nav { gap: 1px; padding: 2px; }
-  .calendar-nav button { min-width: 40px; }
   .calendar-nav .today-button { padding-inline: 8px; }
   .calendar-heading span { display: none; }
   .date-badge { width: min(42px, calc(100% - 2px)); }

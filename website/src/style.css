@@ -1,80 +1,14 @@
-:root,
-:root[data-theme='light'] {
-  color-scheme: light;
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-right: env(safe-area-inset-right, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --safe-left: env(safe-area-inset-left, 0px);
-  --bg-base: #f0f0f3;
-  --bg-elevated: #f7f7f9;
-  --bg-hover: rgba(255, 255, 255, 0.62);
-  --border-faint: rgba(24, 24, 27, 0.07);
-  --text-primary: #18181b;
-  --text-secondary: #27272a;
-  --text-tertiary: #52525b;
-  --text-muted: #71717a;
-  --text-faint: #a1a1aa;
-  --accent: #6366f1;
-  --accent-strong: #4f46e5;
-  --accent-light: rgba(99, 102, 241, 0.12);
-  --accent-border: rgba(99, 102, 241, 0.3);
-  --success: #10b981;
-  --warning: #f59e0b;
-  --code-bg: #18181b;
-  --code-text: #e4e4e7;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-lg: 0 22px 70px rgba(34, 34, 48, 0.12), 0 8px 24px rgba(34, 34, 48, 0.07);
+@import '../../frontend/src/styles/tokens.css';
+
+/* Website-only aliases and page rhythm; palette remains owned by the app. */
+:root {
+  --bg-elevated: var(--glass-solid);
+  --accent-strong: var(--accent);
+  --success: var(--glass-success-label);
+  --warning: var(--glass-warning-label);
+  --code-bg: var(--code-block-bg);
+  --code-text: var(--code-block-text);
   --section-space: clamp(6rem, 10vw, 10rem);
-  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  --font-mono: 'SFMono-Regular', 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
-  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
-  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-:root[data-theme='dark'] {
-  color-scheme: dark;
-  --bg-base: #000;
-  --bg-elevated: #0b0b0d;
-  --bg-hover: rgba(45, 45, 52, 0.52);
-  --border-faint: rgba(255, 255, 255, 0.05);
-  --text-primary: #fff;
-  --text-secondary: #e5e5e5;
-  --text-tertiary: #b3b3b3;
-  --text-muted: #858585;
-  --text-faint: #5b5b60;
-  --accent: #7c7cff;
-  --accent-strong: #8e8eff;
-  --accent-light: rgba(124, 124, 255, 0.14);
-  --accent-border: rgba(124, 124, 255, 0.34);
-  --code-bg: #0d0d0f;
-  --code-text: #e5e5e5;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 3px 12px rgba(0, 0, 0, 0.28);
-  --shadow-lg: 0 24px 80px rgba(0, 0, 0, 0.52);
-}
-
-:root[data-theme='eye-care'] {
-  color-scheme: light;
-  --bg-base: #c5d5b8;
-  --bg-elevated: #d3dfc9;
-  --bg-hover: rgba(206, 228, 194, 0.68);
-  --border-faint: rgba(30, 60, 20, 0.12);
-  --text-primary: #152618;
-  --text-secondary: #1e3320;
-  --text-tertiary: #355030;
-  --text-muted: #4e6e45;
-  --text-faint: #708e60;
-  --accent: #2e7d4a;
-  --accent-strong: #23683b;
-  --accent-light: rgba(46, 125, 74, 0.18);
-  --accent-border: rgba(46, 125, 74, 0.4);
-  --success: #2e7d4a;
-  --code-bg: #152612;
-  --code-text: #c9e5c2;
-  --shadow-sm: 0 1px 2px rgba(30, 60, 20, 0.08);
-  --shadow-md: 0 3px 12px rgba(30, 60, 20, 0.1);
-  --shadow-lg: 0 22px 68px rgba(30, 60, 20, 0.14);
 }
 
 * { box-sizing: border-box; }
@@ -383,7 +317,10 @@ code, pre { font-family: var(--font-mono); }
   :root { --section-space: 5.5rem; }
   .section-shell { width: min(100% - 1.5rem, 1180px); }
   .site-header { padding-inline: max(.55rem, var(--safe-right)) max(.55rem, var(--safe-left)); }
-  .header-inner { min-height: 3.25rem; padding: .35rem .4rem .35rem .75rem; border-radius: 1rem; }
+  .header-inner { min-height: 3.25rem; padding: .35rem .4rem .35rem .75rem; border-radius: 1rem; gap: .375rem; }
+  .header-actions { gap: .25rem; }
+  .header-actions :is(.theme-toggle, .github-button, .menu-toggle) { min-width: 44px; min-height: 44px; }
+  .brand { min-width: 0; gap: .4rem; }
   .brand { font-size: .86rem; }.theme-toggle { width: 2.6rem; padding: 0; }.theme-toggle span, .github-button span { display: none; }.github-button { width: 2.6rem; padding: 0; }
   .hero { min-height: auto; padding-top: 8.5rem; padding-bottom: 4rem; gap: 3rem; }
   .hero h1 { font-size: clamp(2.55rem, 13vw, 4rem); letter-spacing: -.06em; }
@@ -410,9 +347,10 @@ code, pre { font-family: var(--font-mono); }
   .architecture { padding: 1.5rem; }.privacy-grid article { padding-inline: .4rem; }
   .final-cta { width: min(100% - 1.5rem, 1180px); min-height: 35rem; padding: 2rem 1.4rem; grid-template-columns: 1fr; }.cta-copy h2 { font-size: 2.4rem; }.cta-copy .button { width: 100%; }.cta-mark { display: none; }
   .footer-inner { display: grid; }.footer-links { gap: 3.5rem; }.footer-bottom { display: grid; gap: .3rem; }
-  .js [data-reveal] { --reveal-distance: 1.25rem; --reveal-scale: .985; --reveal-blur: 6px; transition-duration: .58s, .66s, .48s; }
+  .js [data-reveal] { --reveal-distance: 1rem; --reveal-scale: .99; --reveal-blur: 3px; transition-duration: .46s, .52s, .32s; }
   .js [data-reveal-sequence] > * { translate: 0 .8rem; scale: .99; filter: blur(5px); transition-duration: .52s, .6s, .6s, .42s; }
 }
+@media (max-width: 380px) { .brand { font-size: .8rem; } }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }

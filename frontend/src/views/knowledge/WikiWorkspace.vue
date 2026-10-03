@@ -56,6 +56,7 @@
             v-for="entry in entries"
             :key="entry.id"
             class="entry-row"
+            :data-entry-id="entry.id"
             :class="{ active: entry.id === selectedEntry?.id }"
             @click="selectEntry(entry)"
           >
@@ -71,9 +72,9 @@
         </div>
       </aside>
 
-      <article class="entry-detail knowledge-surface">
+      <article ref="entryDetailRef" class="entry-detail knowledge-surface">
         <template v-if="selectedEntry">
-          <button class="mobile-back" type="button" @click="selectedEntry = null">
+          <button class="mobile-back" type="button" @click="returnToEntryList">
             <el-icon><ArrowLeft /></el-icon>返回实体列表
           </button>
           <header class="entry-detail-head">
@@ -319,6 +320,9 @@ const selectedEntry = ref<KnowledgeEntrySummary | null>(null)
 const detail = ref<KnowledgeEntryDetail | null>(null)
 const renderedHtml = ref('')
 const markdownRef = ref<HTMLElement | null>(null)
+const entryDetailRef = ref<HTMLElement | null>(null)
+let entryListScrollTop = 0
+let entryReadSequence = 0
 const loadingBases = ref(false)
 const loadingEntries = ref(false)
 const detailLoading = ref(false)
@@ -438,21 +442,52 @@ function scheduleSearch() {
 }
 
 async function selectEntry(entry: KnowledgeEntrySummary) {
+  const sequence = ++entryReadSequence
+  const scroller = entryDetailRef.value?.closest<HTMLElement>('.app-main')
+  const singleColumn = window.matchMedia('(max-width: 1100px)').matches
+  if (singleColumn && !selectedEntry.value) entryListScrollTop = scroller?.scrollTop ?? 0
   selectedEntry.value = entry
   detail.value = null
   detailLoading.value = true
   router.replace({ query: { ...route.query, base: activeBaseId.value, entry: entry.id } })
+  await nextTick()
+  if (singleColumn && scroller) scroller.scrollTop = 0
+  if (entryDetailRef.value) entryDetailRef.value.scrollTop = 0
   try {
     const response = await getKnowledgeEntry(entry.id)
+    if (sequence !== entryReadSequence || selectedEntry.value?.id !== entry.id) return
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '实体读取失败')
+    const html = await renderMarkdown(response.result.content_md, undefined, entry.id)
+    if (sequence !== entryReadSequence || selectedEntry.value?.id !== entry.id) return
     detail.value = response.result
-    renderedHtml.value = await renderMarkdown(response.result.content_md, undefined, entry.id)
+    renderedHtml.value = html
+    // The markdown subtree is gated by detailLoading; mount it before enhancing.
+    detailLoading.value = false
     await nextTick()
     if (markdownRef.value) await enhance(markdownRef.value)
   } catch (error) {
-    ElMessage.error((error as Error).message)
+    if (sequence === entryReadSequence) ElMessage.error((error as Error).message)
   } finally {
-    detailLoading.value = false
+    if (sequence === entryReadSequence) detailLoading.value = false
+  }
+}
+
+async function returnToEntryList() {
+  ++entryReadSequence
+  detailLoading.value = false
+  const entryId = selectedEntry.value?.id
+  const scroller = entryDetailRef.value?.closest<HTMLElement>('.app-main')
+  selectedEntry.value = null
+  const nextQuery = { ...route.query }
+  delete nextQuery.entry
+  void router.replace({ query: nextQuery })
+  await nextTick()
+  if (scroller) scroller.scrollTop = entryListScrollTop
+  // Restore the triggering row without another automatic scroll or focus steal
+  // when this app is no longer the foreground document.
+  if (document.hasFocus() && entryId) {
+    const rows = entryDetailRef.value?.parentElement?.querySelectorAll<HTMLButtonElement>('.entry-row')
+    Array.from(rows ?? []).find(row => row.dataset.entryId === entryId)?.focus({ preventScroll: true })
   }
 }
 

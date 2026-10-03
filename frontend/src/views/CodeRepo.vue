@@ -223,12 +223,12 @@ onUnmounted(() => window.removeEventListener('resize', onResize))
 .code-repo-page .repo-card:nth-child(3) { animation-delay: 0.12s; }
 .code-repo-page .repo-card:nth-child(4) { animation-delay: 0.18s; }
 
-.repo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.repo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 16px; }
 .repo-card { padding: 20px; border-radius: 16px; transition: box-shadow var(--duration-fast) var(--ease-out); display: flex; flex-direction: column; }
 .repo-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
 .repo-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.repo-name { font-size: 16px; font-weight: 600; color: var(--text-primary); }
-.repo-branch { display: flex; align-items: center; gap: 4px; font-size: 13px; color: #6366f1; margin-bottom: 4px; }
+.repo-name { min-width: 0; overflow-wrap: anywhere; font-size: 16px; font-weight: 600; color: var(--text-primary); }
+.repo-branch { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--accent); margin-bottom: 4px; }
 .repo-path {
   font-size: 12px; color: var(--text-faint); font-family: var(--font-mono); margin-bottom: 12px;
   word-break: break-all; overflow: hidden; text-overflow: ellipsis;
@@ -242,55 +242,12 @@ onUnmounted(() => window.removeEventListener('resize', onResize))
 .commits-section h4 { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px; }
 .commit-list { display: flex; flex-direction: column; gap: 8px; }
 .commit-item { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 10px; font-size: 13px; }
-.commit-hash { font-family: var(--font-mono); color: #6366f1; min-width: 60px; font-weight: 500; }
+.commit-hash { font-family: var(--font-mono); color: var(--accent); min-width: 60px; font-weight: 500; }
 .commit-msg { flex: 1; color: var(--text-primary); }
 .commit-author { color: var(--text-faint); font-size: 12px; }
 .no-commits { padding: 20px; text-align: center; }
-.detail-path { font-family: var(--font-mono); font-size: 12px; color: #6366f1; word-break: break-all; }
+.detail-path { font-family: var(--font-mono); font-size: 12px; color: var(--accent); word-break: break-all; }
 .language-tags { display: flex; gap: 6px; flex-wrap: wrap; }
-
-/* 弹窗表格样式 - 解决圆角缺口问题 */
-.detail-descriptions {
-  width: 100%;
-  border-radius: 12px !important;
-  overflow: hidden !important;
-}
-
-.detail-descriptions .el-descriptions__table {
-  width: 100%;
-  border-collapse: separate !important;
-  border-spacing: 0 !important;
-}
-
-.detail-descriptions .el-descriptions__cell {
-  padding: 12px 16px !important;
-  border: 1px solid #ebeef5 !important;
-}
-
-.detail-descriptions .el-descriptions__label {
-  min-width: 100px;
-  font-weight: 500;
-  background-color: #f5f7fa !important;
-}
-
-.detail-descriptions .el-descriptions__content {
-  min-width: 150px;
-  background-color: #fff !important;
-}
-
-/* 修复四角圆角 */
-.detail-descriptions .el-descriptions__body .el-descriptions__table .el-descriptions__cell:first-child {
-  border-top-left-radius: 12px !important;
-}
-.detail-descriptions .el-descriptions__body .el-descriptions__table .el-descriptions__cell:last-child {
-  border-top-right-radius: 12px !important;
-}
-.detail-descriptions .el-descriptions__body .el-descriptions__table tr:last-child .el-descriptions__cell:first-child {
-  border-bottom-left-radius: 12px !important;
-}
-.detail-descriptions .el-descriptions__body .el-descriptions__table tr:last-child .el-descriptions__cell:last-child {
-  border-bottom-right-radius: 12px !important;
-}
 
 @media (max-width: 768px) {
   .repo-grid { grid-template-columns: 1fr; gap: 12px; }
@@ -304,14 +261,4 @@ onUnmounted(() => window.removeEventListener('resize', onResize))
   :deep(.el-dialog__footer) { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   :deep(.el-dialog__footer .el-button) { width: 100%; margin: 0; }
 }
-</style>
-
-<style>
-/* 全局样式 - 圆角弹窗和表格 */
-.el-dialog { border-radius: 16px !important; overflow: hidden; }
-.el-dialog__header { border-radius: 16px 16px 0 0 !important; padding: 20px 24px 16px !important; }
-.el-dialog__body { padding: 16px 24px 24px !important; }
-.el-descriptions { border-radius: 12px !important; overflow: hidden; }
-.el-descriptions__table { border-radius: 12px !important; }
-
 </style>

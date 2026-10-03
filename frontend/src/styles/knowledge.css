@@ -155,13 +155,13 @@
 .knowledge-status.is-clean,
 .knowledge-status.is-healthy,
 .knowledge-status.is-ready,
-.knowledge-status.is-completed { background: color-mix(in srgb, #34c759 13%, transparent); color: #248a3d; }
+.knowledge-status.is-completed { background: color-mix(in srgb, var(--glass-success-label) 12%, transparent); color: var(--glass-success-label); }
 .knowledge-status.is-outdated,
 .knowledge-status.is-not_started,
 .knowledge-status.is-compiling,
 .knowledge-status.is-warning,
-.knowledge-status.is-draft { background: color-mix(in srgb, #ff9f0a 14%, transparent); color: #b96b00; }
-.knowledge-status.is-failed { background: color-mix(in srgb, #ff453a 13%, transparent); color: #d52d25; }
+.knowledge-status.is-draft { background: color-mix(in srgb, var(--glass-warning-label) 12%, transparent); color: var(--glass-warning-label); }
+.knowledge-status.is-failed { background: color-mix(in srgb, var(--glass-danger-label) 12%, transparent); color: var(--glass-danger-label); }
 .knowledge-meta { color: var(--text-faint); font-size: 12px; }
 
 .knowledge-modal-card {
