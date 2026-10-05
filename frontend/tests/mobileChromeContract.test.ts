@@ -78,9 +78,10 @@ test('task detail owns a fixed action row and child detail omits redundant root 
   assert.match(tasks, /\.page-create \{ display: none; \}/)
 })
 
-test('all modules opens as a bottom sheet and mobile titles use stronger hierarchy', async () => {
+test('phone navigation uses direct destinations instead of a module sheet and keeps clear titles', async () => {
   const app = await source('src/App.vue')
 
-  assert.match(app, /transform: translate3d\(0, 100%, 0\)/)
+  assert.doesNotMatch(app, /mobile-overlay|open-modules|全部功能/)
+  assert.match(app, /<MobileDock/)
   assert.match(app, /\.mobile-page-title \{[\s\S]*?font-size: 19px;[\s\S]*?font-weight: 700;/)
 })

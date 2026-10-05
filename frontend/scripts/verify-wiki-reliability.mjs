@@ -157,8 +157,9 @@ const mockApi = {
         case 'read_local_file': return json(response, success(tool, { path: '/mock/glass-book/chapter.md', name: 'chapter.md', content: '# 通透的操作层，清晰的阅读内容\n\n```mermaid\nflowchart LR\n  A[原始资料] --> B[编译知识] --> C[问答与研究]\n```\n\n' + '## 阅读与材质\n\n玻璃只服务导航和操作，正文保持舒适的阅读空间。\n\n'.repeat(24), size: 1900 }))
         case 'save_reader_history': return json(response, success(tool, { ok: true, count: args.history.length }))
         case 'save_reader_books': return json(response, success(tool, { ok: true, count: args.books.length }))
-        case 'browse_timeline': return json(response, success(tool, { memos: [{ id: 'glass-memo', content: '## 清晰的内容，通透的操作层\n\n浮动玻璃属于导航与工具，文字内容保留稳定的阅读底色。', timestamp, tags: ['隔离测试'], images: glassOnly ? ['glass-mock.svg', 'glass-mock-2.svg'] : [] }], total: 1, has_more: false }))
+        case 'browse_timeline': return json(response, success(tool, { memos: Array.from({ length: dockOnly ? 12 : 1 }, (_, index) => ({ id: `glass-memo-${index}`, content: '## 清晰的内容，通透的操作层\n\n浮动玻璃属于导航与工具，文字内容保留稳定的阅读底色。', timestamp, tags: ['隔离测试'], images: glassOnly ? ['glass-mock.svg', 'glass-mock-2.svg'] : [] })), total: dockOnly ? 12 : 1, has_more: false }))
         case 'get_memory_stats': return json(response, success(tool, { total_chunks: 0, total_notes: 0, tags: [] }))
+        case 'get_timeline_storage': return json(response, success(tool, { data_directory: '/mock', originals_directory: '/mock/timeline/images', cache_directory: '/mock/timeline/cache', originals_count: 0, originals_bytes: 0, cache_bytes: 0, cache_limit_bytes: 268435456, pending_cleanup: 0, missing_images: [], last_import: null }))
         case 'get_memo_stats': return json(response, success(tool, { total_memos: 0 }))
         case 'list_code_repos': return json(response, success(tool, { repos: [] }))
         case 'get_config': return json(response, success(tool, { vault: { path: '/mock/no-real-vault', name: 'mock' }, obsidian: { enabled: false, url: '', api_key: '' }, llm: { provider: 'mock', model: 'mock', api_key: '', api_key_env: 'MOCK', base_url: '', max_tokens: 1000, temperature: .5 } }))
@@ -281,28 +282,29 @@ try {
     }
     if (retirementOnly) {
       await page.goto(`${origin}/`)
-      await page.locator('.config-card').first().waitFor()
+      await page.locator('.stat-card').first().waitFor()
       if (phone) {
-        assert.equal(await page.locator('.mobile-dock-item').count(), 4)
-        await page.getByRole('button', { name: '全部模块', exact: true }).click()
-        await page.getByRole('dialog', { name: '全部功能', exact: true }).waitFor()
+        assert.equal(await page.locator('.mobile-dock-item').count(), 5)
+        assert.equal(await page.locator('.app-aside').count(), 0)
+        await page.goto(`${origin}/code-repo`)
+        await page.waitForURL(`${origin}/`)
+      } else {
+        const nav = page.locator('.app-aside')
+        assert.deepEqual(await nav.locator('.nav-group-label').allTextContents(), ['日常', '知识'])
+        assert.equal(await nav.locator('.nav-item').count(), 10)
+        const daily = nav.locator('.nav-group').filter({ has: page.locator('.nav-group-label', { hasText: '日常' }) })
+        await daily.getByRole('link', { name: '代码仓', exact: true }).click()
+        await page.waitForURL('**/code-repo')
+        await page.locator('.code-repo-page').waitFor()
       }
-      const nav = page.locator('.app-aside')
-      assert.deepEqual(await nav.locator('.nav-group-label').allTextContents(), ['日常', '知识'])
-      assert.equal(await nav.locator('.nav-item').count(), 10)
-      const daily = nav.locator('.nav-group').filter({ has: page.locator('.nav-group-label', { hasText: '日常' }) })
-      await daily.getByRole('link', { name: '代码仓', exact: true }).click()
-      await page.waitForURL('**/code-repo')
-      await page.locator('.code-repo-page').waitFor()
-      if (phone) await page.locator('.app-aside.mobile-open').waitFor({ state: 'hidden' })
       await checkLayout(`retirement-${mode}-code-repo`)
       for (const path of ['/inspiration', '/radar', '/inspiration?mode=counterpoint', '/obsolete-module']) {
         await page.goto(`${origin}${path}`)
         await page.waitForURL(url => url.pathname === '/')
-        await page.locator('.config-card').first().waitFor()
+        await page.locator('.stat-card').first().waitFor()
       }
       assert.deepEqual(pageErrors, [])
-      results.push({ viewport, codeRepoInDaily: true, noManagementGroup: true, fourMobileShortcuts: true, retiredBookmarksSafe: true })
+      results.push({ viewport, codeRepoDesktopOnly: true, noManagementGroup: true, fiveMobileShortcuts: true, retiredBookmarksSafe: true })
       await context.close()
       continue
     }
@@ -341,28 +343,9 @@ try {
       for (const theme of ['light', 'dark', 'eye-care']) {
         await page.evaluate(theme => { document.documentElement.dataset.theme = theme; localStorage.setItem('theme', theme) }, theme)
         if (phone) {
-          await page.getByRole('button', { name: '全部模块', exact: true }).click()
-          const sheet = page.getByRole('dialog', { name: '全部功能', exact: true })
-          await sheet.waitFor()
-          await page.waitForFunction(() => document.querySelector('.app-aside').getAnimations().length === 0)
-          const baseline = await page.evaluate(() => window.sidebarSnapshot())
-          await checkLayout(`sidebar-${theme}-mobile-open`, sheet)
-          await record()
-          await page.getByRole('button', { name: '关闭全部模块', exact: true }).click()
-          await page.waitForFunction(() => document.querySelector('.app-aside').getAnimations().length === 0)
-          const frames = await finish()
-          assert.ok(frames.every(frame => frame.close && Math.abs(frame.close.x - baseline.close.x) < 1 && Math.abs(frame.close.y - baseline.close.y) < 1), 'mobile close button remains anchored throughout dismissal')
-          for (const frame of frames) for (let index = 0; index < frame.icons.length; index++) {
-            assert.ok(Math.abs(frame.icons[index].x - baseline.icons[index].x) < 1 && Math.abs(frame.icons[index].y - baseline.icons[index].y) < 1, 'mobile module grid never rearranges while closing')
-          }
-          await page.getByRole('button', { name: '全部模块', exact: true }).click()
-          await sheet.waitFor()
-          await page.waitForFunction(() => document.querySelector('.app-aside').getAnimations().length === 0)
-          await sheet.getByRole('link', { name: '首页', exact: true }).click()
-          await page.waitForFunction(() => !document.querySelector('.app-aside.mobile-open'))
-          await page.goto(`${origin}/knowledge/settings`)
-          await page.locator('.runtime-card').waitFor()
-          await installSnapshot()
+          assert.equal(await page.locator('.app-aside').count(), 0)
+          assert.deepEqual(await page.locator('.mobile-dock-item span').allTextContents(), ['首页', '阅境轩', '时光机', '任务中枢', 'Wiki'])
+          await checkLayout(`sidebar-${theme}-mobile-dock`)
         } else {
           assert.ok(await page.evaluate(() => {
             const list = document.querySelector('.nav-list').getBoundingClientRect()
@@ -827,22 +810,28 @@ try {
       await page.goto(`${origin}/knowledge`)
       await page.locator('.mobile-sub-dock').getByRole('link', { name: 'Wiki', exact: true }).click()
       await page.waitForURL('**/knowledge/wiki')
-      await page.getByRole('button', { name: '全部模块', exact: true }).click()
-      await page.getByRole('dialog', { name: '全部功能', exact: true }).waitFor()
-      await page.locator('.mobile-overlay').click({ position: { x: 20, y: 20 } })
-      await page.locator('.app-aside.mobile-open').waitFor({ state: 'hidden' })
       // Wiki registration is released on a single-level page, including transitions.
-      await page.getByRole('button', { name: '全部模块', exact: true }).click()
-      await page.getByRole('dialog', { name: '全部功能', exact: true }).getByRole('link', { name: '首页', exact: true }).click()
+      await page.locator('.mobile-dock-links').getByRole('link', { name: '首页', exact: true }).click()
       await page.waitForURL(`${origin}/`)
       await page.waitForTimeout(350)
       assert.equal(await page.locator('.mobile-sub-dock').count(), 0)
-      await page.locator('.config-card').first().waitFor()
+      await page.locator('.stat-card').first().waitFor()
       await main.evaluate(element => { element.scrollTop = 0 })
       await page.waitForTimeout(160)
       // Start on the page gutter, not an editable configuration input.
-      await drag(startY, startY - 130, true, 16)
-      await waitForDockRest(100)
+      if (await main.evaluate(element => element.scrollHeight > element.clientHeight)) {
+        await drag(startY, startY - 130, true, 16)
+        await waitForDockRest(100)
+      } else {
+        // A short dashboard cannot scroll; navigation stays expanded rather than
+        // inventing a contraction from a non-scrolling gesture.
+        assert.equal(await dock.getAttribute('data-progress'), '0')
+        await page.goto(`${origin}/timeline`)
+        await page.locator('.timeline-page').waitFor()
+        await main.evaluate(element => { element.scrollTop = 0 })
+        await drag(startY, startY - 130, true, 16)
+        await waitForDockRest(100)
+      }
       await page.getByRole('button', { name: '展开主要导航', exact: true }).press('Enter')
       await waitForDockRest(0)
       await page.waitForFunction(() => document.activeElement?.matches('.mobile-dock-item.active'))

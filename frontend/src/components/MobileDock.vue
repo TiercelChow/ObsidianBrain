@@ -28,6 +28,9 @@
 
     <div v-glass-lens class="mobile-dock dock-glass" data-glass-rim>
       <nav id="mobile-main-navigation" class="mobile-dock-links" aria-label="主要导航" :aria-hidden="compact ? 'true' : undefined" :inert="compact ? true : undefined">
+        <router-link to="/" class="mobile-dock-item" :class="{ active: section === 'home' }" :aria-current="section === 'home' ? 'page' : undefined">
+          <el-icon><House /></el-icon><span>首页</span>
+        </router-link>
         <router-link :to="{ path: '/reader', query: { view: 'shelf' } }" class="mobile-dock-item" :class="{ active: section === 'reader' }" :aria-current="section === 'reader' ? 'page' : undefined">
           <el-icon><Files /></el-icon><span>阅境轩</span>
         </router-link>
@@ -37,9 +40,9 @@
         <router-link :to="{ path: '/tasks', query: { view: 'tasks' } }" class="mobile-dock-item" :class="{ active: section === 'tasks' }" :aria-current="section === 'tasks' ? 'page' : undefined">
           <el-icon><Finished /></el-icon><span>任务中枢</span>
         </router-link>
-        <button type="button" class="mobile-dock-item" :class="{ active: section === 'more' || sidebarVisible }" :aria-expanded="sidebarVisible" aria-label="全部模块" @click="emit('openModules')">
-          <el-icon><Grid /></el-icon><span>全部</span>
-        </button>
+        <router-link to="/knowledge" class="mobile-dock-item" :class="{ active: section === 'wiki' }" :aria-current="section === 'wiki' ? 'page' : undefined">
+          <el-icon><Notebook /></el-icon><span>Wiki</span>
+        </router-link>
       </nav>
       <button type="button" class="mobile-dock-orb" aria-label="展开主要导航" aria-controls="mobile-main-navigation" :aria-expanded="!compact" :aria-hidden="!compact ? 'true' : undefined" :inert="!compact ? true : undefined" @click="expand">
         <el-icon><component :is="orbIcon" /></el-icon>
@@ -51,7 +54,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from 'vue'
-import { Calendar, Files, Finished, Grid } from '@element-plus/icons-vue'
+import { Calendar, Files, Finished, House, Notebook } from '@element-plus/icons-vue'
 import type { MobileNavSection } from '@/utils/mobileNavigationPolicy'
 import type { MobileSubnav } from '@/composables/useMobileSubnav'
 import { dockGeometry, dockRebound } from '@/utils/mobileDockMotion'
@@ -59,14 +62,13 @@ import { dockGeometry, dockRebound } from '@/utils/mobileDockMotion'
 const props = defineProps<{
   progress: number
   section: MobileNavSection
-  sidebarVisible: boolean
   subnav: MobileSubnav | null
 }>()
-const emit = defineEmits<{ expand: []; openModules: [] }>()
+const emit = defineEmits<{ expand: [] }>()
 const geometry = computed(() => dockGeometry(props.progress))
 const rebound = computed(() => dockRebound(props.progress))
 const compact = computed(() => geometry.value.sink > .12)
-const orbIcon = computed(() => ({ reader: Files, timeline: Calendar, tasks: Finished, more: Grid })[props.section])
+const orbIcon = computed(() => ({ home: House, reader: Files, timeline: Calendar, tasks: Finished, wiki: Notebook })[props.section])
 const dockRef = ref<HTMLElement | null>(null)
 const width = ref(Math.max(0, window.innerWidth - 16))
 let observer: ResizeObserver | undefined
@@ -133,7 +135,7 @@ onScopeDispose(() => observer?.disconnect())
   width: calc(var(--dock-width) - 2px);
   height: calc(var(--mobile-dock-height) - 2px);
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   padding: 4px;
   opacity: clamp(0, 1 - var(--dock-settle-progress) * 3, 1);
   transform: translate3d(calc(12px * var(--dock-settle-progress)), 0, 0);

@@ -1,10 +1,18 @@
-export type MobileNavSection = 'reader' | 'timeline' | 'tasks' | 'more'
+import { isPhoneViewport } from './mobileLayoutPolicy.ts'
+
+export type MobileNavSection = 'home' | 'reader' | 'timeline' | 'tasks' | 'wiki'
 
 export function getMobileNavSection(path: string): MobileNavSection {
   if (path === '/reader') return 'reader'
   if (path === '/timeline') return 'timeline'
   if (path === '/tasks') return 'tasks'
-  return 'more'
+  if (path === '/knowledge' || path.startsWith('/knowledge/')) return 'wiki'
+  return 'home'
+}
+
+/** Desktop-only work must not appear through phone bookmarks or a resized tab. */
+export function getMobileRouteRedirect(path: string, width: number): string | null {
+  return path === '/code-repo' && isPhoneViewport(width) ? '/' : null
 }
 
 export function isMobileFocusRoute(

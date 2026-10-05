@@ -7,6 +7,12 @@
 
 ## 1. 技术架构详细设计
 
+### 当前详情弹窗布局（2026-10-04）
+
+代码仓入口与页面仅在桌面可用。共享移动导航策略负责手机书签重定向，App 在窗口缩到手机断点时返回首页；手机首页不展示或请求仓库统计，桌面工具与仓库数据不受影响。这是客户端的展示规则，不是后端权限限制。
+
+CodeRepo.vue 的详情使用独立 repo-detail-dialog 类限定尺寸和样式：外层 column flex 固定高度，header 不收缩，body 为 flex:1/min-height:0/overflow:hidden，内部 repo-detail-content 是唯一滚动区域（overflow-y:auto、overscroll-behavior:contain、tabindex:0）。可见视口变化通过现有 --visual-viewport-height 调整上限，不增加新的尺寸监听器或动画系统。描述表格固定布局、移动端 span 与单列保持一致；提交记录使用可收缩 grid 并按原内容换行。仅给当前弹窗的 Element Plus 子结构使用带专属类的全局选择器，避免 Teleport 和全局主题样式导致滚动失效或污染其他弹窗。验证覆盖短内容/长内容、长无空格文字、完整提交列表、桌面/手机/矮屏与关闭入口。
+
 ### 1.1 模块在系统中的位置
 
 CodeRepo 模块位于核心服务层（`src/core/`），通过工具注册表（Tool Registry）暴露给 LLM，依赖基础设施层的 SQLite、FileWatcher、LLM Client 等组件。

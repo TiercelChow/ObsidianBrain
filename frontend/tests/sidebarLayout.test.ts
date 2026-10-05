@@ -24,10 +24,10 @@ test('collapsing fades labels in place instead of removing layout participants',
   assert.match(source, /ref="navListRef"/)
 })
 
-test('mobile module-sheet controls stay mounted during dismissal', async () => {
+test('desktop rail preserves its layout without obsolete mobile module-sheet controls', async () => {
   const source = await sidebar()
   assert.doesNotMatch(source, /v-if="expandedOnMobile"/)
   assert.match(source, /@media \(min-width: 769px\)/)
-  assert.match(source, /@media \(max-width: 768px\)[\s\S]*?\.nav-item\s*\{[^}]*display:\s*flex/)
+  assert.doesNotMatch(source, /mobile-sheet|mobile-sidebar-close|expandedOnMobile/)
   assert.match(source, /prefers-reduced-motion:\s*reduce/)
 })

@@ -4,13 +4,29 @@ import test from 'node:test'
 
 const source = (path: string) => readFile(new URL(`../src/${path}`, import.meta.url), 'utf8')
 
-test('four main destinations and an accessible orb share one navigation component', async () => {
+test('five direct destinations replace the module menu while preserving the accessible orb', async () => {
   const dock = await source('components/MobileDock.vue')
-  assert.equal((dock.match(/class="mobile-dock-item"/g) || []).length, 4)
+  assert.equal((dock.match(/class="mobile-dock-item"/g) || []).length, 5)
+  const labels = [...dock.matchAll(/<span>(首页|阅境轩|时光机|任务中枢|Wiki)<\/span>/g)].map(match => match[1])
+  assert.deepEqual(labels, ['首页', '阅境轩', '时光机', '任务中枢', 'Wiki'])
+  assert.match(dock, /grid-template-columns: repeat\(5, minmax\(0, 1fr\)\)/)
+  assert.match(dock, /to="\/knowledge"[^>]*class="mobile-dock-item"/)
+  assert.doesNotMatch(dock, /全部|openModules|sidebarVisible|section === 'more'/)
+  assert.match(dock, /home: House/)
+  assert.match(dock, /wiki: Notebook/)
   assert.match(dock, /aria-label="展开主要导航"/)
   assert.match(dock, /:inert="compact \? true : undefined"/)
   assert.match(dock, /prefers-reduced-transparency/)
   assert.match(dock, /prefers-reduced-motion/)
+})
+
+test('phone shell has no hidden module menu and guards desktop-only routes on resize', async () => {
+  const [app, router] = await Promise.all([source('App.vue'), source('router/index.ts')])
+  assert.match(app, /<aside[\s\S]*?v-if="!isMobile"/)
+  assert.doesNotMatch(app, /openMobileSidebar|mobileSidebarVisible|open-modules|expanded-on-mobile|mobile-overlay/)
+  assert.match(app, /getMobileRouteRedirect\(route\.path, windowWidth\.value\)/)
+  assert.match(router, /router\.beforeEach\(/)
+  assert.match(router, /getMobileRouteRedirect\(to\.path, window\.innerWidth\)/)
 })
 
 test('navigation reserve is stable and does not depend on scroll progress', async () => {

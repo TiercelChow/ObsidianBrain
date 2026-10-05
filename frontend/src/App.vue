@@ -11,30 +11,13 @@
       <div class="mobile-header-spacer"></div>
     </div>
 
-    <!-- Mobile sidebar overlay backdrop -->
-    <transition name="scrim-fade">
-      <div
-        v-if="mobileSidebarVisible"
-        class="mobile-overlay"
-        aria-hidden="true"
-        @click="closeMobileSidebar"
-      ></div>
-    </transition>
-
     <el-container class="app-container">
       <aside
-        ref="appAsideRef"
+        v-if="!isMobile"
         class="app-aside"
-        :class="{ 'mobile-open': isMobile && !isCollapsed }"
-        :style="{ width: isMobile ? '100%' : (isCollapsed ? '72px' : '230px') }"
-        :role="isMobile && mobileSidebarVisible ? 'dialog' : undefined"
-        :aria-modal="isMobile && mobileSidebarVisible ? 'true' : undefined"
-        :aria-label="isMobile && mobileSidebarVisible ? '全部功能' : undefined"
-        :aria-hidden="isMobile && !mobileSidebarVisible ? 'true' : undefined"
-        :inert="isMobile && !mobileSidebarVisible ? true : undefined"
-        :tabindex="isMobile && mobileSidebarVisible ? -1 : undefined"
+        :style="{ width: isCollapsed ? '72px' : '230px' }"
       >
-        <Sidebar :expanded-on-mobile="isMobile && mobileSidebarVisible" />
+        <Sidebar />
       </aside>
       <el-main
         class="app-main"
@@ -59,27 +42,26 @@
       v-if="isMobile && !mobileFocusMode && !dockKeyboardOpen"
       :progress="dockProgress"
       :section="mobileNavSection"
-      :sidebar-visible="mobileSidebarVisible"
       :subnav="mobileSubnav"
       @expand="expandDock"
-      @open-modules="openMobileSidebar"
     />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from './stores/app'
 import Sidebar from './components/Sidebar.vue'
 import MobileDock from './components/MobileDock.vue'
-import { isPhoneViewport, shouldLockMobileReaderOuterScroll } from './utils/mobileLayoutPolicy'
-import { getMobileNavSection, isMobileFocusRoute } from './utils/mobileNavigationPolicy'
-import { useModalEnvironment } from './composables/useModalEnvironment'
+import { shouldLockMobileReaderOuterScroll } from './utils/mobileLayoutPolicy'
+import { getMobileNavSection, getMobileRouteRedirect, isMobileFocusRoute } from './utils/mobileNavigationPolicy'
+import { usePhoneViewport } from './composables/usePhoneViewport'
 import { provideMobileSubnav } from './composables/useMobileSubnav'
 import { useMobileDockMotion } from './composables/useMobileDockMotion'
 
 const route = useRoute()
+const router = useRouter()
 const appStore = useAppStore()
 // Reset scroll state when navigating between pages.
 watch(() => route.path, async path => {
@@ -93,16 +75,18 @@ watch(() => route.path, async path => {
 })
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
 const currentTitle = computed(() => (route.meta?.title as string) || '')
-const appAsideRef = ref<HTMLElement | null>(null)
 const appShellRef = ref<HTMLElement | null>(null)
 const mobileSubnav = provideMobileSubnav()
 
 // Mobile detection
-const windowWidth = ref(window.innerWidth)
-const isMobile = computed(() => isPhoneViewport(windowWidth.value))
-// An expanded desktop rail must not become an unsolicited modal on resize.
+const { width: windowWidth, isMobile } = usePhoneViewport()
+// Desktop-only content returns home if the same window changes to phone layout.
 watch(isMobile, (mobile) => {
-  if (mobile) appStore.setSidebarCollapsed(true)
+  if (mobile) {
+    appStore.setSidebarCollapsed(true)
+    const redirect = getMobileRouteRedirect(route.path, windowWidth.value)
+    if (redirect) void router.replace(redirect)
+  }
 })
 const mobileFocusMode = computed(() => isMobileFocusRoute(route.path, route.query))
 const mobileNavSection = computed(() => getMobileNavSection(route.path))
@@ -114,21 +98,6 @@ const { progress: dockProgress, keyboardOpen: dockKeyboardOpen, expand: expandDo
 const lockMobileReaderOuterScroll = computed(() => (
   shouldLockMobileReaderOuterScroll(windowWidth.value, route.path)
 ))
-
-const mobileSidebarVisible = computed(() => isMobile.value && !isCollapsed.value)
-useModalEnvironment(
-  () => isMobile.value && !isCollapsed.value,
-  appAsideRef,
-  closeMobileSidebar,
-)
-
-function openMobileSidebar() {
-  appStore.setSidebarCollapsed(false)
-}
-
-function closeMobileSidebar() {
-  appStore.setSidebarCollapsed(true)
-}
 
 function disableLeavingPage(element: Element) {
   // Fixed descendants can override pointer-events:none; inert also removes
@@ -152,14 +121,10 @@ function onMainScroll(e: Event) {
   appStore.handleScroll(el.scrollTop)
 }
 
-function onResize() {
-  windowWidth.value = window.innerWidth
-}
 onMounted(() => {
   syncVisualViewport()
   window.visualViewport?.addEventListener('resize', syncVisualViewport)
   window.visualViewport?.addEventListener('scroll', syncVisualViewport)
-  window.addEventListener('resize', onResize)
   if (isMobile.value && !isCollapsed.value) appStore.setSidebarCollapsed(true)
 })
 onUnmounted(() => {
@@ -167,7 +132,6 @@ onUnmounted(() => {
   window.visualViewport?.removeEventListener('scroll', syncVisualViewport)
   document.documentElement.style.removeProperty('--visual-viewport-height')
   document.documentElement.style.removeProperty('--visual-viewport-top')
-  window.removeEventListener('resize', onResize)
 })
 </script>
 
@@ -438,10 +402,6 @@ code, pre, .code-block { font-family: var(--font-mono); }
   overflow: hidden;
   background: var(--bg-base);
   transition: background-color var(--motion-fast) var(--ease-emphasized);
-  --mobile-sidebar-x: -260px;
-  --mobile-sidebar-progress: 0;
-  --mobile-content-scale: 1;
-  --mobile-content-shift: 0px;
 }
 
 .app-container {
@@ -517,29 +477,6 @@ code, pre, .code-block { font-family: var(--font-mono); }
   flex-shrink: 0;
 }
 
-.mobile-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1090;
-  background: rgba(0, 0, 0, 0.3);
-  opacity: 1;
-  backdrop-filter: var(--glass-scrim-filter);
-  -webkit-backdrop-filter: var(--glass-scrim-filter);
-  touch-action: none;
-}
-
-.scrim-fade-enter-active,
-.scrim-fade-leave-active { transition: opacity var(--motion-fast) var(--ease-emphasized); }
-.scrim-fade-enter-from,
-.scrim-fade-leave-to { opacity: 0; }
-
-/* Mobile module sheet shares the same physical bottom origin as other sheets. */
-.app-aside {
-  transition: width var(--motion-slow) var(--ease-spring-gentle),
-              transform var(--motion-normal) var(--ease-spring-gentle),
-              box-shadow var(--motion-normal) var(--ease-emphasized);
-}
-
 .has-mobile-subnav { --mobile-navigation-height: calc(var(--mobile-dock-height) + var(--mobile-sub-dock-height) + 8px); }
 
 @media (min-width: 769px) and (prefers-reduced-motion: reduce) {
@@ -571,33 +508,10 @@ code, pre, .code-block { font-family: var(--font-mono); }
 }
 
 @media (max-width: 768px) {
-  .app-aside {
-    position: fixed;
-    top: auto;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 1100;
-    width: 100% !important;
-    height: min(76dvh, 660px);
-    border-radius: 26px 26px 0 0;
-    transform: translate3d(0, 100%, 0);
-    will-change: transform;
-    touch-action: pan-y;
-  }
-
   .app-shell { touch-action: auto; }
 
   .route-stage {
     min-height: calc(100dvh - var(--mobile-header-height) - var(--safe-top));
-  }
-
-  .app-aside.mobile-open {
-    top: auto;
-    right: 0;
-    height: min(76dvh, 660px);
-    transform: translate3d(0, 0, 0);
-    box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.18);
   }
 
 }

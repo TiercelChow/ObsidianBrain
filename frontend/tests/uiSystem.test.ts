@@ -44,7 +44,7 @@ test('static cards are not treated as buttons and presses win over hover transfo
 
 test('switching from desktop to phone closes the inherited desktop navigation', async () => {
   const app = await source('App.vue')
-  assert.match(app, /watch\(isMobile,[\s\S]+?if \(mobile\) appStore\.setSidebarCollapsed\(true\)/)
+  assert.match(app, /watch\(isMobile,[\s\S]+?if \(mobile\)\s*\{?\s*appStore\.setSidebarCollapsed\(true\)/)
 })
 
 test('shared controls own quiet fields, rounded focus, sizing and semantic state', async () => {
@@ -66,12 +66,10 @@ test('route transitions do not relocate fixed phone controls or leave old action
   assert.ok(app.includes('inert = true'))
 })
 
-test('theme switching remains reachable from the global navigation on phones', async () => {
-  const sidebar = await source('components/Sidebar.vue')
+test('theme switching remains reachable on Home after removing the phone module menu', async () => {
+  const [sidebar, home] = await Promise.all([source('components/Sidebar.vue'), source('views/Home.vue')])
   assert.ok(sidebar.includes('class="collapse-btn theme-toggle"'))
   assert.ok(sidebar.includes('@click="appStore.toggleTheme()"'))
-  assert.ok(sidebar.includes('.collapse-btn:not(.theme-toggle)'))
-  const mobile = sidebar.slice(sidebar.indexOf('/* ── Mobile ── */'))
-  assert.ok(mobile.includes('grid-template-columns: repeat(3, minmax(0, 1fr))'))
-  assert.ok(mobile.includes('white-space: normal'), 'module names remain readable, not an ellipsis-only menu')
+  assert.ok(home.includes('@click="appStore.toggleTheme()"'))
+  assert.match(home, /:aria-label="`切换主题，当前\$\{themeName\}`"/)
 })

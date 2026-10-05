@@ -287,7 +287,7 @@
   color: var(--glass-media-label);
 }
 /* A scrim dims the page; it is not another bright glass surface. */
-:root[data-theme] :is(.el-overlay, .motion-modal, .motion-drawer__scrim, .mobile-overlay, .path-overlay, .ppm-overlay) {
+:root[data-theme] :is(.el-overlay, .motion-modal, .motion-drawer__scrim, .path-overlay, .ppm-overlay) {
   background: var(--glass-scrim-fill) !important;
   backdrop-filter: var(--glass-scrim-filter) !important;
   -webkit-backdrop-filter: var(--glass-scrim-filter) !important;

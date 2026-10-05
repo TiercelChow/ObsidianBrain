@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { getMobileRouteRedirect } from '@/utils/mobileNavigationPolicy'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -72,5 +73,7 @@ const router = createRouter({
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
+
+router.beforeEach(to => getMobileRouteRedirect(to.path, window.innerWidth) ?? true)
 
 export default router

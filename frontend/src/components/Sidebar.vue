@@ -1,17 +1,9 @@
 <template>
   <div class="sidebar" :class="{ collapsed: isCollapsed }">
-    <span class="mobile-sheet-handle" aria-hidden="true"></span>
     <!-- Logo -->
     <div class="logo-section">
       <img class="logo-mark" src="/favicon.svg" alt="" aria-hidden="true" />
       <span class="logo-name" :aria-hidden="isCollapsed ? true : undefined">ObsidianBrain</span>
-      <strong class="mobile-sheet-title">全部功能</strong>
-      <button
-        type="button"
-        class="mobile-sidebar-close"
-        aria-label="关闭全部模块"
-        @click="appStore.setSidebarCollapsed(true)"
-      >×</button>
     </div>
 
     <!-- Navigation -->
@@ -81,8 +73,7 @@ import {
 
 const route = useRoute()
 const appStore = useAppStore()
-const props = defineProps<{ expandedOnMobile?: boolean }>()
-const isCollapsed = computed(() => appStore.sidebarCollapsed && !props.expandedOnMobile)
+const isCollapsed = computed(() => appStore.sidebarCollapsed)
 const themeName = computed(() => ({ light: '浅色', dark: '深色', 'eye-care': '护眼' }[appStore.theme]))
 const themeIcon = computed(() => ({ light: Sunny, dark: Moon, 'eye-care': View }[appStore.theme]))
 const navListRef = ref<HTMLElement | null>(null)
@@ -108,12 +99,7 @@ function updateActiveIndicator() {
   })
 }
 
-// Auto-close the mobile sidebar overlay on navigation. The match is checked at
-// navigation time (not cached) so resizing between routes stays correct.
 watch(() => route.path, () => {
-  if (window.matchMedia('(max-width: 768px)').matches && !isCollapsed.value) {
-    appStore.setSidebarCollapsed(true)
-  }
   updateActiveIndicator()
 })
 watch(isCollapsed, updateActiveIndicator)
@@ -195,9 +181,6 @@ function isActive(path: string) {
   letter-spacing: var(--tracking-tight);
   white-space: nowrap;
 }
-
-.mobile-sidebar-close { display: none; }
-.mobile-sheet-title, .mobile-sheet-handle { display: none; }
 
 /* ── Navigation ── */
 .nav-list {
@@ -341,86 +324,6 @@ function isActive(path: string) {
   }
 }
 
-/* ── Mobile ── */
-@media (max-width: 768px) {
-  .sidebar {
-    position: relative;
-    padding-top: 28px;
-    padding-left: 12px;
-    padding-right: 12px;
-    border-right: none;
-    border-radius: inherit;
-    box-shadow: none;
-    background: var(--bg-glass-strong);
-    backdrop-filter: var(--glass-structural-filter);
-    -webkit-backdrop-filter: var(--glass-structural-filter);
-  }
-  .mobile-sheet-handle {
-    position: absolute;
-    top: 8px;
-    left: 50%;
-    width: 38px;
-    height: 5px;
-    display: block;
-    border-radius: 999px;
-    background: var(--text-faint);
-    opacity: .45;
-    transform: translateX(-50%);
-  }
-  .logo-section { height: 54px; display: flex; margin-bottom: 2px; padding-inline: 4px; }
-  .logo-mark, .logo-name { display: none !important; }
-  .mobile-sheet-title { display: block; color: var(--text-primary); font-size: 19px; font-weight: 700; letter-spacing: -.02em; }
-  .mobile-sidebar-close {
-    display: inline-flex;
-    width: var(--tap-target);
-    height: var(--tap-target);
-    margin-left: auto;
-    border: 1px solid var(--border-subtle);
-    border-radius: 14px;
-    background: var(--bg-glass-subtle);
-    color: var(--text-muted);
-    align-items: center;
-    justify-content: center;
-    font: inherit;
-    font-size: 24px;
-    line-height: 1;
-  }
-  .mobile-sidebar-close:active { transform: scale(0.94); }
-  .sidebar-footer {
-    padding: 8px 0 max(12px, var(--safe-bottom));
-  }
-  .collapse-btn:not(.theme-toggle) { display: none; }
-  .theme-toggle { display: flex; gap: 10px; justify-content: center; background: var(--bg-glass-subtle); }
-  .nav-list { gap: 12px; padding-bottom: max(18px, var(--safe-bottom)); }
-  .nav-active-indicator { display: none; }
-  .nav-group {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-  }
-  .nav-group-label { grid-column: 1 / -1; padding: 2px 4px 0; }
-  .nav-item {
-    display: flex;
-    min-width: 0;
-    min-height: 70px;
-    flex-direction: column;
-    justify-content: center;
-    gap: 6px;
-    padding: 8px 4px;
-    border: 1px solid var(--border-subtle);
-    border-radius: 16px;
-    background: color-mix(in srgb, var(--bg-glass) 72%, transparent);
-    font-size: 12px;
-    font-weight: 600;
-    text-align: center;
-    transform-origin: center;
-  }
-  .nav-item.active { background: color-mix(in srgb, var(--accent) 11%, var(--bg-glass)); border-color: var(--accent-border); color: var(--accent); }
-  .nav-icon { font-size: 22px; opacity: .85; }
-  .nav-label { width: 100%; padding: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
-  .nav-group + .nav-group { margin-top: 0; }
-  .nav-group-label { font-size: 11px; }
-}
 @media (prefers-reduced-motion: reduce) {
   .logo-name, .nav-label, .nav-group-label { transition-delay: 0s; }
 }
