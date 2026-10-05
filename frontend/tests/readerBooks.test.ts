@@ -86,6 +86,11 @@ test('bookProgressLabel covers md/pdf/unread cases', () => {
   const pdfNoCount: ReaderBook = { ...pdf, progress: { position: 12, updatedAt: 2 } }
   assert.equal(bookProgressLabel(pdfNoCount), '第 12 页')
 })
+test('a folder book displaying a PDF uses page semantics, not a thousand-percent chapter',()=>{
+  const mixed={...folderBook(),progress:{lastFile:'/d/book.pdf',position:12,pageCount:80,updatedAt:1}}
+  assert.equal(bookProgressLabel(mixed),'第 12/80 页')
+  assert.equal(bookProgressRatio(mixed),12/80)
+})
 
 test('sortBooks orders by last activity (progress.updatedAt ?? addedAt) descending', () => {
   const b = (id: string, t: number, p?: number) => ({

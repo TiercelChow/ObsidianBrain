@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import { createBookshelf } from '../src/composables/useBookshelf.ts'
 import type { ReaderBook } from '../src/api/reader.ts'
+import type { BookProgressState } from '../src/utils/readerProgress.ts'
 
 function book(id: string, path: string, kind: 'folder' | 'pdf' = 'folder'): ReaderBook {
   return { id, path, kind, name: id, description: '', category: '', addedAt: 1 }
@@ -12,6 +13,7 @@ function makeDeps() {
   let saved: ReaderBook[] = []
   let fail = false
   let progressStore: Record<string, unknown> = {}
+  const progressWrites: {id:string;state:BookProgressState}[] = []
   const deps = {
     load: async () => [{ ...book('a', '/a') }] as ReaderBook[],
     persist: async (b: ReaderBook[]) => {
@@ -22,6 +24,12 @@ function makeDeps() {
     saveProgress: (m: Record<string, unknown>) => {
       progressStore = { ...m }
     },
+    persistProgress: async (id:string,state:BookProgressState) => {
+      if (fail) throw new Error('offline')
+      progressWrites.push({id,state})
+      return state
+    },
+    get progressWrites() { return progressWrites },
     get saved() {
       return saved
     },
@@ -79,14 +87,18 @@ test('removeBook persists; updateBook replaces by id', async () => {
 
 // ── per-file progress (localStorage) ───────────────────────────────────
 
-test('saveFileProgress writes per-file state to the progress store, not the backend', async () => {
+test('saveFileProgress caches synchronously and persists only the changed book', async () => {
   const deps = makeDeps()
   const shelf = createBookshelf(deps)
   await shelf.ensureLoaded()
   shelf.saveFileProgress('a', '/a/n.md', { kind: 'md', position: 0.5, updatedAt: 1000 })
   // display progress reflected on the book (for the cover bar)
   assert.equal(shelf.books.value[0].progress?.position, 0.5)
-  // backend NOT written for progress
+  await shelf.flushProgress()
+  assert.equal(deps.progressWrites.length,1)
+  assert.equal(deps.progressWrites[0].id,'a')
+  assert.equal(deps.progressWrites[0].state.byFile['/a/n.md'].position,0.5)
+  // No full bookshelf write for a reading update.
   assert.equal(deps.saved.length, 0)
   // full per-file state retrievable for restore
   const st = shelf.getFileProgressState('a')
@@ -164,4 +176,43 @@ test('findBook matches exact path', async () => {
   await shelf.ensureLoaded()
   assert.equal(shelf.findBook('/a')?.id, 'a')
   assert.equal(shelf.findBook('/zzz'), undefined)
+})
+
+test('server and cached reading states merge by file time without losing other chapters', async () => {
+  const deps=makeDeps()
+  deps.load=async()=>[{...book('a','/a'),progress:{lastFile:'/a/a.md',position:.8,updatedAt:300,lastReadAt:300,byFile:{'/a/a.md':{kind:'md',position:.8,updatedAt:300}}}}]
+  deps.loadProgress=()=>({a:{lastFile:'/a/b.pdf',byFile:{'/a/a.md':{kind:'md',position:.2,updatedAt:100},'/a/b.pdf':{kind:'pdf',position:12,pageCount:80,updatedAt:200}}}})
+  const shelf=createBookshelf(deps)
+  await shelf.ensureLoaded();await shelf.flushProgress()
+  assert.equal(shelf.getFileProgressState('a')?.lastFile,'/a/a.md')
+  assert.equal(shelf.getFileProgressState('a')?.byFile['/a/a.md'].position,.8)
+  assert.equal(shelf.getFileProgressState('a')?.byFile['/a/b.pdf'].position,12)
+  assert.equal(deps.progressWrites.length,1)
+})
+
+test('failed reading sync retains cache and retries without resetting position on reopen', async () => {
+  const deps=makeDeps();const shelf=createBookshelf(deps)
+  await shelf.ensureLoaded();deps.fail=true
+  shelf.saveFileProgress('a','/a/a.md',{kind:'md',position:.75,updatedAt:100})
+  await shelf.flushProgress()
+  assert.ok(shelf.progressError.value)
+  assert.equal(shelf.getFileProgressState('a')?.byFile['/a/a.md'].position,.75)
+  deps.fail=false;shelf.openFile('a','/a/a.md','md');await shelf.flushProgress()
+  assert.equal(shelf.progressError.value,'')
+  const state=shelf.getFileProgressState('a')!
+  assert.equal(state.byFile['/a/a.md'].position,.75)
+  assert.equal(state.byFile['/a/a.md'].updatedAt,100)
+  assert.ok(state.lastReadAt!>100)
+})
+
+test('a delayed response cannot overwrite a newer queued progress and saves are serialized', async () => {
+  const deps=makeDeps();let release:()=>void=()=>{};let calls=0
+  deps.persistProgress=async(id,state)=>{calls++;if(calls===1) await new Promise<void>(resolve=>{release=resolve});return state}
+  const shelf=createBookshelf(deps);await shelf.ensureLoaded()
+  shelf.saveFileProgress('a','/a/a.md',{kind:'md',position:.1,updatedAt:100})
+  shelf.saveFileProgress('a','/a/a.md',{kind:'md',position:.9,updatedAt:200})
+  assert.equal(calls,1)
+  release();await shelf.flushProgress()
+  assert.equal(calls,2)
+  assert.equal(shelf.getFileProgressState('a')?.byFile['/a/a.md'].position,.9)
 })

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 /// Markdown 抽取算法版本。切分规则变更时递增并纳入 source version 派生：
 /// 旧版本与其 span 原样保留（历史引用可回放），新同步建立新版本。
@@ -42,6 +43,35 @@ pub struct BookProgress {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_count: Option<i64>,
     pub updated_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_read_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub by_file: BTreeMap<String, ReaderFileProgress>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ReaderFileKind {
+    Md,
+    Pdf,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReaderFileProgress {
+    pub kind: ReaderFileKind,
+    pub position: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_count: Option<i64>,
+    pub updated_at: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReaderProgressState {
+    pub last_file: String,
+    pub last_read_at: i64,
+    pub by_file: BTreeMap<String, ReaderFileProgress>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

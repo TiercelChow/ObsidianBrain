@@ -55,6 +55,11 @@
       </el-button>
     </div>
 
+    <p v-if="progressSyncError" class="reader-progress-notice" role="status">
+      {{ progressSyncError }}
+      <button type="button" @click="shelf.flushProgress()">重试同步</button>
+    </p>
+
     <!-- Bookshelf view (kept alive via v-show alongside the reading panes) -->
     <BookshelfView ref="bookshelfRef" v-show="viewMode === 'shelf'" class="bookshelf-root" :query="shelfQuery" @open="openBook" />
 
@@ -337,7 +342,7 @@ import {
   computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch,
 } from 'vue'
 import { nextPdfZoomRatio } from '@/components/reader/pdfRenderPolicy'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   FolderOpened, Menu, Document, FullScreen, Refresh, Minus, Plus, Search,
@@ -357,6 +362,7 @@ import {
   captureMdFileProgress,
   capturePdfFileProgress,
   deriveFileKind,
+  resolveReadingBookId,
 } from '@/utils/readerProgress'
 import { useAppStore } from '@/stores/app'
 import FileTree from '@/components/reader/FileTree.vue'
@@ -538,10 +544,14 @@ const viewMode = ref<ReaderView>(initialViewMode())
 const shelfQuery = ref('')
 const bookshelfRef = ref<InstanceType<typeof BookshelfView> | null>(null)
 
-function changeView(mode: ReaderView) {
+function changeView(mode: ReaderView, recordOpen = true) {
   // Leaving the reading view flushes any debounced progress first (FR-16).
   if (viewMode.value === 'read' && mode === 'shelf') flushProgressNow()
   viewMode.value = mode
+  if (recordOpen && mode === 'read' && displayedFile.value && (fileKind.value !== 'pdf' || pdfPageCount.value > 0)) {
+    const id = currentShelfBookId.value
+    if (id) shelf.openFile(id, displayedFile.value, deriveFileKind(displayedFile.value))
+  }
   localStorage.setItem(VIEW_STORAGE_KEY, mode)
   void router.replace({ query: { ...route.query, view: mode } })
   // Entering the shelf from an immersive/fullscreen reading session restores the shell.
@@ -563,13 +573,13 @@ function changeView(mode: ReaderView) {
  * (page), disambiguated by the file's own `kind`.
  */
 async function openBook(book: ReaderBook) {
-  changeView('read')
+  flushProgressNow()
+  activeReadingBookId.value = book.id
+  changeView('read', false)
   const state = shelf.getFileProgressState(book.id)
   if (book.kind === 'pdf') {
     const dir = book.path.substring(0, book.path.lastIndexOf('/'))
     await openPath(dir)
-    const fp = state?.byFile[book.path]
-    pendingPdfPage = fp ? clampPdfPage(fp.position, fp.pageCount ?? 0) : null
     await onSelectFile(book.path)
     return
   }
@@ -577,11 +587,6 @@ async function openBook(book: ReaderBook) {
   const lastFile = state?.lastFile
   const fp = lastFile ? state?.byFile[lastFile] : undefined
   if (lastFile && fp && flatFiles.value.includes(lastFile)) {
-    if (fp.kind === 'pdf') {
-      pendingPdfPage = clampPdfPage(fp.position, fp.pageCount ?? 0)
-    } else {
-      pendingRestoreRatio = fp.position
-    }
     await onSelectFile(lastFile)
   } else if (flatFiles.value.length) {
     // Fallback (FR-13): stale/missing lastFile → first file, from the top.
@@ -594,13 +599,11 @@ async function openBook(book: ReaderBook) {
 // page on every pagechange. A book is matched by rootPath (folder) or the
 // displayed pdf path, so reading outside any book simply records nothing.
 const shelf = useBookshelf()
+const activeReadingBookId = ref<string | null>(null)
+const progressSyncError = computed(() => shelf.progressError.value)
 
 const currentShelfBookId = computed<string | null>(() => {
-  const books = shelf.books.value
-  if (fileKind.value === 'pdf') {
-    return books.find((b) => b.kind === 'pdf' && b.path === displayedFile.value)?.id ?? null
-  }
-  return books.find((b) => b.kind === 'folder' && b.path === rootPath.value)?.id ?? null
+  return resolveReadingBookId(shelf.books.value, rootPath.value, displayedFile.value, activeReadingBookId.value)
 })
 
 // Pending restore targets consumed after the file finishes rendering (set by
@@ -646,7 +649,7 @@ let progressTimer: ReturnType<typeof setTimeout> | null = null
 
 /** Debounced capture of the md scroll ratio (FR-15). */
 function scheduleProgressCapture() {
-  if (fileKind.value === 'pdf') return
+  if (viewMode.value !== 'read' || fileKind.value === 'pdf' || fileLoading.value || pendingRestoreRatio !== null || restoreCorrectionTimer !== null) return
   if (progressTimer) clearTimeout(progressTimer)
   progressTimer = setTimeout(() => {
     progressTimer = null
@@ -656,7 +659,7 @@ function scheduleProgressCapture() {
 
 /** Immediate capture — used by the debounce expiry and the flush points. */
 function captureProgressNow() {
-  if (fileKind.value === 'pdf') return
+  if (viewMode.value !== 'read' || fileKind.value === 'pdf' || fileLoading.value || pendingRestoreRatio !== null || restoreCorrectionTimer !== null) return
   const bookId = currentShelfBookId.value
   const el = contentRef.value
   if (!bookId || !el || !displayedFile.value) return
@@ -669,17 +672,22 @@ function captureProgressNow() {
 
 /** Flush pending debounced progress (view switch / unmount) without waiting. */
 function flushProgressNow() {
-  if (progressTimer) {
-    clearTimeout(progressTimer)
+  if (progressTimer || contentScrollFrame !== null) {
+    if (progressTimer) clearTimeout(progressTimer)
     progressTimer = null
+    if (contentScrollFrame !== null) cancelAnimationFrame(contentScrollFrame)
+    contentScrollFrame = null
     captureProgressNow()
   }
+  void shelf.flushProgress()
 }
 /** App backgrounded (visibilitychange) — flush the md debounce so the position
  *  survives without a route-leave. localStorage writes synchronously. */
 function onVisibilityHidden() {
   if (document.visibilityState === 'hidden') flushProgressNow()
+  else void shelf.flushProgress()
 }
+function retryReadingSync() { void shelf.flushProgress() }
 /** Tab close (pagehide) — same flush for browsers that fire pagehide without
  *  a prior visibilitychange hidden (or in addition to it). */
 function onPageHide() {
@@ -1000,6 +1008,8 @@ async function refreshTree() {
 async function openPath(rawPath: string) {
   const path = rawPath.trim()
   if (!path) return
+  flushProgressNow()
+  stopRestoreCorrection()
   cancelPendingFileSelection()
   error.value = ''
   try {
@@ -1043,6 +1053,8 @@ async function onSelectFile(path: string) {
   activeFile.value = path
   // Already displaying this file — skip to avoid resetting rendered mermaid back to source.
   if (path === displayedFile.value) return
+  flushProgressNow()
+  stopRestoreCorrection()
   fileRequest?.abort()
   const request = new AbortController()
   fileRequest = request
@@ -1051,6 +1063,10 @@ async function onSelectFile(path: string) {
   error.value = ''
 
   const isPdf = /\.pdf$/i.test(path)
+  const targetBook = resolveReadingBookId(shelf.books.value, rootPath.value, path, activeReadingBookId.value)
+  const saved = targetBook ? shelf.getFileProgressState(targetBook)?.byFile[path] : undefined
+  pendingRestoreRatio = isPdf ? null : saved?.position ?? 0
+  pendingPdfPage = isPdf ? clampPdfPage(saved?.position ?? 1, saved?.pageCount ?? 0) : null
   // Determine page-turn direction from the file's position in the tree.
   const oldIdx = flatFiles.value.indexOf(displayedFile.value)
   const newIdx = flatFiles.value.indexOf(path)
@@ -1089,12 +1105,9 @@ async function onSelectFile(path: string) {
       renderedHtml.value = html
       displayedFile.value = path
       localStorage.setItem(LAST_FILE_KEY, path)
-      // Folder-book progress: a fresh file starts from the top (FR-15 lastFile).
-      // Skip while restoring a saved position — the restore owns the next write.
-      // openFile only seeds a new file's entry (position 0); an existing file's
-      // saved progress is never clobbered here.
+      // A successful open updates reading time but keeps the saved position.
       const bookId = currentShelfBookId.value
-      if (bookId && pendingRestoreRatio === null && pendingPdfPage === null) {
+      if (bookId && viewMode.value === 'read') {
         shelf.openFile(bookId, path, deriveFileKind(path))
       }
       // enhance() + buildToc() run in the transition's @enter hook (onArticleEnter).
@@ -1104,6 +1117,10 @@ async function onSelectFile(path: string) {
     error.value = (e as Error)?.message || '读取失败'
   } finally {
     if (version === selectionVersion) {
+      if (displayedFile.value !== path) {
+        pendingRestoreRatio = null
+        pendingPdfPage = null
+      }
       fileRequest = null
       fileLoading.value = false
     }
@@ -1149,11 +1166,14 @@ function onContentAfterLeave(el: Element) {
 }
 
 /** PdfViewer emits its outline after load; populate the TOC. */
-function onPdfPageChange(page: number) {
+function onPdfPageChange(page: number, source: string) {
+  if (source !== displayedFile.value) return
   pdfCurrentPage.value = page
   // Skip capturing during a restore jump — pdf.js fires intermediate page
   // events as it renders toward the target page; the restore owns the position.
-  if (pendingPdfPage !== null) return
+  if (fileKind.value !== 'pdf' || viewMode.value !== 'read' || pdfPageCount.value <= 0) return
+  if (pendingPdfPage !== null && page !== pendingPdfPage) return
+  pendingPdfPage = null
   const bookId = currentShelfBookId.value
   const file = displayedFile.value
   if (bookId && file) {
@@ -1165,14 +1185,18 @@ function onPdfPageChange(page: number) {
   }
 }
 
-function onPdfPageCount(count: number) {
+function onPdfPageCount(count: number, source: string) {
+  if (source !== displayedFile.value || fileKind.value !== 'pdf') return
   pdfPageCount.value = count
+  const id = currentShelfBookId.value
+  if (id && displayedFile.value && count > 0 && viewMode.value === 'read') shelf.openFile(id, displayedFile.value, 'pdf')
   // Book-open restore (FR-14): page wraps mount with pageMetas as the pdf
   // loads, so one rAF after the count arrives the target wrap is addressable.
   if (pendingPdfPage !== null) {
     const target = clampPdfPage(pendingPdfPage, count)
-    pendingPdfPage = null
+    pendingPdfPage = target
     requestAnimationFrame(() => {
+      if (source !== displayedFile.value || pendingPdfPage !== target) return
       // Same programmatic-scroll family as TOC jumps — don't let the mobile
       // header collapse mid-restore (see holdHeaderForJump).
       holdHeaderForJump()
@@ -1350,7 +1374,8 @@ onMounted(async () => {
   // change, so it's already current — this only covers the md debounce.)
   document.addEventListener('visibilitychange', onVisibilityHidden)
   window.addEventListener('pagehide', onPageHide)
-  await shelf.ensureLoaded()
+  window.addEventListener('online', retryReadingSync)
+  await shelf.ensureLoaded(true)
   const requestedBook = String(route.query.book || '')
   const routeBook = requestedBook ? shelf.books.value.find(book => book.id === requestedBook) : undefined
   if (routeBook) {
@@ -1377,6 +1402,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onReaderKeydown)
   document.removeEventListener('visibilitychange', onVisibilityHidden)
   window.removeEventListener('pagehide', onPageHide)
+  window.removeEventListener('online', retryReadingSync)
   document.removeEventListener('mousemove', onFsActivity)
   document.removeEventListener('touchstart', onFsActivity)
   selectionMenu.value.visible = false
@@ -1387,6 +1413,7 @@ onBeforeUnmount(() => {
   if (contentScrollFrame !== null) cancelAnimationFrame(contentScrollFrame)
   if (document.fullscreenElement) void document.exitFullscreen()
 })
+onBeforeRouteLeave(() => { flushProgressNow() })
 </script>
 
 <style scoped>
@@ -1399,6 +1426,8 @@ onBeforeUnmount(() => {
 }
 /* Tighter page-header spacing — the Reader is a tool page, not a content page. */
 .reader-page .page-header { margin-bottom: 6px; }
+.reader-progress-notice { display:flex; align-items:center; justify-content:space-between; gap:12px; flex:none; margin:0; color:var(--text-secondary); font-size:12px; line-height:1.5; }
+.reader-progress-notice button { flex:none; min-height:44px; padding:0 8px; border:0; background:none; color:inherit; font:inherit; cursor:pointer; }
 .reader-selection-menu { position: fixed; z-index: 2600; display: flex; gap: 3px; padding: 5px; border-radius: 13px; box-shadow: var(--shadow-lg); transform-origin: center bottom; }
 .reader-selection-menu button { min-height: 34px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 11px; cursor: pointer; }
 .reader-selection-menu button:hover { background: var(--accent-light); color: var(--accent); }

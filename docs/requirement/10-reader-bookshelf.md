@@ -5,6 +5,12 @@
 > **上游模块**: 阅境轩（本地 Markdown/PDF 阅读器，无独立模块文档，代码见 `frontend/src/views/Reader.vue`）
 > **参考实现**: 阅读历史（`reader_history`，`app_state` JSON 存储）；任务中枢视图切换（`frontend/src/views/Tasks.vue` `.view-switch`）
 
+## 当前阅读状态合同（2026-10-05，优先于下文早期实现）
+
+书架已迁移到 SQLite reader_books 表，阅读进度通过单书 save_reader_progress 工具按文件增量合并。progress.byFile 区分 Markdown 比例与 PDF 页码；lastReadAt 独立记录成功打开/阅读的时间，兼容 updatedAt 显示排序。浏览器仅保留恢复缓存，首次进入新版阅读器按时间合并旧缓存，不覆盖更新的服务器位置；保留旧缓存备份，失败可重试。
+
+切换文件、书籍、视图与路由前保存待写位置，后台/关闭页先同步缓存；成功打开旧文件更新时间但不重置位置。文件夹内 PDF 归属于当前书，恢复时忽略中间页，迟到的旧 PDF 事件不能写入新文件。书架增删改不清空或覆盖已存阅读状态，首页读取同一数据库摘要。实现及验收见[阅读状态修复设计](../development/2026-10-05-reader-progress.md)。
+
 ---
 
 ## 1. 模块概述

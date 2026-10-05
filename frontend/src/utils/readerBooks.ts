@@ -33,7 +33,7 @@ export function clampPdfPage(page: number, pageCount: number): number {
 export function bookProgressLabel(book: ReaderBook): string {
   const p = book.progress
   if (!p) return '未开始'
-  if (book.kind === 'pdf') {
+  if (book.kind === 'pdf' || /\.pdf$/i.test(p.lastFile || '')) {
     return p.pageCount && p.pageCount > 0
       ? `第 ${Math.floor(p.position)}/${p.pageCount} 页`
       : `第 ${Math.floor(p.position)} 页`
@@ -46,7 +46,7 @@ export function bookProgressLabel(book: ReaderBook): string {
 export function bookProgressRatio(book: ReaderBook): number {
   const p = book.progress
   if (!p) return 0
-  if (book.kind === 'pdf') {
+  if (book.kind === 'pdf' || /\.pdf$/i.test(p.lastFile || '')) {
     return p.pageCount && p.pageCount > 0 ? Math.min(1, p.position / p.pageCount) : 0
   }
   return Math.min(1, Math.max(0, p.position))

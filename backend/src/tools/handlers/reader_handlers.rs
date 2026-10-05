@@ -12,8 +12,9 @@ use std::sync::Arc;
 
 use crate::error::BrainError;
 use crate::infra::book_wiki_store::BookWikiStore;
+use crate::infra::reader_progress_store::ReaderProgressStore;
 use crate::infra::sqlite_store::SqliteStore;
-use crate::models::book_wiki::ReaderBook;
+use crate::models::book_wiki::{ReaderBook, ReaderProgressState};
 use crate::tools::traits::ToolHandler;
 use crate::AppContext;
 
@@ -448,6 +449,51 @@ impl ToolHandler for SaveReaderBooksHandler {
             .ok_or_else(|| BrainError::Internal("缺少必需参数 'books'".to_string()))?;
         let count = save_books(&ctx.db, books_arg)?;
         Ok(json!({ "ok": true, "count": count }))
+    }
+}
+
+/// Merge progress for one existing book, independently of shelf edits.
+pub struct SaveReaderProgressHandler;
+#[async_trait]
+impl ToolHandler for SaveReaderProgressHandler {
+    fn name(&self) -> &str {
+        "save_reader_progress"
+    }
+    fn description(&self) -> &str {
+        "原子合并单本书的逐文件阅读位置与最近阅读时间，不修改书架或原文"
+    }
+    fn module(&self) -> &str {
+        "reader"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","additionalProperties":false,"properties":{
+            "book_id":{"type":"string","minLength":1,"maxLength":200},
+            "state":{"type":"object","additionalProperties":false,"properties":{
+                "lastFile":{"type":"string","minLength":1,"maxLength":8192},
+                "lastReadAt":{"type":"integer","minimum":1},
+                "byFile":{"type":"object","minProperties":1,"maxProperties":10000,"additionalProperties":{
+                    "type":"object","additionalProperties":false,"properties":{
+                        "kind":{"type":"string","enum":["md","pdf"]},"position":{"type":"number","minimum":0},
+                        "pageCount":{"type":"integer","minimum":1,"maximum":1000000},"updatedAt":{"type":"integer","minimum":1}
+                    },"required":["kind","position","updatedAt"]}}
+            },"required":["lastFile","lastReadAt","byFile"]}
+        },"required":["book_id","state"]})
+    }
+    async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
+        let id = args
+            .get("book_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| BrainError::KnowledgeValidation("缺少书籍 ID".into()))?
+            .to_string();
+        let state: ReaderProgressState =
+            serde_json::from_value(args.get("state").cloned().unwrap_or(Value::Null))
+                .map_err(|e| BrainError::KnowledgeValidation(format!("阅读状态格式错误: {e}")))?;
+        let db = ctx.db.clone();
+        let result =
+            tokio::task::spawn_blocking(move || ReaderProgressStore::new(db).save(&id, state))
+                .await
+                .map_err(|e| BrainError::Internal(e.to_string()))??;
+        Ok(json!({"state":result}))
     }
 }
 

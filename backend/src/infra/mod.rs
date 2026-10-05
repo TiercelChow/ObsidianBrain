@@ -6,6 +6,7 @@ pub mod file_watcher;
 pub mod home_store;
 #[allow(dead_code)]
 pub mod llm_client;
+pub mod reader_progress_store;
 #[allow(dead_code)]
 pub mod sqlite_store;
 pub mod task_index_store;

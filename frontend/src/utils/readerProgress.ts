@@ -1,5 +1,6 @@
 /**
- * Per-file, type-aware reader progress stored in localStorage.
+ * Per-file, type-aware reading state. SQLite is authoritative; localStorage
+ * retains a recovery cache for offline/closing-tab writes.
  *
  * Why per-file: a folder book can contain both .md and .pdf files. md files
  * record a 0..1 scroll ratio; pdf files record a 1-based page number. Storing
@@ -33,10 +34,13 @@ export interface BookProgressState {
   /** Which file to reopen when the book is opened (folder: the last file; single-pdf: book.path). */
   lastFile: string
   byFile: Record<string, FileProgress>
+  /** Last successful open/read, independent from the position's timestamp. */
+  lastReadAt?: number
 }
 
 /** Display shape fed to the bookshelf cover bar (bookProgressRatio / bookProgressLabel). */
 export interface DisplayProgress {
+  lastFile?: string
   position: number
   pageCount?: number
   updatedAt: number
@@ -88,7 +92,7 @@ export function setLastFile(
   if (!byFile[file]) {
     byFile[file] = { kind, position: kind === 'pdf' ? 1 : 0, updatedAt }
   }
-  return { lastFile: file, byFile }
+  return { lastFile: file, byFile, lastReadAt: Math.max(readTime(state), updatedAt) }
 }
 
 /**
@@ -101,7 +105,7 @@ export function mergeBookState(
   progress: FileProgress,
 ): BookProgressState {
   const byFile = { ...(prev?.byFile ?? {}), [file]: progress }
-  return { lastFile: file, byFile }
+  return { lastFile: file, byFile, lastReadAt: Math.max(readTime(prev), progress.updatedAt) }
 }
 
 /** Derive the single display progress (for the cover bar) from the last-opened file. */
@@ -109,10 +113,44 @@ export function getDisplayProgress(state: BookProgressState | null): DisplayProg
   if (!state || !state.byFile[state.lastFile]) return null
   const fp = state.byFile[state.lastFile]
   return {
+    lastFile: state.lastFile,
     position: fp.position,
     ...(fp.pageCount ? { pageCount: fp.pageCount } : {}),
-    updatedAt: fp.updatedAt,
+    updatedAt: readTime(state),
   }
+}
+
+export function readTime(state: BookProgressState | null): number {
+  if (!state) return 0
+  return Object.values(state.byFile).reduce((time,file) => Math.max(time,file.updatedAt || 0), state.lastReadAt || 0)
+}
+
+/** Merge by file clocks, not by whichever network response arrived last. */
+export function mergeProgressStates(server: BookProgressState | null, local: BookProgressState | null): BookProgressState | null {
+  if (!server && !local) return null
+  const byFile = { ...(server?.byFile || {}) }
+  for (const [file, value] of Object.entries(local?.byFile || {})) {
+    if (!byFile[file] || value.updatedAt >= byFile[file].updatedAt) byFile[file] = value
+  }
+  const last = readTime(local) >= readTime(server) ? local || server : server || local
+  return last ? { lastFile: last.lastFile, byFile, lastReadAt: Math.max(readTime(server), readTime(local)) } : null
+}
+
+function normalizeReadingPath(path: string): string {
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '')
+  return /^[a-z]:/i.test(normalized) ? normalized.toLowerCase() : normalized
+}
+export function readingFileBelongs(book: {path:string;kind:'folder'|'pdf'}, file: string): boolean {
+  const path = normalizeReadingPath(file), root = normalizeReadingPath(book.path)
+  if (path.split('/').some(part => part === '..' || part === '.')) return false
+  return book.kind === 'pdf' ? path === root : path.startsWith(`${root}/`)
+}
+export function resolveReadingBookId(books: {id:string;path:string;kind:'folder'|'pdf'}[], root: string, file: string, preferred?: string | null): string | null {
+  if (!file) return null
+  const selected = books.find(book => book.id === preferred && readingFileBelongs(book, file))
+  if (selected) return selected.id
+  const pdf = books.find(book => book.kind === 'pdf' && readingFileBelongs(book, file))
+  return pdf?.id ?? books.find(book => book.kind === 'folder' && normalizeReadingPath(book.path) === normalizeReadingPath(root) && readingFileBelongs(book, file))?.id ?? null
 }
 
 /**

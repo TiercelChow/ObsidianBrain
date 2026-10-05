@@ -37,7 +37,7 @@ test('phone PDF reserves only one scroller, keeps return controls and permits ho
 test('default reading focus is bounded and restoration follows mounted page placeholders', () => {
   assert.match(viewer, /Promise\.race/)
   assert.match(viewer, /window\.setTimeout\(\(\) => resolve\(null\), 120\)/)
-  assert.match(viewer, /await nextTick\(\)[\s\S]*emit\('pagecount', doc.numPages\)/)
+  assert.match(viewer, /await nextTick\(\)[\s\S]*emit\('pagecount', doc.numPages, props.src\)/)
   assert.match(viewer, /root\.scrollTo\(\{ top:/)
   assert.match(viewer, /box-sizing: content-box/)
 })

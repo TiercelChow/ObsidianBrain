@@ -253,5 +253,6 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     registry.register(Arc::new(SaveReaderHistoryHandler)).await;
     registry.register(Arc::new(GetReaderBooksHandler)).await;
     registry.register(Arc::new(SaveReaderBooksHandler)).await;
+    registry.register(Arc::new(SaveReaderProgressHandler)).await;
     registry.register(Arc::new(StatLocalPathHandler)).await;
 }

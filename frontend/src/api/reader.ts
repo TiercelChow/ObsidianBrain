@@ -90,6 +90,13 @@ export interface BookProgress {
   position: number
   pageCount?: number
   updatedAt: number
+  lastReadAt?: number
+  byFile?: Record<string, import('../utils/readerProgress').FileProgress>
+}
+
+/** Atomic single-book reading patch; does not replace shelf metadata. */
+export function saveReaderProgress(bookId: string, state: import('../utils/readerProgress').BookProgressState): Promise<ToolEnvelope<{state: import('../utils/readerProgress').BookProgressState}>> {
+  return callTool('save_reader_progress', {book_id:bookId,state}, {timeout:10000}) as unknown as Promise<ToolEnvelope<{state:import('../utils/readerProgress').BookProgressState}>>
 }
 
 export interface ReaderBook {

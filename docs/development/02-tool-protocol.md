@@ -8,6 +8,12 @@
 
 > 2026-09-28 更新：模块 06/07 已退役，相关页面、服务和工具不再提供；代码仓入口归属「日常」，不设「管理」分组。历史 SQLite 迁移仅为数据兼容保留。当前范围见[移除方案](../development/2026-09-28-retire-inspiration-radar-plan.md)。
 
+### 阅读状态工具（2026-10-05）
+
+`save_reader_progress` 属于 reader 模块，参数为 `book_id` 与 `state: {lastFile,lastReadAt,byFile}`。每个 byFile 值为 `{kind,position,updatedAt,pageCount?}`，md 是 0–1 滚动比例，pdf 是正整数页码。返回合并后的 `{state}`。未知字段、书外文件、无效时间/页码、移除书籍拒绝；请求及保存状态最多 10000 文件、保存 JSON 最多 2 MiB，失败事务不改旧记录。
+
+该工具只在阻塞任务中原子更新一行阅读状态，不访问原书、目录或模型，未加入 Harness 工具白名单。按文件更新时间和独立 lastReadAt 合并迟到请求。`get_reader_books` 返回含 byFile/lastReadAt 的 progress 供跨浏览器恢复；`save_reader_books` 保留已存进度，仅负责元数据与活动书架列表。完整合同见[阅读状态修复设计](2026-10-05-reader-progress.md)。
+
 ## 1. 技术架构详细设计
 
 ### 1.1 分层架构

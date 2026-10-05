@@ -477,7 +477,7 @@ impl BookWikiStore {
                         description = excluded.description,
                         category = excluded.category,
                         added_at = excluded.added_at,
-                        progress_json = excluded.progress_json,
+                        progress_json = COALESCE(reader_books.progress_json, excluded.progress_json),
                         shelf_state = 'active',
                         removed_at = NULL,
                         revision = reader_books.revision + 1,
@@ -9260,6 +9260,8 @@ mod tests {
                 position: 0.25,
                 page_count: None,
                 updated_at: 456,
+                last_read_at: None,
+                by_file: BTreeMap::new(),
             }),
         }
     }

@@ -149,15 +149,17 @@ function visibilityChanged() {
   if (document.visibilityState === 'visible') void loadOverview(true)
   else { ++request; controller?.abort(); clearTimeout(poll); loading.value = false }
 }
+function readingSaved() { void loadOverview(true) }
 onBeforeRouteLeave(() => saveHomeSnapshot(overview.value, pageRef.value?.closest('.app-main')?.scrollTop ?? 0))
 onMounted(async () => {
   await nextTick()
   const main = pageRef.value?.closest('.app-main')
   if (main) main.scrollTop = snapshot.scroll
   document.addEventListener('visibilitychange', visibilityChanged)
+  window.addEventListener('reader-progress-saved', readingSaved)
   void loadOverview()
 })
-onBeforeUnmount(() => { active = false; ++request; controller?.abort(); clearTimeout(poll); document.removeEventListener('visibilitychange', visibilityChanged) })
+onBeforeUnmount(() => { active = false; ++request; controller?.abort(); clearTimeout(poll); document.removeEventListener('visibilitychange', visibilityChanged); window.removeEventListener('reader-progress-saved', readingSaved) })
 </script>
 <style scoped>
 .home-page { min-height:100%; max-width:100%; color:var(--text-primary); }

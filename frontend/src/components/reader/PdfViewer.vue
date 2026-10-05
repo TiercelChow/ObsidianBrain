@@ -45,8 +45,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 const props = defineProps<{ src: string }>()
 const emit = defineEmits<{
   outline: [items: { text: string; level: number; page: number }[]]
-  pagechange: [page: number]
-  pagecount: [pages: number]
+  pagechange: [page: number, src: string]
+  pagecount: [pages: number, src: string]
   zoomchange: [ratio: number]
 }>()
 const appStore = useAppStore()
@@ -570,7 +570,7 @@ function setupObservers() {
           releaseDetail(num)
         }
       }
-      if (visiblePages.size > 0) emit('pagechange', Math.min(...visiblePages))
+      if (visiblePages.size > 0) emit('pagechange', Math.min(...visiblePages), props.src)
       scheduleDetail()
     },
     { root },
@@ -657,7 +657,7 @@ async function load() {
     emit('zoomchange', zoomRatio.value)
     // Restoration listeners can now address the page placeholders, even when
     // extracting the first page's text took longer than a frame.
-    emit('pagecount', doc.numPages)
+    emit('pagecount', doc.numPages, props.src)
     setupObservers()
     nearbyPages.add(1)
     queuePage(1, true)
