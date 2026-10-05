@@ -1,394 +1,158 @@
-# CLAUDE.md — ObsidianBrain 开发指南
+# CLAUDE.md
 
-> 本文件是 Claude Code 在本项目中工作时的核心指导。所有开发活动必须遵循本文档的规范。
-
----
-
-## 项目概述
-
-ObsidianBrain 是一个运行在本地的 **Rust 知识引擎**，对外提供标准化的 LLM Tool API（兼容 MCP 协议与 OpenAI function calling）。围绕用户的 Obsidian 知识库和本地代码仓库，提供记忆管理、代码仓概览、灵感催化、外部信息聚合、时间线回顾等能力。
-
-**核心原则**：对话由 LLM 前端完成，本引擎是 LLM 的"手"和"眼"——负责感知和执行。
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ---
 
-## 文档体系
+## 项目概况
 
-**开发任何功能前，必须先阅读对应的需求设计和开发设计文档。**
+ObsidianBrain 是本地优先的 **Rust 知识引擎 + 个人工作台**：后端 Axum/Tokio，Vue 3 前端在**编译期嵌入**为单一二进制（rust-embed）。数据全部落在 `~/.obsidian-brain/`（SQLite `brain.db` 为唯一事实来源）。
 
-```
-docs/
-├── top_design.md                    # 顶层设计（总纲，必读）
-├── requirement/                     # 需求设计文档（What & Why）
-│   ├── 01-infrastructure.md         # 基础设施层
-│   ├── 02-tool-protocol.md          # 工具协议与 API
-│   ├── 03-memory-engine.md          # 记忆引擎
-│   ├── 04-timeline.md               # 时间线
-│   ├── 05-code-repo.md              # 代码仓管理
-│   ├── 06-inspiration.md            # 灵感熔炉
-│   └── 07-radar.md                  # 智识雷达
-└── development/                     # 开发设计文档（How）
-    ├── 01-infrastructure.md         # 基础设施层
-    ├── 02-tool-protocol.md          # 工具协议与 API
-    ├── 03-memory-engine.md          # 记忆引擎
-    ├── 04-timeline.md               # 时间线
-    ├── 05-code-repo.md              # 代码仓管理
-    ├── 06-inspiration.md            # 灵感熔炉
-    └── 07-radar.md                  # 智识雷达
-```
+对外以 **Tool API** 暴露 90 个工具，兼容 MCP 与 OpenAI function calling。主要产品面：阅境轩（Markdown/PDF 阅读器 + 每书隔离的 Book Wiki）、时光机与任务中枢、灵感熔炉与智识雷达。
 
-### 文档编号与模块对应
-
-| 编号 | 模块 | 实施阶段 |
-|------|------|----------|
-| 01 | 基础设施层 (Infra) | Phase 0 |
-| 02 | 工具协议与 API (Tool Protocol) | Phase 1 |
-| 03 | 记忆引擎 (Memory Engine) | Phase 1 |
-| 04 | 时间线 (Timeline) | Phase 2 |
-| 05 | 代码仓管理 (Code Repo Hub) | Phase 2 |
-| 06 | 灵感熔炉 (Inspiration Forge) | Phase 3 |
-| 07 | 智识雷达 (Knowledge Radar) | Phase 3 |
+**权威文档**：`docs/top_design.md`（v1.3 总纲）、`docs/development/08-llm-wiki.md`（v3.14，按迁移编号记录 Book Wiki 实施状态，是理解旗舰特性最快的入口）。
 
 ---
 
-## 技术栈
-
-| 层次 | 技术 |
-|------|------|
-| 语言 | Rust (edition 2021) |
-| Web 框架 | Axum + Tokio |
-| Obsidian 集成 | Obsidian Local REST API (HTTP) |
-| HTTP 客户端 | reqwest |
-| 配置 | config crate (TOML) |
-| 日志 | tracing + tracing-subscriber |
-| 序列化 | serde + serde_json |
-
-**注意**：项目已从混合搜索架构（Tantivy + Qdrant + Embedding）简化为直接使用 Obsidian Local REST API。不再需要本地索引、向量存储或 Embedding 服务。
-
----
-
-## 目录结构规范
-
-```
-ObsidianBrain/
-├── Cargo.toml
-├── docker-compose.yml
-├── CLAUDE.md                        # 本文件
-├── config/
-│   └── default.toml
-├── migrations/                      # SQLite 迁移脚本
-├── docs/                            # 设计文档（见上）
-└── src/
-    ├── main.rs                      # 入口
-    ├── config.rs                    # 配置管理
-    ├── error.rs                     # 统一错误类型 (BrainError)
-    ├── api/                         # API 层
-    │   ├── mod.rs
-    │   ├── router.rs
-    │   ├── tool_protocol.rs
-    │   └── handlers/
-    ├── core/                        # 核心服务层
-    │   ├── mod.rs
-    │   ├── memory.rs
-    │   ├── timeline.rs
-    │   ├── code_repo.rs
-    │   ├── inspiration.rs
-    │   └── radar.rs
-    ├── infra/                       # 基础设施层
-    │   ├── mod.rs
-    │   ├── sqlite_store.rs
-    │   ├── file_watcher.rs
-    │   ├── embedding.rs
-    │   ├── llm_client.rs
-    │   ├── qdrant_client.rs
-    │   └── tantivy_index.rs
-    ├── tools/                       # 工具定义与注册
-    │   ├── mod.rs
-    │   ├── registry.rs
-    │   ├── definitions.rs
-    │   └── traits.rs
-    └── models/                      # 共享数据模型
-        ├── mod.rs
-        ├── note.rs
-        ├── memory.rs
-        ├── repo.rs
-        └── radar.rs
-```
-
----
-
-## 开发工作流（必须使用 skill）
-
-### 核心流程
-
-每个功能开发必须遵循以下流程，并使用对应的 skill：
-
-```
-1. 阅读设计文档 → 理解需求
-2. /brainstorming → 如果需求不明确，先探索方案
-3. /writing-plans → 制定实施计划（拆解任务、识别风险）
-4. /test-driven-development → TDD 循环（红→绿→重构）
-5. /verification-before-completion → 完成前验证
-6. /code-review → 自我审查代码质量
-7. /simplifying → 简化冗余代码
-```
-
-### Skill 使用指南
-
-| 场景 | 使用的 Skill | 触发时机 |
-|------|-------------|----------|
-| 新功能需求不明确 | `/brainstorming` | 开始任何新功能前 |
-| 制定实施计划 | `/writing-plans` | 开始多步骤任务前 |
-| 按计划执行 | `/executing-plans` | 执行已有的实施计划 |
-| 所有代码编写 | `/test-driven-development` | **始终使用 TDD** |
-| 修复 Bug | `/systematic-debugging` | 遇到任何 Bug 时 |
-| 完成前检查 | `/verification-before-completion` | 认为任务完成前 |
-| 代码质量审查 | `/code-review` | 完成一个功能后 |
-| 代码简化 | `/simplifying` | 代码审查后 |
-| 请求正式审查 | `/requesting-code-review` | PR 前 |
-| 分支完成 | `/finishing-a-development-branch` | 功能开发完毕 |
-| 大任务拆分 | `/subagent-driven-development` | 独立子任务可并行 |
-| 并行独立任务 | `/dispatching-parallel-agents` | 多个不相关的修改 |
-| 隔离开发 | `/using-git-worktrees` | 需要隔离实验时 |
-
-### 典型开发流程示例
-
-**开发 Memory Engine 的 search_memory 功能：**
-
-```
-1. 阅读 docs/requirement/03-memory-engine.md（理解 What）
-2. 阅读 docs/development/03-memory-engine.md（理解 How）
-3. /writing-plans → 制定 search_memory 的实施计划
-4. /test-driven-development：
-   a. 先写混合搜索的测试（RRF 融合、排序、分页）
-   b. 实现 Tantivy 全文搜索
-   c. 实现 Qdrant 语义搜索
-   d. 实现 RRF 融合算法
-   e. 测试通过
-5. /verification-before-completion → 确认搜索质量
-6. /code-review → 自我审查
-7. /simplifying → 简化代码
-```
-
----
-
-## 编码规范
-
-### Rust 风格
-
-- **遵循 Rust 2021 Edition**，使用 `cargo fmt` 格式化
-- **使用 `cargo clippy` 检查**，零 warning 标准
-- **异步运行时**：统一使用 Tokio，禁止混用其他 runtime
-- **错误处理**：
-  - 使用 `Result<T, BrainError>` 作为函数返回类型
-  - 禁止在生产代码中使用 `.unwrap()` / `.expect()`（测试除外）
-  - 外部错误通过 `From` trait 转换为 `BrainError`
-- **类型安全**：
-  - 优先使用 newtype pattern 封装业务含义（如 `NotePath(PathBuf)`）
-  - 使用 enum 表达有限状态（如 `FileChangeType`, `RadarStatus`）
-  - 公共 API 必须有完整的类型签名
-
-### Trait 抽象
-
-所有外部依赖必须通过 trait 抽象，便于测试和切换实现：
-
-```rust
-// ✅ 正确：trait 抽象
-#[async_trait]
-pub trait EmbeddingProvider: Send + Sync {
-    async fn embed_text(&self, text: &str) -> Result<Vec<f32>, BrainError>;
-    async fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, BrainError>;
-    fn dimensions(&self) -> usize;
-}
-
-// ❌ 错误：直接依赖具体实现
-pub struct MemoryService {
-    openai_client: OpenAiClient,  // 硬编码具体实现
-}
-```
-
-### 模块依赖规则
-
-```
-API 层 (api/) ──→ 核心服务层 (core/) ──→ 基础设施层 (infra/)
-     │                   │                      │
-     └──────────────────→├──────────────────────┘
-                         │
-                    共享模型 (models/)
-                    统一错误 (error.rs)
-                    配置管理 (config.rs)
-```
-
-**严格禁止反向依赖**：infra 不能依赖 core，core 不能依赖 api。
-
-### 共享状态
-
-- 使用 `Arc<T>` 共享跨线程状态
-- 需要可变状态时使用 `Arc<RwLock<T>>`（读多写少）或 `Arc<Mutex<T>>`（写频繁）
-- 异步上下文优先使用 `tokio::sync::RwLock` / `tokio::sync::Mutex`
-- 应用上下文统一通过 `AppContext` struct 传递
-
-### 日志规范
-
-使用 `tracing` 宏：
-
-```rust
-tracing::info!(vault_path = %config.vault.path, "Vault 监控启动");
-tracing::debug!(query = %params.query, top_k = params.top_k, "执行搜索");
-tracing::warn!(error = %e, "Qdrant 不可用，降级为全文搜索");
-tracing::error!(path = %note_path, "笔记解析失败");
-```
-
-- `info`：关键业务事件（启动、停止、工具调用）
-- `debug`：详细处理流程（搜索、索引、LLM 调用参数）
-- `warn`：可恢复的异常（降级、重试）
-- `error`：不可恢复的错误
-
-### 测试规范
-
-- **单元测试**：每个公共函数至少 1 个正向测试 + 1 个边界测试
-- **集成测试**：每个模块的核心流程至少 1 个端到端测试
-- **Mock 策略**：使用 `mockall` 对 trait 做 mock，使用 `wiremock` 对 HTTP API 做 mock
-- **测试命名**：`test_<被测函数>_<场景>_<预期结果>`
-
-```rust
-#[tokio::test]
-async fn test_search_memory_hybrid_returns_rrf_merged_results() { ... }
-
-#[tokio::test]
-async fn test_search_memory_qdrant_down_degrades_to_fulltext() { ... }
-```
-
----
-
-## 构建与运行
+## 常用命令
 
 ```bash
-# 构建
-cargo build
+# ── 后端（在 backend/ 下）──
+cargo test                              # 当前基线：279 passed, 0 failed, 2 ignored
+cargo test semantic_compile             # 按名称过滤单个测试
+cargo fmt -- --check                    # 当前 clean
+cargo clippy --all-targets -- -D warnings   # 当前 clean
+cargo run -- start --foreground         # 前台运行；无子命令等价于前台启动
 
-# 测试
-cargo test                    # 全部测试
-cargo test --lib              # 仅单元测试
-cargo test --test '*'         # 仅集成测试
+# ── 前端（在 frontend/ 下）──
+npm test                                # node --test，当前 194 passed
+npx vue-tsc -b                          # 类型检查
+npm run dev                             # Vite :5173，代理 /v1 → 127.0.0.1:9876
 
-# 代码质量
-cargo fmt -- --check          # 格式检查
-cargo clippy -- -D warnings   # Lint 检查（零 warning）
-
-# 运行
-cargo run                     # 开发运行
-cargo run -- --config config/default.toml  # 指定配置
-
-# Docker（Qdrant）
-docker compose up -d          # 启动 Qdrant
-docker compose down           # 停止
+# ── 一体化构建（顺序很重要，见「易踩的坑 #3」）──
+make build                              # = frontend(dist_new) + backend(release)
+make install                            # → ~/.local/bin/（macOS 自动 codesign，无需 sudo）
 ```
 
----
-
-## 实施阶段路线图
-
-### Phase 0: 基础设施搭建（优先）
-- [ ] `Cargo.toml` + workspace 初始化
-- [ ] `src/config.rs` — 配置加载与校验
-- [ ] `src/error.rs` — BrainError 统一错误类型
-- [ ] `src/infra/sqlite_store.rs` — SQLite 初始化与迁移
-- [ ] `src/infra/file_watcher.rs` — Vault 文件监控
-- [ ] `src/infra/tantivy_index.rs` — 全文索引基础
-- [ ] `src/infra/qdrant_client.rs` — 向量存储封装
-- [ ] `src/infra/embedding.rs` — Embedding Provider
-- [ ] `src/infra/llm_client.rs` — LLM Provider
-- [ ] `docker-compose.yml` — Qdrant 容器
-- [ ] `src/main.rs` — 启动骨架
-
-### Phase 1: 核心引擎 MVP
-- [ ] Markdown 解析 + 智能分块
-- [ ] 记忆 CRUD + 混合搜索 (RRF)
-- [ ] MCP / HTTP Tool API 基础协议
-- [ ] 核心工具：search_notes, get_note, search_memory, add_memory
-
-**里程碑**：在 Claude 中通过 Tool API 搜索 Obsidian 笔记
-
-### Phase 2: 代码仓 + 时间线
-- [ ] 代码仓注册、元信息提取、笔记关联
-- [ ] 自动文档化（LLM 生成）
-- [ ] 时间线事件收集与查询
-
-### Phase 3: 灵感 + 雷达
-- [ ] 灵感熔炉三种模式
-- [ ] 智识雷达外部源拉取 + 个性化排序
-- [ ] 文章纳藏到 vault
-
-### Phase 4: 打磨
-- [ ] 技能 YAML 扩展系统
-- [ ] 本地 ONNX Embedding
-- [ ] 性能优化与内存调优
-
----
-
-## 关键设计决策
-
-| 决策 | 选择 | 理由 |
-|------|------|------|
-| 笔记操作 | Obsidian Local REST API | 无需本地索引，直接利用 Obsidian 的搜索和存储能力 |
-| 工具协议 | HTTP REST API | 通用、易于集成 |
-| 错误处理 | 自定义 BrainError 枚举 | 统一类型、可降级、可映射错误码 |
-| 架构简化 | 移除 Tantivy/Qdrant/Embedding | 减少复杂度，无需额外服务，部署更简单 |
-
----
-
-## 安全与隐私
-
-- **仅监听 127.0.0.1**，不暴露到外网
-- **所有数据由 Obsidian 管理**，ObsidianBrain 仅通过 HTTP API 访问
-- **API Key 通过环境变量传入**，不硬编码在代码或配置文件中
-- **Vault 写入操作通过 Obsidian API**，由 Obsidian 处理路径校验
-
----
-
-## Git 规范
-
-- **分支命名**：`feature/<module>-<desc>`, `fix/<module>-<desc>`, `refactor/<desc>`
-- **Commit 格式**：Conventional Commits
-  ```
-  feat(memory): implement RRF hybrid search
-  fix(timeline): correct date parsing for CJK formats
-  refactor(infra): extract EmbeddingProvider trait
-  docs(architecture): update data flow diagrams
-  test(qdrant): add integration tests for upsert/search
-  ```
-- **每个 commit 必须通过**：`cargo fmt --check && cargo clippy -- -D warnings && cargo test`
-
----
-
-## 快速参考
-
-### 新增一个 Tool 的步骤
-
-1. 在 `src/tools/definitions.rs` 定义 JSON Schema
-2. 在 `src/tools/traits.rs` 实现 `ToolHandler` trait
-3. 在对应的 `src/core/` 模块实现业务逻辑
-4. 在 `src/tools/registry.rs` 的 `initialize_tools()` 注册
-5. 编写单元测试 + 集成测试
-6. 更新 `docs/development/02-tool-protocol.md` 的工具清单
-
-### 新增一个 Infra 模块的步骤
-
-1. 在 `src/infra/` 下新建文件，定义 trait + 实现
-2. 在 `src/config.rs` 添加对应配置段
-3. 在 `src/error.rs` 添加错误变体
-4. 在 `src/main.rs` 初始化并注入 `AppContext`
-5. 编写单元测试（使用 mockall / wiremock）
-
-### 构建命令速查
+**隔离数据库做手工验证**（注意前缀后是**双**下划线）：
 
 ```bash
-cargo build                              # 开发构建
-cargo build --release                    # 生产构建
-cargo test                               # 全部测试
-cargo test --lib <module>                # 单模块测试
-cargo clippy -- -D warnings              # Lint 检查
-cargo fmt                                # 格式化
-cargo doc --no-deps --open               # 生成文档
+OBRAIN__SERVER__PORT=9988 OBRAIN__STORAGE__DB_PATH=/tmp/ob.db cargo run -- start --foreground
+OBRAIN_DATA_DIR=/tmp/ob-preview         # 一次性隔离 db/日志/缩略图
+# OBRAIN_STORAGE__DB_PATH（少一个下划线）不会覆盖正式库，会静默写错地方
 ```
+
+服务默认监听 `0.0.0.0:9876`；`GET /v1/health` 返回组件状态与工具数。
+
+---
+
+## 架构
+
+### 工具优先，不是 REST 资源 API
+
+业务能力**只**通过 `POST /v1/tools/call`（`{tool, arguments}`）暴露。只有真正需要字节流/上传/SSE/MCP-jsonrpc 的场景才有专用路由（`backend/src/api/router.rs:33` 是唯一的扁平路由表，其后挂 SPA fallback）。
+
+- **新增能力时，默认写一个 `ToolHandler`，而不是新增 REST 端点。**
+- `ToolHandler` trait：`backend/src/tools/traits.rs:13`（注意方法是 `input_schema()`，不是 `schema()`）。
+- 注册：在 `backend/src/tools/handlers/<module>_handlers.rs` 实现，再到 `handlers/mod.rs` 的 `register_all_tools` 里 `registry.register(Arc::new(...))`。`list_tools` 与 MCP 暴露自动生效。
+- `register_all_tools` 的 `_ctx` 参数**被有意忽略**，context 是通过 `handle(args, ctx)` 传入的。
+- 阻塞型工作（文件系统 / rusqlite / zip）要包 `spawn_blocking`；长任务应入队而非在请求里 await。
+
+### 分层与共享状态
+
+```
+api/ (handlers, router)  →  core/ (业务逻辑)  →  infra/ (SQLite / HTTP 客户端 / ACP)
+                                    ↓
+                        models/ · error.rs · config.rs
+```
+
+禁止反向依赖。`AppContext`（`backend/src/main.rs:37`）是唯一共享状态结构，始终以 `Arc<AppContext>` 传递，**没有** `FromRef` 子状态提取——handler 直接拿整个 ctx。
+
+### 持久化
+
+- 单条 `rusqlite::Connection` 放在 `std::sync::Mutex` 后面（`backend/src/infra/sqlite_store.rs:15`）：无连接池，DB 实际是单线程瓶颈。
+- 写路径 `transaction()`（`BEGIN IMMEDIATE`），读路径 `with_connection()`。后者在锁中毒时返回错误，**其他多数方法 `.lock().unwrap()` 会 panic**。
+- 迁移：`include_str!` 编译期嵌入 + `_migrations` 表跟踪版本（**不是** `PRAGMA user_version`），所有待执行迁移在**一个事务**内跑完。迁移 29–34 还带 Rust 侧 Skill 种子逻辑（`run_migrations` 里的版本条件 `match`），加这类迁移要同时改两处。
+- **全文检索是 SQLite FTS5**（migration 019：`knowledge_entries_fts` / `source_spans_fts`，`unicode61` + 手写 `cjk_terms` 二元组列处理中文）。Tantivy/Qdrant/Embedding 是已废弃方向，见「陈旧文件」。
+
+### Book Wiki 管线（最大的特性，改动前必读 08 号文档）
+
+```
+来源 Markdown → 不可变 version/span（内容哈希去重、保留旧版本供引用）
+   → 语义编译（受审计 ACP Run，增量：脚本按 compile_fingerprint + 检查点跳过未变来源）
+   → knowledge_change_sets（候选）
+   → 人工批准 → 正式实体/论断/关系/引用（单事务）
+   → 问答（SSE 流式，带 [S#] 引用快照）
+   → 研究任务（SQLite 租约队列，单 base 一个 running）
+   → PPTX（本地手写 OOXML 渲染，非库）
+```
+
+**Rust 与 Agent 的边界（最重要的一条）**：Rust 拥有全部持久状态、检索、提示词组装、JSON 契约校验、审核门禁、配额与 PPTX 渲染；DeepSeek Harness 只是**文本进出的一次性 ACP 子进程**，从不接触数据库。
+
+- Agent 的一切产出都是 **proposal**：`knowledge_propose_changes` 只创建 `proposed` 变更集，只有 `resolve_change_set(approve=true)` 才写正式知识。驳回会**删除编译检查点**（该来源需重新编译）。
+- Harness 的权限请求一律自动应答 `Cancelled`（`backend/src/infra/deepseek_harness.rs`）。密钥只以**环境变量名**形式写进 0600 临时 patch，从不落盘。
+- 唯一对外网络出口是 `book_fetch_external`：仅 HTTPS/443、仅公网 IP、不跟随重定向、配额在请求前就扣减。
+- 各任务类型的 MCP 工具目录不同（`backend/src/core/book_wiki.rs:2226`）；`knowledge_ingest`、`skill_benchmark` 与演示策划 Run 是**零工具**，旁边有内联注释说明原因，别"顺手"挂上工具目录。
+- 不要硬编码 9876：MCP 网关 URL 由实际绑定端口推导（`main.rs` 中构造 `BookWikiService` 处）。
+
+### 前端
+
+- 路由：`frontend/src/router/index.ts` 单文件扁平表，无守卫。视图文件很大（`Reader.vue` 2500+ 行），子组件在 `src/components/{reader,tasks,knowledge,motion}/`。视图状态多放在 **URL query** 而非 store。
+- API：`src/api/index.ts` 的 axios 实例，**响应拦截器返回 `response.data`**（所以 `api.get()` 拿到的是 body，不要再 `.data`）。业务调用统一走 `callTool()`。
+- Markdown 三层管线，边界是设计核心：
+  1. 纯同步、无 DOM 的 core（`src/markdown/renderMarkdown.ts`）——这是它能进 Worker 的前提；
+  2. Web Worker（`src/workers/markdown.worker.ts`），只能传字符串，函数型 resolver 传不过去；
+  3. DOM 增强（`src/composables/useMarkdownRender.ts`），懒加载 highlight.js / mermaid / KaTeX，用 generation 计数器 + `isConnected` 防竞态，mermaid 串行化在一个队列里。
+- Pinia 只有两个 store（`app.ts` 壳层状态、`tasks.ts` 领域数据）；其余是 composable / 组件局部状态。
+
+### 配置优先级（低 → 高）
+
+代码默认值 < `config/default.toml` < `OBRAIN__*` 环境变量 < 数据库内 `system_config` < CLI `--host/--port`。
+
+`backend/config/default.toml` 有意只留 `[server]` 和 `[storage]`；Vault / Obsidian / LLM 配置正常从 Web 控制面板写入数据库。
+
+---
+
+## 易踩的坑
+
+1. **`/v1/tools/call` 失败也返回 HTTP 200**，错误在 body 的 `status:"error"` 与 `error.code` 里（已实测）。只看 HTTP 状态码会把所有失败当成功。
+2. **未匹配的路径返回 `index.html` + 200**，不是 404（SPA fallback 覆盖了 `/v1`）。验证新端点必须用精确路径，否则会被"看起来 200"骗过。
+3. **`cargo build` 不会重建前端**：`#[folder = "../frontend/dist_new/"]` 是编译期嵌入，改了前端不重新构建就会嵌进旧 UI。构建顺序必须先 frontend 再 backend（`make build` 已保证）。
+4. **`DefaultBodyLimit` 只作用于它上方已声明的路由**（`router.rs:38` 那行 `.layer()` 的位置），后续路由回到 2MB 默认值。需要大 body 的新路由要把 layer 放在路由声明之前。
+5. **新增 hast 属性必须同步加进 `rehype-sanitize` schema**，否则被静默剥离、无报错。
+6. **`node --test` 不解析 `@/` 别名**：任何被测试导入的模块，其静态 import 图必须用相对路径 + 显式 `.ts`。（生产代码里已为此写成动态 import，见 `useBookshelf.ts`。）
+7. **大量前端测试是读 `.vue` 源码做正则断言的"结构契约"**（`tests/knowledgeWorkflow.test.ts` 等），不是行为测试。重命名函数、调整 class、改 aria-label 都会让它们失败——要**有意识地同步契约**，不要靠弱化断言"修复"。
+8. 给 `renderMarkdown` 传函数型 resolver 却不传 `resourceContext` → **静默退回主线程渲染**（丢掉 Worker）。
+9. 加迁移要同时改 `MIGRATIONS` 数组；播种 Skill 内容的迁移还要改 `run_migrations` 的版本条件 `match`。
+10. 后台轮询必须调用 `canFocusDocument(document)`，有测试专门断言这条。
+
+---
+
+## 陈旧文件（不要相信它们的描述）
+
+| 文件 | 问题 |
+|---|---|
+| `docs/DEVELOPMENT_PLAN.md`（2026-08-17） | 仍在规划 Qdrant + Embedding + RRF 混合搜索，是**已废弃方向**，且目录树是根级 `src/` |
+| `AGENTS.md`（2026-08-18） | 与本文件旧版同源，描述的 `src/` 根布局不存在 |
+| 根 `docker-compose.yml` | Qdrant 容器，已无代码使用 |
+| `backend/Cargo.toml` 的 `tantivy`、`error.rs` 的 `QdrantError`/`EmbeddingError`、`config.rs` 的 `QdrantConfig` | 遗留物；实际检索是 FTS5 |
+| `backend/src/core/chunker.rs` | 孤儿文件，从未声明 `mod`，从不参与编译 |
+| `backend/src/core/markdown_parser.rs`、`backend/src/infra/file_watcher.rs` | 标了 `#[allow(dead_code)]`，未接线（file_watcher 在 `main.rs` 中无引用） |
+| `backend/src/core/wiki/` | 空目录 |
+
+判断某模块是否真在用，最可靠的方法是查 `mod.rs` 的声明与 `main.rs` 的接线，而不是读文件名。
+
+---
+
+## 开发规范
+
+**流程**：先读 `docs/requirement/NN-*.md`（What & Why）与 `docs/development/NN-*.md`（How）再动手。需求不明确先 `/brainstorming`，多步任务先 `/writing-plans`，写码走 `/test-driven-development`，完成前 `/verification-before-completion`。实施计划与设计规格落在 `docs/superpowers/plans/` 与 `docs/superpowers/specs/`（`.superpowers/` 是 gitignore 的草稿区）。
+
+**代码**：
+
+- 生产代码禁止 `.unwrap()` / `.expect()`（测试除外）；错误用 `BrainError`（`backend/src/error.rs`），它实现了 `IntoResponse`，handler 可直接 `Result<_, BrainError>`。
+- 遵循 Rust 2021、`cargo fmt`、clippy 零 warning；异步只用 Tokio。
+- 用户可见文案（错误信息、UI）是**中文**。
+- 测试命名 `test_<函数>_<场景>_<预期>`；单元测试内联在各模块的 `#[cfg(test)]`（无 `tests/` 目录），handler 集成测试可用 `AppContext::for_test()`（`backend/src/main.rs:636`）。
+
+**提交**：Conventional Commits（`feat(wiki): ...`、`fix(reader): ...`）。提交前跑通 `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test` 与前端 `npm test`。
