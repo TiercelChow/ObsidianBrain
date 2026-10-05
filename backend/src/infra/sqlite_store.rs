@@ -340,6 +340,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "wiki acceptance citation and editorial quality contracts",
         sql: include_str!("../../migrations/058_wiki_acceptance_quality_contracts.sql"),
     },
+    Migration {
+        version: 59,
+        description: "local timeline originals, revision and bounded image cache",
+        sql: include_str!("../../migrations/059_local_timeline.sql"),
+    },
 ];
 
 #[cfg(test)]
@@ -867,6 +872,18 @@ impl SqliteStore {
                 )));
             }
             let seed_result = match migration.version {
+                59 => {
+                    let has_revision = conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('memos') WHERE name='revision')", [], |row| row.get::<_,bool>(0));
+                    match has_revision {
+                        Ok(true) => Ok(()),
+                        Ok(false) => conn
+                            .execute_batch(
+                                "ALTER TABLE memos ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;",
+                            )
+                            .map_err(Into::into),
+                        Err(error) => Err(error.into()),
+                    }
+                }
                 29 => seed_detailed_ingest_skill(&conn),
                 30 => seed_detailed_builtin_skills(&conn),
                 31 => overwrite_wiki_prompt_contract_skills(&conn),
@@ -1498,114 +1515,6 @@ impl SqliteStore {
         Ok(count)
     }
 
-    /// Insert or update a memo (for sync from Obsidian files).
-    pub fn upsert_memo(
-        &self,
-        id: &str,
-        timestamp: &str,
-        date: &str,
-        content: &str,
-        images: &str,
-        tags: &str,
-        file_path: &str,
-    ) -> Result<(), BrainError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO memos (id, timestamp, date, content, images, tags, file_path)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(id) DO UPDATE SET
-               timestamp = excluded.timestamp,
-               date = excluded.date,
-               content = excluded.content,
-               images = excluded.images,
-               tags = excluded.tags,
-               file_path = excluded.file_path",
-            params![id, timestamp, date, content, images, tags, file_path],
-        )
-        .map_err(|e| BrainError::Internal(format!("同步小记失败: {e}")))?;
-        Ok(())
-    }
-
-    /// Find an existing memo ID by timestamp (for dedup during sync).
-    /// Compares only the date+time portion (first 19 chars: YYYY-MM-DDTHH:MM:SS)
-    /// to handle different timezone offsets and microsecond precision.
-    pub fn find_memo_id_by_timestamp(&self, timestamp: &str) -> Result<Option<String>, BrainError> {
-        let conn = self.conn.lock().unwrap();
-        // Normalize: take first 19 chars (YYYY-MM-DDTHH:MM:SS)
-        let normalized = if timestamp.len() >= 19 {
-            &timestamp[..19]
-        } else {
-            timestamp
-        };
-        let pattern = format!("{}%", normalized);
-        let result = conn.query_row(
-            "SELECT id FROM memos WHERE timestamp LIKE ?1 LIMIT 1",
-            params![pattern],
-            |row| row.get::<_, String>(0),
-        );
-        match result {
-            Ok(id) => Ok(Some(id)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(BrainError::Internal(format!("查询小记 ID 失败: {e}"))),
-        }
-    }
-
-    /// Delete memos whose date is in synced_dates but whose ID is NOT in keep_ids.
-    /// Used during sync to remove memos deleted from Obsidian.
-    pub fn delete_memos_not_by_ids(
-        &self,
-        synced_dates: &std::collections::HashSet<String>,
-        keep_ids: &[String],
-    ) -> Result<u32, BrainError> {
-        if synced_dates.is_empty() {
-            return Ok(0);
-        }
-
-        let conn = self.conn.lock().unwrap();
-
-        // Build date IN clause
-        let date_placeholders: Vec<String> = synced_dates
-            .iter()
-            .enumerate()
-            .map(|(i, _)| format!("?{}", i + 1))
-            .collect();
-        let date_in = date_placeholders.join(", ");
-
-        // Build ID NOT IN clause
-        let id_placeholders: Vec<String> = keep_ids
-            .iter()
-            .enumerate()
-            .map(|(i, _)| format!("?{}", i + synced_dates.len() + 1))
-            .collect();
-        let id_not_in = if id_placeholders.is_empty() {
-            "''".to_string()
-        } else {
-            id_placeholders.join(", ")
-        };
-
-        let sql = format!(
-            "DELETE FROM memos WHERE date IN ({}) AND id NOT IN ({})",
-            date_in, id_not_in
-        );
-
-        // Collect all params: dates first, then IDs
-        let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-        for d in synced_dates {
-            all_params.push(Box::new(d.clone()));
-        }
-        for id in keep_ids {
-            all_params.push(Box::new(id.clone()));
-        }
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            all_params.iter().map(|p| p.as_ref()).collect();
-
-        let deleted = conn
-            .execute(&sql, param_refs.as_slice())
-            .map_err(|e| BrainError::Internal(format!("删除过期小记失败: {e}")))?;
-
-        Ok(deleted as u32)
-    }
-
     pub fn query_memos(
         &self,
         sql: &str,
@@ -1620,6 +1529,7 @@ impl SqliteStore {
             String,
             String,
             String,
+            i64,
         )>,
         BrainError,
     > {
@@ -1638,10 +1548,13 @@ impl SqliteStore {
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(4)?
+                        .unwrap_or_else(|| "[]".into()),
+                    row.get::<_, Option<String>>(5)?
+                        .unwrap_or_else(|| "[]".into()),
+                    row.get::<_, Option<String>>(6)?.unwrap_or_default(),
                     row.get::<_, String>(7)?,
+                    row.get::<_, i64>(8)?,
                 ))
             })
             .map_err(|e| BrainError::Internal(format!("查询小记失败: {e}")))?;
@@ -1663,7 +1576,7 @@ mod tests {
         let db_path = dir.path().join("quality-upgrade.db");
         let store = SqliteStore::new(&db_path).unwrap();
         store.with_connection(|conn| {
-            conn.execute("DELETE FROM _migrations WHERE version=58", [])?;
+            conn.execute("DELETE FROM _migrations WHERE version>=58", [])?;
             conn.execute("UPDATE skill_files SET content_text='legacy',content_hash='legacy' WHERE relative_path='SKILL.md' AND skill_version_id IN ('skill-version-book-ingest-v3','skill-version-book-query-v3','skill-version-book-research-v3','skill-version-book-presentation-v3')", [])?;
             Ok(())
         }).unwrap();
@@ -1755,11 +1668,8 @@ mod tests {
         let store = SqliteStore::new(&db_path).unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "DELETE FROM _migrations WHERE version IN (54, 55, 56, 57, 58)",
-                [],
-            )
-            .unwrap();
+            conn.execute("DELETE FROM _migrations WHERE version >= 54", [])
+                .unwrap();
             conn.execute(
                 "UPDATE skill_files
                  SET content_text = '旧版演示指令', content_hash = 'legacy', size_bytes = 18
@@ -1804,11 +1714,8 @@ mod tests {
         let store = SqliteStore::new(&db_path).unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "DELETE FROM _migrations WHERE version IN (55, 56, 57, 58)",
-                [],
-            )
-            .unwrap();
+            conn.execute("DELETE FROM _migrations WHERE version >= 55", [])
+                .unwrap();
             conn.execute(
                 "UPDATE skill_files
                  SET content_text='旧版演示指令', content_hash='legacy', size_bytes=18
@@ -1849,11 +1756,8 @@ mod tests {
         let hash = hex::encode(Sha256::digest(content.as_bytes()));
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "DELETE FROM _migrations WHERE version IN (54, 55, 56, 57, 58)",
-                [],
-            )
-            .unwrap();
+            conn.execute("DELETE FROM _migrations WHERE version >= 54", [])
+                .unwrap();
             conn.execute(
                 "INSERT INTO skill_versions
                     (id, skill_id, revision, content_hash, release_state, created_at)
@@ -1902,11 +1806,8 @@ mod tests {
         let hash = hex::encode(Sha256::digest(content.as_bytes()));
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "DELETE FROM _migrations WHERE version IN (55, 56, 57, 58)",
-                [],
-            )
-            .unwrap();
+            conn.execute("DELETE FROM _migrations WHERE version >= 55", [])
+                .unwrap();
             conn.execute(
                 "INSERT INTO skill_versions
                     (id, skill_id, revision, content_hash, release_state, created_at)
@@ -1952,7 +1853,7 @@ mod tests {
         let store = SqliteStore::new(&db_path).unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version IN (56, 57, 58)", [])
+            conn.execute("DELETE FROM _migrations WHERE version >= 56", [])
                 .unwrap();
             conn.execute(
                 "UPDATE skill_files SET content_text='旧版演示指令', content_hash='legacy', size_bytes=18
@@ -2001,7 +1902,7 @@ mod tests {
         let store = SqliteStore::new(&db_path).unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version IN (57, 58)", [])
+            conn.execute("DELETE FROM _migrations WHERE version >= 57", [])
                 .unwrap();
             conn.execute(
                 "UPDATE skill_files SET content_text='旧版演示指令', content_hash='legacy', size_bytes=18
@@ -2049,7 +1950,7 @@ mod tests {
         let hash = hex::encode(Sha256::digest(content.as_bytes()));
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM _migrations WHERE version IN (56, 57, 58)", [])
+            conn.execute("DELETE FROM _migrations WHERE version >= 56", [])
                 .unwrap();
             conn.execute(
                 "INSERT INTO skill_versions

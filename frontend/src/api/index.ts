@@ -1,4 +1,5 @@
 import axios, { type AxiosRequestConfig } from 'axios'
+import { memoToolResult, type TimelineMemo, type TimelineStorage } from '@/utils/timelineMemo'
 
 const api = axios.create({
   baseURL: '/v1',
@@ -21,6 +22,10 @@ export function getHealth() {
   return api.get('/health')
 }
 
+export async function getMemo(id: string): Promise<TimelineMemo> {
+  return await api.get(`/timeline/memos/${encodeURIComponent(id)}`) as unknown as TimelineMemo
+}
+
 // ── Tools ──
 export function listTools() {
   return api.get('/tools')
@@ -34,44 +39,7 @@ export function callTool(
   return api.post('/tools/call', { tool, arguments: args }, config)
 }
 
-// ── Convenience: wrapped tool calls ──
-export function searchNotes(query: string, topK = 5, tags?: string[]) {
-  return callTool('search_notes', { query, top_k: topK, ...(tags?.length ? { tags } : {}) })
-}
-
-export function getNote(path: string) {
-  return callTool('get_note', { path })
-}
-
-export function listRecentNotes(days?: number, limit?: number) {
-  return callTool('list_recent_notes', { ...(days ? { days } : {}), ...(limit ? { limit } : {}) })
-}
-
-export function searchMemory(query: string, topK = 5, tags?: string[]) {
-  return callTool('search_memory', { query, top_k: topK, ...(tags?.length ? { tags } : {}) })
-}
-
-export function addMemory(notePath: string, content: string, tags?: string[]) {
-  return callTool('add_memory', { note_path: notePath, content, ...(tags?.length ? { tags } : {}) })
-}
-
-export function updateMemory(memoryId: string, content: string) {
-  return callTool('update_memory', { memory_id: memoryId, content })
-}
-
-export function forgetMemory(memoryId: string) {
-  return callTool('forget_memory', { memory_id: memoryId })
-}
-
-export function getMemoryStats() {
-  return callTool('get_memory_stats')
-}
-
 // ── System Config ──
-export function getConfig() {
-  return callTool('get_config')
-}
-
 export function saveConfig(config: Record<string, unknown>) {
   return callTool('save_config', config)
 }
@@ -124,21 +92,42 @@ export function browseTimeline(startDate?: string, endDate?: string, limit = 20,
   })
 }
 
-export function syncMemos(months = 3) {
-  return callTool('sync_memos', { months })
+export async function updateMemo(memoId: string, revision: number, content: string, images: string[], tags: string[]) {
+  return memoToolResult<TimelineMemo>(await callTool('update_memo', { memo_id: memoId, expected_revision: revision, content, images, tags }))
+}
+
+export async function deleteMemo(memoId: string, revision: number) {
+  return memoToolResult<{ deleted: boolean; pending_cleanup: number }>(await callTool('delete_memo', { memo_id: memoId, expected_revision: revision }))
+}
+
+export async function getTimelineStorage() {
+  return memoToolResult<TimelineStorage>(await callTool('get_timeline_storage'))
+}
+
+export async function importTimelineImages(directory: string) {
+  return memoToolResult<{ copied: number; missing: string[] }>(await callTool('import_timeline_images', { directory }, { timeout: 600000 }))
+}
+
+export async function discardMemoImages(paths: string[]) {
+  return memoToolResult<{ pending_cleanup: number }>(await callTool('discard_memo_images', { paths }))
+}
+
+export async function clearTimelineImageCache() {
+  return memoToolResult<{ cleared: boolean }>(await callTool('clear_timeline_image_cache'))
 }
 
 export function getMemoStats() {
   return callTool('get_memo_stats')
 }
 
-export function searchMemos(query: string, startDate?: string, endDate?: string, tags?: string[], limit = 20) {
+export function searchMemos(query: string, startDate?: string, endDate?: string, tags?: string[], limit = 20, offset = 0) {
   return callTool('search_memos', {
     query,
     ...(startDate ? { start_date: startDate } : {}),
     ...(endDate ? { end_date: endDate } : {}),
     ...(tags?.length ? { tags } : {}),
     limit,
+    offset,
   })
 }
 
@@ -150,6 +139,9 @@ export async function uploadImages(files: File[]): Promise<{ paths: string[] }> 
     method: 'POST',
     body: formData,
   })
-  if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
+  if (!res.ok) {
+    const error = await res.json().catch(() => null)
+    throw new Error(error?.message || `上传失败：${res.status}`)
+  }
   return res.json()
 }

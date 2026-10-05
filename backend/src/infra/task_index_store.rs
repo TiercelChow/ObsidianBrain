@@ -328,6 +328,26 @@ fn build_task_query(
     );
     let mut values = Vec::new();
 
+    if let Some(focus) = &query.focus {
+        sql.push_str(" AND n.status NOT IN ('completed','cancelled')");
+        let day = query
+            .focus_date
+            .unwrap_or_else(|| chrono::Local::now().date_naive())
+            .to_string();
+        match focus {
+            crate::models::task::TaskFocus::Today => {
+                sql.push_str(" AND (n.start_date = ? OR n.end_date = ?)");
+                values.push(SqlValue::Text(day.clone()));
+                values.push(SqlValue::Text(day));
+            }
+            crate::models::task::TaskFocus::Overdue => {
+                sql.push_str(" AND n.end_date < ?");
+                values.push(SqlValue::Text(day));
+            }
+            crate::models::task::TaskFocus::Blocked => sql.push_str(" AND n.status = 'blocked'"),
+        }
+    }
+
     if !query.include_subtasks {
         sql.push_str(" AND n.role = 'root'");
     }

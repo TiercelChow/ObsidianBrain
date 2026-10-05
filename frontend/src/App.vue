@@ -68,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import { computed, nextTick, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from './stores/app'
 import Sidebar from './components/Sidebar.vue'
@@ -82,7 +82,15 @@ import { useMobileDockMotion } from './composables/useMobileDockMotion'
 const route = useRoute()
 const appStore = useAppStore()
 // Reset scroll state when navigating between pages.
-watch(() => route.path, () => appStore.handleScroll(0))
+watch(() => route.path, async path => {
+  appStore.handleScroll(0)
+  await nextTick()
+  // Home owns its return position; other destinations start with controls visible.
+  if (path !== '/') {
+    const main = appShellRef.value?.querySelector('.app-main')
+    if (main) main.scrollTop = 0
+  }
+})
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
 const currentTitle = computed(() => (route.meta?.title as string) || '')
 const appAsideRef = ref<HTMLElement | null>(null)
@@ -349,7 +357,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
   .el-card,
   .stat-card, .module-card, .status-card, .tool-card,
   .stat-chip, .result-card, .recent-card,
-  .repo-card, .config-card {
+  .repo-card {
     background: color-mix(in srgb, var(--bg-glass-strong) 88%, var(--bg-base)) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;

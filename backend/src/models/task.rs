@@ -541,6 +541,9 @@ pub struct ArchiveTaskRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskQuery {
     #[serde(default)]
+    pub focus: Option<TaskFocus>,
+    pub focus_date: Option<NaiveDate>,
+    #[serde(default)]
     pub kinds: Vec<TaskKind>,
     #[serde(default)]
     pub statuses: Vec<TaskStatus>,
@@ -572,6 +575,8 @@ fn default_limit() -> usize {
 impl Default for TaskQuery {
     fn default() -> Self {
         Self {
+            focus: None,
+            focus_date: None,
             kinds: Vec::new(),
             statuses: Vec::new(),
             importance: Vec::new(),
@@ -585,6 +590,14 @@ impl Default for TaskQuery {
             limit: default_limit(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskFocus {
+    Today,
+    Overdue,
+    Blocked,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

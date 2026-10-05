@@ -28,76 +28,6 @@ fn task_fields_schema() -> Value {
     })
 }
 
-/// Schema for `search_notes` — note search via Obsidian API.
-pub fn search_notes_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "搜索查询词"
-            },
-            "top_k": {
-                "type": "integer",
-                "default": 5,
-                "minimum": 1,
-                "maximum": 50,
-                "description": "返回结果数量"
-            }
-        },
-        "required": ["query"],
-        "additionalProperties": false
-    })
-}
-
-/// Schema for `get_note` — read a note's full content.
-pub fn get_note_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "笔记路径（相对于 Vault 根目录）"
-            }
-        },
-        "required": ["path"],
-        "additionalProperties": false
-    })
-}
-
-/// Schema for `list_recent_notes` — list recently modified notes.
-pub fn list_recent_notes_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "days": {
-                "type": "integer",
-                "default": 7,
-                "minimum": 1,
-                "maximum": 365,
-                "description": "最近修改天数范围"
-            },
-            "limit": {
-                "type": "integer",
-                "default": 20,
-                "minimum": 1,
-                "maximum": 100,
-                "description": "返回结果数量上限"
-            }
-        },
-        "additionalProperties": false
-    })
-}
-
-/// Schema for `get_memory_stats` — return vault statistics.
-pub fn get_memory_stats_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {},
-        "additionalProperties": false
-    })
-}
-
 // ── Personal Task Tools ──
 
 pub fn create_task_schema() -> Value {
@@ -121,6 +51,8 @@ pub fn list_tasks_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
+            "focus": { "type": "string", "enum": ["today", "overdue", "blocked"] },
+            "focus_date": { "type": "string", "format": "date" },
             "kinds": { "type": "array", "items": { "type": "string", "enum": ["short", "long"] } },
             "statuses": { "type": "array", "items": { "type": "string", "enum": ["open", "planned", "in_progress", "blocked", "completed", "cancelled"] } },
             "importance": { "type": "array", "items": { "type": "string", "enum": ["low", "normal", "high", "urgent"] } },
@@ -449,26 +381,10 @@ pub fn search_memos_schema() -> Value {
                 "minimum": 1,
                 "maximum": 100,
                 "description": "每页数量"
-            }
+            },
+            "offset": {"type":"integer","minimum":0,"default":0}
         },
         "required": ["query"],
-        "additionalProperties": false
-    })
-}
-
-/// Schema for `sync_memos` — sync memos from Obsidian files.
-pub fn sync_memos_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "months": {
-                "type": "integer",
-                "default": 3,
-                "minimum": 1,
-                "maximum": 24,
-                "description": "同步最近几个月的数据"
-            }
-        },
         "additionalProperties": false
     })
 }
@@ -498,20 +414,8 @@ pub fn save_config_schema() -> Value {
     json!({
         "type": "object",
         "properties": {
-            "vault": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Vault 根目录路径" },
-                    "name": { "type": "string", "description": "Vault 名称" }
-                }
-            },
-            "obsidian": {
-                "type": "object",
-                "properties": {
-                    "enabled": { "type": "boolean" },
-                    "url": { "type": "string" },
-                    "api_key": { "type": "string" }
-                }
+            "timeline": {
+                "type":"object","properties":{"cache_limit_mb":{"type":"integer","minimum":0,"maximum":4096}},"required":["cache_limit_mb"],"additionalProperties":false
             },
             "llm": {
                 "type": "object",

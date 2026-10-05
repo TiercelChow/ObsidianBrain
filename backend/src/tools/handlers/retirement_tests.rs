@@ -12,6 +12,12 @@ async fn test_register_all_tools_excludes_retired_modules_and_keeps_daily_tools(
         "get_radar",
         "add_to_vault",
         "dismiss_radar_item",
+        "search_notes",
+        "get_note",
+        "list_recent_notes",
+        "list_files",
+        "get_memory_stats",
+        "sync_memos",
     ] {
         assert!(
             ctx.tool_registry.get(name).await.is_none(),
@@ -23,6 +29,9 @@ async fn test_register_all_tools_excludes_retired_modules_and_keeps_daily_tools(
         "get_repo_detail",
         "open_in_vscode",
         "browse_timeline",
+        "update_memo",
+        "delete_memo",
+        "get_timeline_storage",
         "list_tasks",
         "list_book_knowledge_bases",
     ] {

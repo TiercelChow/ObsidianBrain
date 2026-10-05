@@ -2,7 +2,7 @@
 name = "obsidian-brain"
 version = "0.1.0"
 edition = "2021"
-description = "Local Rust knowledge engine with LLM Tool API for Obsidian"
+description = "Local-first knowledge engine and personal workspace with LLM Tool API"
 
 [dependencies]
 axum = { version = "0.7", features = ["multipart"] }

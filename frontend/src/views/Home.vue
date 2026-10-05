@@ -1,419 +1,232 @@
 <template>
-  <div class="home-page">
+  <div ref="pageRef" class="home-page">
     <header class="page-header">
-      <div>
-        <h1 class="page-title">控制面板</h1>
-        <p class="page-subtitle">系统状态与配置管理</p>
-      </div>
+      <div><h1 class="page-title">首页</h1><p class="page-subtitle">{{ dateLabel }} · 从这里继续你的日常</p></div>
       <div class="header-actions">
-        <el-button @click="appStore.toggleTheme()" :title="themeLabel">
-          <el-icon><component :is="themeIcon" /></el-icon>
-        </el-button>
-        <el-button @click="loadAll" :loading="loading">
-          <el-icon v-if="!loading"><Refresh /></el-icon>
-          刷新
-        </el-button>
+        <el-button class="home-theme-action" @click="appStore.toggleTheme()" :title="`切换主题，当前${themeName}`" :aria-label="`切换主题，当前${themeName}`"><el-icon><component :is="themeIcon" /></el-icon></el-button>
+        <el-button @click="loadOverview()" :loading="loading" aria-label="刷新工作台"><el-icon v-if="!loading"><Refresh /></el-icon><span>刷新</span></el-button>
       </div>
     </header>
-
-    <!-- Stats -->
-    <div class="stats-grid">
-      <div class="stat-card" v-for="(stat, i) in stats" :key="stat.label"
-        :style="{ '--delay': `${i * 0.05}s` }">
-        <div class="stat-icon" :style="{ color: stat.color }">
-          <el-icon :size="20"><component :is="stat.icon" /></el-icon>
+    <div class="workbench-heading"><span>今日关注</span><small v-if="overview">{{ error ? '更新失败 · 显示上次结果' : `更新于 ${updatedLabel}` }}</small></div>
+    <p v-if="error" class="home-notice" role="status">{{ error }} <button @click="loadOverview()">重试</button></p>
+    <p v-else-if="systemProblem" class="home-notice" role="alert">本地服务或数据库状态异常，请刷新检查。</p>
+    <div class="attention-grid" aria-label="今日关注">
+      <RouterLink v-for="tile in attention" :key="tile.label" class="attention-tile glass-surface" :to="tile.to">
+        <span class="attention-top"><el-icon><component :is="tile.icon" /></el-icon><el-icon class="entry-chevron"><ArrowRight /></el-icon></span>
+        <strong>{{ tile.value }}</strong><span>{{ tile.label }}</span><small>{{ tile.hint }}</small>
+      </RouterLink>
+    </div>
+    <RouterLink v-if="overview?.wiki.data?.failed_count" :to="{path:'/knowledge',query:{activity:'attention'}}" class="home-notice">有 {{ overview.wiki.data.failed_count }} 项 Wiki 工作需要检查 <el-icon><ArrowRight /></el-icon></RouterLink>
+    <div class="workbench-grid">
+      <div class="workbench-main">
+      <HomePanel class="task-panel" title="我的任务" :subtitle="overview?.tasks.data ? `${overview.tasks.data.active_count} 项未关闭 · 优先显示需要关注的任务` : '先完成重要的事'" to="/tasks" :loading="loading" :ready="!!overview?.tasks.data" :error="overview?.tasks.error" @retry="loadOverview()">
+        <div v-if="overview?.tasks.data?.items.length" class="home-list">
+          <div v-for="task in shownTasks" :key="task.id" class="task-row">
+            <RouterLink class="home-row" :to="{path:'/tasks',query:{view:'tasks',task:task.id}}">
+              <span class="row-icon"><el-icon><component :is="task.kind === 'long' ? Flag : CircleCheck" /></el-icon></span>
+              <span class="row-content"><strong>{{ task.title }}</strong><span class="row-meta"><span :class="{'is-warning':task.end_date < today}">{{ task.end_date < today ? '已逾期' : task.end_date === today ? '今天截止' : `${task.end_date} 截止` }}</span><span>{{ importanceLabel(task.importance) }}</span></span>
+                <span v-if="task.kind === 'long'" class="home-progress"><span :style="{width:`${task.progress_percent}%`}"></span></span>
+              </span>
+              <span class="row-end"><small>{{ task.kind === 'long' ? `${task.progress_percent}%` : '待办' }}</small><el-icon><ArrowRight /></el-icon></span>
+            </RouterLink>
+            <RouterLink v-if="task.child_risk_id" class="child-risk" :to="{path:'/tasks',query:{view:'tasks',task:task.id,child:task.child_risk_id}}">子任务需关注：{{ task.child_risk_title }}<el-icon><ArrowRight /></el-icon></RouterLink>
+          </div>
         </div>
-        <div class="stat-content">
-          <span class="stat-value">{{ stat.value }}</span>
-          <span class="stat-label">{{ stat.label }}</span>
+        <div v-else class="panel-empty"><el-icon><CircleCheck /></el-icon><p>没有未关闭的任务</p><RouterLink to="/tasks">去安排下一件事</RouterLink></div>
+      </HomePanel>
+      <HomePanel class="reading-panel" title="最近阅读" subtitle="接着上次的位置读下去" :to="{path:'/reader',query:{view:'shelf'}}" :loading="loading" :ready="!!overview?.reading.data" :error="overview?.reading.error" @retry="loadOverview()">
+        <div v-if="overview?.reading.data?.length" class="home-list">
+          <RouterLink v-for="book in shownBooks" :key="book.id" class="home-row" :to="{path:'/reader',query:{book:book.id}}">
+            <span class="book-spine"><el-icon><component :is="book.kind === 'pdf' ? Document : Reading" /></el-icon></span>
+            <span class="row-content"><strong>{{ book.name }}</strong><span class="row-meta reading-position">{{ readingPosition(book) }}</span><small>{{ recentReadLabel(book.read_at) }}阅读 · {{ book.kind === 'pdf' ? 'PDF' : 'Markdown 文集' }}</small></span><el-icon class="entry-chevron"><ArrowRight /></el-icon>
+          </RouterLink>
         </div>
+        <div v-else class="panel-empty"><el-icon><Reading /></el-icon><p>还没有阅读记录</p><RouterLink :to="{path:'/reader',query:{view:'shelf'}}">从书架选一本书</RouterLink></div>
+      </HomePanel>
+      </div>
+      <div class="workbench-side">
+      <HomePanel class="wiki-panel" title="Wiki 动态" subtitle="编译、研究与待审核成果" to="/knowledge" :loading="loading" :ready="!!overview?.wiki.data" :error="overview?.wiki.error" @retry="loadOverview()">
+        <div v-if="overview?.wiki.data?.items.length" class="home-list">
+          <RouterLink v-for="item in overview.wiki.data.items" :key="`${item.kind}-${item.id}`" class="home-row wiki-row" :to="wikiItemRoute(item)">
+            <span class="row-icon" :class="{'is-warning':item.status === 'failed' || item.artifact_state === 'failed'}"><el-icon><component :is="item.kind === 'review' ? EditPen : item.kind === 'compile' ? Collection : DataAnalysis" /></el-icon></span>
+            <span class="row-content"><strong>{{ item.title }}</strong><span class="row-meta">{{ item.book_name }}</span><small :class="{'is-warning':item.status === 'failed' || item.artifact_state === 'failed'}">{{ wikiStatus(item) }}</small><span v-if="item.detail && item.kind !== 'research'" class="wiki-detail">{{ item.detail }}</span></span><el-icon class="entry-chevron"><ArrowRight /></el-icon>
+          </RouterLink>
+        </div>
+        <div v-else class="panel-empty"><el-icon><Collection /></el-icon><p>暂时没有 Wiki 动态</p><RouterLink to="/knowledge">查看书籍知识库</RouterLink></div>
+      </HomePanel>
+      <HomePanel class="memo-panel" title="最近小记" subtitle="留住片刻的想法" to="/timeline" :loading="loading" :ready="!!overview?.memos.data" :error="overview?.memos.error" @retry="loadOverview()">
+        <RouterLink v-if="overview?.memos.data" class="week-link" :to="{path:'/timeline',query:{start:overview.week_start,end:today}}">本周 {{ overview.memos.data.week_count }} 条 <span>查看本周<el-icon><ArrowRight /></el-icon></span></RouterLink>
+        <div v-if="overview?.memos.data?.items.length" class="home-list">
+          <RouterLink v-for="memo in overview.memos.data.items" :key="memo.id" class="home-row memo-row" :to="{path:'/timeline',query:{memo:memo.id}}">
+            <span class="row-content"><small>{{ memoTime(memo.timestamp) }}</small><strong class="memo-excerpt">{{ plainExcerpt(memo.excerpt) || '一段影像记录' }}</strong><span v-if="memo.tags.length" class="row-meta memo-tags">{{ memo.tags.map(tag=>`#${tag}`).join('  ') }}</span></span>
+            <img v-if="memo.thumbnail && !failedImages.has(memo.id)" :src="memoImageUrl(memo.thumbnail,true)" loading="lazy" decoding="async" class="memo-thumb" alt="小记图片" @error="failedImages.add(memo.id)" /><el-icon v-else class="entry-chevron"><ArrowRight /></el-icon>
+          </RouterLink>
+        </div>
+        <div v-else class="panel-empty"><el-icon><EditPen /></el-icon><p>还没有小记</p><RouterLink to="/timeline">记下今天的第一段想法</RouterLink></div>
+      </HomePanel>
       </div>
     </div>
-
-    <!-- System Status -->
-    <section class="section">
-      <h2 class="section-title">系统状态</h2>
-      <div class="status-card">
-        <div class="status-grid" v-if="health">
-          <div class="status-item" v-for="(status, name) in health.components" :key="name">
-            <span class="status-dot" :class="status === 'ok' ? 'ok' : 'inactive'"></span>
-            <span class="status-name">{{ name }}</span>
-            <span class="status-value" :class="status === 'ok' ? 'ok' : 'inactive'">
-              {{ status === 'ok' ? '运行中' : status }}
-            </span>
-          </div>
-          <div class="status-item">
-            <span class="status-dot ok"></span>
-            <span class="status-name">运行时间</span>
-            <span class="status-value ok">{{ formatUptime(health.uptime_seconds) }}</span>
-          </div>
-        </div>
-        <div v-else class="status-empty">
-          <div class="loading-spinner"></div>
-          <span>检测中...</span>
-        </div>
+    <section class="home-system glass-surface" aria-label="系统概况">
+      <header><h2>系统概况</h2><span v-if="overview">v{{ overview.system.version }}</span></header>
+      <div v-if="overview" class="system-grid">
+        <div><span>本地服务 / 数据库</span><strong :class="{'is-warning':systemProblem}">{{ systemProblem ? '状态异常' : '运行正常' }}</strong></div>
+        <div><span>持续运行</span><strong>{{ formatUptime(overview.system.uptime_seconds) }}</strong></div>
+        <RouterLink :to="{path:'/timeline',query:{storage:'1'}}"><span>原图存储 · 登记用量</span><strong>{{ overview.storage.data ? formatHomeBytes(overview.storage.data.originals_bytes) : '—' }}<el-icon><ArrowRight /></el-icon></strong></RouterLink>
+        <RouterLink :to="{path:'/timeline',query:{storage:'1'}}"><span>图片缓存 / 上限</span><strong>{{ overview.storage.data ? `${formatHomeBytes(overview.storage.data.cache_bytes)} / ${formatHomeBytes(overview.storage.data.cache_limit_bytes)}` : '—' }}<el-icon><ArrowRight /></el-icon></strong></RouterLink>
       </div>
-    </section>
-
-    <!-- Configuration -->
-    <section class="section">
-      <h2 class="section-title">系统配置</h2>
-      <div class="config-grid" v-if="config">
-        <!-- Obsidian 配置卡片 -->
-        <div class="config-card">
-          <div class="config-group">
-            <h3 class="config-group-title">
-              <el-icon><FolderOpened /></el-icon>
-              Obsidian Vault
-            </h3>
-            <div class="config-fields">
-              <div class="config-field">
-                <label>Vault 路径</label>
-                <el-input v-model="config.vault.path" placeholder="/path/to/vault" />
-              </div>
-              <div class="config-field small">
-                <label>Vault 名称</label>
-                <el-input v-model="config.vault.name" placeholder="my-vault" />
-              </div>
-            </div>
-          </div>
-
-          <div class="config-group">
-            <h3 class="config-group-title">
-              <el-icon><Connection /></el-icon>
-              Obsidian REST API
-            </h3>
-            <div class="config-fields">
-              <div class="config-field inline">
-                <label>启用</label>
-                <el-switch v-model="config.obsidian.enabled" />
-              </div>
-              <div class="config-field">
-                <label>API 地址</label>
-                <el-input v-model="config.obsidian.url" placeholder="https://127.0.0.1:27124" />
-              </div>
-              <div class="config-field">
-                <label>API Key</label>
-                <el-input v-model="config.obsidian.api_key" placeholder="API Key" show-password />
-              </div>
-            </div>
-          </div>
-
-          <div class="config-actions">
-            <el-button type="primary" @click="saveSettings" :loading="saving">
-              保存配置
-            </el-button>
-          </div>
-        </div>
-
-        <!-- LLM 配置卡片 -->
-        <div class="config-card">
-          <div class="config-group">
-            <h3 class="config-group-title">
-              <el-icon><MagicStick /></el-icon>
-              LLM 配置
-            </h3>
-            <div class="config-fields">
-              <div class="config-field inline">
-                <label>提供商</label>
-                <el-select v-model="config.llm.provider" style="width: 160px">
-                  <el-option label="OpenAI 兼容" value="openai" />
-                  <el-option label="Ollama (本地)" value="ollama" />
-                </el-select>
-              </div>
-              <div class="config-field">
-                <label>模型名称</label>
-                <el-input v-model="config.llm.model" placeholder="glm-5.2 / gpt-4o-mini / qwen2.5" />
-              </div>
-              <div class="config-field">
-                <label>API Key</label>
-                <el-input v-model="config.llm.api_key" placeholder="直接输入 API Key" show-password />
-                <span class="field-hint">密钥保存后不再显示，留空则使用环境变量</span>
-              </div>
-              <div class="config-field">
-                <label>API Base URL</label>
-                <el-input v-model="config.llm.base_url" placeholder="如 https://dashscope.aliyuncs.com/compatible-mode/v1" />
-                <span class="field-hint">OpenAI 官方留空即可，第三方服务填兼容地址</span>
-              </div>
-              <div class="config-field inline">
-                <label>最大 Token</label>
-                <el-input-number v-model="config.llm.max_tokens" :min="256" :max="32768" :step="256" />
-              </div>
-              <div class="config-field inline">
-                <label>温度</label>
-                <el-slider v-model="config.llm.temperature" :min="0" :max="2" :step="0.1" style="width: 160px" />
-                <span class="slider-value">{{ config.llm.temperature }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="config-actions">
-            <el-button @click="verifyLlm" :loading="verifyingLlm">
-              验证 LLM
-            </el-button>
-            <el-button type="primary" @click="saveSettings" :loading="saving">
-              保存配置
-            </el-button>
-          </div>
-        </div>
-      </div>
+      <p v-else class="system-unavailable">{{ loading ? '正在读取系统状态…' : '系统状态暂时无法读取' }}</p>
+      <footer><span v-if="overview?.storage.error">{{ overview.storage.error }}</span><span v-else-if="overview?.storage.data?.pending_cleanup">{{ overview.storage.data.pending_cleanup }} 张图片等待清理</span><span v-else>数据保存在本机 · 原图不参与缓存淘汰</span><RouterLink :to="{path:'/knowledge/settings',query:{section:'usage'}}">查看 AI 用量<el-icon><ArrowRight /></el-icon></RouterLink></footer>
     </section>
   </div>
 </template>
-
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { getHealth, getMemoryStats, getMemoStats, getConfig, saveConfig, listCodeRepos, callTool } from '@/api'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
+import { ArrowRight, Refresh, Sunny, Moon, View, Calendar, Warning, Collection, EditPen, Flag, CircleCheck, Reading, Document, DataAnalysis } from '@element-plus/icons-vue'
+import { getHomeOverview, type HomeOverview } from '@/api/home'
+import HomePanel from '@/components/home/HomePanel.vue'
 import { useAppStore } from '@/stores/app'
-import {
-  Refresh, Notebook, FolderOpened, Calendar,
-  MagicStick, DataLine, Connection, Sunny, Moon, View,
-} from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { usePhoneViewport } from '@/composables/usePhoneViewport'
+import { todayLocal } from '@/utils/taskDates'
+import { memoImageUrl } from '@/utils/timelineMemo'
+import { readingPosition, wikiItemRoute, wikiStatus, mergeHomeOverview, shouldPollHome, formatHomeBytes, formatUptime, recentReadLabel, homeSnapshot, saveHomeSnapshot } from '@/utils/homeWorkbench'
 
 const appStore = useAppStore()
-
-const themeIcon = computed(() => {
-  if (appStore.theme === 'dark') return Moon
-  if (appStore.theme === 'eye-care') return View
-  return Sunny
+const { isMobile } = usePhoneViewport()
+const themeName = computed(() => ({light:'浅色',dark:'深色','eye-care':'护眼'}[appStore.theme]))
+const themeIcon = computed(() => appStore.theme === 'dark' ? Moon : appStore.theme === 'eye-care' ? View : Sunny)
+const snapshot = homeSnapshot()
+const overview = ref<HomeOverview|null>(snapshot.data)
+const loading = ref(!snapshot.data)
+const error = ref('')
+const today = ref(todayLocal())
+const pageRef = ref<HTMLElement|null>(null)
+const failedImages = reactive(new Set<string>())
+let controller: AbortController | null = null
+let poll: ReturnType<typeof setTimeout> | undefined
+let active = true
+let request = 0
+const dateLabel = computed(() => new Date(`${today.value}T12:00:00`).toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'}))
+const updatedLabel = computed(() => overview.value ? new Date(overview.value.generated_at).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) : '')
+const shownTasks = computed(() => overview.value?.tasks.data?.items.slice(0,isMobile.value ? 3 : 4) || [])
+const shownBooks = computed(() => overview.value?.reading.data?.slice(0,isMobile.value ? 3 : 4) || [])
+const systemProblem = computed(() => !!overview.value && Object.values(overview.value.system.components).some(status => status !== 'ok'))
+const attention = computed(() => {
+  const data = overview.value
+  return [
+    {label:'今日安排',icon:Calendar,value:data?.tasks.error ? '—' : data?.tasks.data?.today_count ?? '—',hint:'顶层任务 · 今日开始或截止',to:{path:'/tasks',query:{focus:'today'}}},
+    {label:'已逾期',icon:Warning,value:data?.tasks.error ? '—' : data?.tasks.data?.overdue_count ?? '—',hint:'顶层任务 · 尚未关闭',to:{path:'/tasks',query:{focus:'overdue'}}},
+    {label:'Wiki 运行中',icon:Collection,value:data?.wiki.error ? '—' : data?.wiki.data?.running_count ?? '—',hint:'编译与研究 · 含排队',to:{path:'/knowledge',query:{activity:'running'}}},
+    {label:'等待审核',icon:EditPen,value:data?.wiki.error ? '—' : data?.wiki.data?.review_count ?? '—',hint:'知识候选 · 由你决定',to:{path:'/knowledge/wiki',query:{pending:'1'}}},
+  ]
 })
-const themeLabel = computed(() => {
-  if (appStore.theme === 'dark') return '浅色'
-  if (appStore.theme === 'eye-care') return '护眼'
-  return '深色'
+function importanceLabel(value:string) { return ({urgent:'紧急',high:'重要',normal:'普通',low:'低优先'} as Record<string,string>)[value] || '普通' }
+function memoTime(value:string) { return new Date(value).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) }
+function plainExcerpt(value:string) { return value.replace(/!\[[^\]]*\]\([^)]*\)|!\[\[[^\]]*\]\]/g,'').replace(/\[([^\]]+)\]\([^)]*\)/g,'$1').replace(/[#>*`_~]/g,'').replace(/\s+/g,' ').trim() }
+function schedulePoll() {
+  clearTimeout(poll)
+  if (active && shouldPollHome(overview.value, document.visibilityState === 'visible')) poll = setTimeout(() => void loadOverview(true), 15000)
+}
+async function loadOverview(quiet = false) {
+  if (!active || document.visibilityState !== 'visible') return
+  const sequence = ++request
+  controller?.abort(); clearTimeout(poll)
+  controller = new AbortController()
+  if (!quiet) loading.value = true
+  today.value = todayLocal()
+  try {
+    const fresh = await getHomeOverview(today.value, controller.signal)
+    if (!active || sequence !== request) return
+    overview.value = mergeHomeOverview(overview.value, fresh)
+    saveHomeSnapshot(overview.value); error.value = ''
+  } catch {
+    if (active && sequence === request) error.value = '工作台暂时无法更新，请检查本地服务。'
+  } finally {
+    if (active && sequence === request) { loading.value = false; if (!error.value) schedulePoll() }
+  }
+}
+function visibilityChanged() {
+  if (document.visibilityState === 'visible') void loadOverview(true)
+  else { ++request; controller?.abort(); clearTimeout(poll); loading.value = false }
+}
+onBeforeRouteLeave(() => saveHomeSnapshot(overview.value, pageRef.value?.closest('.app-main')?.scrollTop ?? 0))
+onMounted(async () => {
+  await nextTick()
+  const main = pageRef.value?.closest('.app-main')
+  if (main) main.scrollTop = snapshot.scroll
+  document.addEventListener('visibilitychange', visibilityChanged)
+  void loadOverview()
 })
-
-interface HealthData {
-  status: string
-  version: string
-  uptime_seconds: number
-  tools_count: number
-  vault: { path: string; exists: boolean; watching: boolean }
-  components: Record<string, string>
-}
-
-interface ConfigData {
-  vault: { path: string; name: string }
-  obsidian: { enabled: boolean; url: string; api_key: string }
-  llm: { provider: string; model: string; api_key: string; api_key_env: string; base_url: string; max_tokens: number; temperature: number }
-}
-
-const health = ref<HealthData | null>(null)
-const memStats = ref<{ total_chunks: number; total_notes: number; tags: string[] } | null>(null)
-const memoStats = ref<{ total_memos: number } | null>(null)
-const config = ref<ConfigData | null>(null)
-const repoCount = ref<number | null>(null)
-const loading = ref(false)
-const saving = ref(false)
-const verifyingLlm = ref(false)
-
-const stats = computed(() => [
-  { icon: Notebook, label: '笔记总数', value: memStats.value?.total_notes ?? '—', color: 'var(--accent)' },
-  { icon: DataLine, label: '已注册工具', value: health.value?.tools_count ?? '—', color: '#06b6d4' },
-  { icon: Calendar, label: '小记数', value: memoStats.value?.total_memos ?? '—', color: '#10b981' },
-  { icon: FolderOpened, label: '代码仓', value: repoCount.value ?? '—', color: '#f59e0b' },
-])
-
-function formatUptime(seconds: number): string {
-  if (!seconds) return '—'
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  if (h > 0) return `${h}h ${m}m`
-  if (m > 0) return `${m}m`
-  return `${seconds % 60}s`
-}
-
-async function loadAll() {
-  loading.value = true
-  try {
-    const [healthRes, memRes, memoRes, configRes, reposRes] = await Promise.allSettled([
-      getHealth(),
-      getMemoryStats(),
-      getMemoStats(),
-      getConfig(),
-      listCodeRepos(),
-    ])
-    if (healthRes.status === 'fulfilled') health.value = healthRes.value as unknown as HealthData
-    if (memRes.status === 'fulfilled') {
-      const r = memRes.value as unknown as { result: { total_chunks: number; total_notes: number; tags: string[] } }
-      memStats.value = r.result ?? null
-    }
-    if (memoRes.status === 'fulfilled') {
-      const r = memoRes.value as unknown as { result: { total_memos: number } }
-      memoStats.value = r.result ?? null
-    }
-    if (configRes.status === 'fulfilled') {
-      const r = configRes.value as unknown as { result: ConfigData }
-      config.value = r.result ?? null
-    }
-    if (reposRes.status === 'fulfilled') {
-      const r = reposRes.value as unknown as { result: unknown }
-      const repos = r.result
-      repoCount.value = Array.isArray(repos) ? repos.length : 0
-    }
-  } finally {
-    loading.value = false
-  }
-}
-
-async function saveSettings() {
-  if (!config.value) return
-  saving.value = true
-  try {
-    await saveConfig(config.value)
-    ElMessage.success('配置已保存并生效')
-  } catch (e) {
-    ElMessage.error('保存失败')
-  } finally {
-    saving.value = false
-  }
-}
-
-async function verifyLlm() {
-  if (!config.value) return
-  verifyingLlm.value = true
-  try {
-    const res = await callTool('verify_llm', {
-      provider: config.value.llm.provider,
-      model: config.value.llm.model,
-      api_key: config.value.llm.api_key,
-      api_key_env: config.value.llm.api_key_env,
-      base_url: config.value.llm.base_url,
-    }) as unknown as { result: { valid: boolean; message: string; response?: string } }
-    const r = res.result
-    if (r.valid) {
-      ElMessage.success(`✅ ${r.message}（回复：${r.response || ''}）`)
-    } else {
-      ElMessage.error(`❌ ${r.message}`)
-    }
-  } catch (e: any) {
-    ElMessage.error('验证失败：' + (e?.message || '未知错误'))
-  } finally {
-    verifyingLlm.value = false
-  }
-}
-
-onMounted(() => { loadAll() })
+onBeforeUnmount(() => { active = false; ++request; controller?.abort(); clearTimeout(poll); document.removeEventListener('visibilitychange', visibilityChanged) })
 </script>
-
 <style scoped>
-.home-page {
-  min-height: 100%;
-  max-width: 100%;
-}
-
-.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
-.stat-card {
-  display: flex; align-items: center; gap: 14px; padding: 20px;
-  border-radius: 18px;
-  animation: fade-in var(--duration-normal) var(--ease-out) both; animation-delay: var(--delay, 0s);
-}
-.stat-icon {
-  width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
-  background: var(--bg-glass-subtle); backdrop-filter: var(--glass-content-filter);
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px; flex-shrink: 0;
-}
-.stat-content { display: flex; flex-direction: column; }
-.stat-value { font-size: 22px; font-weight: 700; color: var(--text-primary); line-height: 1.2; }
-.stat-label { font-size: 12px; color: var(--text-faint); margin-top: 3px; font-weight: 500; }
-
-.section { margin-bottom: 28px; animation: fade-in var(--duration-normal) var(--ease-out) both; animation-delay: var(--delay, 0s); }
-.section-title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px; letter-spacing: var(--tracking-tight); }
-
-.status-card { padding: 16px 20px; border-radius: 16px; }
-.status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
-.status-item {
-  display: flex; align-items: center; gap: 10px; padding: 8px 14px;
-  border-radius: 10px; background: var(--bg-glass-subtle);
-  border: 1px solid var(--border-subtle);
-}
-.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.status-dot.ok { background: var(--glass-success-label); }
-.status-dot.inactive { background: #d4d4d8; }
-.status-name { flex: 1; font-size: 13px; color: var(--text-tertiary); font-weight: 500; text-transform: capitalize; }
-.status-value { font-size: 12px; font-weight: 600; }
-.status-value.ok { color: var(--glass-success-label); }
-.status-value.inactive { color: var(--text-faint); }
-.status-empty { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 20px; color: var(--text-faint); font-size: 13px; }
-.loading-spinner {
-  width: 14px; height: 14px; border: 2px solid #e4e4e7; border-top-color: var(--accent);
-  border-radius: 50%; animation: spin 0.8s linear infinite;
-}
-
-/* Config */
-.config-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  align-items: stretch;
-}
-.config-card { padding: 24px; border-radius: 18px; display: flex; flex-direction: column; }
-.config-group {
-  margin-bottom: 24px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid rgba(0,0,0,0.04);
-}
-.config-group:nth-last-child(2) { margin-bottom: 16px; border-bottom: none; padding-bottom: 0; }
-.config-actions { margin-top: auto; }
-.config-group-title {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 14px; font-weight: 600; color: var(--text-primary);
-  margin-bottom: 14px;
-}
-.config-group-title .el-icon { color: var(--accent); }
-.config-fields { display: flex; flex-direction: column; gap: 10px; }
-.config-field { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.config-field label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
-.field-hint { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
-.config-field.inline { flex-direction: row; align-items: center; gap: 12px; }
-.config-field.inline label { min-width: 72px; flex-shrink: 0; }
-.config-field.small { max-width: 200px; }
-.slider-value { font-size: 13px; color: var(--text-primary); font-weight: 600; min-width: 28px; text-align: center; }
-.config-actions {
-  display: flex; align-items: center; justify-content: flex-end; gap: 12px;
-  padding-top: 12px; margin-top: 4px;
-}
-
-/* ── Mobile ── */
+.home-page { min-height:100%; max-width:100%; color:var(--text-primary); }
+.workbench-heading { display:flex; justify-content:space-between; gap:12px; align-items:center; margin:0 0 12px; font-size:14px; font-weight:600; }
+.workbench-heading small { font-size:12px; font-weight:400; color:var(--text-muted); }
+.attention-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-bottom:20px; }
+.attention-tile { display:flex; flex-direction:column; padding:16px 18px; border-radius:18px; text-decoration:none; color:inherit; min-width:0; gap:5px; }
+.attention-top { display:flex; justify-content:space-between; font-size:18px; color:var(--text-muted); margin-bottom:2px; }
+.attention-tile strong { font-size:28px; font-weight:720; line-height:1.2; font-variant-numeric:tabular-nums; letter-spacing:-.03em; }
+.attention-tile > span:not(.attention-top) { font-size:14px; font-weight:600; }
+.attention-tile small { font-size:11px; color:var(--text-muted); line-height:1.5; }
+.entry-chevron { flex-shrink:0; color:var(--text-faint); font-size:13px; }
+.workbench-grid { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(0,1fr); gap:18px; align-items:stretch; margin-bottom:18px; }
+.workbench-main,.workbench-side { min-width:0; display:flex; flex-direction:column; gap:18px; }
+.workbench-main > .home-panel,.workbench-side > .home-panel { flex:1 1 auto; }
+.task-panel { grid-area:tasks; } .reading-panel { grid-area:reading; } .wiki-panel { grid-area:wiki; } .memo-panel { grid-area:memos; }
+.home-list { display:grid; gap:3px; }
+.home-row { display:flex; align-items:center; gap:12px; min-height:76px; padding:12px 8px; border-radius:12px; text-decoration:none; color:inherit; min-width:0; transition:background var(--duration-fast) var(--ease-out),transform var(--duration-fast) var(--ease-out); }
+.home-row:hover,.attention-tile:hover { background-color:var(--bg-hover); }
+.home-row:active,.attention-tile:active { transform:scale(.985); }
+.home-row:focus-visible,.attention-tile:focus-visible,.child-risk:focus-visible { outline:2px solid var(--text-primary); outline-offset:3px; }
+.row-icon { flex:none; display:grid; place-items:center; width:36px; height:36px; color:var(--text-tertiary); font-size:20px; }
+.row-content { display:flex; flex:1; min-width:0; flex-direction:column; gap:5px; }
+.row-content strong { font-size:15px; font-weight:600; line-height:1.45; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow-wrap:anywhere; }
+.row-meta { display:flex; gap:10px; font-size:12px; line-height:1.5; color:var(--text-muted); }
+.row-content small { color:var(--text-muted); font-size:12px; line-height:1.5; }
+.row-end { display:flex; gap:10px; align-items:center; color:var(--text-muted); flex:none; font-variant-numeric:tabular-nums; }
+.row-end small { font-size:12px; }
+.home-progress { height:3px; border-radius:3px; background:var(--bg-hover); margin-top:2px; overflow:hidden; }
+.home-progress > span { display:block; height:100%; background:var(--text-tertiary); border-radius:inherit; }
+.child-risk { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 8px 4px 56px; min-height:44px; color:var(--glass-warning-label,var(--text-secondary)); font-size:12px; text-decoration:none; overflow-wrap:anywhere; }
+.is-warning { color:var(--glass-warning-label,var(--text-secondary))!important; }
+.book-spine { flex:none; display:grid; place-items:center; width:40px; height:50px; border-radius:6px 11px 11px 6px; background:var(--bg-hover); color:var(--text-secondary); box-shadow:inset 3px 0 0 var(--border-subtle); font-size:22px; }
+.reading-position,.memo-tags { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; display:block; }
+.wiki-row { align-items:flex-start; } .wiki-row > .entry-chevron { align-self:center; }
+.wiki-detail { font-size:12px; color:var(--text-muted); line-height:1.5; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
+.week-link { display:flex; justify-content:space-between; gap:8px; align-items:center; min-height:44px; padding:0 8px; font-size:12px; color:var(--text-muted); text-decoration:none; }
+.week-link > span { display:flex; align-items:center; gap:3px; }
+.memo-thumb { width:56px; height:56px; object-fit:cover; border-radius:12px; flex:none; }
+.panel-empty { display:flex; flex-direction:column; align-items:flex-start; justify-content:center; padding:20px 8px; min-height:116px; color:var(--text-muted); }
+.panel-empty > .el-icon { font-size:25px; margin-bottom:4px; }
+.panel-empty p { font-size:14px; margin:8px 0 0; }
+.panel-empty a { display:inline-flex; align-items:center; min-height:44px; color:var(--text-secondary); font-size:13px; text-decoration:none; }
+.home-notice { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 16px; font-size:13px; color:var(--text-secondary); min-height:44px; text-decoration:none; }
+.home-notice button { background:none; border:0; font:inherit; color:inherit; min-height:44px; cursor:pointer; }
+.home-system { padding:18px 20px; border-radius:18px; }
+.home-system header { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+.home-system h2 { font-size:15px; margin:0; font-weight:650; }
+.home-system header span { font-size:12px; color:var(--text-muted); }
+.system-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:18px; }
+.system-grid > * { display:grid; gap:7px; text-decoration:none; color:inherit; min-width:0; min-height:44px; }
+.system-grid span { color:var(--text-muted); font-size:12px; line-height:1.5; }
+.system-grid strong { font-size:13px; font-weight:550; display:flex; gap:6px; align-items:center; flex-wrap:wrap; overflow-wrap:anywhere; }
+.home-system footer { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-top:12px; font-size:11px; color:var(--text-muted); }
+.home-system footer a { display:flex; align-items:center; gap:4px; min-height:44px; text-decoration:none; color:var(--text-secondary); font-size:12px; }
+.system-unavailable { font-size:13px; color:var(--text-muted); }
+@media(max-width:1080px) { .workbench-grid { grid-template-columns:minmax(0,1.2fr) minmax(0,1fr); } .system-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width: 768px) {
-  .page-header { margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
-  .page-subtitle { width: 100%; order: 1; margin-top: 0; }
-  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 20px; }
-  .stat-card { padding: 14px; gap: 10px; border-radius: 14px; }
-  .stat-icon { width: 36px; height: 36px; border-radius: 10px; backdrop-filter: none; }
-  .stat-value { font-size: 18px; }
-  .stat-label { font-size: 11px; }
-  .section { margin-bottom: 20px; }
-  .section-title { font-size: 14px; margin-bottom: 10px; }
-  .status-card { padding: 12px 14px; border-radius: 14px; }
-  .status-grid { grid-template-columns: 1fr; gap: 6px; }
-  .status-item { padding: 6px 10px; }
-  .config-card { padding: 16px; border-radius: 14px; }
-  .config-grid { grid-template-columns: 1fr; }
-  .config-group { margin-bottom: 16px; padding-bottom: 14px; }
-  .config-field.small { max-width: 100%; }
-  .config-field.inline { align-items: stretch; flex-direction: column; gap: 6px; }
-  .config-field.inline label { min-width: 0; }
-  .config-field :deep(.el-select),
-  .config-field :deep(.el-input-number),
-  .config-field :deep(.el-slider) { width: 100% !important; }
-  .config-actions {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
-    margin: 8px -16px -16px;
-    padding: 10px 16px calc(10px + var(--safe-bottom));
-    background: var(--bg-glass-strong);
-    backdrop-filter: var(--glass-floating-filter);
-    -webkit-backdrop-filter: var(--glass-floating-filter);
-    border-top: 1px solid var(--border-glass);
-  }
-  .config-actions :deep(.el-button) { flex: 1; }
+  .home-page .header-actions .home-theme-action { display: inline-flex; position: fixed; left: max(12px, var(--safe-left)); top:calc(var(--safe-top) + (var(--mobile-header-height) - var(--tap-target)) / 2); width: var(--tap-target); padding:0; }
+  .workbench-heading { font-size:14px; margin-bottom:10px; } .workbench-heading small { font-size:11px; }
+  .attention-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:14px; }
+  .attention-tile { padding:14px; border-radius:16px; } .attention-tile strong { font-size:27px; } .attention-tile small { font-size:10px; }
+  .attention-tile { position:relative; gap:4px; }
+  .attention-top { position:absolute; top:14px; right:14px; }
+  .attention-top .entry-chevron { display:none; }
+  .workbench-grid { grid-template-columns:minmax(0,1fr); grid-template-areas:'tasks' 'reading' 'wiki' 'memos'; gap:14px; }
+  .workbench-main,.workbench-side { display:contents; }
+  .home-row { padding:12px 2px; gap:10px; } .row-content strong { font-size:15px; } .child-risk { padding-left:48px; }
+  .home-system { padding:16px; } .system-grid { gap:16px 10px; }
 }
-
-@media (max-width: 360px) {
-  .stat-card { flex-direction: column; align-items: flex-start; }
-}
+@media(prefers-reduced-motion:reduce) { .home-row,.attention-tile { transition:none; transform:none!important; } }
 </style>

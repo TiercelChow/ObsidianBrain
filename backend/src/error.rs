@@ -52,8 +52,12 @@ pub enum BrainError {
     #[error("知识库状态冲突: {0}")]
     KnowledgeConflict(String),
 
-    #[error("Obsidian API 不可用")]
-    ObsidianUnavailable,
+    #[error("小记不存在: {0}")]
+    MemoNotFound(String),
+    #[error("小记校验失败: {0}")]
+    MemoValidation(String),
+    #[error("小记版本冲突: {0}")]
+    MemoConflict(String),
 
     #[error("Git error in {path}: {detail}")]
     GitError { path: PathBuf, detail: String },
@@ -93,7 +97,9 @@ impl BrainError {
             Self::KnowledgeNotFound(_) => "KNOWLEDGE_NOT_FOUND",
             Self::KnowledgeValidation(_) => "KNOWLEDGE_VALIDATION_ERROR",
             Self::KnowledgeConflict(_) => "KNOWLEDGE_CONFLICT",
-            Self::ObsidianUnavailable => "OBSIDIAN_UNAVAILABLE",
+            Self::MemoNotFound(_) => "MEMO_NOT_FOUND",
+            Self::MemoValidation(_) => "MEMO_VALIDATION_ERROR",
+            Self::MemoConflict(_) => "MEMO_VERSION_CONFLICT",
             Self::GitError { .. } => "GIT_ERROR",
             Self::QdrantError(_) => "QDRANT_ERROR",
             Self::LlmApiError { .. } => "LLM_API_ERROR",
@@ -129,7 +135,9 @@ impl BrainError {
             Self::KnowledgeNotFound(_) => Some("请刷新书架或知识库列表后重试"),
             Self::KnowledgeValidation(_) => Some("请检查知识库、实体或任务参数"),
             Self::KnowledgeConflict(_) => Some("请刷新知识库或研究任务状态，复核变化的来源后重试"),
-            Self::ObsidianUnavailable => Some("请启用并检查 Obsidian Local REST API 插件"),
+            Self::MemoNotFound(_) => Some("请刷新时光机"),
+            Self::MemoValidation(_) => Some("请检查内容和附件"),
+            Self::MemoConflict(_) => Some("小记已被修改，请刷新后重新编辑"),
             Self::GitError { .. } => {
                 Some("Ensure the repository is a valid git repo and git is accessible")
             }
@@ -159,7 +167,9 @@ impl BrainError {
             Self::TaskVersionConflict(_)
             | Self::TaskDuplicateId(_)
             | Self::KnowledgeConflict(_) => StatusCode::CONFLICT,
-            Self::ObsidianUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            Self::MemoNotFound(_) => StatusCode::NOT_FOUND,
+            Self::MemoValidation(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::MemoConflict(_) => StatusCode::CONFLICT,
             Self::SearchError(_)
             | Self::EmbeddingError(_)
             | Self::QdrantError(_)

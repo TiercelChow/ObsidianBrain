@@ -78,7 +78,7 @@ test('every component filter consumes a semantic material token instead of a loc
 
 test('calendar, secondary toolbars, previews, snackbar and scrims participate in shared materials', async () => {
   const css = await source('styles/materials.css')
-  for (const selector of ['.glass-panel', '.config-actions', '.mobile-detail-nav', '.toolbar-row', '.published-notice', '.undo-snackbar', '.reader-toast', '.path-trigger', '.mv-mobile-close', '.canvas-hint', '.motion-modal', '.ppm-overlay']) {
+  for (const selector of ['.glass-panel', '.mobile-detail-nav', '.toolbar-row', '.published-notice', '.undo-snackbar', '.reader-toast', '.path-trigger', '.mv-mobile-close', '.canvas-hint', '.motion-modal', '.ppm-overlay']) {
     assert.ok(css.includes(selector), `${selector}: shared material coverage`)
   }
   assert.match(css, /--glass-scrim-filter:\s*blur\(4px\)/)

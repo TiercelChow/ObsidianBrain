@@ -309,6 +309,7 @@ import {
 } from '@/api/knowledge'
 
 const route = useRoute()
+let pageAlive = true
 const router = useRouter()
 const bases = ref<KnowledgeBaseSummary[]>([])
 const activeBaseId = ref('')
@@ -391,18 +392,23 @@ async function loadBases() {
   loadingBases.value = true
   try {
     const response = await listBookKnowledgeBases()
+    if (!pageAlive) return
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '加载失败')
     bases.value = response.result.items.flatMap(card => (
       card.book.kind === 'folder' && card.knowledge_base ? [card.knowledge_base] : []
     ))
     const requested = String(route.query.base || '')
-    activeBaseId.value = bases.value.some(base => base.id === requested) ? requested : (bases.value[0]?.id || '')
+    const reviewBase = route.query.pending === '1' ? bases.value.find(base => base.lifecycle !== 'archived' && base.pending_review_count > 0) : undefined
+    activeBaseId.value = bases.value.some(base => base.id === requested) ? requested : (reviewBase?.id || bases.value[0]?.id || '')
     if (activeBaseId.value) {
       await Promise.all([loadEntries(String(route.query.entry || '')), loadReviews()])
+      if (!pageAlive || document.visibilityState !== 'visible' || !document.hasFocus()) return
       const requestedReview = String(route.query.review || '')
       if (requestedReview) {
         activeReview.value = pendingReviews.value.find(item => item.id === requestedReview) || null
         reviewVisible.value = Boolean(activeReview.value)
+      } else if (route.query.pending === '1' && pendingReviews.value.length && document.visibilityState === 'visible') {
+        openReviews()
       }
     }
   } catch (error) {
@@ -860,6 +866,7 @@ watch(graphVisible, (visible) => {
   }
 })
 onBeforeUnmount(() => {
+  pageAlive = false
   window.clearTimeout(searchTimer)
   window.clearTimeout(graphReleaseTimer)
   graphSnapshot.value = null

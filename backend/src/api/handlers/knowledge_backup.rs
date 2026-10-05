@@ -88,6 +88,8 @@ pub async fn upload_and_restore_knowledge_backup(
     }
     let db = ctx.db.clone();
     let retention = db.backup_retention();
+    // Prevent image GC and memo writes from racing a database replacement.
+    let _image_guard = ctx.memo_manager.images.mutation.lock().await;
     let report = tokio::task::spawn_blocking(move || {
         db.restore_database_file(&upload_path, confirmation.trim(), retention)
     })
@@ -96,6 +98,12 @@ pub async fn upload_and_restore_knowledge_backup(
     ctx.book_wiki_service
         .store()
         .rebuild_knowledge_search_indexes()?;
+    let budget = ctx
+        .db
+        .get_state("timeline_cache_limit_bytes")?
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(crate::infra::timeline_images::DEFAULT_CACHE_BYTES);
+    ctx.memo_manager.images.set_budget(budget).await?;
     Ok(Json(json!({ "validation": report })))
 }
 

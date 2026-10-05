@@ -7,9 +7,9 @@
         <p class="page-subtitle">记录碎片化想法，回顾思考历程</p>
       </div>
       <div class="header-actions">
-        <el-button class="desktop-sync-action" @click="doSync" :loading="syncing">
-          <el-icon v-if="!syncing"><Refresh /></el-icon>
-          同步
+        <el-button class="desktop-sync-action" @click="storageOpen = true">
+          <el-icon><FolderOpened /></el-icon>
+          图片存储
         </el-button>
         <el-button type="primary" @click="openCreateDialog">
           <el-icon><Plus /></el-icon>
@@ -54,9 +54,9 @@
         <div v-if="!isMobile || mobileFiltersOpen" id="timeline-mobile-filters" class="filter-right">
           <div v-if="isMobile" class="mobile-filter-heading">
             <span>时间范围</span>
-            <button type="button" class="mobile-sync-action" :disabled="syncing" @click="doSync">
-              <el-icon :class="{ 'is-loading': syncing }"><Refresh /></el-icon>
-              {{ syncing ? '同步中' : '同步记录' }}
+            <button type="button" class="mobile-sync-action" @click="storageOpen = true">
+              <el-icon><FolderOpened /></el-icon>
+              图片存储
             </button>
           </div>
           <div class="preset-chips">
@@ -171,6 +171,7 @@
           </div>
         </Transition>
 
+        <div v-if="locatedMemo" class="filter-hint glass-surface"><span>来自首页的小记</span><button type="button" @click="clearMemoLocation">查看全部小记</button></div>
         <TransitionGroup
           v-if="filteredMemos.length > 0"
           name="memo-anim"
@@ -194,6 +195,11 @@
                 </div>
                 <div class="memo-card-body glass-surface">
                   <div class="memo-time">{{ formatTime(memo.timestamp) }}</div>
+                  <div class="memo-actions">
+                    <button v-if="!isMobile" type="button" class="memo-action-btn" aria-label="编辑小记" title="编辑小记" @click="openEditDialog(memo)"><el-icon><Edit /></el-icon></button>
+                    <button v-if="!isMobile" type="button" class="memo-action-btn danger" aria-label="删除小记" title="删除小记" @click="deleteTarget = memo"><el-icon><Delete /></el-icon></button>
+                    <button v-else type="button" class="memo-action-btn" aria-label="小记操作" @click="actionMemo = memo"><el-icon><MoreFilled /></el-icon></button>
+                  </div>
                   <div class="memo-card-main" :class="{ 'has-images': memo.images.length > 0 }">
                     <div v-if="memo.images.length > 0" class="memo-images-wrap">
                       <div class="memo-images" :class="'memo-images-' + imageGridClass(memo.images.length)">
@@ -202,6 +208,9 @@
                           :key="i"
                           :src="thumbnailUrl(img)"
                           class="memo-image"
+                          loading="lazy"
+                          decoding="async"
+                          :alt="`小记图片 ${i + 1}`"
                           @click="openImageViewer(memo.images, i)"
                         />
                       </div>
@@ -257,19 +266,19 @@
     </div>
 
     <!-- Create Dialog: centered on desktop, velocity-aware bottom sheet on mobile. -->
-    <MotionModal v-model="showCreateDialog" aria-label="写小记">
+    <MotionModal v-model="composerOpen" :aria-label="editedMemo ? '编辑小记' : '写小记'">
       <div class="dialog-content glass-surface-heavy">
           <div class="dialog-header">
-            <h3>写小记</h3>
-            <button type="button" class="glass-icon-btn" aria-label="关闭写小记面板" @click="showCreateDialog = false">✕</button>
+            <h3>{{ editedMemo ? '编辑小记' : '写小记' }}</h3>
+            <button type="button" class="glass-icon-btn" aria-label="关闭小记面板" :disabled="creating" @click="closeDraft">✕</button>
           </div>
           <div class="create-form">
             <textarea
               v-model="newMemo.content"
+              :disabled="creating"
               :rows="7"
               placeholder="写下你此刻的想法...（支持 Markdown：**加粗**、- 列表）"
               class="glass-textarea"
-              autofocus
               @paste="onPaste"
             ></textarea>
 
@@ -281,7 +290,7 @@
                 class="image-preview-item"
               >
                 <img :src="img.preview" class="image-preview-img" />
-                <button type="button" class="image-remove-btn" :aria-label="`移除第 ${idx + 1} 张图片`" @click="removePendingImage(idx)">✕</button>
+                <button type="button" class="image-remove-btn" :aria-label="`移除第 ${idx + 1} 张图片`" :disabled="creating" @click="removePendingImage(idx)">✕</button>
                 <div v-if="img.uploading" class="image-upload-overlay">
                   <el-icon class="is-loading"><Loading /></el-icon>
                 </div>
@@ -291,6 +300,7 @@
                 type="button"
                 class="image-add-btn"
                 aria-label="继续添加图片"
+                :disabled="creating"
                 @click="triggerFileInput"
               >
                 <el-icon :size="24"><Plus /></el-icon>
@@ -302,11 +312,12 @@
                 <el-icon class="tag-icon"><PriceTag /></el-icon>
                 <input
                   v-model="tagsInput"
+                  :disabled="creating"
                   placeholder="标签，逗号分隔（如：灵感,想法）"
                   class="glass-input inline"
                 />
               </div>
-              <button type="button" class="glass-btn image-btn" @click="triggerFileInput" v-if="pendingImages.length === 0">
+              <button type="button" class="glass-btn image-btn" :disabled="creating" @click="triggerFileInput" v-if="pendingImages.length === 0">
                 <el-icon><Picture /></el-icon>
                 <span>图片</span>
               </button>
@@ -325,18 +336,45 @@
               {{ newMemo.content.length }} 字
             </span>
             <div class="dialog-btns">
-              <button type="button" class="glass-btn" @click="showCreateDialog = false">取消</button>
+              <button type="button" class="glass-btn" @click="closeDraft" :disabled="creating">取消</button>
               <button
                 type="button"
                 class="glass-btn primary"
                 @click="submitMemo"
-                :disabled="!newMemo.content.trim() || creating"
+                :disabled="(!newMemo.content.trim() && pendingImages.length === 0) || creating"
               >
                 <el-icon v-if="creating" class="is-loading"><Loading /></el-icon>
-                <span>发布小记</span>
+                <span>{{ creating ? '正在保存…' : editedMemo ? '保存修改' : '发布小记' }}</span>
               </button>
             </div>
           </div>
+      </div>
+    </MotionModal>
+
+    <MotionModal v-model="actionSheetOpen" aria-label="小记操作">
+      <div class="dialog-content glass-surface-heavy memo-action-sheet compact-dialog">
+        <div class="dialog-header"><h3>小记操作</h3><button type="button" class="glass-icon-btn" aria-label="关闭操作" @click="actionMemo = null">✕</button></div>
+        <button type="button" class="glass-btn" @click="editFromSheet"><el-icon><Edit /></el-icon>编辑小记</button>
+        <button type="button" class="glass-btn danger" @click="deleteFromSheet"><el-icon><Delete /></el-icon>删除小记</button>
+      </div>
+    </MotionModal>
+
+    <MotionModal v-model="deleteOpen" aria-label="删除小记">
+      <div class="dialog-content glass-surface-heavy compact-dialog">
+        <div class="dialog-header"><h3>删除这条小记？</h3></div>
+        <p class="memo-delete-hint">删除后无法恢复。这条小记不再使用的原图和缩略图也会清理；其他小记仍在使用的图片会保留。</p>
+        <p class="memo-delete-preview">{{ deleteTarget?.content.slice(0, 160) || '图片小记' }}</p>
+        <div class="dialog-footer"><div class="dialog-btns">
+          <button type="button" class="glass-btn" :disabled="deleting" @click="deleteTarget = null">保留</button>
+          <button type="button" class="glass-btn danger" :disabled="deleting" @click="confirmDelete">{{ deleting ? '正在删除…' : '删除小记及独占图片' }}</button>
+        </div></div>
+      </div>
+    </MotionModal>
+
+    <MotionModal v-model="storageOpen" aria-label="时光机图片存储">
+      <div class="dialog-content glass-surface-heavy">
+        <div class="dialog-header"><h3>图片存储</h3><button type="button" class="glass-icon-btn" aria-label="关闭图片存储" @click="storageOpen = false">✕</button></div>
+        <div class="create-form"><TimelineStoragePanel @migrated="loadMemos()" /></div>
       </div>
     </MotionModal>
 
@@ -345,7 +383,7 @@
     <Teleport to="body">
       <Transition name="viewer">
         <div v-if="imageViewer.show" class="image-viewer-overlay" @click.self="closeImageViewer">
-          <button class="viewer-close" @click="closeImageViewer">✕</button>
+          <button class="viewer-close" aria-label="关闭图片" @click="closeImageViewer">✕</button>
           <button
             v-if="imageViewer.images.length > 1"
             class="viewer-nav viewer-prev"
@@ -354,15 +392,25 @@
           <div class="viewer-image-wrap" ref="viewerStageRef">
             <img
               ref="viewerImgRef"
-              :src="vaultImageUrl(imageViewer.images[imageViewer.index])"
+              :key="`${imageViewer.images[imageViewer.index]}:${viewerRetry}`"
+              :src="memoImageUrl(imageViewer.images[imageViewer.index])"
               class="viewer-image"
+              :class="{ 'viewer-image-pending': viewerStatus !== 'ready' }"
+              alt="小记原图"
+              @load="onViewerLoad"
+              @error="viewerStatus = 'error'"
               @click.stop
             />
+            <p v-if="viewerStatus === 'loading'" class="viewer-status" role="status">正在加载原图…</p>
+            <div v-if="viewerStatus === 'error'" class="viewer-status" role="alert">
+              <p>原图暂时无法读取。旧图片可在「图片存储」中重新迁移。</p>
+              <button class="glass-btn" @click.stop="retryViewerImage">重试</button>
+            </div>
             <div v-if="imageViewer.images.length > 1" class="viewer-counter">
               {{ imageViewer.index + 1 }} / {{ imageViewer.images.length }}
             </div>
           </div>
-          <div class="viewer-controls">
+          <div v-if="viewerStatus === 'ready'" class="viewer-controls">
             <button class="viewer-zoom-btn" title="缩小" @click.stop="viewerZoom(0.8)"><el-icon :size="18"><Minus /></el-icon></button>
             <button class="viewer-zoom-btn" title="放大" @click.stop="viewerZoom(1.25)"><el-icon :size="18"><Plus /></el-icon></button>
             <button class="viewer-zoom-btn" title="重置" @click.stop="viewerReset"><el-icon :size="18"><Refresh /></el-icon></button>
@@ -380,23 +428,22 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { getMemo } from '@/api'
+import { parseLocalDate } from '@/utils/taskDates'
 import { ElMessage } from 'element-plus'
-import { Plus, Minus, Search, PriceTag, Loading, Picture, Refresh, ArrowLeft, ArrowRight, MoreFilled } from '@element-plus/icons-vue'
+import { Plus, Minus, Search, PriceTag, Loading, Picture, Refresh, ArrowLeft, ArrowRight, MoreFilled, Edit, Delete, FolderOpened } from '@element-plus/icons-vue'
 import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/github-dark.css'
 import panzoom, { type PanZoom } from 'panzoom'
-import { createMemo, browseTimeline, searchMemos, uploadImages, syncMemos } from '@/api'
+import { createMemo, browseTimeline, searchMemos, uploadImages, updateMemo, deleteMemo, discardMemoImages } from '@/api'
+import { memoImageUrl, memoImageSource, memoLocalDate, memoToolResult, type TimelineMemo } from '@/utils/timelineMemo'
+import TimelineStoragePanel from '@/components/timeline/TimelineStoragePanel.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import { pickActiveDate, type SpyHeader } from '@/utils/timelineSpy'
 
 // ── Types ──
-interface Memo {
-  id: string
-  timestamp: string
-  content: string
-  images: string[]
-  tags: string[]
-}
+type Memo = TimelineMemo
 interface MemoDayGroup {
   date: string
   memos: Memo[]
@@ -413,9 +460,11 @@ interface TimePreset {
 
 // ── State ──
 const loading = ref(false)
+const route = useRoute()
+const router = useRouter()
+const locatedMemo = computed(() => typeof route.query.memo === 'string' ? route.query.memo : '')
 const loadingMore = ref(false)
 const creating = ref(false)
-const syncing = ref(false)
 const memos = ref<Memo[]>([])
 const searchQuery = ref('')
 const activePreset = ref('')
@@ -448,7 +497,7 @@ const newMemo = ref({
 
 // ── Image Upload State ──
 interface PendingImage {
-  file: File
+  file?: File
   preview: string
   uploading: boolean
   path?: string
@@ -464,7 +513,18 @@ const imageViewer = ref({
 })
 const viewerStageRef = ref<HTMLDivElement | null>(null)
 const viewerImgRef = ref<HTMLImageElement | null>(null)
+const viewerStatus = ref<'loading' | 'ready' | 'error'>('loading')
+const viewerRetry = ref(0)
 let viewerPz: PanZoom | null = null
+
+function onViewerLoad() {
+  viewerStatus.value = 'ready'
+  void nextTick(initViewerPz)
+}
+function retryViewerImage() {
+  viewerStatus.value = 'loading'
+  viewerRetry.value++
+}
 
 function initViewerPz() {
   if (!viewerImgRef.value) return
@@ -498,9 +558,9 @@ function viewerReset() {
   })
 }
 function openImageViewer(images: string[], index: number) {
+  viewerStatus.value = 'loading'
   imageViewer.value = { show: true, images, index }
   document.addEventListener('keydown', onViewerKeydown)
-  setTimeout(initViewerPz, 100)
 }
 function closeImageViewer() {
   imageViewer.value.show = false
@@ -509,14 +569,20 @@ function closeImageViewer() {
   viewerPz = null
 }
 function viewerPrev() {
+  if (imageViewer.value.images.length < 2) return
+  viewerPz?.dispose()
+  viewerPz = null
+  viewerStatus.value = 'loading'
   const v = imageViewer.value
   v.index = (v.index - 1 + v.images.length) % v.images.length
-  setTimeout(initViewerPz, 100)
 }
 function viewerNext() {
+  if (imageViewer.value.images.length < 2) return
+  viewerPz?.dispose()
+  viewerPz = null
+  viewerStatus.value = 'loading'
   const v = imageViewer.value
   v.index = (v.index + 1) % v.images.length
-  setTimeout(initViewerPz, 100)
 }
 function onViewerKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') closeImageViewer()
@@ -532,7 +598,8 @@ onUnmounted(() => {
   window.removeEventListener('resize', onResize)
   if (spyRafId !== null) cancelAnimationFrame(spyRafId)
   if (searchTimer) clearTimeout(searchTimer)
-  pendingImages.value.forEach((image) => URL.revokeObjectURL(image.preview))
+  void releaseDraftImages()
+  pendingImages.value.forEach((image) => { if (image.file) URL.revokeObjectURL(image.preview) })
   viewerPz?.dispose()
 })
 
@@ -560,9 +627,11 @@ function onPaste(e: ClipboardEvent) {
 }
 
 function addImageFiles(files: File[]) {
+  if (creating.value) return
   const remaining = 9 - pendingImages.value.length
   const toAdd = files.slice(0, remaining)
   for (const file of toAdd) {
+    if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type) || file.size > 20 * 1024 * 1024) { ElMessage.warning('仅支持 20 MB 以内的 PNG、JPEG、GIF、WebP 图片'); continue }
     const preview = URL.createObjectURL(file)
     pendingImages.value.push({ file, preview, uploading: false })
   }
@@ -570,7 +639,9 @@ function addImageFiles(files: File[]) {
 
 function removePendingImage(idx: number) {
   const img = pendingImages.value[idx]
-  if (img) URL.revokeObjectURL(img.preview)
+  if (creating.value) return
+  if (img?.file) URL.revokeObjectURL(img.preview)
+  if (img?.file && img.path) void discardMemoImages([img.path]).catch(() => ElMessage.warning('暂存图片清理将由系统自动重试'))
   pendingImages.value.splice(idx, 1)
 }
 
@@ -634,7 +705,7 @@ const filteredMemos = computed(() => memos.value)
 const groupedMemos = computed((): MemoDayGroup[] => {
   const groups = new Map<string, Memo[]>()
   for (const memo of filteredMemos.value) {
-    const date = memo.timestamp.split('T')[0]
+    const date = memoLocalDate(memo)
     if (!groups.has(date)) groups.set(date, [])
     groups.get(date)!.push(memo)
   }
@@ -646,7 +717,7 @@ const groupedMemos = computed((): MemoDayGroup[] => {
 const timelineMonths = computed((): TimelineMonth[] => {
   const monthMap = new Map<string, Map<string, number>>()
   for (const memo of filteredMemos.value) {
-    const date = memo.timestamp.split('T')[0]
+    const date = memoLocalDate(memo)
     const [year, month] = date.split('-')
     const monthKey = `${year}-${month}`
     if (!monthMap.has(monthKey)) monthMap.set(monthKey, new Map())
@@ -668,18 +739,28 @@ const timelineMonths = computed((): TimelineMonth[] => {
 })
 
 // ── Data Loading ──
+let loadSequence = 0
 async function loadMemos(reset = true) {
-  if (reset) { loading.value = true; memos.value = []; hasMore.value = true }
+  const sequence = ++loadSequence
+  if (reset) { loading.value = true; hasMore.value = true }
   const range = activeDateRange.value
   const startDate = range?.[0], endDate = range?.[1]
   try {
+    if (locatedMemo.value) {
+      if (reset) memos.value = []
+      const memo = await getMemo(locatedMemo.value)
+      if (sequence !== loadSequence) return
+      memos.value = [memo]; hasMore.value = false; totalCount.value = 1
+      return
+    }
     let res: unknown
     if (searchQuery.value) {
-      res = await searchMemos(searchQuery.value, startDate, endDate, undefined, PAGE_SIZE)
+      res = await searchMemos(searchQuery.value, startDate, endDate, undefined, PAGE_SIZE, reset ? 0 : memos.value.length)
     } else {
       res = await browseTimeline(startDate, endDate, PAGE_SIZE, reset ? 0 : memos.value.length)
     }
-    const result = (res as { result: { memos: Memo[]; has_more?: boolean; total?: number } })?.result
+    const result = memoToolResult<{ memos: Memo[]; has_more?: boolean; total?: number }>(res)
+    if (sequence !== loadSequence) return
     const newMemos = result?.memos || []
     if (reset) { memos.value = newMemos } else { memos.value = [...memos.value, ...newMemos] }
     hasMore.value = newMemos.length >= PAGE_SIZE
@@ -688,8 +769,7 @@ async function loadMemos(reset = true) {
     console.error('加载小记失败:', e)
     ElMessage.error('加载小记失败')
   } finally {
-    loading.value = false
-    loadingMore.value = false
+    if (sequence === loadSequence) { loading.value = false; loadingMore.value = false }
   }
 }
 
@@ -699,41 +779,32 @@ async function loadMore() {
   await loadMemos(false)
 }
 
-async function doSync() {
-  syncing.value = true
-  try {
-    const res = await syncMemos(3) as unknown as { result: { synced: number; deleted: number } }
-    const count = res.result?.synced ?? 0
-    const deleted = res.result?.deleted ?? 0
-    ElMessage.success(`同步完成：${count} 条小记${deleted > 0 ? `，删除 ${deleted} 条` : ''}`)
-    await loadMemos()
-  } catch (e) {
-    console.error('同步失败:', e)
-    ElMessage.error('同步失败')
-  } finally {
-    syncing.value = false
-  }
-}
-
 // ── Search ──
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 function onSearchInput() {
   if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => loadMemos(), 300)
+  searchTimer = setTimeout(() => void loadFilteredMemos(), 300)
 }
-function clearSearch() { searchQuery.value = ''; loadMemos() }
-function searchByTag(tag: string) { searchQuery.value = tag; loadMemos() }
+async function loadFilteredMemos() {
+  if (locatedMemo.value || route.query.start || route.query.end) {
+    const query = {...route.query}; delete query.memo; delete query.start; delete query.end
+    await router.replace({query})
+  }
+  await loadMemos()
+}
+function clearSearch() { searchQuery.value = ''; void loadFilteredMemos() }
+function searchByTag(tag: string) { searchQuery.value = tag; void loadFilteredMemos() }
 
 // ── Filter ──
 function applyPreset(preset: TimePreset) {
   if (activePreset.value === preset.label) { clearFilter(); return }
   activePreset.value = preset.label
   customDateRange.value = null
-  loadMemos()
+  void loadFilteredMemos()
 }
 function onCustomDateChange(_val: [Date, Date] | null) {
   activePreset.value = ''
-  loadMemos()
+  void loadFilteredMemos()
 }
 function onMobileDateChange() {
   activePreset.value = ''
@@ -742,21 +813,76 @@ function onMobileDateChange() {
   } else {
     customDateRange.value = null
   }
-  loadMemos()
+  void loadFilteredMemos()
 }
 function clearFilter() {
   activePreset.value = ''
   customDateRange.value = null
   mobileStartDate.value = null
   mobileEndDate.value = null
-  loadMemos()
+  void loadFilteredMemos()
 }
 
-// ── Create ──
+// ── Memo lifecycle ──
+const editedMemo = ref<Memo | null>(null)
+const actionMemo = ref<Memo | null>(null)
+const deleteTarget = ref<Memo | null>(null)
+const deleting = ref(false)
+const storageOpen = ref(false)
+const composerOpen = computed({ get: () => showCreateDialog.value, set: (value: boolean) => { if (!value) closeDraft() } })
+const actionSheetOpen = computed({ get: () => !!actionMemo.value, set: (value: boolean) => { if (!value) actionMemo.value = null } })
+const deleteOpen = computed({ get: () => !!deleteTarget.value, set: (value: boolean) => { if (!value && !deleting.value) deleteTarget.value = null } })
+
+function resetDraft() {
+  pendingImages.value.forEach(img => { if (img.file) URL.revokeObjectURL(img.preview) })
+  pendingImages.value = []
+  newMemo.value = { content: '', images: [], tags: [] }
+  tagsInput.value = ''
+  editedMemo.value = null
+}
+async function releaseDraftImages() {
+  const paths = pendingImages.value.filter(img => img.file && img.path).map(img => img.path!)
+  if (paths.length) {
+    try { await discardMemoImages(paths) }
+    catch { ElMessage.warning('暂存图片清理将由系统自动重试') }
+  }
+}
+function closeDraft() {
+  if (creating.value) return
+  void releaseDraftImages()
+  resetDraft()
+  showCreateDialog.value = false
+}
 function openCreateDialog() {
+  resetDraft()
   const timelineTop = memoScrollRef.value?.getBoundingClientRect().top ?? 0
   wasReviewingHistory = isMobile.value && timelineTop < -180
   showCreateDialog.value = true
+}
+function openEditDialog(memo: Memo) {
+  resetDraft()
+  editedMemo.value = memo
+  newMemo.value.content = memo.content
+  tagsInput.value = memo.tags.join(', ')
+  pendingImages.value = memo.images.map(path => ({ preview: memoImageUrl(path, true), path, uploading: false }))
+  showCreateDialog.value = true
+}
+function editFromSheet() { const memo = actionMemo.value; actionMemo.value = null; if (memo) openEditDialog(memo) }
+function deleteFromSheet() { deleteTarget.value = actionMemo.value; actionMemo.value = null }
+async function confirmDelete() {
+  if (!deleteTarget.value || deleting.value) return
+  deleting.value = true
+  try {
+    const memo = deleteTarget.value
+    const result = await deleteMemo(memo.id, memo.revision)
+    memos.value = memos.value.filter(item => item.id !== memo.id)
+    totalCount.value = Math.max(0, totalCount.value - 1)
+    if (imageViewer.value.show) closeImageViewer()
+    deleteTarget.value = null
+    if (result.pending_cleanup) ElMessage.warning('小记已删除；部分图片清理待重试，可在图片存储中查看')
+    else ElMessage.success('小记及不再使用的图片已删除')
+  } catch (e) { ElMessage.error(e instanceof Error ? e.message : '删除失败，未移除小记') }
+  finally { deleting.value = false }
 }
 
 async function viewLatestMemo() {
@@ -772,63 +898,45 @@ async function viewLatestMemo() {
 }
 
 async function submitMemo() {
-  if (!newMemo.value.content.trim() && pendingImages.value.length === 0) return
+  if (creating.value || (!newMemo.value.content.trim() && !pendingImages.value.length)) return
   creating.value = true
   try {
-    const tags = tagsInput.value
-      ? tagsInput.value.split(/[,，]/).map(t => t.trim()).filter(Boolean) : []
-
-    // Upload images first
-    let imagePaths: string[] = []
-    if (pendingImages.value.length > 0) {
-      pendingImages.value.forEach(img => { img.uploading = true })
-      const files = pendingImages.value.map(img => img.file)
-      const uploadRes = await uploadImages(files)
-      imagePaths = uploadRes.paths || []
+    const tags = tagsInput.value ? tagsInput.value.split(/[,，]/).map(t => t.trim()).filter(Boolean) : []
+    const toUpload = pendingImages.value.filter(img => img.file && !img.path)
+    for (const img of toUpload) {
+      // Upload separately: nine 20 MB originals should not exceed one HTTP body's limit.
+      // Successful paths stay in the draft if a later upload fails.
+      img.uploading = true
+      const result = await uploadImages([img.file!])
+      if (result.paths.length !== 1) throw new Error('图片上传未完成，请重试')
+      img.path = result.paths[0]
+      img.uploading = false
     }
-
-    const res = await createMemo(newMemo.value.content, imagePaths, tags) as unknown as {
-      result: { id: string; timestamp: string; file_path: string }
-    }
-    ElMessage.success('小记创建成功')
-
-    // Prepend new memo to existing list
-    const newMemoItem: Memo = {
-      id: res.result.id,
-      timestamp: res.result.timestamp,
-      content: newMemo.value.content,
-      images: imagePaths,
-      tags,
-    }
-    const keepHistoryPosition = wasReviewingHistory || hasActiveFilter.value || !!searchQuery.value
-    if (keepHistoryPosition) {
-      showPublishedNotice.value = true
+    const imagePaths = pendingImages.value.map(img => img.path!)
+    if (editedMemo.value) {
+      const memo = await updateMemo(editedMemo.value.id, editedMemo.value.revision, newMemo.value.content, imagePaths, tags)
+      memos.value = memos.value.map(item => item.id === memo.id ? memo : item)
+      ElMessage.success('小记已更新')
     } else {
-      memos.value = [newMemoItem, ...memos.value]
+      const result = memoToolResult<{ id: string; timestamp: string; date: string; revision: number }>(await createMemo(newMemo.value.content, imagePaths, tags))
+      const memo: Memo = { ...result, content: newMemo.value.content, images: imagePaths, tags }
+      const keepHistoryPosition = wasReviewingHistory || hasActiveFilter.value || !!searchQuery.value
+      if (keepHistoryPosition) showPublishedNotice.value = true
+      else memos.value = [memo, ...memos.value]
+      totalCount.value++
+      ElMessage.success('小记已发布')
     }
-    totalCount.value++
-
-    // Cleanup
-    pendingImages.value.forEach(img => URL.revokeObjectURL(img.preview))
-    pendingImages.value = []
-    newMemo.value = { content: '', images: [], tags: [] }
-    tagsInput.value = ''
+    resetDraft()
     showCreateDialog.value = false
-  } catch (e) {
-    console.error('创建小记失败:', e); ElMessage.error('创建小记失败')
-  } finally {
+  } catch (e) { ElMessage.error(e instanceof Error ? e.message : '保存失败，草稿已保留') }
+  finally {
     pendingImages.value.forEach(img => { img.uploading = false })
     creating.value = false
   }
 }
 
 // ── Formatting ──
-function vaultImageUrl(path: string): string {
-  return `/v1/vault/images/${path}`
-}
-function thumbnailUrl(path: string): string {
-  return `/v1/vault/thumbnails/${path}`
-}
+function thumbnailUrl(path: string): string { return memoImageUrl(path, true) }
 function imageGridClass(count: number): string {
   if (count <= 1) return '1'
   if (count <= 3) return String(count)
@@ -863,13 +971,19 @@ function renderContent(content: string, query: string): string {
   })
 
   // Phase 2: escape HTML in remaining text
-  html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
   // Phase 3: inline elements
   html = html.replace(/`([^`\n]+)`/g, '<code class="memo-inline-code">$1</code>')
-  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img class="memo-inline-img" src="$2" alt="$1" />')
-  html = html.replace(/!\[\[([^\]]+)\]\]/g, '<span class="memo-obsidian-img">📎 $1</span>')
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a class="memo-link" href="$2" target="_blank" rel="noopener">$1</a>')
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_match, alt, path) => {
+    const src = memoImageSource(path).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    return `<img class="memo-inline-img" src="${src}" alt="${alt}" loading="lazy" />`
+  })
+  html = html.replace(/!\[\[([^\]]+)\]\]/g, (_match, path) => `<img class="memo-inline-img" src="${memoImageSource(path)}" alt="小记图片" loading="lazy" />`)
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, href) => {
+    if (!/^(?:https?:\/\/|mailto:|#|\/)/i.test(href)) return label
+    return `<a class="memo-link" href="${href}" target="_blank" rel="noopener">${label}</a>`
+  })
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
   html = html.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>')
   html = html.replace(/~~(.+?)~~/g, '<del>$1</del>')
@@ -974,7 +1088,21 @@ function onMemoScroll(e: Event) {
   requestSpyUpdate()
 }
 
-onMounted(() => { loadMemos() })
+function applyHomepageContext() {
+  const start = String(route.query.start || ''), end = String(route.query.end || '')
+  const valid = (value:string) => { try { parseLocalDate(value); return true } catch { return false } }
+  if (valid(start) && valid(end) && start <= end) {
+    activePreset.value = ''; customDateRange.value = [new Date(`${start}T12:00:00`),new Date(`${end}T12:00:00`)]
+    mobileStartDate.value = customDateRange.value[0]; mobileEndDate.value = customDateRange.value[1]
+  }
+  void loadMemos()
+}
+function clearMemoLocation() {
+  const query = {...route.query}; delete query.memo
+  void router.replace({query})
+}
+watch(() => [route.query.memo,route.query.start,route.query.end], applyHomepageContext)
+onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') storageOpen.value = true })
 </script>
 
 <style scoped>
@@ -2142,6 +2270,8 @@ onMounted(() => { loadMemos() })
   touch-action: pan-x pan-y;
 }
 .viewer-image:active { cursor: grabbing; }
+.viewer-image-pending { display: none; }
+.viewer-status { max-width: min(70vw, 420px); color: #fff; text-align: center; line-height: 1.6; }
 .viewer-controls {
   position: absolute;
   bottom: 24px;
@@ -2446,6 +2576,29 @@ onMounted(() => { loadMemos() })
   .memo-image,
   .memo-tag,
   .mobile-filter-summary { -webkit-tap-highlight-color: transparent; }
+}
+
+.memo-actions { position: absolute; top: 8px; right: 10px; display: flex; gap: 4px; }
+.memo-action-btn { width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 12px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.memo-action-btn:hover { background: var(--bg-glass); color: var(--text-primary); }
+.memo-action-btn:active { transform: scale(.96); }
+.memo-action-btn .el-icon { font-size: 18px; }
+.danger { color: var(--glass-danger-label); }
+.memo-delete-hint { color: var(--text-secondary); font-size: 14px; line-height: 1.7; }
+.memo-delete-preview { color: var(--text-muted); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.memo-action-sheet { display: flex; flex-direction: column; gap: 12px; }
+.memo-action-sheet > .glass-btn { justify-content: flex-start; min-height: 48px; }
+.memo-card-body { padding-top: 50px; }
+.memo-time { position: absolute; top: 20px; left: 20px; right: auto; margin: 0; }
+.memo-card-main { padding-top: 0; }
+.compact-dialog { height: auto; }
+@media (max-width: 768px) {
+  .compact-dialog { height: auto; overflow-y: auto; }
+  .memo-actions { top: 4px; right: 8px; }
+  .memo-action-btn { width: 44px; height: 44px; }
+  .memo-card-body { padding-top: 54px; }
+  .memo-time { top: 19px; left: 16px; }
+  .memo-action-btn .el-icon { font-size: 20px; }
 }
 </style>
 

@@ -129,6 +129,7 @@ pub struct TimelineResponse {
 /// 小记（Memo）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Memo {
+    pub revision: i64,
     pub id: String,
     pub timestamp: DateTime<Utc>,
     pub date: String,

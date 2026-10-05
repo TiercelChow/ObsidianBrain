@@ -1,8 +1,6 @@
 //! Tool handler implementations and centralized registration.
 //!
 //! This module contains all tool handlers organized by module:
-//! - `search_handlers` — search_notes, get_note, list_recent_notes
-//! - `memory_handlers` — get_memory_stats
 //! - `reader_handlers` — list_local_dir, read_local_file, stat_local_path, get/save_reader_history, get/save_reader_books (Markdown Reader)
 //! - `code_repo_handlers` — add_code_repo, list_code_repos, get_repo_detail, link_note_to_repo, get_linked_notes, open_in_vscode
 //! - `timeline_handlers` — get_timeline
@@ -10,9 +8,7 @@
 pub mod book_wiki_handlers;
 pub mod code_repo_handlers;
 pub mod config_handlers;
-pub mod memory_handlers;
 pub mod reader_handlers;
-pub mod search_handlers;
 pub mod task_handlers;
 pub mod timeline_handlers;
 
@@ -23,9 +19,7 @@ use crate::tools::handlers::code_repo_handlers::*;
 use crate::tools::handlers::config_handlers::{
     GetConfigHandler, SaveConfigHandler, VerifyLlmHandler,
 };
-use crate::tools::handlers::memory_handlers::GetMemoryStatsHandler;
 use crate::tools::handlers::reader_handlers::*;
-use crate::tools::handlers::search_handlers::*;
 use crate::tools::handlers::task_handlers::*;
 use crate::tools::handlers::timeline_handlers::*;
 use crate::tools::registry::ToolRegistry;
@@ -39,15 +33,6 @@ mod retirement_tests;
 /// Called at startup after AppContext is constructed. Since `ToolRegistry::register`
 /// is async, this function is async and must be `.await`ed in the tokio runtime.
 pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) {
-    // Search module
-    registry.register(Arc::new(SearchNotesHandler)).await;
-    registry.register(Arc::new(GetNoteHandler)).await;
-    registry.register(Arc::new(ListRecentNotesHandler)).await;
-    registry.register(Arc::new(ListFilesHandler)).await;
-
-    // Memory module
-    registry.register(Arc::new(GetMemoryStatsHandler)).await;
-
     // Code Repo module
     registry.register(Arc::new(AddCodeRepoHandler)).await;
     registry.register(Arc::new(ListCodeReposHandler)).await;
@@ -61,7 +46,16 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     registry.register(Arc::new(CreateMemoHandler)).await;
     registry.register(Arc::new(BrowseTimelineHandler)).await;
     registry.register(Arc::new(SearchMemosHandler)).await;
-    registry.register(Arc::new(SyncMemosHandler)).await;
+    registry.register(Arc::new(UpdateMemoHandler)).await;
+    registry.register(Arc::new(DeleteMemoHandler)).await;
+    registry.register(Arc::new(TimelineStorageHandler)).await;
+    registry
+        .register(Arc::new(ImportTimelineImagesHandler))
+        .await;
+    registry.register(Arc::new(DiscardMemoImagesHandler)).await;
+    registry
+        .register(Arc::new(ClearTimelineImageCacheHandler))
+        .await;
     registry.register(Arc::new(GetMemoStatsHandler)).await;
 
     // Personal task management

@@ -491,7 +491,7 @@
         <div class="archive-dialog-copy">
           <span>收纳已完成的计划</span>
           <h3>归档这项任务？</h3>
-          <p>归档后将不再默认出现在任务列表中，但 Obsidian 内的文件和历史记录都会保留。</p>
+          <p>归档后将不再默认出现在任务列表中，本地数据库中的任务信息和历史记录仍会保留。</p>
           <strong v-if="detail?.root.title">{{ detail.root.title }}</strong>
         </div>
         <footer class="archive-dialog-actions">
@@ -564,7 +564,7 @@ useMobileSubnav(() => ({
 const searchQuery = ref('')
 const kindFilter = ref<'all' | TaskKind>('all')
 const statusFilter = ref<'active' | 'all' | TaskStatus>('active')
-const focusFilter = ref<TaskFocus>('all')
+const focusFilter = ref<TaskFocus>(['today','overdue','blocked'].includes(String(route.query.focus)) ? route.query.focus as TaskFocus : 'all')
 const filtersExpanded = ref(false)
 const listCollapsed = ref(false)
 const detailSection = ref<'breakdown' | 'progress'>('breakdown')
@@ -678,6 +678,7 @@ const sheetAction = computed(() => ({ create: '创建', edit: '保存', subtask:
 function taskFilters() {
   const activeStatuses: TaskStatus[] = ['open', 'planned', 'in_progress', 'blocked']
   return {
+    ...(focusFilter.value !== 'all' && viewMode.value === 'tasks' ? { focus: focusFilter.value, focus_date: today } : {}),
     ...(kindFilter.value !== 'all' ? { kinds: [kindFilter.value] } : {}),
     ...(statusFilter.value === 'active' ? { statuses: activeStatuses } : statusFilter.value !== 'all' ? { statuses: [statusFilter.value] } : {}),
     ...(searchQuery.value.trim() ? { query: searchQuery.value.trim() } : {}),
@@ -718,6 +719,7 @@ function closeMobileDetail() {
   listCollapsed.value = false
   const query = { ...route.query }
   delete query.task
+  delete query.child
   void router.replace({ query })
 }
 
@@ -742,6 +744,13 @@ function changeView(mode: ViewMode) {
 
 // Root Dock links and browser navigation can change query without remounting.
 watch(() => route.query.view, view => applyView(view === 'calendar' ? 'calendar' : 'tasks'))
+watch(focusFilter, focus => {
+  void router.replace({query:{...route.query,focus:focus === 'all' ? undefined : focus}})
+  void loadList()
+})
+watch(() => route.query.focus, focus => {
+  focusFilter.value = ['today','overdue','blocked'].includes(String(focus)) ? focus as TaskFocus : 'all'
+})
 
 function shiftCalendar(months: number) {
   calendarAnchor.value = shiftMonth(calendarAnchor.value, months)
@@ -830,6 +839,10 @@ function focusTask(id: string) {
 
 function closeDrawer() {
   drawerNodeId.value = null
+  if (route.query.child) {
+    const query = {...route.query}; delete query.child
+    void router.replace({query})
+  }
 }
 
 function backFromChild() {
@@ -951,10 +964,12 @@ onUnmounted(() => {
 })
 
 onMounted(async () => {
+  if (typeof route.query.task !== 'string') store.clearSelection()
   await store.loadTasks(taskFilters()).catch(() => [])
   if (viewMode.value === 'calendar') await loadCalendar()
   if (viewMode.value === 'tasks' && typeof route.query.task === 'string') {
     await openTask(route.query.task)
+    if (typeof route.query.child === 'string' && detail.value?.tasks.some(node => node.id === route.query.child)) focusTask(route.query.child)
   }
 })
 </script>

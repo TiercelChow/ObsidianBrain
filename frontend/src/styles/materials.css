@@ -123,7 +123,7 @@
 :root[data-theme] :is(
   .liquid-glass, [data-glass], .glass-surface, .glass-surface-heavy, .glass-panel, .knowledge-surface,
   .el-card, .stat-card, .module-card, .status-card, .tool-card, .stat-chip,
-  .result-card, .recent-card, .repo-card, .config-card,
+  .result-card, .recent-card, .repo-card,
   .pane, .knowledge-search, .knowledge-tabs, .chat-composer, .dock-glass,
   .reader-topbar, .task-toolbar, .search-box, .shelf-search, .task-search,
   .mobile-filter-summary, .reader-selection-menu,
@@ -298,14 +298,6 @@
   -webkit-backdrop-filter: var(--glass-scrim-filter);
 }
 @media (max-width: 768px) {
-  /* The configuration footer is sticky; desktop actions stay on the open plane. */
-  :root[data-theme] .config-actions {
-    background: var(--glass-sheen), var(--glass-floating-fill);
-    backdrop-filter: var(--glass-floating-filter);
-    -webkit-backdrop-filter: var(--glass-floating-filter);
-    border-color: var(--glass-edge);
-    box-shadow: var(--glass-floating-shadow);
-  }
   /* Timeline has separate search / add / filter pills, not a second glass slab. */
   :root[data-theme] .timeline-page .toolbar-row {
     background: transparent;

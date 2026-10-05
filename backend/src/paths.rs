@@ -8,12 +8,11 @@ use std::path::PathBuf;
 /// 1. `OBRAIN_DATA_DIR` environment variable
 /// 2. `~/.obsidian-brain/`
 ///
-/// Creates the directory (and `thumbnails/` subdirectory) if it doesn't exist.
+/// Creates the directory if it doesn't exist. Image storage is colocated with the configured DB.
 pub fn data_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("OBRAIN_DATA_DIR") {
         let p = PathBuf::from(dir);
         let _ = std::fs::create_dir_all(&p);
-        let _ = std::fs::create_dir_all(p.join("thumbnails"));
         return p;
     }
 
@@ -22,7 +21,6 @@ pub fn data_dir() -> PathBuf {
         .unwrap_or_else(|_| ".".to_string());
     let dir = PathBuf::from(home).join(".obsidian-brain");
     let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::create_dir_all(dir.join("thumbnails"));
     dir
 }
 
@@ -31,14 +29,28 @@ pub fn db_path() -> PathBuf {
     data_dir().join("brain.db")
 }
 
+/// Originals/GC must never be shared by distinct databases in the same directory.
+pub fn timeline_dir(database: &std::path::Path) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let parent = database
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."));
+    let filename = database.file_name().unwrap_or_default();
+    let directory = if filename == "brain.db" {
+        "timeline".to_string()
+    } else {
+        format!(
+            "timeline-{}",
+            &hex::encode(Sha256::digest(filename.to_string_lossy().as_bytes()))[..16]
+        )
+    };
+    parent.join(directory)
+}
+
 /// Path to the Tantivy index directory.
 pub fn index_path() -> PathBuf {
     data_dir().join("tantivy_index")
-}
-
-/// Path to the thumbnails directory.
-pub fn thumbnails_dir() -> PathBuf {
-    data_dir().join("thumbnails")
 }
 
 /// Directory containing generated knowledge deliverables such as PPTX files.
@@ -56,4 +68,32 @@ pub fn pid_file() -> PathBuf {
 /// Path to the log file (for daemon mode).
 pub fn log_file() -> PathBuf {
     data_dir().join("obsidian-brain.log")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_timeline_directory_follows_database_and_isolates_siblings() {
+        assert_eq!(
+            timeline_dir(std::path::Path::new("/data/brain.db")),
+            PathBuf::from("/data/timeline")
+        );
+        let a = timeline_dir(std::path::Path::new("/data/preview-a.db"));
+        let b = timeline_dir(std::path::Path::new("/data/preview-b.db"));
+        assert_ne!(a, b);
+        assert_ne!(a, PathBuf::from("/data/timeline"));
+        assert_eq!(a.parent(), Some(std::path::Path::new("/data")));
+    }
+    #[test]
+    fn test_relative_database_does_not_use_global_user_storage() {
+        assert_eq!(
+            timeline_dir(std::path::Path::new("brain.db")),
+            PathBuf::from("./timeline")
+        );
+        assert_eq!(
+            timeline_dir(std::path::Path::new("preview.db")).parent(),
+            Some(std::path::Path::new("."))
+        );
+    }
 }

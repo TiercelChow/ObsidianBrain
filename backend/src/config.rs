@@ -10,8 +10,9 @@ use crate::error::BrainError;
 pub struct AppConfig {
     #[serde(default)]
     pub server: ServerConfig,
-    #[serde(default)]
-    pub vault: VaultConfig,
+    /// Read old TOML paths solely for one-way image migration; never connect to the old application.
+    #[serde(default, rename = "vault", skip_serializing)]
+    pub legacy_vault: LegacyVaultConfig,
     #[serde(default)]
     pub qdrant: QdrantConfig,
     #[serde(default)]
@@ -24,8 +25,6 @@ pub struct AppConfig {
     pub storage: StorageConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
-    #[serde(default)]
-    pub obsidian: ObsidianApiConfig,
 }
 
 impl AppConfig {
@@ -91,26 +90,10 @@ impl Default for ServerConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct VaultConfig {
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct LegacyVaultConfig {
     #[serde(default)]
     pub path: PathBuf,
-    #[serde(default = "default_vault_name")]
-    pub name: String,
-    #[serde(default = "default_true")]
-    pub watch_enabled: bool,
-    #[serde(default = "default_exclude_patterns")]
-    pub exclude_patterns: Vec<String>,
-}
-impl Default for VaultConfig {
-    fn default() -> Self {
-        Self {
-            path: PathBuf::new(),
-            name: default_vault_name(),
-            watch_enabled: default_true(),
-            exclude_patterns: default_exclude_patterns(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -242,28 +225,6 @@ impl Default for LoggingConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ObsidianApiConfig {
-    /// Whether to enable the Obsidian Local REST API client.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Base URL of the Obsidian Local REST API (HTTP).
-    #[serde(default = "default_obsidian_url")]
-    pub url: String,
-    /// API key for authentication (Bearer token).
-    #[serde(default)]
-    pub api_key: Option<String>,
-}
-impl Default for ObsidianApiConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            url: default_obsidian_url(),
-            api_key: None,
-        }
-    }
-}
-
 // ── Default value functions ──
 
 fn default_host() -> String {
@@ -274,19 +235,6 @@ fn default_port() -> u16 {
 }
 fn default_protocol() -> String {
     "http".to_string()
-}
-fn default_vault_name() -> String {
-    "brain".to_string()
-}
-fn default_true() -> bool {
-    true
-}
-fn default_exclude_patterns() -> Vec<String> {
-    vec![
-        ".obsidian/".to_string(),
-        "templates/".to_string(),
-        ".trash/".to_string(),
-    ]
 }
 fn default_qdrant_url() -> String {
     "http://127.0.0.1:6333".to_string()
@@ -335,9 +283,6 @@ fn default_backup_retention() -> usize {
 }
 fn default_log_level() -> String {
     "info".to_string()
-}
-fn default_obsidian_url() -> String {
-    "http://127.0.0.1:27123".to_string()
 }
 
 #[cfg(test)]

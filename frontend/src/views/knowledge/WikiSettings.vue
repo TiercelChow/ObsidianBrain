@@ -379,6 +379,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowDown, Connection, Cpu, DataAnalysis, Document, Download, InfoFilled, Loading, Lock, MagicStick, Plus, UploadFilled } from '@element-plus/icons-vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
@@ -422,6 +423,9 @@ import {
 } from '@/api/knowledge'
 
 const section = ref<'runtime' | 'providers' | 'usage' | 'protection' | 'documents' | 'skills'>('runtime')
+const settingsRoute = useRoute()
+const requestedSection = String(settingsRoute.query.section || '')
+if (['runtime','providers','usage','protection','documents','skills'].includes(requestedSection)) section.value = requestedSection as typeof section.value
 const bases = ref<KnowledgeBaseSummary[]>([])
 const activeBaseId = ref('')
 const skillMetadataExpanded = ref(false)
@@ -1173,7 +1177,7 @@ watch(section, value => {
   if (value === 'protection' && !backups.value.length) void loadBackups()
   if (value === 'skills' && !skills.value.length) void loadSkills()
 })
-onMounted(initialize)
+onMounted(() => { void initialize(); if (section.value === 'usage') void loadUsage() })
 </script>
 
 <style scoped>

@@ -7,6 +7,7 @@ mod frontend_assets;
 mod infra;
 mod models;
 mod paths;
+mod timeline_migration;
 mod tools;
 
 use std::net::SocketAddr;
@@ -19,15 +20,15 @@ use crate::config::AppConfig;
 use crate::core::book_wiki::BookWikiService;
 use crate::core::code_repo::manager::{RepoManager, RepoManagerConfig};
 use crate::core::code_repo::note_linker::NoteLinker;
-use crate::core::memory_service::MemoryService;
 use crate::core::tasks::TaskService;
 use crate::core::timeline::store::TimelineStore;
 use crate::core::timeline::{MemoManager, TimelineConfig, TimelineService};
 use crate::infra::book_wiki_store::BookWikiStore;
 use crate::infra::deepseek_harness::DeepSeekHarnessRuntime;
-use crate::infra::obsidian_client::{new_provider, ObsidianClient};
 use crate::infra::sqlite_store::SqliteStore;
 use crate::infra::task_index_store::SqliteTaskIndexStore;
+use crate::infra::timeline_images::{TimelineImages, DEFAULT_CACHE_BYTES};
+use crate::timeline_migration::migrate_timeline_images;
 use crate::tools::handlers::register_all_tools;
 use crate::tools::registry::ToolRegistry;
 
@@ -37,8 +38,6 @@ pub struct AppContext {
     pub components: Arc<std::sync::Mutex<ComponentStatus>>,
     pub tool_registry: Arc<ToolRegistry>,
     pub db: Arc<SqliteStore>,
-    pub obsidian: crate::infra::obsidian_client::ObsidianProvider,
-    pub memory_service: Arc<MemoryService>,
     pub repo_manager: Arc<RepoManager>,
     pub note_linker: Arc<NoteLinker>,
     pub timeline_service: Arc<TimelineService>,
@@ -53,7 +52,6 @@ pub struct AppContext {
 #[derive(Debug, Clone, Default)]
 pub struct ComponentStatus {
     pub server: String,
-    pub obsidian: String,
     pub sqlite: String,
     pub timeline: String,
     pub code_repo: String,
@@ -65,7 +63,7 @@ pub struct ComponentStatus {
 #[command(
     name = "obsidian-brain",
     version,
-    about = "Local Rust knowledge engine with LLM Tool API for Obsidian"
+    about = "Local knowledge engine, reader, timeline and LLM Wiki"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -103,6 +101,13 @@ enum Command {
     },
     /// Print version information.
     Version,
+    /// Copy referenced legacy Timeline photos once; never starts the server.
+    MigrateTimelineImages {
+        #[arg(long)]
+        database: std::path::PathBuf,
+        #[arg(long)]
+        source: std::path::PathBuf,
+    },
 }
 
 #[derive(clap::Subcommand)]
@@ -188,6 +193,23 @@ fn main() {
             println!("obsidian-brain {}", env!("CARGO_PKG_VERSION"));
             println!("Data directory: {}", paths::data_dir().display());
         }
+        Some(Command::MigrateTimelineImages { database, source }) => {
+            init_logging();
+            let result = tokio::runtime::Runtime::new()
+                .map_err(error::BrainError::from)
+                .and_then(|runtime| runtime.block_on(migrate_timeline_images(&database, &source)));
+            match result.and_then(|report| {
+                serde_json::to_string_pretty(&report).map_err(|error| {
+                    error::BrainError::Internal(format!("迁移报告序列化失败: {error}"))
+                })
+            }) {
+                Ok(report) => println!("{report}"),
+                Err(error) => {
+                    eprintln!("图片迁移失败: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
     }
 }
 
@@ -231,7 +253,6 @@ async fn run_server_async(
     // Initialize SQLite
     let mut components = ComponentStatus {
         server: "ok".to_string(),
-        obsidian: "disabled".to_string(),
         sqlite: "pending".to_string(),
         timeline: "pending".to_string(),
         code_repo: "pending".to_string(),
@@ -265,29 +286,6 @@ async fn run_server_async(
                 }
                 if let Some(p) = srv.get("port").and_then(|v| v.as_u64()) {
                     config.server.port = p as u16;
-                }
-            }
-            if let Some(vault) = saved.get("vault") {
-                if let Some(path) = vault.get("path").and_then(|v| v.as_str()) {
-                    config.vault.path = std::path::PathBuf::from(path);
-                }
-                if let Some(name) = vault.get("name").and_then(|v| v.as_str()) {
-                    config.vault.name = name.to_string();
-                }
-            }
-            if let Some(obs) = saved.get("obsidian") {
-                if let Some(enabled) = obs.get("enabled").and_then(|v| v.as_bool()) {
-                    config.obsidian.enabled = enabled;
-                }
-                if let Some(url) = obs.get("url").and_then(|v| v.as_str()) {
-                    config.obsidian.url = url.to_string();
-                }
-                if let Some(key) = obs.get("api_key").and_then(|v| v.as_str()) {
-                    config.obsidian.api_key = if key.is_empty() {
-                        None
-                    } else {
-                        Some(key.to_string())
-                    };
                 }
             }
             if let Some(llm) = saved.get("llm") {
@@ -345,39 +343,64 @@ async fn run_server_async(
     let addr = SocketAddr::new(host, config.server.port);
     tracing::info!("配置加载完成: {}:{}", addr.ip(), addr.port());
 
-    // Obsidian
-    let obsidian_client = if config.obsidian.enabled {
-        match ObsidianClient::new(&config.obsidian) {
-            Ok(client) => {
-                let client = Arc::new(client);
-                if client.health_check().await {
-                    components.obsidian = "ok".to_string();
-                    tracing::info!("Obsidian API 连接成功: {}", config.obsidian.url);
-                    Some(client)
-                } else {
-                    components.obsidian = "degraded: 无法连接".to_string();
-                    tracing::warn!("Obsidian API 无法连接: {}", config.obsidian.url);
-                    Some(client)
-                }
-            }
-            Err(e) => {
-                components.obsidian = format!("error: {e}");
-                tracing::error!("Obsidian API 客户端创建失败: {e}");
-                None
+    // Local assets are colocated with the configured database, including isolated tests.
+    let image_root = paths::timeline_dir(&config.storage.db_path);
+    let cache_budget = db
+        .get_state("timeline_cache_limit_bytes")?
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_CACHE_BYTES);
+    let images = Arc::new(TimelineImages::new(db.clone(), image_root, cache_budget)?);
+    let legacy_directory = db
+        .get_state("timeline_legacy_directory")?
+        .or_else(|| {
+            db.get_state("system_config")
+                .ok()
+                .flatten()
+                .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
+                .and_then(|v| {
+                    v.get("vault")?
+                        .get("path")?
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string)
+                })
+        })
+        .or_else(|| {
+            config
+                .legacy_vault
+                .path
+                .to_str()
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+        });
+    if let Some(path) = &legacy_directory {
+        db.set_state("timeline_legacy_directory", path)?;
+    }
+    // Preserve all unrelated settings; retire credentials and live vault configuration.
+    if let Some(saved) = db.get_state("system_config")? {
+        let mut value: serde_json::Value = serde_json::from_str(&saved)?;
+        if let Some(object) = value.as_object_mut() {
+            object.remove("obsidian");
+            object.remove("vault");
+        }
+        db.set_state("system_config", &value.to_string())?;
+    }
+    let maintenance_images = images.clone();
+    tokio::spawn(async move {
+        if let Err(error) = maintenance_images.maintain().await {
+            tracing::warn!(%error,"启动图片存储维护失败，将自动重试");
+        }
+        // Maintenance only: never scan or import from the legacy vault on startup.
+        // Import requires an explicit CLI command or the storage panel's manual action.
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            if let Err(error) = maintenance_images.maintain().await {
+                tracing::warn!(%error,"图片存储维护失败，将自动重试");
             }
         }
-    } else {
-        tracing::warn!("Obsidian API 未启用");
-        None
-    };
-    let obsidian = new_provider(obsidian_client);
-
+    });
     // Core services
-    let memory_service = Arc::new(MemoryService::new(
-        obsidian.clone(),
-        config.vault.path.clone(),
-        config.vault.name.clone(),
-    ));
     let repo_manager = Arc::new(RepoManager::new(db.clone(), RepoManagerConfig::default()));
     let note_linker = Arc::new(NoteLinker::new(db.clone()));
     let timeline_store = Arc::new(TimelineStore::new(db.clone()));
@@ -385,7 +408,7 @@ async fn run_server_async(
         timeline_store,
         TimelineConfig::default(),
     ));
-    let memo_manager = Arc::new(MemoManager::new(db.clone(), obsidian.clone()));
+    let memo_manager = Arc::new(MemoManager::new(db.clone(), images.clone()));
     let task_service = Arc::new(TaskService::new(Arc::new(SqliteTaskIndexStore::new(
         db.clone(),
     ))));
@@ -407,8 +430,6 @@ async fn run_server_async(
         components: Arc::new(std::sync::Mutex::new(components)),
         tool_registry: tool_registry.clone(),
         db: db.clone(),
-        obsidian: obsidian.clone(),
-        memory_service,
         repo_manager,
         note_linker,
         timeline_service,
@@ -502,9 +523,9 @@ fn show_status() {
                 if let Some(uptime) = h.get("uptime_seconds").and_then(|v| v.as_u64()) {
                     println!("  Uptime: {}s", uptime);
                 }
-                if let Some(vault) = h.get("vault").and_then(|v| v.as_object()) {
+                if let Some(vault) = h.get("storage").and_then(|v| v.as_object()) {
                     if let Some(path) = vault.get("path").and_then(|v| v.as_str()) {
-                        println!("  Vault: {path}");
+                        println!("  Data: {path}");
                     }
                 }
             } else {
@@ -605,25 +626,7 @@ mod test_helpers {
             std::fs::create_dir_all(&vault_path).expect("vault dir creation");
 
             let mut config = AppConfig::default();
-            config.vault.path = vault_path.clone();
-            config.vault.name = "TestVault".to_string();
-            config.obsidian.enabled = false;
-
-            let obsidian = Arc::new(ObsidianClient::new(&config.obsidian).unwrap_or_else(|_| {
-                ObsidianClient::new(&crate::config::ObsidianApiConfig {
-                    enabled: true,
-                    url: "http://127.0.0.1:1".to_string(),
-                    api_key: None,
-                })
-                .expect("dummy client creation")
-            }));
-            let obsidian_provider = new_provider(Some(obsidian));
-
-            let memory_service = Arc::new(MemoryService::new(
-                obsidian_provider.clone(),
-                vault_path.clone(),
-                "TestVault".to_string(),
-            ));
+            config.storage.db_path = dir.path().join("test.db");
             let db =
                 Arc::new(SqliteStore::new(&dir.path().join("test.db")).expect("SQLite creation"));
             let repo_manager = Arc::new(RepoManager::new(db.clone(), RepoManagerConfig::default()));
@@ -633,7 +636,17 @@ mod test_helpers {
                 timeline_store,
                 TimelineConfig::default(),
             ));
-            let memo_manager = Arc::new(MemoManager::new(db.clone(), obsidian_provider.clone()));
+            let memo_manager = Arc::new(MemoManager::new(
+                db.clone(),
+                Arc::new(
+                    TimelineImages::new(
+                        db.clone(),
+                        dir.path().join("timeline"),
+                        DEFAULT_CACHE_BYTES,
+                    )
+                    .expect("local image store"),
+                ),
+            ));
             let task_service = Arc::new(TaskService::new(Arc::new(SqliteTaskIndexStore::new(
                 db.clone(),
             ))));
@@ -647,8 +660,6 @@ mod test_helpers {
                 components: Arc::new(std::sync::Mutex::new(ComponentStatus::default())),
                 tool_registry: Arc::new(ToolRegistry::new()),
                 db: db.clone(),
-                obsidian: obsidian_provider.clone(),
-                memory_service,
                 repo_manager,
                 note_linker,
                 timeline_service,
@@ -660,5 +671,106 @@ mod test_helpers {
 
             (ctx, dir, vault_path)
         }
+    }
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_manual_image_migration_requires_explicit_database_and_source() {
+        assert!(Cli::try_parse_from(["obsidian-brain", "migrate-timeline-images"]).is_err());
+        assert!(Cli::try_parse_from([
+            "obsidian-brain",
+            "migrate-timeline-images",
+            "--database",
+            "/tmp/brain.db"
+        ])
+        .is_err());
+        let cli = Cli::try_parse_from([
+            "obsidian-brain",
+            "migrate-timeline-images",
+            "--database",
+            "/tmp/brain.db",
+            "--source",
+            "/tmp/old vault",
+        ])
+        .unwrap();
+        assert!(
+            matches!(cli.cmd, Some(Command::MigrateTimelineImages { database, source })
+            if database == std::path::Path::new("/tmp/brain.db")
+                && source == std::path::Path::new("/tmp/old vault"))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_manual_image_migration_copies_without_changing_memos_or_old_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("brain.db");
+        let source = temp.path().join("old vault");
+        std::fs::create_dir_all(source.join("Timeline/images")).unwrap();
+        let mut image = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(2, 2)
+            .write_to(&mut image, image::ImageFormat::Png)
+            .unwrap();
+        let bytes = image.into_inner();
+        let path = "Timeline/images/example.png";
+        std::fs::write(source.join(path), &bytes).unwrap();
+        let db = SqliteStore::new(&database).unwrap();
+        db.with_connection(|conn| {
+            conn.execute("INSERT INTO memos(id,timestamp,date,content,images,tags,file_path) VALUES('old','2026-10-01T00:00:00Z','2026-10-01','original',?1,'[]','old.md')", [format!("[\"{path}\"]")])?;
+            Ok(())
+        }).unwrap();
+        let report = migrate_timeline_images(&database, &source).await.unwrap();
+        assert_eq!(report.copied, 1);
+        assert!(report.missing.is_empty());
+        assert!(report.backup.is_file());
+        assert_eq!(std::fs::read(source.join(path)).unwrap(), bytes);
+        let images = TimelineImages::new(Arc::new(db), paths::timeline_dir(&database), 0).unwrap();
+        assert_eq!(images.original(path).await.unwrap().0, bytes);
+        let snapshot = rusqlite::Connection::open(report.backup).unwrap();
+        let before: String = snapshot
+            .query_row(
+                "SELECT content || images || timestamp FROM memos WHERE id='old'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let after: String = rusqlite::Connection::open(&database)
+            .unwrap()
+            .query_row(
+                "SELECT content || images || timestamp FROM memos WHERE id='old'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(before, after);
+        assert_eq!(
+            migrate_timeline_images(&database, &source)
+                .await
+                .unwrap()
+                .copied,
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn test_manual_image_migration_rejects_missing_inputs_without_creating_database() {
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("missing.db");
+        assert!(migrate_timeline_images(&database, temp.path())
+            .await
+            .is_err());
+        assert!(!database.exists());
+        let database = temp.path().join("brain.db");
+        let _db = SqliteStore::new(&database).unwrap();
+        assert!(
+            migrate_timeline_images(&database, &temp.path().join("missing"))
+                .await
+                .is_err()
+        );
+        assert!(!temp.path().join("timeline").exists());
     }
 }

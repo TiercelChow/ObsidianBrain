@@ -2,6 +2,7 @@
 #![allow(unused_imports)]
 pub mod agent_budget;
 pub mod book_wiki;
+pub mod home;
 pub mod memory;
 pub mod note;
 pub mod repo;

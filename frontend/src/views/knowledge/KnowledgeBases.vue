@@ -4,6 +4,7 @@
       <el-button :loading="loading" @click="loadCards()"><el-icon><Refresh /></el-icon>刷新</el-button>
     </template>
 
+    <div v-if="runningOnly || attentionOnly" class="activity-context knowledge-toolbar"><span>首页 · {{ attentionOnly ? '需要检查的知识编译' : '运行中的知识编译' }}</span><RouterLink :to="{path:'/knowledge/tasks',query:{status:attentionOnly ? 'attention' : 'running'}}">{{ attentionOnly ? '查看失败的研究 / PPT 任务' : '查看排队 / 运行中的研究任务' }}</RouterLink><button type="button" @click="router.replace('/knowledge')">显示全部知识库</button></div>
     <div class="mobile-base-actions">
       <span>{{ cards.length }} 本 Markdown 书籍</span>
       <button type="button" :disabled="loading" aria-label="刷新书籍知识库" @click="loadCards()"><el-icon :class="{ 'is-loading': loading }"><Refresh /></el-icon><span>刷新</span></button>
@@ -21,9 +22,9 @@
       <span>正在读取阅境轩书架…</span>
     </div>
 
-    <section v-else-if="cards.length" class="book-wiki-grid">
+    <section v-else-if="visibleCards.length" class="book-wiki-grid">
       <article
-        v-for="(card, index) in cards"
+        v-for="(card, index) in visibleCards"
         :key="card.book.id"
         class="book-wiki-card knowledge-surface"
         :style="{ '--order': index }"
@@ -145,6 +146,7 @@
       </article>
     </section>
 
+    <div v-else-if="runningOnly || attentionOnly" class="knowledge-empty knowledge-surface"><strong>{{ attentionOnly ? '没有失败的知识编译' : '没有正在执行的知识编译' }}</strong><RouterLink :to="{path:'/knowledge/tasks',query:{status:attentionOnly ? 'attention' : 'running'}}">查看研究任务</RouterLink></div>
     <div v-else class="knowledge-empty knowledge-surface">
       <div class="empty-orb"><el-icon><Collection /></el-icon></div>
       <strong>书架还是空的</strong>
@@ -217,6 +219,15 @@ import {
 
 const router = useRouter()
 const cards = ref<BookKnowledgeCard[]>([])
+let pageAlive = true
+const runningOnly = computed(() => router.currentRoute.value.query.activity === 'running')
+const attentionOnly = computed(() => router.currentRoute.value.query.activity === 'attention')
+const visibleCards = computed(() => cards.value.filter(card => {
+  const base = card.knowledge_base
+  if (runningOnly.value) return base?.lifecycle !== 'archived' && base?.compile_state === 'compiling' && base.compile_phase !== 'waiting_review'
+  if (attentionOnly.value) return base?.lifecycle !== 'archived' && base?.compile_state === 'failed'
+  return true
+}))
 const loading = ref(false)
 const busyBookId = ref('')
 const compilingBaseId = ref('')
@@ -441,7 +452,12 @@ function compileProgress(base: NonNullable<BookKnowledgeCard['knowledge_base']>)
 }
 
 onMounted(() => {
-  void loadCards()
+  void loadCards().then(() => {
+    if (pageAlive && router.currentRoute.value.query.report === '1' && canFocusDocument(document)) {
+      reportBase.value = cards.value.find(card => card.knowledge_base?.id === router.currentRoute.value.query.base)?.knowledge_base || null
+      reportVisible.value = !!reportBase.value
+    }
+  })
   pollingTimer = window.setInterval(() => {
     if (!canFocusDocument(document)) return
     if (cards.value.some(card => card.knowledge_base?.compile_state === 'compiling' && card.knowledge_base.compile_phase !== 'waiting_review')) {
@@ -451,11 +467,14 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  pageAlive = false
   if (pollingTimer !== undefined) window.clearInterval(pollingTimer)
 })
 </script>
 
 <style scoped>
+.activity-context { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; font-size:13px; }
+.activity-context a,.activity-context button { color:var(--text-secondary); min-height:44px; display:inline-flex; align-items:center; background:none; border:0; font:inherit; cursor:pointer; }
 .mobile-base-actions { display: none; }
 .mobile-book-more { display: none; }
 .book-action-sheet .el-button { width: 100%; min-height: 48px; height: auto; margin: 0; padding: 12px; justify-content: flex-start; white-space: normal; }

@@ -97,6 +97,8 @@ export interface TaskFields {
 }
 
 export interface TaskFilters {
+  focus?: 'today' | 'overdue' | 'blocked'
+  focus_date?: string
   kinds?: TaskKind[]
   statuses?: TaskStatus[]
   importance?: TaskImportance[]

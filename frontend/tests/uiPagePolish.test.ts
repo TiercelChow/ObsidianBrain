@@ -28,7 +28,7 @@ test('custom fields and confirmations share focus, disabled and keyboard-safe sh
 test('knowledge and home statuses use theme-aware semantic labels rather than fixed light-theme colors', async () => {
   const [knowledge, home] = await Promise.all([source('styles/knowledge.css'), source('views/Home.vue')])
   for (const token of ['glass-success-label', 'glass-warning-label', 'glass-danger-label']) assert.ok(knowledge.includes(`var(--${token})`), token)
-  assert.match(home, /\.status-value.ok \{ color: var\(--glass-success-label\)/)
+  assert.match(home, /\.is-warning \{ color:var\(--glass-warning-label/)
 })
 
 test('repo styles cannot change the presentation of dialogs in other modules', async () => {

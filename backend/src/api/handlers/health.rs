@@ -9,12 +9,16 @@ pub async fn health_check(State(ctx): State<Arc<AppContext>>) -> Json<Value> {
     // Collect component statuses then release the lock before any .await calls.
     let component_snapshot = {
         let components = ctx.components.lock().unwrap();
-        (components.server.clone(), components.obsidian.clone())
+        (components.server.clone(), components.sqlite.clone())
     };
 
-    // Vault status
-    let vault_path_str = ctx.config.vault.path.to_string_lossy().to_string();
-    let vault_exists = ctx.config.vault.path.exists();
+    let data_path = ctx
+        .config
+        .storage
+        .db_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."));
 
     let uptime_seconds = chrono::Utc::now()
         .signed_duration_since(ctx.start_time)
@@ -29,11 +33,11 @@ pub async fn health_check(State(ctx): State<Arc<AppContext>>) -> Json<Value> {
         "uptime_seconds": uptime_seconds,
         "components": {
             "server": component_snapshot.0,
-            "obsidian": component_snapshot.1,
+            "sqlite": component_snapshot.1,
         },
-        "vault": {
-            "path": vault_path_str,
-            "exists": vault_exists,
+        "storage": {
+            "path": data_path,
+            "exists": data_path.exists(),
         }
     }))
 }

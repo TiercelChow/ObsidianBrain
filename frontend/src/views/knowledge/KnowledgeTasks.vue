@@ -13,8 +13,9 @@
     </div>
 
     <div v-if="loading" class="knowledge-empty knowledge-surface"><el-icon class="is-loading"><Loading /></el-icon>正在加载任务…</div>
-    <section v-else-if="tasks.length" class="research-task-list">
-      <article v-for="(task, index) in tasks" :key="task.id" class="research-task knowledge-surface" :style="{ '--order': index }">
+    <section v-else-if="visibleTasks.length" class="research-task-list">
+      <div v-if="runningOnly || attentionOnly" class="task-summary">{{ attentionOnly ? '正在查看失败的研究 / PPT 任务' : '正在查看排队 / 运行中的研究任务' }} <el-button @click="router.replace({query:{...route.query,status:undefined}})">显示全部</el-button></div>
+      <article v-for="(task, index) in visibleTasks" :key="task.id" class="research-task knowledge-surface" :style="{ '--order': index }">
         <div class="task-kind" :class="`is-${task.task_type}`"><el-icon><component :is="taskIcon(task.task_type)" /></el-icon></div>
         <div class="task-main">
           <div class="task-topline"><span>{{ task.book_name }}</span><span class="knowledge-status" :class="`is-${task.status}`">{{ statusLabel(task.status) }}</span></div>
@@ -43,7 +44,7 @@
     </section>
     <div v-else class="knowledge-empty knowledge-surface">
       <div class="task-empty-symbol"><el-icon><Operation /></el-icon></div>
-      <strong>还没有研究任务</strong>
+      <strong>{{ attentionOnly ? '没有需要检查的研究任务' : runningOnly ? '没有运行中的研究任务' : '还没有研究任务' }}</strong>
       <span>创建任务后可交给 Harness 执行，结果和运行状态会保存到数据库。</span>
       <el-button type="primary" :disabled="!bases.length" @click="openCreate">创建第一项任务</el-button>
     </div>
@@ -298,7 +299,10 @@ const router = useRouter()
 const route = useRoute()
 const bases = ref<KnowledgeBaseSummary[]>([])
 const tasks = ref<KnowledgeTask[]>([])
-const filterBaseId = ref('')
+const runningOnly = computed(() => route.query.status === 'running')
+const attentionOnly = computed(() => route.query.status === 'attention')
+const visibleTasks = computed(() => tasks.value.filter(task => runningOnly.value ? ['running','queued'].includes(task.status) : attentionOnly.value ? task.status === 'failed' || task.artifact_state === 'failed' : true))
+const filterBaseId = ref(typeof route.query.base === 'string' ? route.query.base : '')
 const loading = ref(false)
 const creating = ref(false)
 const previewing = ref(false)
@@ -373,6 +377,13 @@ async function loadData() {
       card.book.kind === 'folder' && card.knowledge_base ? [card.knowledge_base] : []
     ))
     await loadTasks()
+    if (viewActive && canFocusDocument(document) && typeof route.query.task === 'string') {
+      const requested = tasks.value.find(task => task.id === route.query.task)
+      if (requested) {
+        if (requested.status === 'completed' || requested.artifact_state === 'failed') await openResult(requested)
+        else openStages(requested)
+      } else ElMessage.warning('该研究任务已不存在或不在当前知识库中')
+    }
     if (route.query.create === '1') {
       openCreate()
       const requestedBase = String(route.query.base || '')

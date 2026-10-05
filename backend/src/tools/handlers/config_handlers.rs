@@ -30,35 +30,26 @@ impl ToolHandler for GetConfigHandler {
     }
 
     async fn handle(&self, _args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
-        // Try to load from DB cache
-        if let Ok(Some(cached)) = ctx.db.get_state(CONFIG_KEY) {
-            if let Ok(data) = serde_json::from_str::<Value>(&cached) {
-                return Ok(data);
+        let config = &ctx.config;
+        let mut data = json!({"llm":{
+            "provider":config.llm.provider,"model":config.llm.model,"api_key":"",
+            "api_key_env":config.llm.api_key_env.as_deref().unwrap_or(""),
+            "base_url":config.llm.base_url.as_deref().unwrap_or(""),
+            "max_tokens":config.llm.max_tokens,"temperature":config.llm.temperature
+        }});
+        if let Some(cached) = ctx.db.get_state(CONFIG_KEY)? {
+            let saved: Value = serde_json::from_str(&cached)
+                .map_err(|e| BrainError::ConfigError(e.to_string()))?;
+            if let Some(llm) = saved.get("llm").and_then(Value::as_object) {
+                if let Some(current) = data["llm"].as_object_mut() {
+                    current.extend(llm.clone());
+                    current.insert("api_key".into(), json!(""));
+                }
             }
         }
-
-        // Return defaults from current config
-        let config = &ctx.config;
-        Ok(json!({
-            "vault": {
-                "path": config.vault.path.to_string_lossy(),
-                "name": config.vault.name,
-            },
-            "obsidian": {
-                "enabled": config.obsidian.enabled,
-                "url": config.obsidian.url,
-                "api_key": config.obsidian.api_key.as_deref().unwrap_or(""),
-            },
-            "llm": {
-                "provider": config.llm.provider,
-                "model": config.llm.model,
-                "api_key": config.llm.api_key.as_deref().unwrap_or(""),
-                "api_key_env": config.llm.api_key_env.as_deref().unwrap_or(""),
-                "base_url": config.llm.base_url.as_deref().unwrap_or(""),
-                "max_tokens": config.llm.max_tokens,
-                "temperature": config.llm.temperature,
-            }
-        }))
+        let storage = ctx.memo_manager.images.stats().await?;
+        data["timeline"] = json!({"cache_limit_mb":storage.cache_limit_bytes/(1024*1024)});
+        Ok(data)
     }
 }
 
@@ -71,7 +62,7 @@ impl ToolHandler for SaveConfigHandler {
         "save_config"
     }
     fn description(&self) -> &str {
-        "保存系统配置（热更新，无需重启）"
+        "保存系统配置；图片缓存容量立即生效，通用 LLM 启动配置重启后使用"
     }
     fn input_schema(&self) -> Value {
         definitions::save_config_schema()
@@ -81,55 +72,52 @@ impl ToolHandler for SaveConfigHandler {
     }
 
     async fn handle(&self, args: Value, ctx: &Arc<AppContext>) -> Result<Value, BrainError> {
-        // Save to DB
-        let config_json = serde_json::to_string(&args)
-            .map_err(|e| BrainError::Internal(format!("序列化配置失败: {e}")))?;
-
-        ctx.db.set_state(CONFIG_KEY, &config_json)?;
-
-        // Hot-reload ObsidianClient
-        if let Some(obs_cfg) = args.get("obsidian") {
-            let enabled = obs_cfg
-                .get("enabled")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            if enabled {
-                let url = obs_cfg
-                    .get("url")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("http://127.0.0.1:27123")
-                    .to_string();
-                let api_key = obs_cfg
-                    .get("api_key")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                let new_config = crate::config::ObsidianApiConfig {
-                    enabled,
-                    url,
-                    api_key,
-                };
-                match crate::infra::obsidian_client::ObsidianClient::new(&new_config) {
-                    Ok(client) => {
-                        crate::infra::obsidian_client::set_client(
-                            &ctx.obsidian,
-                            Some(Arc::new(client)),
-                        );
-                        tracing::info!("ObsidianClient hot-reloaded");
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to hot-reload ObsidianClient: {e}");
-                    }
+        if let Some(mb) = args
+            .get("timeline")
+            .and_then(|v| v.get("cache_limit_mb"))
+            .and_then(Value::as_u64)
+        {
+            let bytes = mb * 1024 * 1024;
+            ctx.db
+                .set_state("timeline_cache_limit_bytes", &bytes.to_string())?;
+            ctx.memo_manager.images.set_budget(bytes).await?;
+        }
+        let mut saved = ctx
+            .db
+            .get_state(CONFIG_KEY)?
+            .map(|v| serde_json::from_str::<Value>(&v))
+            .transpose()
+            .map_err(|e| BrainError::ConfigError(e.to_string()))?
+            .unwrap_or_else(|| json!({}));
+        if let Some(llm) = args.get("llm") {
+            let old_key = saved.get("llm").and_then(|l| l.get("api_key")).cloned();
+            saved["llm"] = llm.clone();
+            if saved["llm"].get("api_key").and_then(Value::as_str) == Some("") {
+                if let Some(key) = old_key {
+                    saved["llm"]["api_key"] = key;
                 }
-            } else {
-                crate::infra::obsidian_client::set_client(&ctx.obsidian, None);
             }
         }
-
-        tracing::info!("系统配置已保存并热更新");
+        if let Some(object) = saved.as_object_mut() {
+            if ctx.db.get_state("timeline_legacy_directory")?.is_none() {
+                if let Some(path) = object
+                    .get("vault")
+                    .and_then(|v| v.get("path"))
+                    .and_then(Value::as_str)
+                    .filter(|p| !p.is_empty())
+                {
+                    ctx.db.set_state("timeline_legacy_directory", path)?;
+                }
+            }
+            object.remove("obsidian");
+            object.remove("vault");
+        }
+        ctx.db.set_state(CONFIG_KEY, &saved.to_string())?;
+        tracing::info!("系统配置已保存，图片缓存上限立即生效");
 
         Ok(json!({
             "saved": true,
-            "message": "配置已保存并生效",
+            "message": "配置已保存；缓存上限立即生效，通用 LLM 启动配置重启后使用",
         }))
     }
 }

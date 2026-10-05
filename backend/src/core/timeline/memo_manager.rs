@@ -1,122 +1,124 @@
-//! 时光机小记管理器
-
-use chrono::{Datelike, Local, Utc};
+//! SQLite-authoritative memos; attachment changes and cleanup are coordinated.
+use chrono::{Local, Utc};
+use rusqlite::{params, Connection};
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::error::BrainError;
-use crate::infra::obsidian_client::ObsidianProvider;
 use crate::infra::sqlite_store::SqliteStore;
+use crate::infra::timeline_images::TimelineImages;
 use crate::models::timeline::{BrowseTimelineRequest, Memo, MemoCreateRequest, MemoQuery};
 
-/// 时光机小记管理器
+#[cfg(test)]
+#[path = "memo_manager_tests.rs"]
+mod tests;
+
 pub struct MemoManager {
     db: Arc<SqliteStore>,
-    obsidian: ObsidianProvider,
+    pub images: Arc<TimelineImages>,
 }
 
 impl MemoManager {
-    pub fn new(db: Arc<SqliteStore>, obsidian: ObsidianProvider) -> Self {
-        Self { db, obsidian }
+    pub fn new(db: Arc<SqliteStore>, images: Arc<TimelineImages>) -> Self {
+        Self { db, images }
     }
 
-    /// 创建小记
-    pub async fn create_memo(&self, request: MemoCreateRequest) -> Result<Memo, BrainError> {
-        let id = Uuid::new_v4().to_string();
-        let now = Utc::now();
-        let local = Local::now();
-        let date = local.format("%Y-%m-%d").to_string();
-        let time = local.format("%H:%M:%S").to_string();
-
-        // 生成文件路径（用本地时间的月份）
-        let file_path = format!("Timeline/{}.md", local.format("%Y-%m"));
-
-        // 格式化 Markdown 内容
-        let mut md_content = format!("### {}\n{}\n\n", time, request.content);
-        for img in &request.images {
-            md_content.push_str(&format!("![[{}]]\n", img));
+    fn validate(&self, request: &MemoCreateRequest, old: &[String]) -> Result<(), BrainError> {
+        if request.content.trim().is_empty() && request.images.is_empty() {
+            return Err(BrainError::MemoValidation("请填写内容或添加图片".into()));
         }
-        if !request.tags.is_empty() {
-            md_content.push_str(&format!(
-                "\n{}\n",
-                request
-                    .tags
-                    .iter()
-                    .map(|t| format!("#{}", t))
-                    .collect::<Vec<_>>()
-                    .join(" ")
+        if request.content.len() > 100_000 || request.images.len() > 9 || request.tags.len() > 30 {
+            return Err(BrainError::MemoValidation(
+                "内容过长、图片超过 9 张或标签超过 30 个".into(),
             ));
         }
-        md_content.push_str("\n---\n\n");
-
-        // 写入 Obsidian 文件（如果 Obsidian 可用）
-        if let Ok(obsidian) = crate::infra::obsidian_client::get_client(&self.obsidian) {
-            let month_title = format!(
-                "# {}年{}月 时光机\n\n## {}\n\n",
-                local.format("%Y"),
-                local.format("%m"),
-                local.format("%Y-%m-%d")
-            );
-
-            // 尝试读取文件判断是否存在
-            match obsidian.read_file(&file_path).await {
-                Ok(existing) => {
-                    // 文件存在，检查是否包含今天的日期标题
-                    let today_header = format!("## {}", local.format("%Y-%m-%d"));
-                    if !existing.contains(&today_header) {
-                        let date_header = format!("\n## {}\n\n", local.format("%Y-%m-%d"));
-                        obsidian
-                            .append_file(&file_path, &date_header)
-                            .await
-                            .map_err(|e| BrainError::Internal(format!("追加日期标题失败: {e}")))?;
-                    }
-                }
-                Err(_) => {
-                    // 文件不存在，先写入文件头和日期标题
-                    obsidian
-                        .write_file(&file_path, &month_title)
-                        .await
-                        .map_err(|e| BrainError::Internal(format!("创建月份文件失败: {e}")))?;
-                }
+        for path in &request.images {
+            if !old.contains(path) && self.images.asset(path).is_err() {
+                return Err(BrainError::MemoValidation(format!(
+                    "图片不存在或尚未完成上传: {path}"
+                )));
             }
-
-            // 追加小记内容
-            obsidian
-                .append_file(&file_path, &md_content)
-                .await
-                .map_err(|e| BrainError::Internal(format!("写入小记文件失败: {e}")))?;
-        } else {
-            tracing::warn!("Obsidian API 不可用，小记仅存储到 SQLite");
         }
+        Ok(())
+    }
 
-        // 序列化 images 和 tags 为 JSON
-        let images_json =
-            serde_json::to_string(&request.images).unwrap_or_else(|_| "[]".to_string());
-        let tags_json = serde_json::to_string(&request.tags).unwrap_or_else(|_| "[]".to_string());
-
-        // 写入 SQLite 元数据
-        self.db.insert_memo(
-            &id,
-            &now.to_rfc3339(),
-            &date,
-            &request.content,
-            &images_json,
-            &tags_json,
-            &file_path,
-        )?;
-
-        tracing::info!(id = %id, date = %date, time = %time, "小记创建成功");
-
-        Ok(Memo {
-            id,
+    pub async fn create_memo(&self, request: MemoCreateRequest) -> Result<Memo, BrainError> {
+        let _guard = self.images.mutation.lock().await;
+        self.validate(&request, &[])?;
+        let now = Utc::now();
+        let memo = Memo {
+            id: Uuid::new_v4().to_string(),
             timestamp: now,
-            date,
+            date: Local::now().format("%Y-%m-%d").to_string(),
             content: request.content,
             images: request.images,
             tags: request.tags,
-            file_path,
+            file_path: String::new(),
             created_at: now,
-        })
+            revision: 1,
+        };
+        self.db.transaction(|conn| {
+            conn.execute("INSERT INTO memos(id,timestamp,date,content,images,tags,file_path,created_at,revision) VALUES(?1,?2,?3,?4,?5,?6,'',?2,1)",params![memo.id,memo.timestamp.to_rfc3339(),memo.date,memo.content,json(&memo.images)?,json(&memo.tags)?])?;
+            publish_references(conn,&memo)?;
+            Ok(())
+        })?;
+        Ok(memo)
+    }
+
+    pub fn get_memo(&self, id: &str) -> Result<Memo, BrainError> {
+        let rows = self.db.query_memos("SELECT id,timestamp,date,content,images,tags,file_path,created_at,revision FROM memos WHERE id=?", &[id.into()])?;
+        rows.into_iter()
+            .next()
+            .map(|r| self.row_to_memo(r))
+            .ok_or_else(|| BrainError::MemoNotFound(id.into()))
+    }
+
+    pub async fn update_memo(
+        &self,
+        id: &str,
+        revision: i64,
+        request: MemoCreateRequest,
+    ) -> Result<Memo, BrainError> {
+        let _guard = self.images.mutation.lock().await;
+        let old = self.get_memo(id)?;
+        self.validate(&request, &old.images)?;
+        let updated = Memo {
+            content: request.content,
+            images: request.images,
+            tags: request.tags,
+            revision: old.revision + 1,
+            ..old.clone()
+        };
+        self.db.transaction(|conn| {
+            if conn.execute("UPDATE memos SET content=?1,images=?2,tags=?3,revision=revision+1 WHERE id=?4 AND revision=?5",params![updated.content,json(&updated.images)?,json(&updated.tags)?,id,revision])? !=1 { return Err(BrainError::MemoConflict("小记已被修改，请刷新后重试".into())); }
+            queue_old_images(conn,&old)?;
+            publish_references(conn,&updated)?;
+            Ok(())
+        })?;
+        let pending = self.images.collect_locked().await?;
+        if pending > 0 {
+            tracing::warn!(pending, "小记保存成功，部分图片清理待重试");
+        }
+        Ok(updated)
+    }
+
+    pub async fn delete_memo(&self, id: &str, revision: i64) -> Result<u64, BrainError> {
+        let _guard = self.images.mutation.lock().await;
+        let old = self.get_memo(id)?;
+        self.db.transaction(|conn| {
+            if conn.execute(
+                "DELETE FROM memos WHERE id=?1 AND revision=?2",
+                params![id, revision],
+            )? != 1
+            {
+                return Err(BrainError::MemoConflict(
+                    "小记已被修改，请刷新后重试".into(),
+                ));
+            }
+            queue_old_images(conn, &old)?;
+            Ok(())
+        })?;
+        self.images.collect_locked().await
     }
 
     /// 统计小记总数
@@ -130,7 +132,7 @@ impl MemoManager {
         request: BrowseTimelineRequest,
     ) -> Result<Vec<Memo>, BrainError> {
         let mut sql = String::from(
-            "SELECT id, timestamp, date, content, images, tags, file_path, created_at FROM memos WHERE 1=1",
+            "SELECT id, timestamp, date, content, images, tags, file_path, created_at, revision FROM memos WHERE 1=1",
         );
         let mut params = Vec::new();
 
@@ -156,9 +158,12 @@ impl MemoManager {
     /// 搜索小记
     pub async fn search_memos(&self, query: MemoQuery) -> Result<Vec<Memo>, BrainError> {
         let mut sql = String::from(
-            "SELECT id, timestamp, date, content, images, tags, file_path, created_at FROM memos WHERE content LIKE ?",
+            "SELECT id, timestamp, date, content, images, tags, file_path, created_at, revision FROM memos WHERE (content LIKE ? OR tags LIKE ?)",
         );
-        let mut params = vec![format!("%{}%", query.query.unwrap_or_default())];
+        let mut params = vec![
+            format!("%{}%", query.query.clone().unwrap_or_default()),
+            format!("%{}%", query.query.unwrap_or_default()),
+        ];
 
         if let Some(ref start) = query.start_date {
             sql.push_str(" AND date >= ?");
@@ -185,10 +190,9 @@ impl MemoManager {
         Ok(memos)
     }
 
-    /// 将数据库行转换为 Memo 对象
     fn row_to_memo(
         &self,
-        (id, timestamp, date, content, images, tags, file_path, created_at): (
+        (id, timestamp, date, content, images, tags, file_path, created_at, revision): (
             String,
             String,
             String,
@@ -197,296 +201,50 @@ impl MemoManager {
             String,
             String,
             String,
+            i64,
         ),
     ) -> Memo {
-        let images: Vec<String> = serde_json::from_str(&images).unwrap_or_default();
-        let tags: Vec<String> = serde_json::from_str(&tags).unwrap_or_default();
-
         Memo {
             id,
             timestamp: chrono::DateTime::parse_from_rfc3339(&timestamp)
                 .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now()),
+                .unwrap_or_default(),
             date,
             content,
-            images,
-            tags,
+            images: serde_json::from_str(&images).unwrap_or_default(),
+            tags: serde_json::from_str(&tags).unwrap_or_default(),
             file_path,
             created_at: chrono::DateTime::parse_from_rfc3339(&created_at)
                 .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now()),
+                .unwrap_or_default(),
+            revision,
         }
     }
+}
 
-    /// 从 Obsidian 文件同步小记到数据库
-    pub async fn sync_from_obsidian(&self, months: u32) -> Result<(u32, u32), BrainError> {
-        let obsidian = crate::infra::obsidian_client::get_client(&self.obsidian)?;
+fn json(items: &[String]) -> Result<String, BrainError> {
+    serde_json::to_string(items).map_err(|e| BrainError::Internal(e.to_string()))
+}
 
-        // 计算需要同步的月份列表和完整日期范围
-        let now = Local::now();
-        let mut month_files = Vec::new();
-        let mut all_dates_in_range: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
-        for i in 0..months {
-            let target = now - chrono::Duration::days(30 * i as i64);
-            month_files.push(format!(
-                "Timeline/{:04}-{:02}.md",
-                target.year(),
-                target.month()
-            ));
-            // Generate all dates in this month for the deletion scope
-            let year = target.year();
-            let month = target.month();
-            let days_in_month =
-                chrono::NaiveDate::from_ymd_opt(year, if month == 12 { 1 } else { month + 1 }, 1)
-                    .map(|d| {
-                        d.signed_duration_since(
-                            chrono::NaiveDate::from_ymd_opt(year, month, 1).unwrap(),
-                        )
-                        .num_days()
-                    })
-                    .unwrap_or(30);
-            for day in 1..=days_in_month {
-                if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, day as u32) {
-                    all_dates_in_range.insert(date.format("%Y-%m-%d").to_string());
-                }
-            }
-        }
-
-        let mut total_synced = 0u32;
-        let mut all_sync_ids: Vec<String> = Vec::new();
-
-        // Collect all memos from Obsidian first
-        let mut all_memos: Vec<Memo> = Vec::new();
-        for file_path in &month_files {
-            let content = match obsidian.read_file(file_path).await {
-                Ok(c) => c,
-                Err(_) => {
-                    tracing::debug!(path = %file_path, "月份文件不存在，跳过");
-                    continue;
-                }
-            };
-            let memos = self.parse_month_file(&content, file_path);
-            for memo in memos {
-                all_sync_ids.push(memo.id.clone());
-                all_memos.push(memo);
-            }
-        }
-
-        // Delete memos in synced date range that no longer exist in Obsidian.
-        // Keep IDs from both the parsed sync IDs AND any existing DB memos that
-        // match by timestamp (so we don't delete-then-reinsert memos created via
-        // the app that have UUID ids — we update them in place instead).
-        let mut all_keep_ids: std::collections::HashSet<String> =
-            all_sync_ids.iter().cloned().collect();
-        for memo in &all_memos {
-            let ts_rfc3339 = memo.timestamp.to_rfc3339();
-            if let Ok(Some(existing_id)) = self.db.find_memo_id_by_timestamp(&ts_rfc3339) {
-                all_keep_ids.insert(existing_id);
-            }
-        }
-        let all_keep_vec: Vec<String> = all_keep_ids.into_iter().collect();
-
-        let deleted = self
-            .db
-            .delete_memos_not_by_ids(&all_dates_in_range, &all_keep_vec)?;
-        if deleted > 0 {
-            tracing::info!(deleted = deleted, "已删除 Obsidian 中不存在的小记");
-        }
-
-        // Upsert all memos from Obsidian. For each memo, if an existing DB memo
-        // has the same timestamp (created via the app with a UUID id), update
-        // that row in place — preserving the original id and created_at.
-        for memo in &all_memos {
-            let ts = memo.timestamp.to_rfc3339();
-            let images_json =
-                serde_json::to_string(&memo.images).unwrap_or_else(|_| "[]".to_string());
-            let tags_json = serde_json::to_string(&memo.tags).unwrap_or_else(|_| "[]".to_string());
-
-            // Try to find an existing memo with the same timestamp (UUID id from create_memo).
-            let effective_id = match self.db.find_memo_id_by_timestamp(&ts) {
-                Ok(Some(existing_id)) => existing_id, // Update in place, preserve id + created_at
-                _ => memo.id.clone(),                 // New memo, use sync: id
-            };
-
-            self.db.upsert_memo(
-                &effective_id,
-                &ts,
-                &memo.date,
-                &memo.content,
-                &images_json,
-                &tags_json,
-                &memo.file_path,
-            )?;
-            total_synced += 1;
-        }
-
-        tracing::info!(
-            months = months,
-            synced = total_synced,
-            deleted = deleted,
-            "Obsidian 小记同步完成"
-        );
-        Ok((total_synced, deleted))
+fn queue_old_images(conn: &Connection, memo: &Memo) -> Result<(), BrainError> {
+    for path in &memo.images {
+        conn.execute(
+            "INSERT OR IGNORE INTO timeline_image_gc(path) VALUES(?1)",
+            [path],
+        )?;
     }
+    conn.execute("INSERT OR IGNORE INTO timeline_image_gc(path) SELECT path FROM timeline_images WHERE instr(?1,path)>0",[&memo.content])?;
+    Ok(())
+}
 
-    /// 解析月份 Markdown 文件，提取小记
-    fn parse_month_file(&self, content: &str, file_path: &str) -> Vec<Memo> {
-        let mut memos = Vec::new();
-        let mut current_date = String::new();
-        let mut current_time = String::new();
-        let mut current_content = String::new();
-        let mut current_images: Vec<String> = Vec::new();
-        let mut current_tags: Vec<String> = Vec::new();
-
-        for line in content.lines() {
-            let trimmed = line.trim();
-
-            // ## YYYY-MM-DD
-            if trimmed.starts_with("## ") && trimmed.len() >= 13 {
-                let date_part = trimmed[3..].trim();
-                if date_part.len() >= 10 && date_part.chars().nth(4) == Some('-') {
-                    self.flush_memo(
-                        &mut memos,
-                        &current_date,
-                        &current_time,
-                        &current_content,
-                        &current_images,
-                        &current_tags,
-                        file_path,
-                    );
-                    current_date = date_part[..10].to_string();
-                    current_time.clear();
-                    current_content.clear();
-                    current_images.clear();
-                    current_tags.clear();
-                    continue;
-                }
-            }
-
-            // ### HH:MM:SS
-            if trimmed.starts_with("### ") && trimmed.len() >= 12 {
-                let time_part = trimmed[4..].trim();
-                if time_part.len() >= 8 && time_part.chars().nth(2) == Some(':') {
-                    self.flush_memo(
-                        &mut memos,
-                        &current_date,
-                        &current_time,
-                        &current_content,
-                        &current_images,
-                        &current_tags,
-                        file_path,
-                    );
-                    current_time = time_part[..8].to_string();
-                    current_content.clear();
-                    current_images.clear();
-                    current_tags.clear();
-                    continue;
-                }
-            }
-
-            // --- separator
-            if trimmed == "---" {
-                self.flush_memo(
-                    &mut memos,
-                    &current_date,
-                    &current_time,
-                    &current_content,
-                    &current_images,
-                    &current_tags,
-                    file_path,
-                );
-                current_content.clear();
-                current_images.clear();
-                current_tags.clear();
-                continue;
-            }
-
-            // ![[image.png]]
-            if trimmed.starts_with("![") && trimmed.contains("]]") {
-                if let Some(start) = trimmed.find("[[") {
-                    if let Some(end) = trimmed.find("]]") {
-                        let img_path = &trimmed[start + 2..end];
-                        current_images.push(img_path.to_string());
-                        continue;
-                    }
-                }
-            }
-
-            // #tag (but not ## headings or # title)
-            if trimmed.starts_with('#') && !trimmed.starts_with("# ") && !trimmed.starts_with("##")
-            {
-                for word in trimmed.split_whitespace() {
-                    if let Some(tag) = word.strip_prefix('#') {
-                        let tag = tag.trim();
-                        if !tag.is_empty() {
-                            current_tags.push(tag.to_string());
-                        }
-                    }
-                }
-                continue;
-            }
-
-            // Skip # title and ## heading lines
-            if trimmed.starts_with("# ") || trimmed.starts_with("## ") {
-                continue;
-            }
-
-            // Regular content
-            if !current_time.is_empty() && !trimmed.is_empty() {
-                if !current_content.is_empty() {
-                    current_content.push('\n');
-                }
-                current_content.push_str(trimmed);
-            }
-        }
-
-        // Flush last memo
-        self.flush_memo(
-            &mut memos,
-            &current_date,
-            &current_time,
-            &current_content,
-            &current_images,
-            &current_tags,
-            file_path,
-        );
-
-        memos
+fn publish_references(conn: &Connection, memo: &Memo) -> Result<(), BrainError> {
+    for path in &memo.images {
+        conn.execute("UPDATE timeline_images SET pending=0 WHERE path=?1", [path])?;
+        conn.execute("DELETE FROM timeline_image_gc WHERE path=?1", [path])?;
     }
-
-    #[allow(clippy::too_many_arguments)]
-    fn flush_memo(
-        &self,
-        memos: &mut Vec<Memo>,
-        date: &str,
-        time: &str,
-        content: &str,
-        images: &[String],
-        tags: &[String],
-        file_path: &str,
-    ) {
-        if date.is_empty() || time.is_empty() || content.is_empty() {
-            return;
-        }
-
-        let id = format!("sync:{}:{}:{}", file_path, date, time);
-        // Use local timezone for the timestamp (matches create_memo's Local::now()).
-        let offset_str = Local::now().format("%:z").to_string();
-        let timestamp_str = format!("{}T{}{}", date, time, offset_str);
-        let timestamp = chrono::DateTime::parse_from_rfc3339(&timestamp_str)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
-
-        memos.push(Memo {
-            id,
-            timestamp,
-            date: date.to_string(),
-            content: content.to_string(),
-            images: images.to_vec(),
-            tags: tags.to_vec(),
-            file_path: file_path.to_string(),
-            created_at: timestamp,
-        });
-    }
+    conn.execute(
+        "UPDATE timeline_images SET pending=0 WHERE instr(?1,path)>0",
+        [&memo.content],
+    )?;
+    Ok(())
 }

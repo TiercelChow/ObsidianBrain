@@ -17,7 +17,7 @@ use crate::api::handlers::knowledge_export::download_book_wiki_export;
 use crate::api::handlers::knowledge_skill::upload_wiki_skill_archive;
 use crate::api::handlers::reader_file::serve_reader_file;
 use crate::api::handlers::tool_handler::{call_tool, list_tools};
-use crate::api::handlers::upload::{serve_thumbnail, serve_vault_image, upload_images};
+use crate::api::handlers::upload::{serve_image, serve_thumbnail, upload_images};
 use crate::frontend_assets;
 use crate::AppContext;
 
@@ -32,11 +32,22 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
     // API routes under /v1 prefix.
     let api_routes = Router::new()
         .route("/health", get(health_check))
+        .route(
+            "/home/overview",
+            get(crate::api::handlers::home::home_overview),
+        )
+        .route(
+            "/timeline/memos/:id",
+            get(crate::api::handlers::home::home_memo),
+        )
         .route("/tools", get(list_tools))
         .route("/tools/call", post(call_tool))
         .route("/upload/images", post(upload_images))
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024)) // 50MB for image uploads
-        .route("/vault/images/*path", get(serve_vault_image))
+        .route("/timeline/images/*path", get(serve_image))
+        .route("/timeline/thumbnails/*path", get(serve_thumbnail))
+        // Compatibility URLs for existing records; both now read local assets only.
+        .route("/vault/images/*path", get(serve_image))
         .route("/vault/thumbnails/*path", get(serve_thumbnail))
         .route("/reader/raw", get(serve_reader_file))
         .route("/knowledge/agent-mcp", post(agent_mcp))
