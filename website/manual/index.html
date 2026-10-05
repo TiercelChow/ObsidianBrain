@@ -150,7 +150,7 @@ cargo build --release</code></pre>
             <li><strong>查看状态：</strong><code>obsidian-brain status</code></li>
             <li><strong>前台排错：</strong><code>obsidian-brain start --foreground</code></li>
             <li><strong>数据目录：</strong>默认位于用户主目录下的 <code>.obsidian-brain/</code>；任务数据库也在其中。</li>
-            <li><strong>连接时光机：</strong>需要在 Obsidian 安装 Local REST API 社区插件，并在 ObsidianBrain 首页配置 Vault 路径、服务地址和 API Key。阅境轩读取本地文件、任务中枢使用本地 SQLite，不依赖此插件。</li>
+            <li><strong>独立运行：</strong>不再需要 Obsidian 或 Local REST API 插件。小记和任务保存在本地 SQLite，时光机原图保存在数据库同级 <code>timeline/images/</code>；默认位于 <code>~/.obsidian-brain/</code>。</li>
           </ul>
         </section>
 
@@ -236,7 +236,7 @@ cargo build --release</code></pre>
             <div class="feature-card">
               <div class="feature-icon">🔍</div>
               <h3>关键词搜索</h3>
-              <p>输入后约 300 毫秒自动查询小记正文，可与日期范围组合。搜索结果中的关键词会被高亮。</p>
+              <p>输入后约 300 毫秒自动查询小记正文与标签，可与日期范围组合。搜索结果中的关键词会被高亮。</p>
             </div>
           </div>
 
@@ -244,21 +244,24 @@ cargo build --release</code></pre>
           <ol class="manual-steps">
             <li><span>1</span><div><strong>打开编辑器</strong><p>点击右上角「写小记」，写下正文；支持常用 Markdown 语法。</p></div></li>
             <li><span>2</span><div><strong>添加上下文</strong><p>按需输入标签，并通过「图片」按钮选择图片，或者直接粘贴截图。</p></div></li>
-            <li><span>3</span><div><strong>发布</strong><p>点击「发布小记」。最新内容会立即加入时间线顶部。</p></div></li>
+            <li><span>3</span><div><strong>发布</strong><p>点击「发布小记」。可以只记录文字或只添加图片，最新内容会立即加入时间线顶部。每张图片不超过 20 MB，支持 PNG、JPEG、GIF、WebP。</p></div></li>
             <li><span>4</span><div><strong>继续回看</strong><p>每次加载 20 条；到列表底部后点击「加载更多」继续读取。</p></div></li>
           </ol>
 
-          <h3>图片与同步</h3>
+          <h3>编辑、删除与图片存储</h3>
           <ul class="manual-points">
             <li><strong>查看图片：</strong>点击缩略图进入大图查看器；支持上一张、下一张、放大、缩小和重置。</li>
-            <li><strong>Obsidian 存储：</strong>正文按月追加到 <code>Timeline/YYYY-MM.md</code>，图片保存到 <code>Timeline/images/</code>。</li>
-            <li><strong>查询索引：</strong>SQLite 保存小记元数据，页面的浏览、日期筛选和正文搜索从这里读取。</li>
-            <li><strong>手动同步：</strong>如果直接在 Obsidian 中修改了月份文件，点击「同步」会重新读取最近 3 个月，并把这段范围内的增删变化同步到 SQLite。</li>
+            <li><strong>编辑小记：</strong>电脑端使用卡片右上角编辑图标，手机端点击「更多」打开底部操作抽屉；可以修改正文、标签、增删图片，记录时间保持不变。其他设备已修改同一条小记时，系统提示版本冲突，不会覆盖新内容。</li>
+            <li><strong>删除小记：</strong>确认后从 SQLite 删除记录，同时清理没有其他小记引用的系统内原图与缩略图。共享图片保留；磁盘权限等导致的清理失败会显示待清理数量，并在下次启动和每 5 分钟重试。</li>
+            <li><strong>独立存储：</strong>SQLite 是小记唯一事实来源，默认原图位于 <code>timeline/images/</code>。自定义数据库文件名会使用独立的 <code>timeline-&lt;哈希&gt;/</code>，以「图片存储」显示的实际目录为准；不再从 Obsidian 月份文件同步或回写。</li>
+            <li><strong>有界缓存：</strong>可重建缩略图位于 <code>timeline/cache/</code>，默认上限 256 MB（按 1024 计），超过后按 LRU 淘汰最久未使用的缓存。时光机「图片存储」可调整 0–4096 MB 上限或清空缓存，设为 0 不缓存，原图不受影响。</li>
+            <li><strong>迁移旧图片：</strong>在「图片存储」选择含 <code>Timeline/</code> 的旧目录，点击「复制旧图片」手动搬运一次即可；启动时不会自动扫描或搬运旧目录。只复制已被小记引用的旧图片，不改动旧库 Markdown 或原图，缺图仍保留小记并支持手动重试。</li>
+            <li><strong>暂存清理：</strong>取消编辑会释放本次新增、尚未发布的图片；异常中断遗留的未引用暂存图片，24 小时后自动回收。</li>
           </ul>
 
           <div class="callout">
             <span class="callout-icon">ℹ️</span>
-            <span><strong>当前边界：</strong>时光机页面暂不提供已发布小记的编辑和删除操作。需要修改时，可在 Obsidian 中编辑对应月份文件，再回到页面执行同步。</span>
+            <span><strong>备份注意：</strong>SQLite 一致快照不包含原图。完整备份需要保留数据库及同级 <code>timeline/images/</code>，缓存无需备份；备份时暂停写入并使用一致快照。恢复数据库不能找回已经物理删除的照片，确认旧图片迁移完成前请保留旧库。</span>
           </div>
         </section>
 

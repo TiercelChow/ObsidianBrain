@@ -19,8 +19,10 @@
 ### 时光机
 - 类似朋友圈的碎片想法记录，支持 Markdown + 图片
 - 关键词搜索 + 时间筛选 + 标签
-- 与 Obsidian 双向同步
-- 图片缩略图加速加载
+- SQLite 独立保存小记，支持编辑正文、标签、附件和删除；保留记录时间，版本冲突不覆盖
+- 原图保存在应用数据目录；删除或移除附件会清理无引用原图和缩略图，共享图片保留
+- 缩略图默认 256 MiB 的字节容量上限，超限按 LRU 淘汰，支持调整上限和清空缓存
+- 旧图片只复制迁入、不改动旧库；缺图保留小记并提供重试入口，不再依赖 Obsidian 或插件
 
 ### 阅境轩·书籍知识库（Book Wiki）
 - 阅境轩书架中的每个 Markdown 文集都可建立一个相互隔离的知识库；PDF 继续用于阅读，不进入 Book Wiki
@@ -43,7 +45,7 @@
 
 ### 其他
 - 代码仓（「日常」下：注册、详情、VS Code 打开）
-- 系统配置（Obsidian 连接支持热更新；保留通用 LLM Provider 的配置与验证）
+- 首页个人工作台（今日任务与逾期提醒、最近阅读、Wiki 编译/研究/审核动态、最近小记及系统存储概况；卡片可直接定位到对应内容）
 
 导航统一为「日常」和「知识」，不再提供「管理」分组。已移除的模块不再出现在页面或工具列表中，已有本地记录和迁移历史保留，不自动清理用户数据。
 
@@ -124,7 +126,7 @@ obsidian-brain start --host 127.0.0.1 --port 8080
 # 停止
 obsidian-brain stop
 
-# 查看运行状态（PID、运行时间、工具数、Vault 路径）
+# 查看运行状态（PID、运行时间、工具数、数据库路径）
 obsidian-brain status
 
 # 查看版本
@@ -154,7 +156,7 @@ OBRAIN__STORAGE__DB_PATH=/tmp/obsidianbrain-preview.db \
 cargo run -- start --foreground
 ```
 
-也可以设置 `OBRAIN_DATA_DIR=/tmp/obsidianbrain-preview`，一次隔离数据库、日志和缩略图。不要使用少一个下划线的 `OBRAIN_STORAGE__DB_PATH`，它不会覆盖正式数据库路径。
+也可以设置 `OBRAIN_DATA_DIR=/tmp/obsidianbrain-preview`，一次隔离数据库、日志和时光机图片。图片跟随配置后的数据库目录保存。不要使用少一个下划线的 `OBRAIN_STORAGE__DB_PATH`，它不会覆盖正式数据库路径。
 
 ### 产品官网
 
@@ -232,7 +234,7 @@ Harness 只接收后端召回的当前书籍证据。默认安全 Patch 会关�
 1. **代码默认值** — 内置在二进制中
 2. **`config/default.toml`** — 开发时从 `backend/config/` 读取（安装后的二进制不依赖此文件）
 3. **环境变量** — `OBRAIN__SERVER__HOST`、`OBRAIN__SERVER__PORT` 等（`__` 分隔层级）
-4. **数据库配置** — 通过 `obsidian-brain config set` 或首页控制面板设置，持久化到 `~/.obsidian-brain/brain.db`
+4. **数据库配置** — 通过 `obsidian-brain config set` 设置，持久化到 `~/.obsidian-brain/brain.db`；首页仅展示状态，功能配置在对应模块管理
 5. **CLI 参数** — `--host`、`--port`（仅当次启动有效，优先级最高）
 
 ### 可配置项
@@ -242,11 +244,6 @@ Harness 只接收后端召回的当前书籍证据。默认安全 Patch 会关�
 | `server.host` | `config set server.host "0.0.0.0"` | 绑定地址。`0.0.0.0` 允许局域网访问，`127.0.0.1` 仅本机 | `0.0.0.0` |
 | `server.port` | `config set server.port 9876` | 服务端口 | `9876` |
 | `storage.db_path` | `config set storage.db_path "/path/to/brain.db"` | SQLite 数据库路径 | `~/.obsidian-brain/brain.db` |
-| `vault.path` | `config set vault.path "/path/to/vault"` | Obsidian Vault 路径 | 空 |
-| `vault.name` | `config set vault.name "my-vault"` | Vault 名称 | `brain` |
-| `obsidian.enabled` | `config set obsidian.enabled true` | 启用 Obsidian REST API | `false` |
-| `obsidian.url` | `config set obsidian.url "https://127.0.0.1:27124"` | Obsidian REST API 地址 | `https://127.0.0.1:27124` |
-| `obsidian.api_key` | `config set obsidian.api_key "ey..."` | Obsidian REST API Key | 空 |
 | `llm.provider` | `config set llm.provider "openai"` | LLM 提供商（`openai` 或 `ollama`） | `openai` |
 | `llm.model` | `config set llm.model "gpt-4o-mini"` | 模型名称 | `gpt-4o-mini` |
 | `llm.api_key` | `config set llm.api_key "sk-xxx"` | LLM API Key | 空 |
@@ -269,7 +266,7 @@ obsidian-brain config set llm.api_key "sk-xxx"
 obsidian-brain config set llm.model "gpt-4o-mini"
 ```
 
-也可以通过首页控制面板（Web UI）配置 Obsidian 和 LLM，保存后热更新生效。
+时光机「图片存储」可查看原图目录、缓存用量、缺图和清理状态；保存缓存上限立即生效（0–4096 MiB，0 表示不缓存）。首页已移除本地图片与通用 LLM 的配置卡片；Book Wiki 的模型供应商在 Wiki 配置页面管理，已有配置不会因入口移除而删除。
 
 ### 局域网访问
 
@@ -282,12 +279,17 @@ obsidian-brain config set llm.model "gpt-4o-mini"
 
 如需仅本机访问：`obsidian-brain config set server.host "127.0.0.1"`，然后重启。
 
-### Obsidian Local REST API
+### 时光机旧图片迁移与数据完整性
 
-1. 在 Obsidian 中安装 [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) 插件
-2. 启用插件，复制 API Key
-3. 配置：`obsidian-brain config set obsidian.enabled true` + `obsidian-brain config set obsidian.api_key "你的Key"`
-4. 或通过首页控制面板填写
+系统不再调用 Obsidian Local REST API，也不再从月份 Markdown 文件同步增删小记。已有 SQLite 小记的 ID、时间、内容、标签和图片引用保持不变。
+
+启动时不会自动扫描或搬运旧目录。只需在时光机「图片存储」输入含 `Timeline/` 的旧库根目录，点击「复制旧图片」，一次性复制小记已引用的图片到本地原图目录。迁移可重复执行，旧库的 Markdown 和原图不会被修改、删除。缺失或不支持的图片会被报告，不会丢弃小记。
+
+也可使用一次性命令 `obsidian-brain migrate-timeline-images --database <已有数据库路径> --source <旧库根目录>`。它不启动服务、不连接 Obsidian，先创建包含 WAL 的一致数据库快照，保留已有备份，再复制图片；返回目标目录、快照路径与 copied/missing 结果。正式迁移前确认两个路径指向自己的数据。
+
+支持 PNG、JPEG、GIF、WebP，每条最多 9 张、每张最多 20 MiB，并验证真实格式与解码尺寸。删除小记或移除图片时，事务先更新记录与持久化清理队列，再删除无引用原图和缓存；失败每 5 分钟及下次启动重试。取消编辑会释放新增暂存图片；异常中断的未引用暂存图片 24 小时后回收。
+
+**完整备份需要数据库及同级 `timeline/images/`。** 现有 SQLite 快照不包含照片，恢复数据库也不会恢复已经物理删除的原图。备份前暂停写入，创建 SQLite 一致快照并复制原图目录；缓存可重建，无需备份。迁移 v59 前会自动创建数据库快照，但旧库照片仍需保留至确认迁移完成。
 
 ## 技术栈
 
@@ -312,7 +314,7 @@ ObsidianBrain/
 │   │   ├── frontend_assets.rs  # rust-embed 嵌入前端
 │   │   ├── api/                # HTTP 路由 + 工具调用
 │   │   ├── core/               # 业务逻辑（Book Wiki, timeline, tasks, reader...）
-│   │   ├── infra/              # SQLite、Obsidian/LLM 客户端、Harness ACP 适配器
+│   │   ├── infra/              # SQLite、本地图片/LRU 缓存、LLM 客户端、Harness ACP 适配器
 │   │   └── tools/              # Tool 注册 + 各模块 handler
 │   ├── migrations/             # SQLite schema（编译时嵌入）
 │   └── config/                 # Harness 安全 Patch 等运行配置
@@ -332,16 +334,19 @@ ObsidianBrain/
 
 ## 数据目录
 
-所有运行时数据在 `~/.obsidian-brain/`：
+默认运行时数据位于 `~/.obsidian-brain/`；时光机图片跟随 `storage.db_path` 所在目录：
+
+默认 `brain.db` 使用同级 `timeline/`。自定义数据库文件名使用同级 `timeline-<文件名哈希>/`，避免同目录内的不同数据库误清理对方图片；以时光机「图片存储」显示的实际原图目录为准。
 
 ```
 ~/.obsidian-brain/
-├── brain.db              # SQLite（书架、Book Wiki 实体/引用/任务、个人任务、配置）
+├── brain.db              # SQLite（书架、Book Wiki、小记/附件元数据、个人任务、配置）
 ├── backups/              # 受管 SQLite 一致快照
 ├── exports/              # 单书 JSONL / Markdown Wiki 导出
 ├── artifacts/            # PPTX 等研究成果
-├── thumbnails/           # 图片缩略图
-├── tantivy_index/        # 全文索引
+├── timeline/
+│   ├── images/           # 时光机原图（不参与缓存淘汰）
+│   └── cache/            # 缩略图（默认 256 MiB，按 LRU 淘汰）
 ├── obsidian-brain.pid    # PID 文件
 └── obsidian-brain.log    # 日志
 ```

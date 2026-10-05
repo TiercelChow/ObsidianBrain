@@ -3,7 +3,7 @@
 > **版本**: v0.2 | **最后更新**: 2026-06-12 | **状态**: 设计中
 > **关联文档**: [顶层设计文档](../top_design.md) | [需求设计文档](../requirement/01-infrastructure.md)
 >
-> **架构说明**：项目已从混合搜索架构（Tantivy + Qdrant + Embedding）简化为直接使用 Obsidian Local REST API。不再需要本地索引、向量存储或 Embedding 服务。
+> **当前架构（2026-10-04）**：系统不再调用 Obsidian Local REST API。SQLite 管理小记、任务、书架与 Book Wiki；`TimelineImages` 管理数据库同级的原图、字节容量受限的 LRU 缓存和清理队列。以下旧 Obsidian/Memory Client 设计只作历史参考，现行方案见[本地存储实施文档](2026-10-04-local-timeline-storage.md)。
 
 ---
 

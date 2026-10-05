@@ -1,499 +1,86 @@
-# 时光机模块 (Time Machine) — 开发设计文档
+# 时光机 — 开发设计
 
-> **文档编号**: DEV-04 | **版本**: v2.0 | **状态**: 设计中 | **最后更新**: 2026-06-02
->
-> **上游依赖**: [顶层设计文档](../top_design.md) §5.2 时光机 | [需求设计文档](../requirement/04-timeline.md)
+> DEV-04 · v3.0 · 2026-10-04 · 已实施
+> 上游：[需求设计](../requirement/04-timeline.md) · [实施与风险](2026-10-04-local-timeline-storage.md)
 
----
+## 1. 分层
 
-## 1. 技术架构详细设计
+Timeline.vue → Tool API / 图片 HTTP API → MemoManager → SqliteStore + TimelineImages。
 
-### 1.1 架构概览
+MemoManager 位于 core/timeline，负责 CRUD、校验、版本和查询；infra/TimelineImages 管理本地图片、安全复制、缩略图、LRU 和 GC。API 不再访问笔记应用。ObsidianClient、MemoryService 和旧搜索/同步 handler 已移除。
 
-时光机模块位于 `core` 层，对外通过 Tool API 暴露 `create_memo`、`browse_timeline`、`search_memos` 三个工具，对内通过 Obsidian Local REST API 进行文件操作，通过 SQLite 存储元数据。模块内部采用 **创建 → 存储 → 查询** 的简洁架构。
+原图和缓存跟随配置的数据库目录，默认 ~/.obsidian-brain/timeline/{images,cache}。原图文件名 UUID，逻辑引用保留 Timeline/images/...；旧逻辑路径可映射新 UUID，不必修改小记正文。
 
-```
-┌────────────────────────────────────────────────────────────────────┐
-│                       Time Machine Service                          │
-│                                                                    │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │                    小记管理层 (Memo Manager)                   │  │
-│  │                                                              │  │
-│  │  ┌──────────────┐ ┌──────────────┐ ┌─────────────────────┐  │  │
-│  │  │ Create Memo  │ │ Browse       │ │ Search Memos        │  │  │
-│  │  │              │ │ Timeline     │ │                     │  │  │
-│  │  └──────┬───────┘ └──────┬───────┘ └──────────┬──────────┘  │  │
-│  └─────────┼────────────────┼──────────────────┼─────────────┘  │
-│            │                │                  │                 │
-│            ▼                ▼                  ▼                 │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │              存储层 (Storage Layer)                            │  │
-│  │                                                              │  │
-│  │  ┌──────────────────┐ ┌──────────────────┐                  │  │
-│  │  │ SQLite Store     │ │ Obsidian API     │                  │  │
-│  │  │ (memos 表)       │ │ (Timeline 文件夹) │                  │  │
-│  │  └──────────────────┘ └──────────────────┘                  │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────┘
-         │                                              ▲
-         │ 创建/查询                                     │ Tool API 调用
-         ▼                                              │
-┌─────────────────┐  ┌─────────────┐  ┌──────────────────────────┐
-│    SQLite       │  │  Obsidian   │  │     Tool API Handler     │
-│  (brain.db)    │  │  Local API  │  │  create_memo / browse   │
-└─────────────────┘  └─────────────┘  └──────────────────────────┘
-```
+默认 brain.db 使用 timeline，其他数据库文件名用 timeline-<文件名哈希> 隔离，不共享 GC。相对路径使用本地同级目录，不回落全局数据区；实际目录由存储面板显示。
 
-### 1.2 模块间依赖关系
+## 2. 迁移与数据合同
 
-```
-Time Machine Service 依赖：
-├── infra::sqlite_store    — SQLite 读写（元数据存储）
-├── infra::obsidian_client — Obsidian API（文件操作）
-└── infra::llm_client      — LLM 摘要生成（可选，用于未来扩展）
-```
+v59 保留所有旧记录和历史迁移，条件式添加 memos.revision（默认 1），创建：
 
----
-
-## 2. 目录与文件组织
-
-### 2.1 文件布局
-
-```
-src/
-├── core/
-│   ├── timeline/
-│   │   ├── mod.rs                  # 模块入口：TimeMachineService 定义
-│   │   ├── memo_manager.rs         # 小记管理器（创建、浏览、搜索）
-│   │   └── store.rs                # 元数据存储层（SQLite CRUD）
-├── models/
-│   └── timeline.rs                 # 数据模型（Memo、MemoQuery 等）
-└── tools/
-    └── handlers/
-        └── timeline_handlers.rs    # Tool API Handler
-```
-
-### 2.2 文件职责
-
-| 文件 | 职责 |
+| 表 | 用途 |
 |---|---|
-| `core/timeline/mod.rs` | 模块入口，TimeMachineService 结构定义与初始化 |
-| `core/timeline/memo_manager.rs` | 小记管理器，处理创建、浏览、搜索逻辑 |
-| `core/timeline/store.rs` | SQLite 元数据存储，提供 CRUD 接口 |
-| `models/timeline.rs` | 数据模型定义（Memo、MemoQuery 等） |
-| `tools/handlers/timeline_handlers.rs` | Tool API Handler，暴露 3 个工具 |
+| memos | ID、时间戳、本地日期、正文、图片/标签 JSON、revision；旧 file_path 兼容保留 |
+| timeline_images | path → 唯一 filename、MIME、字节大小、创建时间、pending |
+| timeline_image_gc | 持久化待清理 path |
+| timeline_image_cache | 缓存 key、实际字节大小、last_used 单调 LRU 次序 |
 
----
+app_state.timeline_cache_limit_bytes 默认 256 * 1024 * 1024；timeline_legacy_directory 保存手动导入的默认旧目录。启动剥离 system_config 的 obsidian/vault 字段，其他设置保留；不自动尝试旧图片迁入。迁移前沿用在线数据库快照，不改历史 SQL。
 
-## 3. 数据模型详细设计
+## 3. 并发与完整性
 
-### 3.1 Memo（小记）
+TimelineImages.mutation 串行化发布、复制、CRUD、读取和 GC；缓存另设 cache_lock。锁顺序 mutation → cache → SQLite 短事务，不在 SQLite 事务内 await。恢复数据库同样持有 mutation，避免与清理竞争。
 
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Memo {
-    pub id: String,               // UUID
-    pub timestamp: DateTime<Utc>, // 精确时间戳
-    pub date: String,             // YYYY-MM-DD
-    pub content: String,          // 小记内容（Markdown）
-    pub images: Vec<String>,      // 图片路径列表
-    pub tags: Vec<String>,        // 标签列表
-    pub file_path: String,        // 月份文件路径
-    pub created_at: DateTime<Utc>,
-}
-```
+上传校验真实图片，20 MiB、宽高 16000、解码内存 128 MiB；CPU 解码 spawn_blocking。临时文件写入并 sync 后以不覆盖方式原子发布，登记失败删除新文件；pending 图片保存后成为正式引用。
 
-### 3.2 MemoQuery（查询参数）
+创建至少正文或图片一项，正文 ≤100000 字节、图片 ≤9、标签 ≤30。新引用必须是存在的受管资产；编辑允许原样保留尚未迁入的旧附件。
 
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemoQuery {
-    pub query: Option<String>,      // 搜索关键词
-    pub start_date: Option<String>, // YYYY-MM-DD
-    pub end_date: Option<String>,   // YYYY-MM-DD
-    pub tags: Option<Vec<String>>,  // 标签筛选
-    pub limit: usize,               // 每页数量
-    pub offset: usize,              // 偏移量
-}
-```
+更新/删除 WHERE 匹配 ID 与 expected_revision，影响行数不是 1 则回滚并返回 MEMO_VERSION_CONFLICT。编辑保留记录 ID/timestamp/date/created_at，revision +1。
 
-### 3.3 MemoCreateRequest（创建请求）
+事务同时写待清理队列，不先删原图。GC 再检查全体 memos 图片 JSON 和正文路径引用，无引用才删缓存/原图，再事务移除元数据与队列。权限/IO 失败保留队列，删除返回 pending_cleanup，启动和每 300 秒重试。
 
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemoCreateRequest {
-    pub content: String,            // 小记内容
-    pub images: Vec<String>,        // 图片路径列表
-    pub tags: Vec<String>,          // 标签列表
-}
-```
+discard 只释放 pending 图片，已发布或已被引用的附件仍保护。pending 超过 24 小时且无引用才回收。宕机留下的未登记原图有 24 小时宽限，派生缓存孤儿立即清理；只处理专用目录普通文件，不递归删除旧库。
 
-### 3.4 SQLite 表结构
+## 4. LRU 缓存
 
-```sql
-CREATE TABLE IF NOT EXISTS memos (
-    id          TEXT PRIMARY KEY,
-    timestamp   DATETIME NOT NULL,
-    date        TEXT NOT NULL,
-    content     TEXT NOT NULL,
-    images      TEXT,               -- JSON 数组
-    tags        TEXT,               -- JSON 数组
-    file_path   TEXT NOT NULL,
-    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-);
+key 的 SHA-256 是文件名。按字节统计，last_used 升序淘汰；命中设为 MAX +1，避免同一秒碰撞。生成 400×400 内 JPEG，发布前预留空间并淘汰，发布后核对容量。单张超额不缓存；0 禁用；缩容量立即淘汰；清空后保留原上限。
 
-CREATE INDEX idx_memos_timestamp ON memos(timestamp DESC);
-CREATE INDEX idx_memos_date ON memos(date);
-CREATE INDEX idx_memos_tags ON memos(tags);
-```
+缓存写入失败仍返回生成图片；缩略图生成失败尝试原图。HTTP 使用真实 MIME、Cache-Control: no-store、X-Content-Type-Options: nosniff。没有无限图片内存缓存，原图不参与 LRU。
 
----
+## 5. 一次性复制
 
-## 4. 核心功能实现
+从 memos JSON 和 Markdown/wiki 图片嵌入发现路径。无效 JSON 不直接交给 json_each，正文引用依旧保护。安全路径拒绝绝对路径、..、反斜线、冒号与 NUL，来源 canonicalize 后需在选定旧目录内。目标使用 UUID，读取拒绝符号链接原图。
 
-### 4.1 创建小记 (create_memo)
+只复制缺少本地映射的被引用图片，不改正文/记录/旧 Markdown。返回 copied/missing，可重复执行。复制期间小记被删除，刚复制的无引用图片也进入 GC。旧目录永远只读。
 
-**实现步骤**：
+触发入口仅为 import_timeline_images 工具（存储面板）或 migrate-timeline-images --database <已有数据库> --source <旧根目录> CLI。CLI 不启动 HTTP/Agent/其他服务；先验证输入和数据库完整性，以 SQLite 在线备份 API 创建一致快照（含 WAL），保留现有备份，再执行 schema 迁移和图片复制。报告复制数量、缺失路径和快照位置。服务启动与每 300 秒只维护本地 GC/LRU，不导入旧图。
 
-1. **生成小记 ID**：使用 UUID v4
-2. **记录时间戳**：精确到秒
-3. **生成文件路径**：`Timeline/YYYY-MM.md`
-4. **格式化 Markdown 内容**：
-   ```markdown
-   ### HH:MM:SS
-   小记内容...
-   
-   ![[Timeline/images/image1.png]]
-   
-   #tag1 #tag2
-   
-   ---
-   ```
-5. **写入 Obsidian 文件**：使用 Obsidian API `PUT /vault/Timeline/YYYY-MM.md`（追加模式）
-6. **写入 SQLite 元数据**：存储元数据用于快速查询
+## 6. API
 
-**代码示例**：
-```rust
-pub async fn create_memo(&self, request: MemoCreateRequest) -> Result<Memo, BrainError> {
-    let id = Uuid::new_v4().to_string();
-    let now = Utc::now();
-    let date = now.format("%Y-%m-%d").to_string();
-    let time = now.format("%H:%M:%S").to_string();
-    
-    // 生成文件路径
-    let file_path = format!("Timeline/{}.md", now.format("%Y-%m"));
-    
-    // 格式化 Markdown 内容
-    let mut md_content = format!("### {}\n{}\n\n", time, request.content);
-    for img in &request.images {
-        md_content.push_str(&format!("![[{}]]\n", img));
-    }
-    if !request.tags.is_empty() {
-        md_content.push_str(&format!("\n{}\n", request.tags.iter()
-            .map(|t| format!("#{}", t))
-            .collect::<Vec<_>>()
-            .join(" ")));
-    }
-    md_content.push_str("\n---\n\n");
-    
-    // 写入 Obsidian 文件（追加模式）
-    self.obsidian.append_to_file(&file_path, &md_content).await?;
-    
-    // 写入 SQLite 元数据
-    let memo = Memo {
-        id: id.clone(),
-        timestamp: now,
-        date: date.clone(),
-        content: request.content,
-        images: request.images,
-        tags: request.tags,
-        file_path: file_path.clone(),
-        created_at: now,
-    };
-    self.store.insert_memo(&memo)?;
-    
-    Ok(memo)
-}
-```
-
-### 4.2 浏览时间线 (browse_timeline)
-
-**实现步骤**：
-
-1. **构建查询**：根据 `start_date`、`end_date`、`limit`、`offset` 构建 SQL 查询
-2. **查询 SQLite**：从 `memos` 表查询
-3. **格式化响应**：按时间倒序排列
-
-**代码示例**：
-```rust
-pub async fn browse_timeline(&self, query: MemoQuery) -> Result<Vec<Memo>, BrainError> {
-    let mut sql = String::from("SELECT * FROM memos WHERE 1=1");
-    let mut params = Vec::new();
-    
-    if let Some(ref start) = query.start_date {
-        sql.push_str(" AND date >= ?");
-        params.push(start.clone());
-    }
-    if let Some(ref end) = query.end_date {
-        sql.push_str(" AND date <= ?");
-        params.push(end.clone());
-    }
-    if let Some(ref tags) = query.tags {
-        for tag in tags {
-            sql.push_str(" AND tags LIKE ?");
-            params.push(format!("%{}%", tag));
-        }
-    }
-    
-    sql.push_str(" ORDER BY timestamp DESC LIMIT ? OFFSET ?");
-    params.push(query.limit.to_string());
-    params.push(query.offset.to_string());
-    
-    self.store.query_memos(&sql, &params)
-}
-```
-
-### 4.3 搜索小记 (search_memos)
-
-**实现步骤**：
-
-1. **构建全文搜索查询**：使用 SQLite 全文搜索（FTS5）
-2. **支持组合搜索**：关键词 + 时间范围 + 标签
-3. **相关性排序**：按相关性 + 时间排序
-
-**代码示例**：
-```rust
-pub async fn search_memos(&self, query: MemoQuery) -> Result<Vec<Memo>, BrainError> {
-    let mut sql = String::from("SELECT * FROM memos WHERE content MATCH ?");
-    let mut params = vec![query.query.clone().unwrap_or_default()];
-    
-    if let Some(ref start) = query.start_date {
-        sql.push_str(" AND date >= ?");
-        params.push(start.clone());
-    }
-    if let Some(ref end) = query.end_date {
-        sql.push_str(" AND date <= ?");
-        params.push(end.clone());
-    }
-    if let Some(ref tags) = query.tags {
-        for tag in tags {
-            sql.push_str(" AND tags LIKE ?");
-            params.push(format!("%{}%", tag));
-        }
-    }
-    
-    sql.push_str(" ORDER BY timestamp DESC LIMIT ? OFFSET ?");
-    params.push(query.limit.to_string());
-    params.push(query.offset.to_string());
-    
-    self.store.query_memos(&sql, &params)
-}
-```
-
----
-
-## 5. 工具接口实现
-
-### 5.1 create_memo
-
-**工具定义**：
-```json
-{
-  "name": "create_memo",
-  "description": "创建一条小记，支持文本和图片",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "content": {
-        "type": "string",
-        "description": "小记内容（支持 Markdown）"
-      },
-      "images": {
-        "type": "array",
-        "items": {"type": "string"},
-        "description": "图片路径列表"
-      },
-      "tags": {
-        "type": "array",
-        "items": {"type": "string"},
-        "description": "标签列表"
-      }
-    },
-    "required": ["content"]
-  }
-}
-```
-
-### 5.2 browse_timeline
-
-**工具定义**：
-```json
-{
-  "name": "browse_timeline",
-  "description": "浏览时间线，支持按时间范围筛选",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "start_date": {
-        "type": "string",
-        "description": "起始日期（YYYY-MM-DD）"
-      },
-      "end_date": {
-        "type": "string",
-        "description": "结束日期（YYYY-MM-DD）"
-      },
-      "limit": {
-        "type": "integer",
-        "default": 20
-      },
-      "offset": {
-        "type": "integer",
-        "default": 0
-      }
-    }
-  }
-}
-```
-
-### 5.3 search_memos
-
-**工具定义**：
-```json
-{
-  "name": "search_memos",
-  "description": "搜索小记内容",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "query": {
-        "type": "string",
-        "description": "搜索关键词"
-      },
-      "start_date": {
-        "type": "string",
-        "description": "起始日期（YYYY-MM-DD）"
-      },
-      "end_date": {
-        "type": "string",
-        "description": "结束日期（YYYY-MM-DD）"
-      },
-      "tags": {
-        "type": "array",
-        "items": {"type": "string"}
-      },
-      "limit": {
-        "type": "integer",
-        "default": 20
-      }
-    },
-    "required": ["query"]
-  }
-}
-```
-
----
-
-## 6. 前端 UI 设计
-
-### 6.1 页面布局
-
-```
-┌─────────────────────────────────────────────────────┐
-│  [创建小记按钮]                    [搜索框] [筛选]  │
-├──────────┬──────────────────────────────────────────┤
-│ 时间线   │                                          │
-│ (200px)  │  内容区                                  │
-│          │                                          │
-│ 2026-06  │  ┌─────────────────────────────────────┐│
-│  ├─ 02   │  │ 14:30:25                            ││
-│  ├─ 01   │  │ 这是一条小记...                     ││
-│          │  │ ![[image.png]]                      ││
-│ 2026-05  │  │ #灵感 #想法                         ││
-│  ├─ 28   │  └─────────────────────────────────────┘│
-│  ...     │                                          │
-└──────────┴──────────────────────────────────────────┘
-```
-
-### 6.2 组件设计
-
-**TimeMachine.vue**：
-- 左侧时间线：年月日树形结构；高亮为 scroll-spy——右侧列表滚动（rAF 节流）时取视口顶部最后一个越过 90px 阈值的日期分组头（`pickActiveDate`，utils/timelineSpy.ts），初次加载与数据变化后自动重同步，高亮日移出左轴时 `scrollIntoView({ block: 'nearest' })` 跟随；移动端左轴隐藏、联动跳过
-- 右侧内容区：小记列表（无限滚动）
-- 顶部工具栏：创建按钮、搜索框、筛选器
-
-**CreateMemoDialog.vue**：
-- 多行文本框（支持 Markdown）
-- 图片上传（拖拽、粘贴）
-- 标签输入（自动补全）
-
-**TimeFilter.vue**：
-- 预设范围按钮
-- 自定义日期选择器
-
----
-
-## 7. 错误处理
-
-图片原图通过 `GET /v1/vault/images/*path` 代理读取 Obsidian，缩略图优先读取本地缓存；缩略图可见不代表原图读取正常。共用的 Obsidian 客户端按路径段编码中文、空格、`#`、`?`、`%` 等字符，保留 `/` 目录分隔符及目录末尾斜线，禁止把整条路径编码为包含 `%2F` 的单个段。
-
-| 错误场景 | 处理方式 |
+| Tool | 合同 |
 |---|---|
-| Timeline 文件夹不存在 | 自动创建 |
-| 月份文件不存在 | 自动创建 |
-| 图片上传失败 | 返回错误，小记不创建 |
-| SQLite 写入失败 | 返回错误，提示用户 |
-| Obsidian API 不可用 | 返回错误，提示用户检查插件 |
+| create_memo | content、images、tags；返回 ID/时间/revision |
+| update_memo | memo_id、expected_revision、content、images、tags |
+| delete_memo | memo_id、expected_revision；返回 deleted/pending_cleanup |
+| browse_timeline | start_date、end_date、limit、offset |
+| search_memos | query、日期/标签、limit、offset；正文及标签搜索 |
+| get_timeline_storage | 目录、原图/缓存 bytes、容量、missing_images、pending_cleanup、legacy_directory |
+| import_timeline_images | directory；只复制旧图，返回 copied/missing |
+| discard_memo_images | paths（最多 9 项），释放新暂存 |
+| clear_timeline_image_cache | 清派生缓存，不改原图 |
+| save_config | timeline.cache_limit_mb，整数 0–4096，立即生效 |
 
----
+HTTP：POST /v1/upload/images（multipart images）；GET /v1/timeline/images/*path；GET /v1/timeline/thumbnails/*path。旧 /v1/vault/{images,thumbnails}/*path 仅为本地读取兼容别名，不调用外部 API。
 
-## 8. 测试策略
+退役：search_notes、get_note、list_recent_notes、list_files、get_memory_stats、sync_memos。健康检查仅 server/sqlite 与本地目录。内部旧 timeline_events 读取工具为兼容保留，与小记编辑独立。
 
-### 8.1 单元测试
+## 7. 前端和验证
 
-| 模块 | 测试内容 |
-|---|---|
-| `memo_manager` | 创建小记、浏览时间线、搜索小记 |
-| `store` | SQLite CRUD、查询构建 |
-| `timeline_handlers` | Tool API 调用 |
+复用 MotionModal 编辑器与删除确认；桌面图标、手机操作抽屉。已有附件不再上传；取消只释放本次新资源，失败保留草稿。请求序列防止陈旧查询覆盖新筛选，错误 envelope 不得作为成功。
 
-### 8.2 集成测试
+TimelineStoragePanel 仅用于时光机「图片存储」；首页移除整个系统配置区，不加载配置或挂载存储面板，只请求状态/统计。memoImageUrl 按路径段编码特殊字符，正文旧图也解析到本地入口；日期分组用持久化 date。查看器使用 load/error 初始化缩放，不依赖固定延迟。
 
-- 创建小记 → 验证文件写入
-- 浏览时间线 → 验证查询结果
-- 搜索小记 → 验证搜索结果
+测试覆盖格式/路径、只复制迁移、正文引用、共享图与最后引用删除、更新冲突、IO 失败跨重启 GC、LRU/超额/降容量、不可写缓存回退、HTTP 完整生命周期、旧连接设置清理。前端覆盖日期、URL、旧嵌入、错误结果，界面验收使用隔离数据库。
 
----
+## 8. 备份限制
 
-## 9. 性能优化
-
-| 操作 | 优化策略 |
-|---|---|
-| 创建小记 | 异步写入文件，立即返回 |
-| 浏览时间线 | SQLite 索引查询，分页加载 |
-| 搜索小记 | SQLite FTS5 全文搜索 |
-| 时间筛选 | SQLite 索引查询 |
-
----
-
-## 10. 未来扩展
-
-### 10.1 可能的扩展
-
-- **小记编辑**：支持编辑已发布的小记
-- **小记删除**：支持删除小记
-- **小记关联**：将小记关联到正式笔记
-- **小记导出**：导出小记为 PDF
-- **小记统计**：统计小记数量、频率
-
-### 10.2 与其他模块的集成
-
-- **时间线回顾**：与其他模块的时间线事件融合
-
----
-
-## 11. 修订历史
-
-| 版本 | 日期 | 修订内容 |
-|---|---|---|
-| v1.0 | 2026-05-29 | 初始版本（自动事件采集） |
-| v2.0 | 2026-06-02 | 重新设计为用户主动记录模式，更名为"时光机" |
+SQLite 快照与恢复只包含数据库。完整备份需要一致数据库快照与 timeline/images/，备份时暂停写入，缓存无需复制。恢复不能找回已物理删除的照片，页面/手册明确告知；不得因数据库恢复立即无条件清空原图目录。
