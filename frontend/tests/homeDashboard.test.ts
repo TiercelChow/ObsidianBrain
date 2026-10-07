@@ -44,7 +44,7 @@ test('phone dashboard neither displays code repository stats nor requests their 
 
 test('appearance remains visible in the left phone header slot without competing with refresh', async () => {
   const home = await source('views/Home.vue')
-  assert.match(home, /class="home-theme-action"/)
+  assert.match(home, /class="home-theme-action(?: [^"]*)?"/)
   assert.match(home, /@media \(max-width: 768px\)[\s\S]*\.home-page \.header-actions \.home-theme-action\s*\{[^}]*display: inline-flex;[^}]*position: fixed;[^}]*left: max\(12px, var\(--safe-left\)\)/)
   assert.match(home, /\.home-theme-action\s*\{[^}]*width: var\(--tap-target\)/)
 })

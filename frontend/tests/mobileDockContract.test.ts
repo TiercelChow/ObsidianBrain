@@ -70,7 +70,7 @@ test('scroll retargets the running spring instead of jumping to the gesture posi
 test('endpoint elasticity remains visible and reduced motion removes deformation', async () => {
   const [motion, dock] = await Promise.all([source('composables/useMobileDockMotion.ts'), source('components/MobileDock.vue')])
   assert.match(motion, /progress\.value = state\.value/)
-  assert.match(dock, /dockRebound\(props\.progress\)/)
+  assert.match(dock, /dockRebound\(effectiveProgress\.value\)/)
   assert.match(dock, /--dock-rebound/)
   assert.match(dock, /transform-origin:\s*right bottom/)
   assert.match(dock, /prefers-reduced-motion: reduce\)[\s\S]*--dock-rebound:\s*0\s*!important/)

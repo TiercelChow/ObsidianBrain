@@ -20,6 +20,55 @@
     box-shadow var(--motion-fast) var(--ease-emphasized);
 }
 
+/* Compact actions share one geometry; semantics stay in labels/tooltips. */
+.ui-icon-action {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--bg-glass);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 22px;
+}
+.ui-icon-action .el-icon { font-size: 22px; }
+.ui-action__glyph { width: 21px; height: 21px; flex: none; }
+.ui-action__glyph.is-loading { animation: ui-action-spin 900ms linear infinite; }
+@keyframes ui-action-spin { to { transform: rotate(360deg); } }
+.ui-action { vertical-align: middle; }
+
+/* Spatial list changes: the selected/filtering collection moves as a whole. */
+/* Active-only precedence: scoped card hover styles cannot override FLIP. */
+.collection-flow-move { transition: transform 380ms var(--ease-spring-gentle) !important; }
+.collection-flow-enter-active { transition: transform 360ms var(--ease-spring-gentle), opacity 240ms ease !important; }
+.collection-flow-leave-active { position: absolute !important; pointer-events: none; transition: transform 220ms var(--ease-emphasized), opacity 180ms ease !important; }
+.collection-flow-enter-from { opacity: 0; transform: translateY(18px) scale(.96) !important; }
+.collection-flow-leave-to { opacity: 0; transform: translateY(-8px) scale(.96) !important; }
+
+.content-arrive-enter-active { transition: transform 360ms var(--ease-spring-gentle), opacity 240ms ease; }
+.content-arrive-leave-active { transition: opacity 160ms ease; }
+.content-arrive-enter-from { opacity: 0; transform: translateY(16px); }
+.content-arrive-leave-to { opacity: 0; }
+
+/* A quick compression and soft release supplies tactile feedback. Never apply
+   this to static cards or controls whose transform positions them on screen. */
+:is(.ui-icon-action, .mobile-compose-action, .mobile-filter-summary, .bc-more, .focus-filters button, .panel-heading-actions button, .detail-switch button, .calendar-nav button, .viewer-close, .viewer-zoom-btn, .settings-nav button) {
+  transition: transform 280ms var(--ease-spring-playful), color var(--motion-fast) ease,
+    background-color var(--motion-fast) ease, border-color var(--motion-fast) ease;
+}
+:is(.ui-icon-action, .mobile-compose-action, .mobile-filter-summary, .bc-more, .focus-filters button, .panel-heading-actions button, .detail-switch button, .calendar-nav button, .viewer-close, .viewer-zoom-btn, .settings-nav button):active {
+  transform: scale(.94);
+  transition-duration: 70ms;
+}
+
 html.motion-overlay-open .app-main,
 html.motion-overlay-open .pane-center,
 html.motion-overlay-open .memo-scroll,
@@ -162,6 +211,10 @@ select:focus-visible,
 
 /* Motion and transparency are independent accessibility preferences. */
 @media (prefers-reduced-motion: reduce) {
+  .collection-flow-move, .collection-flow-enter-active, .collection-flow-leave-active, .content-arrive-enter-active, .content-arrive-leave-active { transition: opacity 100ms ease !important; }
+  .collection-flow-enter-from, .collection-flow-leave-to, .content-arrive-enter-from { transform: none !important; }
+  :is(.ui-icon-action, .mobile-compose-action, .mobile-filter-summary, .bc-more, .focus-filters button, .panel-heading-actions button, .detail-switch button, .calendar-nav button, .viewer-close, .viewer-zoom-btn, .settings-nav button) { transform: none !important; transition: none !important; }
+  .viewer-enter-from .viewer-image { transform: none !important; }
   :root {
     --motion-instant: 80ms;
     --motion-fast: 120ms;

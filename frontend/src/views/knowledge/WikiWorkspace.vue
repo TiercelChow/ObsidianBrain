@@ -1,11 +1,11 @@
 <template>
-  <KnowledgePageShell title="Wiki 工作台" subtitle="浏览数据库实体，并沿引用回到书中原文">
+  <KnowledgePageShell title="Wiki 工作台">
     <template #actions>
-      <el-button v-if="activeBase?.pending_review_count" type="primary" @click="openReviews"><el-icon><Checked /></el-icon>审核 {{ activeBase.pending_review_count }}</el-button>
-      <el-button v-if="activeBase" @click="openGraph"><el-icon><Connection /></el-icon>关系洞察</el-button>
-      <el-button v-if="activeBase" :loading="linting" @click="runLint"><el-icon><DataAnalysis /></el-icon>知识体检</el-button>
-      <el-button v-if="activeBase" @click="compileReportVisible = true"><el-icon><Tickets /></el-icon>编译报告</el-button>
-      <el-button v-if="activeBase" :loading="syncing" :disabled="activeBase.lifecycle !== 'active' || !activeBase.source_available" @click="syncActive"><el-icon><Refresh /></el-icon>同步来源</el-button>
+      <UiAction v-if="activeBase?.pending_review_count" :icon="Checked" :label="`审核 ${activeBase.pending_review_count} 项候选`" @click="openReviews" />
+      <UiAction v-if="activeBase" :icon="Connection" label="关系洞察" @click="openGraph" />
+      <UiAction v-if="activeBase" :icon="DataAnalysis" label="知识体检" :loading="linting" @click="runLint" />
+      <UiAction v-if="activeBase" :icon="Tickets" label="编译报告" @click="compileReportVisible = true" />
+      <UiAction v-if="activeBase" :icon="Refresh" label="同步来源" :loading="syncing" :disabled="activeBase.lifecycle !== 'active' || !activeBase.source_available" @click="syncActive" />
     </template>
 
     <div class="wiki-toolbar knowledge-toolbar" :class="{ 'is-reading': Boolean(selectedEntry) }">
@@ -27,7 +27,7 @@
     </div>
 
     <div v-if="loadingBases" class="knowledge-empty knowledge-surface">
-      <el-icon class="is-loading" :size="24"><Loading /></el-icon><span>正在加载知识库…</span>
+      <el-icon class="is-loading" :size="24" role="status" aria-label="加载知识库"><Loading /></el-icon>
     </div>
     <div v-else-if="!bases.length" class="knowledge-empty knowledge-surface">
       <strong>还没有可浏览的知识库</strong>
@@ -35,7 +35,8 @@
       <el-button type="primary" @click="$router.push('/knowledge')">前往初始化</el-button>
     </div>
 
-    <section v-else class="wiki-workspace" :class="{ 'show-detail': Boolean(selectedEntry) }">
+    <MotionSwap v-else :view-key="singleColumn ? (selectedEntry ? 'detail' : 'list') : 'desktop'" :horizontal="singleColumn" :direction="selectedEntry ? 1 : -1">
+    <section class="wiki-workspace" :class="{ 'show-detail': Boolean(selectedEntry) }">
       <aside class="entry-pane knowledge-surface" data-glass="structural">
         <div class="entry-pane-head">
           <div>
@@ -63,28 +64,27 @@
             <span class="entry-type">{{ entryTypeLabel(entry.entry_type) }}</span>
             <span v-if="entry.status === 'stale'" class="knowledge-status is-warning">来源需复核</span>
             <strong>{{ entry.title }}</strong>
-            <span class="entry-summary">{{ entry.summary || '此章节没有摘要' }}</span>
-            <span class="entry-source">{{ entry.source_path || '数据库实体' }}</span>
+            <span v-if="entry.summary" class="entry-summary">{{ entry.summary }}</span>
+            <span v-if="entry.source_path" class="entry-source">{{ entry.source_path }}</span>
           </button>
           <div v-if="!loadingEntries && !entries.length" class="entry-empty">没有匹配的实体</div>
-          <div v-if="loadingEntries" class="entry-loading"><el-icon class="is-loading"><Loading /></el-icon>检索中</div>
+          <div v-if="loadingEntries" class="entry-loading" role="status" aria-label="检索实体"><el-icon class="is-loading" aria-hidden="true"><Loading /></el-icon></div>
           <button v-if="entryHasMore && !loadingEntries" class="entry-load-more" type="button" @click="loadMoreEntries">继续加载</button>
         </div>
       </aside>
 
       <article ref="entryDetailRef" class="entry-detail knowledge-surface">
+        <MotionSwap :view-key="selectedEntry?.id || 'empty'">
         <template v-if="selectedEntry">
-          <button class="mobile-back" type="button" @click="returnToEntryList">
-            <el-icon><ArrowLeft /></el-icon>返回实体列表
-          </button>
+          <UiAction class="mobile-back" :icon="ArrowLeft" label="返回实体列表" @click="returnToEntryList" />
           <header class="entry-detail-head">
             <div>
               <div class="entry-detail-kicker"><span class="entry-type">{{ entryTypeLabel(selectedEntry.entry_type) }}</span><span class="knowledge-status mobile-entity-status" :class="needsSourceReview(detail || selectedEntry) ? 'is-warning' : 'is-healthy'">{{ knowledgeStatusLabel(detail?.status || selectedEntry.status) }}</span></div>
               <h2>{{ selectedEntry.title }}</h2>
-              <p>{{ selectedEntry.source_path || '数据库实体' }}</p>
+              <p v-if="selectedEntry.source_path">{{ selectedEntry.source_path }}</p>
             </div>
             <div class="entry-detail-actions">
-              <el-button v-if="detail && detail.entry_type !== 'source_section' && activeBase?.lifecycle === 'active' && !needsSourceReview(detail)" circle title="调整实体" @click="openEntryEdit"><el-icon><Edit /></el-icon></el-button>
+              <UiAction v-if="detail && detail.entry_type !== 'source_section' && activeBase?.lifecycle === 'active' && !needsSourceReview(detail)" :icon="Edit" label="调整实体" @click="openEntryEdit" />
               <span class="knowledge-status desktop-entity-status" :class="needsSourceReview(detail || selectedEntry) ? 'is-warning' : 'is-healthy'">{{ knowledgeStatusLabel(detail?.status || selectedEntry.status) }}</span>
             </div>
           </header>
@@ -133,7 +133,7 @@
                 </button>
               </div>
             </section>
-            <section class="citation-section">
+            <section v-if="detail.citations.length" class="citation-section">
               <h3>来源引用 <span>{{ detail.citations.length }}</span></h3>
               <div v-for="citation in detail.citations" :key="citation.id" class="citation-card">
                 <div><el-icon><Document /></el-icon><strong>{{ citation.source_path }}</strong></div>
@@ -156,10 +156,11 @@
         <div v-else class="knowledge-empty">
           <div class="detail-symbol"><el-icon><Tickets /></el-icon></div>
           <strong>选择一个实体开始阅读</strong>
-          <span>正文、公式、表格与 Mermaid 将沿用阅境轩的 Markdown 渲染链路。</span>
         </div>
+        </MotionSwap>
       </article>
     </section>
+    </MotionSwap>
 
     <KnowledgeCompileReport v-model="compileReportVisible" :base-id="activeBaseId" :book-name="activeBase?.book_name" @review="openCompileReportReview" @base-updated="updateCompileBase" />
     <MotionModal v-model="mobileActionsVisible" aria-label="Wiki 操作">
@@ -232,7 +233,7 @@
               <label><span>Markdown 正文</span><el-input v-model="part.contentMd" type="textarea" :rows="5" :maxlength="30000" /></label>
             </article>
           </div>
-          <button v-if="splitParts.length < 12" class="add-split-part" type="button" @click="addSplitPart">＋ 添加一个拆分实体</button>
+          <button v-if="splitParts.length < 12" class="add-split-part ui-icon-action" type="button" aria-label="添加拆分实体" title="添加拆分实体" @click="addSplitPart">＋</button>
         </template>
         <div class="knowledge-modal-actions"><el-button @click="editVisible = false">取消</el-button><el-button type="primary" :loading="savingEdit" @click="submitStructureChange">生成审核候选</el-button></div>
       </div>
@@ -281,6 +282,9 @@ import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import KnowledgeGraphCanvas from '@/components/knowledge/KnowledgeGraphCanvas.vue'
 import KnowledgeCompileReport from '@/components/knowledge/KnowledgeCompileReport.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
+import MotionSwap from '@/components/motion/MotionSwap.vue'
+import UiAction from '@/components/motion/UiAction'
+import { useMediaQuery } from '@vueuse/core'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { knowledgeStatusLabel, needsSourceReview, sourceImpactLabel } from '@/utils/knowledgeSourceImpacts'
 import {
@@ -322,6 +326,7 @@ const detail = ref<KnowledgeEntryDetail | null>(null)
 const renderedHtml = ref('')
 const markdownRef = ref<HTMLElement | null>(null)
 const entryDetailRef = ref<HTMLElement | null>(null)
+const singleColumn = useMediaQuery('(max-width: 1100px)')
 let entryListScrollTop = 0
 let entryReadSequence = 0
 const loadingBases = ref(false)

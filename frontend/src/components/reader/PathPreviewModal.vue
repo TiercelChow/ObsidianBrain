@@ -18,8 +18,8 @@
       </header>
 
       <div ref="bodyRef" class="ppm-body">
-        <div v-if="loading" class="ppm-state">
-          <el-icon class="is-loading"><Loading /></el-icon><span>加载中…</span>
+        <div v-if="loading" class="ppm-state" role="status" aria-label="加载预览">
+          <el-icon class="is-loading" aria-hidden="true"><Loading /></el-icon>
         </div>
         <div v-else-if="error" class="ppm-state error">⚠️ {{ error }}</div>
         <div v-else-if="kind === 'notfound'" class="ppm-state">路径不存在</div>

@@ -1,13 +1,13 @@
 <template>
-  <KnowledgePageShell title="书籍知识库" subtitle="书架中的每一本书，都是一座独立、可追溯的知识库">
+  <KnowledgePageShell title="书籍知识库">
     <template #actions>
-      <el-button :loading="loading" @click="loadCards()"><el-icon><Refresh /></el-icon>刷新</el-button>
+      <UiAction :icon="Refresh" label="刷新书籍知识库" :loading="loading" @click="loadCards()" />
     </template>
 
     <div v-if="runningOnly || attentionOnly" class="activity-context knowledge-toolbar"><span>首页 · {{ attentionOnly ? '需要检查的知识编译' : '运行中的知识编译' }}</span><RouterLink :to="{path:'/knowledge/tasks',query:{status:attentionOnly ? 'attention' : 'running'}}">{{ attentionOnly ? '查看失败的研究 / PPT 任务' : '查看排队 / 运行中的研究任务' }}</RouterLink><button type="button" @click="router.replace('/knowledge')">显示全部知识库</button></div>
     <div class="mobile-base-actions">
       <span>{{ cards.length }} 本 Markdown 书籍</span>
-      <button type="button" :disabled="loading" aria-label="刷新书籍知识库" @click="loadCards()"><el-icon :class="{ 'is-loading': loading }"><Refresh /></el-icon><span>刷新</span></button>
+      <button type="button" class="ui-icon-action" :disabled="loading" aria-label="刷新书籍知识库" title="刷新" @click="loadCards()"><el-icon :class="{ 'is-loading': loading }"><Refresh /></el-icon></button>
     </div>
 
     <section v-if="cards.length" class="overview-strip knowledge-surface">
@@ -17,12 +17,11 @@
       <div><strong>{{ attentionCount }}</strong><span>需要处理</span></div>
     </section>
 
-    <div v-if="loading && !cards.length" class="knowledge-empty knowledge-surface">
+    <div v-if="loading && !cards.length" class="knowledge-empty knowledge-surface" role="status" aria-label="读取阅境轩书架">
       <el-icon class="is-loading" :size="26"><Loading /></el-icon>
-      <span>正在读取阅境轩书架…</span>
     </div>
 
-    <section v-else-if="visibleCards.length" class="book-wiki-grid">
+    <TransitionGroup v-else-if="visibleCards.length" name="collection-flow" tag="section" class="book-wiki-grid" @before-leave="freezeCollectionLeave" @before-enter="resetCollectionEnter">
       <article
         v-for="(card, index) in visibleCards"
         :key="card.book.id"
@@ -103,7 +102,7 @@
             </div>
           </div>
           <div v-else-if="!card.knowledge_base" class="book-uninitialized">
-            尚未初始化。创建后，Markdown 章节将进入数据库并保留来源引用。
+            尚未建立知识库
           </div>
           <div v-else-if="!card.knowledge_base.source_available" class="book-uninitialized is-warning">
             原书目录已失效。历史知识仍可浏览，请先在阅境轩重新添加正确目录。
@@ -125,26 +124,19 @@
                 :loading="compilingBaseId === card.knowledge_base.id"
                 @click="compileWiki(card)"
               ><el-icon><MagicStick /></el-icon>{{ compileActionLabel(card.knowledge_base) }}</el-button>
-              <el-button
-                class="book-secondary-action"
-                :loading="busyBookId === card.book.id"
-                :disabled="card.knowledge_base.lifecycle !== 'active' || !card.knowledge_base.source_available || card.knowledge_base.compile_state === 'compiling'"
-                @click="sync(card)"
-              ><el-icon><Refresh /></el-icon>同步</el-button>
-              <el-button class="book-secondary-action" @click="openManage(card)">管理</el-button>
-              <el-button class="book-secondary-action" @click="reportBase = card.knowledge_base; reportVisible = true">编译报告</el-button>
+              <UiAction class="book-secondary-action" :icon="Refresh" label="同步知识库来源" :loading="busyBookId === card.book.id" :disabled="card.knowledge_base.lifecycle !== 'active' || !card.knowledge_base.source_available || card.knowledge_base.compile_state === 'compiling'" @click="sync(card)" />
+              <UiAction class="book-secondary-action" :icon="Setting" label="管理知识库" @click="openManage(card)" />
+              <UiAction class="book-secondary-action" :icon="Tickets" label="查看编译报告" @click="reportBase = card.knowledge_base; reportVisible = true" />
             </template>
-            <el-button class="book-secondary-action" text @click="$router.push({ path: '/reader', query: { book: card.book.id } })">
-              阅读
-            </el-button>
-            <button class="mobile-book-more" type="button" aria-label="知识库操作" @click="actionBookId = card.book.id; actionSheetVisible = true"><el-icon><MoreFilled /></el-icon>更多</button>
+            <UiAction class="book-secondary-action" :icon="Reading" label="阅读原书" @click="$router.push({ path: '/reader', query: { book: card.book.id } })" />
+            <button class="mobile-book-more" type="button" aria-label="知识库操作" @click="actionBookId = card.book.id; actionSheetVisible = true"><el-icon><MoreFilled /></el-icon></button>
           </div>
           <p v-if="card.knowledge_base?.compile_error || card.knowledge_base?.last_error" class="book-error">
             {{ card.knowledge_base.compile_error || card.knowledge_base.last_error }}
           </p>
         </div>
       </article>
-    </section>
+    </TransitionGroup>
 
     <div v-else-if="runningOnly || attentionOnly" class="knowledge-empty knowledge-surface"><strong>{{ attentionOnly ? '没有失败的知识编译' : '没有正在执行的知识编译' }}</strong><RouterLink :to="{path:'/knowledge/tasks',query:{status:attentionOnly ? 'attention' : 'running'}}">查看研究任务</RouterLink></div>
     <div v-else class="knowledge-empty knowledge-surface">
@@ -199,11 +191,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Collection, FolderOpened, Loading, MagicStick, MoreFilled, Refresh } from '@element-plus/icons-vue'
+import { Collection, FolderOpened, Loading, MagicStick, MoreFilled, Reading, Refresh, Setting, Tickets } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import KnowledgeCompileReport from '@/components/knowledge/KnowledgeCompileReport.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
+import UiAction from '@/components/motion/UiAction'
+import { freezeCollectionLeave, resetCollectionEnter } from '@/utils/collectionMotion'
 import { canFocusDocument } from '@/utils/modalFocusPolicy'
 import {
   cancelBookKnowledgeCompile,
@@ -486,7 +480,7 @@ onBeforeUnmount(() => {
 .overview-strip > div:first-child { padding-left: 0; border-left: 0; }
 .overview-strip strong { font-size: 25px; font-weight: 720; font-variant-numeric: tabular-nums; }
 .overview-strip span { color: var(--text-faint); font-size: 12px; }
-.book-wiki-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 14px; }
+.book-wiki-grid { position: relative; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 14px; }
 .book-wiki-card { min-width: 0; display: grid; grid-template-columns: 82px 1fr; gap: 18px; padding: 19px; animation: knowledge-card-in var(--motion-slow) var(--ease-spring-gentle) both; animation-delay: calc(var(--order) * 36ms); }
 .book-cover { height: 108px; display: grid; place-content: center; justify-items: center; gap: 8px; border-radius: 15px 12px 12px 15px; background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 78%, #9b7bff), color-mix(in srgb, var(--accent) 56%, #263b9d)); color: white; box-shadow: 7px 8px 20px color-mix(in srgb, var(--accent) 18%, transparent), inset -5px 0 10px rgba(0,0,0,.1), inset 1px 0 rgba(255,255,255,.3); }
 .book-cover .el-icon { font-size: 27px; }

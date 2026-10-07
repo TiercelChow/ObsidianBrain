@@ -4,16 +4,13 @@
     <header class="page-header">
       <div>
         <h1 class="page-title">时光机</h1>
-        <p class="page-subtitle">记录碎片化想法，回顾思考历程</p>
       </div>
       <div class="header-actions">
-        <el-button class="desktop-sync-action" @click="storageOpen = true">
+        <el-button class="desktop-sync-action ui-icon-action" aria-label="图片存储" title="图片存储" @click="storageOpen = true">
           <el-icon><FolderOpened /></el-icon>
-          图片存储
         </el-button>
-        <el-button type="primary" @click="openCreateDialog">
+        <el-button type="primary" class="ui-icon-action" aria-label="写小记" title="写小记" @click="openCreateDialog">
           <el-icon><Plus /></el-icon>
-          写小记
         </el-button>
       </div>
     </header>
@@ -50,15 +47,7 @@
           <el-icon><MoreFilled /></el-icon>
         </button>
 
-        <Transition name="filter-panel">
-        <div v-if="!isMobile || mobileFiltersOpen" id="timeline-mobile-filters" class="filter-right">
-          <div v-if="isMobile" class="mobile-filter-heading">
-            <span>时间范围</span>
-            <button type="button" class="mobile-sync-action" @click="storageOpen = true">
-              <el-icon><FolderOpened /></el-icon>
-              图片存储
-            </button>
-          </div>
+        <div v-if="!isMobile" class="filter-right">
           <div class="preset-chips">
             <div class="chip-track">
               <div
@@ -78,9 +67,7 @@
           </div>
 
           <div class="date-range-picker">
-            <!-- Desktop: daterange picker (two panels) -->
             <el-date-picker
-              v-if="!isMobile"
               v-model="customDateRange"
               type="daterange"
               range-separator="→"
@@ -91,43 +78,38 @@
               @change="onCustomDateChange"
               :clearable="true"
             />
-            <!-- Mobile: two single-date pickers (one panel each) -->
-            <template v-else>
-              <el-date-picker
-                v-model="mobileStartDate"
-                type="date"
-                placeholder="起始"
-                size="default"
-                popper-class="glass-picker"
-                @change="onMobileDateChange"
-                :clearable="true"
-                class="mobile-date-input"
-              />
-              <span class="mobile-date-sep">→</span>
-              <el-date-picker
-                v-model="mobileEndDate"
-                type="date"
-                placeholder="结束"
-                size="default"
-                popper-class="glass-picker"
-                @change="onMobileDateChange"
-                :clearable="true"
-                class="mobile-date-input"
-              />
-            </template>
             <button
               v-if="hasActiveFilter"
               class="glass-icon-btn clear-filter"
               @click="clearFilter"
               title="清除筛选"
+              aria-label="清除筛选"
             >
               ✕
             </button>
           </div>
         </div>
-        </Transition>
       </div>
     </div>
+
+    <MotionModal v-model="mobileFiltersOpen" aria-label="时间筛选">
+      <section id="timeline-mobile-filters" class="timeline-filter-sheet glass-surface-heavy">
+        <header class="filter-sheet-header">
+          <h3>时间范围</h3>
+          <button type="button" class="glass-icon-btn" aria-label="图片存储" title="图片存储" @click="mobileFiltersOpen = false; storageOpen = true"><el-icon><FolderOpened /></el-icon></button>
+          <button type="button" class="glass-icon-btn" aria-label="关闭时间筛选" @click="mobileFiltersOpen = false">✕</button>
+        </header>
+        <div class="filter-sheet-presets">
+          <button type="button" class="chip" :class="{ active: !hasActiveFilter }" :aria-pressed="!hasActiveFilter" @click="clearFilter">全部</button>
+          <button v-for="preset in timePresets" :key="preset.label" type="button" class="chip" :class="{ active: activePreset === preset.label }" :aria-pressed="activePreset === preset.label" @click="applyPreset(preset)">{{ preset.label }}</button>
+        </div>
+        <div class="filter-sheet-dates">
+          <label><span>开始</span><el-date-picker v-model="mobileStartDate" type="date" aria-label="开始日期" placeholder="选择日期" popper-class="glass-picker" @change="onMobileDateChange" :clearable="true" /></label>
+          <label><span>结束</span><el-date-picker v-model="mobileEndDate" type="date" aria-label="结束日期" placeholder="选择日期" popper-class="glass-picker" @change="onMobileDateChange" :clearable="true" /></label>
+        </div>
+        <button type="button" class="glass-btn filter-sheet-done" @click="mobileFiltersOpen = false">完成</button>
+      </section>
+    </MotionModal>
 
     <!-- Main Content -->
     <div class="main-content">
@@ -187,8 +169,8 @@
               <span class="day-header-count glass-chip">{{ group.memos.length }}</span>
             </div>
 
-            <div class="day-group-memos">
-                <div v-for="(memo, idx) in group.memos" :key="memo.id" class="memo-card" :style="{ '--delay': idx * 0.06 + 's' }">
+            <TransitionGroup name="collection-flow" tag="div" class="day-group-memos" @before-leave="freezeCollectionLeave" @before-enter="resetCollectionEnter">
+                <div v-for="memo in group.memos" :key="memo.id" class="memo-card">
                 <div class="memo-card-left">
                   <div class="memo-time-dot"></div>
                   <div class="memo-time-line"></div>
@@ -231,13 +213,13 @@
                   </div>
                 </div>
               </div>
-            </div>
+            </TransitionGroup>
           </div>
         </TransitionGroup>
         <div class="load-more-area" v-if="hasMore && filteredMemos.length > 0">
-          <button class="glass-btn" @click="loadMore" :disabled="loadingMore">
-            <el-icon v-if="loadingMore" class="is-loading"><Loading /></el-icon>
-            <span>{{ loadingMore ? '加载中' : '加载更多' }}</span>
+          <button class="glass-btn" @click="loadMore" :disabled="loadingMore" :aria-busy="loadingMore || undefined" :aria-label="loadingMore ? '加载更多小记' : undefined">
+            <el-icon v-if="loadingMore" class="is-loading" aria-hidden="true"><Loading /></el-icon>
+            <span v-else>加载更多</span>
           </button>
         </div>
         <div class="all-loaded" v-else-if="filteredMemos.length > 0">
@@ -252,9 +234,6 @@
           <div class="empty-title" v-if="searchQuery">没有找到匹配的小记</div>
           <div class="empty-title" v-else-if="hasActiveFilter">该时间范围内没有小记</div>
           <div class="empty-title" v-else>还没有小记</div>
-          <div class="empty-hint" v-if="!searchQuery && !hasActiveFilter">
-            {{ isMobile ? '点击搜索栏旁的「＋」开始记录' : '点击右上角「写小记」开始记录' }}
-          </div>
         </div>
 
         <div v-if="loading" class="loading-state">
@@ -354,7 +333,7 @@
     <MotionModal v-model="actionSheetOpen" aria-label="小记操作">
       <div class="dialog-content glass-surface-heavy memo-action-sheet compact-dialog">
         <div class="dialog-header"><h3>小记操作</h3><button type="button" class="glass-icon-btn" aria-label="关闭操作" @click="actionMemo = null">✕</button></div>
-        <button type="button" class="glass-btn" @click="editFromSheet"><el-icon><Edit /></el-icon>编辑小记</button>
+        <button type="button" class="glass-btn" @click="editFromSheet"><el-icon><Edit /></el-icon>编辑</button>
         <button type="button" class="glass-btn danger" @click="deleteFromSheet"><el-icon><Delete /></el-icon>删除小记</button>
       </div>
     </MotionModal>
@@ -382,11 +361,12 @@
          transform no longer reparents the fixed overlay away from the viewport. -->
     <Teleport to="body">
       <Transition name="viewer">
-        <div v-if="imageViewer.show" class="image-viewer-overlay" @click.self="closeImageViewer">
+        <div v-if="imageViewer.show" ref="viewerOverlayRef" class="image-viewer-overlay" role="dialog" aria-modal="true" aria-label="小记图片" tabindex="-1" @click.self="closeImageViewer">
           <button class="viewer-close" aria-label="关闭图片" @click="closeImageViewer">✕</button>
           <button
             v-if="imageViewer.images.length > 1"
             class="viewer-nav viewer-prev"
+            aria-label="上一张图片"
             @click="viewerPrev"
           ><el-icon :size="22"><ArrowLeft /></el-icon></button>
           <div class="viewer-image-wrap" ref="viewerStageRef">
@@ -395,29 +375,32 @@
               :key="`${imageViewer.images[imageViewer.index]}:${viewerRetry}`"
               :src="memoImageUrl(imageViewer.images[imageViewer.index])"
               class="viewer-image"
-              :class="{ 'viewer-image-pending': viewerStatus !== 'ready' }"
+              :class="{ 'viewer-image-pending': viewerStatus !== 'ready', 'viewer-image-ready': viewerStatus === 'ready' }"
               alt="小记原图"
               @load="onViewerLoad"
               @error="viewerStatus = 'error'"
               @click.stop
             />
-            <p v-if="viewerStatus === 'loading'" class="viewer-status" role="status">正在加载原图…</p>
+            <div v-if="viewerStatus === 'loading'" class="viewer-spinner" role="status" aria-label="加载原图"><el-icon class="is-loading"><Loading /></el-icon></div>
             <div v-if="viewerStatus === 'error'" class="viewer-status" role="alert">
               <p>原图暂时无法读取。旧图片可在「图片存储」中重新迁移。</p>
               <button class="glass-btn" @click.stop="retryViewerImage">重试</button>
             </div>
-            <div v-if="imageViewer.images.length > 1" class="viewer-counter">
+          </div>
+          <footer class="viewer-footer">
+            <div v-if="imageViewer.images.length > 1" class="viewer-counter" aria-live="polite">
               {{ imageViewer.index + 1 }} / {{ imageViewer.images.length }}
             </div>
-          </div>
-          <div v-if="viewerStatus === 'ready'" class="viewer-controls">
-            <button class="viewer-zoom-btn" title="缩小" @click.stop="viewerZoom(0.8)"><el-icon :size="18"><Minus /></el-icon></button>
-            <button class="viewer-zoom-btn" title="放大" @click.stop="viewerZoom(1.25)"><el-icon :size="18"><Plus /></el-icon></button>
-            <button class="viewer-zoom-btn" title="重置" @click.stop="viewerReset"><el-icon :size="18"><Refresh /></el-icon></button>
-          </div>
+            <div class="viewer-controls">
+              <button class="viewer-zoom-btn" aria-label="缩小" title="缩小" :disabled="viewerStatus !== 'ready'" @click.stop="viewerZoom(0.8)"><el-icon :size="20"><Minus /></el-icon></button>
+              <button class="viewer-zoom-btn" aria-label="放大" title="放大" :disabled="viewerStatus !== 'ready'" @click.stop="viewerZoom(1.25)"><el-icon :size="20"><Plus /></el-icon></button>
+              <button class="viewer-zoom-btn" aria-label="重置" title="重置" :disabled="viewerStatus !== 'ready'" @click.stop="viewerReset"><el-icon :size="20"><Refresh /></el-icon></button>
+            </div>
+          </footer>
           <button
             v-if="imageViewer.images.length > 1"
             class="viewer-nav viewer-next"
+            aria-label="下一张图片"
             @click="viewerNext"
           ><el-icon :size="22"><ArrowRight /></el-icon></button>
         </div>
@@ -440,7 +423,9 @@ import { createMemo, browseTimeline, searchMemos, uploadImages, updateMemo, dele
 import { memoImageUrl, memoImageSource, memoLocalDate, memoToolResult, type TimelineMemo } from '@/utils/timelineMemo'
 import TimelineStoragePanel from '@/components/timeline/TimelineStoragePanel.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
+import { freezeCollectionLeave, resetCollectionEnter } from '@/utils/collectionMotion'
 import { pickActiveDate, type SpyHeader } from '@/utils/timelineSpy'
+import { useModalEnvironment } from '@/composables/useModalEnvironment'
 
 // ── Types ──
 type Memo = TimelineMemo
@@ -512,12 +497,15 @@ const imageViewer = ref({
   index: 0,
 })
 const viewerStageRef = ref<HTMLDivElement | null>(null)
+const viewerOverlayRef = ref<HTMLElement | null>(null)
 const viewerImgRef = ref<HTMLImageElement | null>(null)
 const viewerStatus = ref<'loading' | 'ready' | 'error'>('loading')
 const viewerRetry = ref(0)
 let viewerPz: PanZoom | null = null
+useModalEnvironment(() => imageViewer.value.show, viewerOverlayRef, closeImageViewer)
 
 function onViewerLoad() {
+  if (!imageViewer.value.show) return
   viewerStatus.value = 'ready'
   void nextTick(initViewerPz)
 }
@@ -527,7 +515,7 @@ function retryViewerImage() {
 }
 
 function initViewerPz() {
-  if (!viewerImgRef.value) return
+  if (!viewerImgRef.value || !imageViewer.value.show) return
   viewerPz?.dispose()
   const img = viewerImgRef.value
   img.style.transform = ''
@@ -800,10 +788,14 @@ function applyPreset(preset: TimePreset) {
   if (activePreset.value === preset.label) { clearFilter(); return }
   activePreset.value = preset.label
   customDateRange.value = null
+  mobileStartDate.value = null
+  mobileEndDate.value = null
   void loadFilteredMemos()
 }
 function onCustomDateChange(_val: [Date, Date] | null) {
   activePreset.value = ''
+  mobileStartDate.value = customDateRange.value?.[0] ?? null
+  mobileEndDate.value = customDateRange.value?.[1] ?? null
   void loadFilteredMemos()
 }
 function onMobileDateChange() {
@@ -1356,15 +1348,6 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
   align-items: center;
   gap: 6px;
 }
-.mobile-date-sep {
-  color: var(--text-faint);
-  font-size: 13px;
-  flex-shrink: 0;
-}
-.mobile-date-input {
-  flex: 1;
-  min-width: 0;
-}
 .date-range-picker :deep(.el-range-editor) {
   border-radius: 14px !important;
   border: 1px solid var(--border-subtle) !important;
@@ -1440,10 +1423,11 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
 }
 .month-days { position: relative; }
 .day-link {
+  --time-nav-axis: 10px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 8px 5px 6px;
+  padding: 7px 8px 7px calc(var(--time-nav-axis) + 12px);
   border-radius: 10px;
   cursor: pointer;
   font-size: 13px;
@@ -1462,6 +1446,10 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
   color: var(--accent);
 }
 .day-dot {
+  position: absolute;
+  left: var(--time-nav-axis);
+  top: 50%;
+  transform: translate(-50%, -50%);
   width: 8px; height: 8px;
   border-radius: 50%;
   border: 2px solid #d4d4d8;
@@ -1477,11 +1465,12 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
   border-color: var(--accent);
   background: var(--accent);
   box-shadow: 0 0 8px rgba(129, 140, 248, 0.5);
-  transform: scale(1.2);
+  transform: translate(-50%, -50%) scale(1.2);
 }
 .day-line {
   position: absolute;
-  left: 13px;
+  left: var(--time-nav-axis);
+  transform: translateX(-50%);
   top: -3px;
   bottom: -3px;
   width: 2px;
@@ -1573,6 +1562,7 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
 
 /* ── Memo Card ── */
 .day-group-memos {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -2200,9 +2190,12 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
   position: fixed;
   inset: 0;
   z-index: 2000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  justify-items: center;
+  gap: 14px;
+  padding: calc(var(--safe-top) + 68px) max(20px, var(--safe-right), var(--safe-left)) calc(var(--safe-bottom) + 20px);
+  overflow: hidden;
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: var(--glass-scrim-filter);
   -webkit-backdrop-filter: var(--glass-scrim-filter);
@@ -2253,16 +2246,19 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
 .viewer-prev { left: 20px; }
 .viewer-next { right: 20px; }
 .viewer-image-wrap {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  justify-content: center;
+  overflow: hidden;
   max-width: 80vw;
-  max-height: 80vh;
 }
 .viewer-image {
-  max-width: 80vw;
-  max-height: 75vh;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
@@ -2271,18 +2267,20 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
 }
 .viewer-image:active { cursor: grabbing; }
 .viewer-image-pending { display: none; }
+.viewer-image-ready { animation: photo-arrive 380ms var(--ease-spring-gentle); }
+/* Opacity does not compete with the pan/zoom inline transform. */
+@keyframes photo-arrive { from { opacity: 0; } to { opacity: 1; } }
+@media(prefers-reduced-motion: reduce) { .viewer-image-ready { animation: none; } }
 .viewer-status { max-width: min(70vw, 420px); color: #fff; text-align: center; line-height: 1.6; }
+.viewer-spinner { color: #fff; font-size: 30px; }
+.viewer-footer { display: flex; flex-direction: column; align-items: center; gap: 12px; min-height: 44px; z-index: 10; }
 .viewer-controls {
-  position: absolute;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
   gap: 8px;
   z-index: 10;
 }
 .viewer-zoom-btn {
-  width: 40px; height: 40px; border-radius: 50%;
+  width: 44px; height: 44px; border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: var(--glass-floating-filter);
@@ -2294,6 +2292,7 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
 }
 .viewer-zoom-btn:hover { background: rgba(255, 255, 255, 0.2); color: #fff; }
 .viewer-zoom-btn:active { transform: scale(0.92); }
+.viewer-zoom-btn:disabled { opacity: .4; pointer-events: none; }
 .viewer-counter {
   color: rgba(255, 255, 255, 0.7);
   font-size: 14px;
@@ -2316,30 +2315,19 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
 /* Mobile-only controls stay out of the desktop hierarchy. */
 .mobile-filter-summary,
 .mobile-compose-action,
-.mobile-filter-heading,
 .published-notice { display: none; }
-.mobile-sync-action {
-  min-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 10px;
-  background: var(--accent-light);
-  color: var(--accent);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-}
-.mobile-sync-action:disabled { opacity: 0.55; }
-.filter-panel-enter-active,
-.filter-panel-leave-active {
-  transition: opacity var(--motion-fast) var(--ease-emphasized),
-              transform var(--motion-normal) var(--ease-spring-gentle);
-}
-.filter-panel-enter-from,
-.filter-panel-leave-to { opacity: 0; transform: translateY(-8px); }
+.timeline-filter-sheet { border-radius: 24px 24px 0 0; padding: 32px 20px max(18px, var(--safe-bottom)); max-height: inherit; overflow-y: auto; }
+.filter-sheet-header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.filter-sheet-header h3 { flex: 1; margin: 0; font-size: 19px; }
+.filter-sheet-header .glass-icon-btn { width: 44px; height: 44px; font-size: 18px; }
+.filter-sheet-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.filter-sheet-presets .chip { min-height: 44px; justify-content: center; font: inherit; font-size: 14px; border: 1px solid var(--border-subtle); background: var(--bg-glass-subtle); }
+.filter-sheet-presets .chip.active { border-color: var(--border-glass); background: var(--glass-action-sheen), var(--glass-action-fill); }
+.filter-sheet-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+.filter-sheet-dates label { display: flex; flex-direction: column; gap: 8px; min-width: 0; color: var(--text-secondary); font-size: 13px; }
+.filter-sheet-dates :deep(.el-date-editor) { width: 100%; min-width: 0; }
+.filter-sheet-dates :deep(.el-input__wrapper) { min-height: 44px; }
+.filter-sheet-done { width: 100%; min-height: 46px; justify-content: center; }
 .published-notice-enter-active,
 .published-notice-leave-active {
   transition: opacity var(--motion-fast) var(--ease-emphasized),
@@ -2410,11 +2398,11 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
     width: var(--tap-target);
     height: var(--tap-target);
   }
-  .viewer-controls { bottom: calc(var(--safe-bottom) + 12px); }
   .viewer-zoom-btn { width: var(--tap-target); height: var(--tap-target); }
   .viewer-prev { left: max(8px, var(--safe-left)); }
   .viewer-next { right: max(8px, var(--safe-right)); }
-  .viewer-image-wrap, .viewer-image { max-width: calc(100vw - 16px); max-height: calc(100dvh - 120px - var(--safe-top) - var(--safe-bottom)); }
+  .image-viewer-overlay { gap: 12px; padding-inline: 8px; padding-bottom: calc(var(--safe-bottom) + 12px); }
+  .viewer-image-wrap { max-width: 100%; }
 
   /* Date picker responsive */
   .date-range-picker {
@@ -2471,26 +2459,6 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
   }
   .mobile-filter-summary.active { color: var(--accent); border-color: var(--accent-border); background: var(--accent-light); }
   .mobile-filter-summary:active { transform: scale(.94); }
-  .filter-right {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    width: 100%;
-    margin: 0;
-    padding: 12px;
-    align-items: stretch;
-    border: 1px solid var(--border-glass);
-    border-radius: 16px;
-    background: var(--bg-glass-strong);
-  }
-  .mobile-filter-heading {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    color: var(--text-primary);
-    font-size: 14px;
-    font-weight: 650;
-  }
   .preset-chips { width: 100%; }
   .chip { min-height: 40px; display: inline-flex; align-items: center; }
   .date-range-picker :deep(.el-date-editor) { min-height: var(--tap-target); }

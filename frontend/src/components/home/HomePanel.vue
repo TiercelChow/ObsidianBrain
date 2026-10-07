@@ -1,6 +1,6 @@
 <template>
   <section class="home-panel glass-surface" :aria-busy="loading && !ready" :aria-label="title">
-    <header><div><h2>{{ title }}</h2><p v-if="subtitle">{{ subtitle }}</p></div><RouterLink class="panel-link" :to="to">查看全部<el-icon><ArrowRight /></el-icon></RouterLink></header>
+    <header><div><h2>{{ title }}</h2><p v-if="subtitle">{{ subtitle }}</p></div><RouterLink class="panel-link" :to="to" :aria-label="`查看全部${title}`" :title="`查看全部${title}`"><el-icon><ArrowRight /></el-icon></RouterLink></header>
     <div v-if="loading && !ready" class="home-skeleton" aria-label="加载中"><i v-for="n in 3" :key="n"></i></div>
     <div v-else-if="!ready && error" class="home-empty"><span>{{ error }}</span><button type="button" @click="$emit('retry')">重试</button></div>
     <template v-else>
@@ -22,7 +22,8 @@ header { display:flex; justify-content:space-between; align-items:flex-start; ga
 header > div { min-width:0; }
 h2 { margin:0; font-size:17px; font-weight:680; letter-spacing:-.02em; line-height:1.4; }
 header p { margin:5px 0 0; color:var(--text-muted); font-size:12px; line-height:1.5; }
-.panel-link { display:inline-flex; align-items:center; justify-content:flex-end; gap:3px; min-height:44px; flex:none; margin-top:-10px; color:var(--text-muted); font-size:12px; text-decoration:none; }
+.panel-link { display:inline-flex; align-items:center; justify-content:center; width:44px; min-height:44px; flex:none; margin-top:-10px; color:var(--text-muted); font-size:18px; text-decoration:none; border-radius:12px; transition:transform var(--motion-normal) var(--ease-spring-playful),background-color var(--motion-fast) ease; }
+.panel-link:active { transform:scale(.94); background:var(--bg-hover); }
 .panel-link:hover { color:var(--text-primary); }
 .home-empty { display:grid; justify-items:start; gap:6px; margin:0; padding:20px 0; color:var(--text-muted); font-size:14px; line-height:1.6; }
 button { min-height:44px; border:0; background:transparent; color:var(--text-primary); cursor:pointer; padding:0 8px; font:inherit; }
@@ -30,4 +31,5 @@ button { min-height:44px; border:0; background:transparent; color:var(--text-pri
 .home-skeleton { display:grid; gap:12px; padding:6px 0; }
 .home-skeleton i { display:block; height:58px; border-radius:12px; background:var(--bg-hover); }
 @media(max-width:768px) { .home-panel { padding:16px; } h2 { font-size:17px; } }
+@media(prefers-reduced-motion:reduce) { .panel-link { transition:none; transform:none !important; } }
 </style>

@@ -1,7 +1,7 @@
 <template>
-  <KnowledgePageShell title="研究任务" subtitle="让 Agent 围绕一本书持续研究、刷新与审核知识">
+  <KnowledgePageShell title="研究任务">
     <template #actions>
-      <el-button type="primary" :disabled="!bases.length" @click="openCreate"><el-icon><Plus /></el-icon>新建任务</el-button>
+      <el-button type="primary" class="ui-icon-action" aria-label="新建研究任务" title="新建研究任务" :disabled="!bases.length" @click="openCreate"><el-icon><Plus /></el-icon></el-button>
     </template>
 
     <div class="task-filter knowledge-toolbar">
@@ -9,10 +9,10 @@
         <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
       </el-select>
       <button class="mobile-create-task" type="button" aria-label="新建研究任务" :disabled="!bases.length" @click="openCreate"><el-icon><Plus /></el-icon></button>
-      <div class="task-summary">{{ tasks.length }} 项任务 · 报告仅依据当前书籍的数据库证据生成</div>
+      <div class="task-summary">{{ tasks.length }} 项任务</div>
     </div>
 
-    <div v-if="loading" class="knowledge-empty knowledge-surface"><el-icon class="is-loading"><Loading /></el-icon>正在加载任务…</div>
+    <div v-if="loading" class="knowledge-empty knowledge-surface" role="status" aria-label="加载研究任务"><el-icon class="is-loading"><Loading /></el-icon></div>
     <section v-else-if="visibleTasks.length" class="research-task-list">
       <div v-if="runningOnly || attentionOnly" class="task-summary">{{ attentionOnly ? '正在查看失败的研究 / PPT 任务' : '正在查看排队 / 运行中的研究任务' }} <el-button @click="router.replace({query:{...route.query,status:undefined}})">显示全部</el-button></div>
       <article v-for="(task, index) in visibleTasks" :key="task.id" class="research-task knowledge-surface" :style="{ '--order': index }">
@@ -20,9 +20,9 @@
         <div class="task-main">
           <div class="task-topline"><span>{{ task.book_name }}</span><span class="knowledge-status" :class="`is-${task.status}`">{{ statusLabel(task.status) }}</span></div>
           <h2>{{ task.title }}</h2>
-          <p>{{ task.description || '没有补充任务说明' }}</p>
+          <p v-if="task.description">{{ task.description }}</p>
           <div v-if="task.brief?.confirmed" class="task-brief-summary">{{ briefSummary(task.brief, task.deliverable_type) }}</div>
-          <button v-if="task.status === 'draft'" class="task-brief-edit" type="button" :disabled="creating || Boolean(executingTaskId)" @click="openEditBrief(task)">调整材料偏好</button>
+          <UiAction v-if="task.status === 'draft'" :icon="Edit" label="编辑研究简报" :disabled="creating || Boolean(executingTaskId)" @click="openEditBrief(task)" />
           <div v-if="task.status === 'running' && taskActivity[task.id]" class="task-live" role="status">
             <i></i><span>{{ taskActivity[task.id] }}</span>
           </div>
@@ -30,7 +30,7 @@
           <footer><span>{{ typeLabel(task.task_type) }}</span><span>{{ task.deliverable_type === 'presentation' ? 'PPTX 演示文稿' : '研究报告' }}</span><span v-if="task.external_research_enabled">外部资料 {{ task.external_requests_used }}/{{ task.external_request_limit }}</span><span v-if="task.knowledge_change_state === 'proposed'">待知识审核</span><time>{{ formatDate(task.updated_at) }}</time></footer>
         </div>
         <div class="task-card-actions">
-          <button class="task-stage-link" type="button" @click="openStages(task)">阶段与成果</button>
+          <UiAction :icon="View" label="查看阶段与成果" @click="openStages(task)" />
           <button class="task-action" type="button" :class="{ 'is-cancel': task.status === 'running' || task.status === 'queued' }" :aria-label="taskActionLabel(task)" :disabled="(Boolean(executingTaskId) && executingTaskId !== task.id) || Boolean(loadingResultId)" @click="runOrOpen(task)">
             <el-icon :class="{ 'is-loading': task.status === 'running' || executingTaskId === task.id || loadingResultId === task.id }">
               <Loading v-if="task.status === 'running' || executingTaskId === task.id || loadingResultId === task.id" />
@@ -45,8 +45,7 @@
     <div v-else class="knowledge-empty knowledge-surface">
       <div class="task-empty-symbol"><el-icon><Operation /></el-icon></div>
       <strong>{{ attentionOnly ? '没有需要检查的研究任务' : runningOnly ? '没有运行中的研究任务' : '还没有研究任务' }}</strong>
-      <span>创建任务后可交给 Harness 执行，结果和运行状态会保存到数据库。</span>
-      <el-button type="primary" :disabled="!bases.length" @click="openCreate">创建第一项任务</el-button>
+      <UiAction :icon="Plus" label="新建研究任务" :disabled="!bases.length" @click="openCreate" />
     </div>
 
     <MotionModal v-model="createVisible" :aria-label="editingTask ? '编辑研究简报' : '新建研究任务'">
@@ -126,6 +125,7 @@
           <button type="button" :aria-pressed="resultTab === 'report'" :class="{ 'is-active': resultTab === 'report' }" @click="openResult(activeTask)">研究报告</button>
           <button type="button" :aria-pressed="resultTab === 'inspector'" :class="{ 'is-active': resultTab === 'inspector' }" @click="openTaskInspection"><el-icon><View /></el-icon>运行检查器</button>
         </div>
+        <MotionSwap class="task-result-switch" :view-key="resultTab" contained horizontal>
         <div v-if="resultTab === 'report'" class="task-result-scroll" role="region" aria-label="研究报告">
           <div v-if="activeTask.artifact_state === 'failed'" class="artifact-failure" role="status"><strong>PPTX 生成失败，研究报告已保留</strong><span>可在下方阅读完整报告，或打开运行检查器定位原因后重新运行。</span></div>
           <div class="task-result-content">
@@ -136,8 +136,8 @@
               <div class="artifact-main-row">
                 <span class="artifact-icon"><el-icon><Download /></el-icon></span>
                 <span class="artifact-copy"><b>{{ artifact.title }}</b><small>{{ formatBytes(artifact.size_bytes) }} · {{ artifact.validation_message }}</small></span>
-                <button v-if="artifact.agent_run_id" type="button" @click="inspectArtifact(artifact)"><el-icon><View /></el-icon>策划过程</button>
-                <a :href="knowledgeArtifactDownloadUrl(artifact.id)" download>下载</a>
+                <UiAction v-if="artifact.agent_run_id" :icon="View" label="查看演示文稿策划过程" @click="inspectArtifact(artifact)" />
+                <a class="ui-icon-action" :href="knowledgeArtifactDownloadUrl(artifact.id)" download aria-label="下载演示文稿" title="下载演示文稿"><el-icon><Download /></el-icon></a>
               </div>
               <div v-if="artifactQuality(artifact)" class="artifact-quality" aria-label="演示文稿质量摘要">
                 <span><b>{{ artifactQuality(artifact)?.slide_count }}</b><small>总页数</small></span>
@@ -151,7 +151,7 @@
               </details>
             </article>
           </div>
-          <button v-if="activeTask.knowledge_change_state === 'proposed'" class="review-result-link" type="button" @click="openTaskReview(activeTask)">研究结论已作为候选保存，前往 Wiki 工作台审核</button>
+          <button v-if="activeTask.knowledge_change_state === 'proposed'" class="review-result-link" type="button" @click="openTaskReview(activeTask)">审核研究结论</button>
           <div v-if="activeEvidence.length" class="task-result-evidence">
             <button v-for="(entry, index) in activeEvidence" :key="`${index}-${entry.id}`" type="button" @click="openEvidence(index)">
               <b>S{{ index + 1 }}</b><span>{{ entry.title }}</span><small>{{ entry.source_path || '数据库实体' }}</small>
@@ -241,6 +241,7 @@
             </div>
           </div>
         </div>
+        </MotionSwap>
         <div class="knowledge-modal-actions">
           <el-button v-if="hasCapacityFailure || hasStallFailure" @click="openModelSettings">{{ hasStartupFailure ? '检查运行配置' : '检查模型设置' }}</el-button>
           <el-button v-if="(hasTurnLimitFailure || hasCapacityFailure || (hasStallFailure && !hasStartupFailure)) && activeTask.task_type === 'research'" @click="openNarrowedTask(activeTask)">缩小范围另建任务</el-button>
@@ -257,9 +258,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { DataAnalysis, Download, Loading, Operation, Plus, Refresh, Select, VideoPlay, View } from '@element-plus/icons-vue'
+import { DataAnalysis, Download, Edit, Loading, Operation, Plus, Refresh, Select, VideoPlay, View } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import MotionModal from '@/components/motion/MotionModal.vue'
+import MotionSwap from '@/components/motion/MotionSwap.vue'
+import UiAction from '@/components/motion/UiAction'
 import KnowledgeAnswerMarkdown from '@/components/knowledge/KnowledgeAnswerMarkdown.vue'
 import KnowledgeRunInspector from '@/components/knowledge/KnowledgeRunInspector.vue'
 import KnowledgeResearchWorkspace from '@/components/knowledge/KnowledgeResearchWorkspace.vue'
@@ -817,9 +820,6 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
 .task-filter { margin-bottom: 12px; }
 .task-summary { color: var(--text-faint); font-size: 12px; }
 .task-card-actions { min-width: 0; display: grid; gap: 8px; }
-.task-brief-edit { min-height: 30px; margin-top: 5px; padding: 2px 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
-.task-brief-edit:disabled { opacity: .5; cursor: default; }
-.task-stage-link { min-height: 34px; margin-top: 6px; padding: 3px 9px; border: 0; border-radius: 9px; background: var(--accent-light); color: var(--accent); font: inherit; font-size: 11px; font-weight: 650; cursor: pointer; }
 .research-task-list { display: grid; gap: 9px; }
 .research-task { display: grid; grid-template-columns: 52px minmax(0, 1fr) minmax(96px, auto); align-items: center; gap: 15px; padding: 16px 17px; animation: task-in var(--motion-normal) var(--ease-spring-gentle) both; animation-delay: calc(var(--order) * 30ms); }
 .task-kind { width: 52px; height: 52px; display: grid; place-items: center; border-radius: 16px; background: var(--accent-light); color: var(--accent); font-size: 22px; }
@@ -888,6 +888,7 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
 .task-result-tabs { flex: none; display: flex; gap: 5px; margin: 0 24px 12px; padding: 4px; border-radius: 12px; background: color-mix(in srgb, var(--text-primary) 5%, transparent); }
 .task-result-tabs button { min-height: 38px; flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 9px; background: transparent; color: var(--text-muted); font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; }
 .task-result-tabs button.is-active { background: var(--bg-glass-strong); color: var(--accent); box-shadow: var(--shadow-sm); }
+.task-result-switch :deep(.motion-swap__panel) { display: flex; flex-direction: column; }
 .task-result-scroll { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; padding: 0 24px 24px; overscroll-behavior: contain; }
 .task-result-scroll > * { min-width: 0; flex: 0 0 auto; }
 .task-inspection-state { min-height: 140px; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; color: var(--text-muted); font-size: 12px; text-align: center; }
@@ -982,7 +983,6 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
   .task-action span { display: none; }
 }
 @media (max-width: 768px) {
-  .task-brief-edit { min-height: 44px; font-size: 12px; }
   .research-readiness-state { font-size: 12px; }
   .research-readiness-state button { min-height: 44px; }
   .research-readiness-head strong { font-size: 13px; }
@@ -994,7 +994,6 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
   .research-brief-field { font-size: 13px; }
   .research-decision-tip b { font-size: 13px; }
   .research-decision-tip em { font-size: 12px; }
-  .task-stage-link { min-height: 44px; }
   .task-filter { display: grid; grid-template-columns: minmax(0, 1fr) 46px; align-items: stretch; }
   .mobile-create-task { width: 46px; min-height: 46px; display: grid; place-items: center; border: 0; border-radius: 14px; font-size: 18px; }
   .task-summary { grid-column: 1 / -1; }
@@ -1002,7 +1001,6 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
   .task-kind { display: none; }
   .task-main { grid-column: 1 / -1; }
   .task-card-actions { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding-top: 10px; border-top: 1px solid var(--border-faint); }
-  .task-stage-link { margin: 0; font-size: 13px; }
   .task-action { width: 100%; min-height: 44px; padding: 8px; border-radius: 11px; font-size: 13px; }
   .task-action span { display: inline; }
   .task-main > p { font-size: 14px; }

@@ -1,10 +1,10 @@
 <template>
   <div ref="pageRef" class="home-page">
     <header class="page-header">
-      <div><h1 class="page-title">首页</h1><p class="page-subtitle">{{ dateLabel }} · 从这里继续你的日常</p></div>
+      <div><h1 class="page-title">首页</h1><p class="page-subtitle">{{ dateLabel }}</p></div>
       <div class="header-actions">
-        <el-button class="home-theme-action" @click="appStore.toggleTheme()" :title="`切换主题，当前${themeName}`" :aria-label="`切换主题，当前${themeName}`"><el-icon><component :is="themeIcon" /></el-icon></el-button>
-        <el-button @click="loadOverview()" :loading="loading" aria-label="刷新工作台"><el-icon v-if="!loading"><Refresh /></el-icon><span>刷新</span></el-button>
+        <el-button class="home-theme-action ui-icon-action" @click="appStore.toggleTheme()" :title="`切换主题，当前${themeName}`" :aria-label="`切换主题，当前${themeName}`"><el-icon><component :is="themeIcon" /></el-icon></el-button>
+        <el-button class="ui-icon-action" @click="loadOverview()" :loading="loading" aria-label="刷新工作台" title="刷新工作台"><el-icon v-if="!loading"><Refresh /></el-icon></el-button>
       </div>
     </header>
     <div class="workbench-heading"><span>今日关注</span><small v-if="overview">{{ error ? '更新失败 · 显示上次结果' : `更新于 ${updatedLabel}` }}</small></div>
@@ -19,7 +19,7 @@
     <RouterLink v-if="overview?.wiki.data?.failed_count" :to="{path:'/knowledge',query:{activity:'attention'}}" class="home-notice">有 {{ overview.wiki.data.failed_count }} 项 Wiki 工作需要检查 <el-icon><ArrowRight /></el-icon></RouterLink>
     <div class="workbench-grid">
       <div class="workbench-main">
-      <HomePanel class="task-panel" title="我的任务" :subtitle="overview?.tasks.data ? `${overview.tasks.data.active_count} 项未关闭 · 优先显示需要关注的任务` : '先完成重要的事'" to="/tasks" :loading="loading" :ready="!!overview?.tasks.data" :error="overview?.tasks.error" @retry="loadOverview()">
+      <HomePanel class="task-panel" title="我的任务" :subtitle="overview?.tasks.data ? `${overview.tasks.data.active_count} 项未关闭` : undefined" to="/tasks" :loading="loading" :ready="!!overview?.tasks.data" :error="overview?.tasks.error" @retry="loadOverview()">
         <div v-if="overview?.tasks.data?.items.length" class="home-list">
           <div v-for="task in shownTasks" :key="task.id" class="task-row">
             <RouterLink class="home-row" :to="{path:'/tasks',query:{view:'tasks',task:task.id}}">
@@ -34,7 +34,7 @@
         </div>
         <div v-else class="panel-empty"><el-icon><CircleCheck /></el-icon><p>没有未关闭的任务</p><RouterLink to="/tasks">去安排下一件事</RouterLink></div>
       </HomePanel>
-      <HomePanel class="reading-panel" title="最近阅读" subtitle="接着上次的位置读下去" :to="{path:'/reader',query:{view:'shelf'}}" :loading="loading" :ready="!!overview?.reading.data" :error="overview?.reading.error" @retry="loadOverview()">
+      <HomePanel class="reading-panel" title="最近阅读" :to="{path:'/reader',query:{view:'shelf'}}" :loading="loading" :ready="!!overview?.reading.data" :error="overview?.reading.error" @retry="loadOverview()">
         <div v-if="overview?.reading.data?.length" class="home-list">
           <RouterLink v-for="book in shownBooks" :key="book.id" class="home-row" :to="{path:'/reader',query:{book:book.id}}">
             <span class="book-spine"><el-icon><component :is="book.kind === 'pdf' ? Document : Reading" /></el-icon></span>
@@ -45,7 +45,7 @@
       </HomePanel>
       </div>
       <div class="workbench-side">
-      <HomePanel class="wiki-panel" title="Wiki 动态" subtitle="编译、研究与待审核成果" to="/knowledge" :loading="loading" :ready="!!overview?.wiki.data" :error="overview?.wiki.error" @retry="loadOverview()">
+      <HomePanel class="wiki-panel" title="Wiki 动态" to="/knowledge" :loading="loading" :ready="!!overview?.wiki.data" :error="overview?.wiki.error" @retry="loadOverview()">
         <div v-if="overview?.wiki.data?.items.length" class="home-list">
           <RouterLink v-for="item in overview.wiki.data.items" :key="`${item.kind}-${item.id}`" class="home-row wiki-row" :to="wikiItemRoute(item)">
             <span class="row-icon" :class="{'is-warning':item.status === 'failed' || item.artifact_state === 'failed'}"><el-icon><component :is="item.kind === 'review' ? EditPen : item.kind === 'compile' ? Collection : DataAnalysis" /></el-icon></span>
@@ -54,7 +54,7 @@
         </div>
         <div v-else class="panel-empty"><el-icon><Collection /></el-icon><p>暂时没有 Wiki 动态</p><RouterLink to="/knowledge">查看书籍知识库</RouterLink></div>
       </HomePanel>
-      <HomePanel class="memo-panel" title="最近小记" subtitle="留住片刻的想法" to="/timeline" :loading="loading" :ready="!!overview?.memos.data" :error="overview?.memos.error" @retry="loadOverview()">
+      <HomePanel class="memo-panel" title="最近小记" to="/timeline" :loading="loading" :ready="!!overview?.memos.data" :error="overview?.memos.error" @retry="loadOverview()">
         <RouterLink v-if="overview?.memos.data" class="week-link" :to="{path:'/timeline',query:{start:overview.week_start,end:today}}">本周 {{ overview.memos.data.week_count }} 条 <span>查看本周<el-icon><ArrowRight /></el-icon></span></RouterLink>
         <div v-if="overview?.memos.data?.items.length" class="home-list">
           <RouterLink v-for="memo in overview.memos.data.items" :key="memo.id" class="home-row memo-row" :to="{path:'/timeline',query:{memo:memo.id}}">

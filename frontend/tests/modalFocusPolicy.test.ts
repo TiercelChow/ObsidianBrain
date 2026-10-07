@@ -22,3 +22,10 @@ test('shared overlays, reader search, and background pollers respect the focus p
   assert.ok(bases.includes('if (!canFocusDocument(document)) return'))
   assert.ok(tasks.includes('if (!canFocusDocument(document)) continue'))
 })
+
+test('an outgoing sheet cannot restore background focus over a newer modal', async () => {
+  const modal = await readFile(new URL('../src/composables/useModalEnvironment.ts', import.meta.url), 'utf8')
+  assert.match(modal, /const wasTopmost = isTopmost\(\)/)
+  assert.match(modal, /if \(restoreFocus && wasTopmost\)/)
+  assert.match(modal, /if \(modalStack\[modalStack.length - 1\] !== nextTop\) return/)
+})

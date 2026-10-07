@@ -1,5 +1,5 @@
 <template>
-  <div class="task-tree" role="tree" aria-label="任务拆解">
+  <TransitionGroup name="collection-flow" tag="div" class="task-tree" role="tree" aria-label="任务拆解" @before-leave="freezeCollectionLeave" @before-enter="resetCollectionEnter">
     <div
       v-for="item in flattened"
       :key="item.node.id"
@@ -58,8 +58,8 @@
 
     </div>
 
-    <div v-if="flattened.length === 0" class="tree-empty">还没有子任务</div>
-  </div>
+    <div v-if="flattened.length === 0" key="empty" class="tree-empty">还没有子任务</div>
+  </TransitionGroup>
 </template>
 
 <script setup lang="ts">
@@ -67,6 +67,7 @@ import { computed, ref, watch } from 'vue'
 import type { TaskImportance, TaskNode, TaskStatus } from '@/api/tasks'
 import { flattenVisibleSubtasks } from '@/utils/taskHierarchy'
 import { formatTaskDateRangeCompact } from '@/utils/taskDates'
+import { freezeCollectionLeave, resetCollectionEnter } from '@/utils/collectionMotion'
 
 const props = defineProps<{
   tasks: TaskNode[]
@@ -137,7 +138,7 @@ function importanceLabel(importance: TaskImportance) {
 </script>
 
 <style scoped>
-.task-tree { display: grid; gap: 6px; }
+.task-tree { position: relative; display: grid; gap: 6px; }
 .tree-row {
   --indent: calc(var(--tree-depth) * 22px);
   min-height: 54px;

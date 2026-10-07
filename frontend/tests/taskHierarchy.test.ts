@@ -25,6 +25,18 @@ test('task breakdown omits the root and promotes its direct children to depth ze
   ])
 })
 
+test('collapsed descendants do not reappear as orphaned top-level subtasks', () => {
+  const rows = flattenVisibleSubtasks(tasks, new Set())
+  assert.deepEqual(rows.map(row => row.node.id), ['child-a', 'child-later'])
+})
+
+test('genuinely orphaned subtasks remain visible without looping over damaged cycles', () => {
+  const orphan = {...tasks[1],id:'orphan',parent_id:'missing'}
+  const cycle = [{...orphan,id:'cycle-a',parent_id:'cycle-b'},{...orphan,id:'cycle-b',parent_id:'cycle-a'}]
+  const rows = flattenVisibleSubtasks([...tasks,orphan,...cycle], new Set(['cycle-a','cycle-b']))
+  assert.deepEqual(rows.map(row => row.node.id), ['child-a','child-later','orphan','cycle-a','cycle-b'])
+})
+
 test('calendar grid and collapsed agenda only receive root tasks', () => {
   assert.deepEqual(calendarTopLevelTasks(tasks).map(task => task.id), ['root-a', 'root-b'])
 

@@ -80,7 +80,7 @@
             <strong>{{ selectedDateLabel }}</strong>
             <span>{{ selectedRootCount ? `${selectedRootCount} 项任务` : '暂无安排' }}</span>
           </div>
-          <button type="button" @click="$emit('create', selectedDate)">＋ 添加</button>
+          <button type="button" class="ui-icon-action" aria-label="新建任务" title="新建任务" @click="$emit('create', selectedDate)">＋</button>
         </div>
         <div class="agenda-body">
           <TransitionGroup name="agenda-item" tag="div" class="agenda-list">

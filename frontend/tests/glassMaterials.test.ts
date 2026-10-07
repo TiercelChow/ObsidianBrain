@@ -129,6 +129,6 @@ test('file uploads expose styled triggers rather than unstyled native file butto
   for (const ref of ['skillArchiveInput', 'backupUploadInput']) {
     const input = settings.match(new RegExp(`<input ref="${ref}"[^>]+>`))?.[0] || ''
     assert.match(input, /\s+hidden(?:\s|\/?>)/, `${ref}: native picker is hidden`)
-    assert.match(settings, new RegExp(`<el-button[^>]*@click="${ref}\\?\\.click\\(\\)"`), `${ref}: system styled trigger remains available`)
+    assert.match(settings, new RegExp(`<(?:el-button|UiAction)[^>]*@click="${ref}\\?\\.click\\(\\)"`), `${ref}: system styled trigger remains available`)
   }
 })

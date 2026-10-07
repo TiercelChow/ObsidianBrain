@@ -192,7 +192,7 @@
 /* Actions share optical paint, including former solid-blue primary buttons.
    The host pane supplies backdrop sampling: no expensive filter per button. */
 :root[data-theme] :where(
-  [data-glass-action], .el-button:not(.is-text):not(.is-link), .glass-btn, .glass-icon-btn,
+  [data-glass-action], .el-button:not(.is-text):not(.is-link), .glass-btn, .glass-icon-btn, .ui-icon-action,
   button.primary, button.primary-action, button.confirm, .page-create,
   .reader-shelf-add, .mobile-compose-action, .mobile-create-task, .chat-composer button,
   .new-conversation-button, .task-action, .artifact-main-row > a,
@@ -206,7 +206,7 @@
 }
 /* Keep legacy paint bridged strongly; keep defaults weak so variants can win. */
 :root[data-theme] :is(
-  [data-glass-action], .el-button:not(.is-text):not(.is-link), .glass-btn, .glass-icon-btn,
+  [data-glass-action], .el-button:not(.is-text):not(.is-link), .glass-btn, .glass-icon-btn, .ui-icon-action,
   button.primary, button.primary-action, button.confirm, .page-create,
   .reader-shelf-add, .mobile-compose-action, .mobile-create-task, .chat-composer button,
   .new-conversation-button, .task-action, .artifact-main-row > a,
@@ -241,7 +241,7 @@
 :root[data-theme] .el-button--success { --control-label: var(--glass-success-label); }
 :root[data-theme] .el-button--warning { --control-label: var(--glass-warning-label); }
 :root[data-theme] :is(
-  [data-glass-action], .el-button:not(.is-text):not(.is-link), .glass-btn, .glass-icon-btn,
+  [data-glass-action], .el-button:not(.is-text):not(.is-link), .glass-btn, .glass-icon-btn, .ui-icon-action,
   button.primary, button.primary-action, button.confirm, .page-create,
   .reader-shelf-add, .mobile-compose-action, .mobile-create-task, .chat-composer button,
   .new-conversation-button, .task-action, .artifact-main-row > a,
@@ -252,7 +252,7 @@
   &:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 }
 :root[data-theme] :is(
-  [data-glass-action], .el-button:not(.is-text):not(.is-link), .glass-btn, .glass-icon-btn,
+  [data-glass-action], .el-button:not(.is-text):not(.is-link), .glass-btn, .glass-icon-btn, .ui-icon-action,
   button.primary, button.primary-action, button.confirm, .page-create,
   .reader-shelf-add, .mobile-compose-action, .mobile-create-task, .chat-composer button,
   .new-conversation-button, .task-action
@@ -287,11 +287,13 @@
   color: var(--glass-media-label);
 }
 /* A scrim dims the page; it is not another bright glass surface. */
-:root[data-theme] :is(.el-overlay, .motion-modal, .motion-drawer__scrim, .path-overlay, .ppm-overlay) {
+:root[data-theme] :is(.el-overlay, .motion-drawer__scrim, .path-overlay, .ppm-overlay) {
   background: var(--glass-scrim-fill) !important;
   backdrop-filter: var(--glass-scrim-filter) !important;
   -webkit-backdrop-filter: var(--glass-scrim-filter) !important;
 }
+/* MotionModal fades its separate scrim plane, never the entire sheet. */
+:root[data-theme] .motion-modal { background: transparent !important; }
 :root[data-theme] .image-viewer-overlay {
   background: rgba(0, 0, 0, .72);
   backdrop-filter: var(--glass-scrim-filter);

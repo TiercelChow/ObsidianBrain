@@ -15,9 +15,9 @@
     </div>
     <p class="storage-note">设为 0 不缓存；缩小容量会立即淘汰旧缓存，原图不受影响。</p>
     <div class="storage-actions">
-      <el-button :disabled="busy" @click="refresh">刷新</el-button>
+      <UiAction :icon="Refresh" label="刷新存储状态" :loading="loading" :disabled="busy && !loading" @click="refresh" />
       <el-button :disabled="busy" @click="clear">清空缓存</el-button>
-      <el-button type="primary" :loading="saving" :disabled="busy && !saving" @click="saveLimit">保存上限</el-button>
+      <el-button type="primary" :loading="saving" :disabled="busy && !saving" @click="saveLimit">保存</el-button>
     </div>
     <details class="storage-import" :open="!!storage?.missing_images.length">
       <summary>迁移旧图片</summary>
@@ -33,6 +33,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Refresh } from '@element-plus/icons-vue'
+import UiAction from '@/components/motion/UiAction'
 import { getTimelineStorage, importTimelineImages, clearTimelineImageCache, saveConfig } from '@/api'
 import { memoToolResult, type TimelineStorage } from '@/utils/timelineMemo'
 

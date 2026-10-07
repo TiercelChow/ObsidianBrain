@@ -47,12 +47,21 @@ export function flattenVisibleSubtasks<T extends HierarchyTask>(
   const rows: Array<FlattenedTask<T>> = []
   const visited = new Set<string>()
 
+  function coverHidden(node: T) {
+    if (visited.has(node.id)) return
+    visited.add(node.id)
+    const nested = children.get(node.id) || []
+    nested.forEach(coverHidden)
+  }
+
   function visit(node: T, depth: number) {
     if (visited.has(node.id) || node.role === 'root') return
     visited.add(node.id)
     const nested = children.get(node.id) || []
     rows.push({ node, depth, hasChildren: nested.length > 0 })
     if (expandedIds.has(node.id)) nested.forEach(child => visit(child, depth + 1))
+    // Hidden descendants are still connected, not orphaned fallback rows.
+    else nested.forEach(coverHidden)
   }
 
   const roots = tasks.filter(task => task.role === 'root').sort(compareTasks)

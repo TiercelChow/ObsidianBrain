@@ -1,5 +1,5 @@
 <template>
-  <KnowledgePageShell title="知识问答" subtitle="在单本书的证据边界内提问，答案与来源会持续保留">
+  <KnowledgePageShell title="知识问答">
     <div class="chat-layout">
       <div class="chat-mobile-context">
         <el-select v-model="activeBaseId" class="knowledge-select is-fluid" aria-label="当前问答知识库" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" :disabled="searching" placeholder="选择一本书" @change="changeKnowledgeBase">
@@ -30,8 +30,8 @@
         <section class="conversation-history" aria-label="问答历史">
           <header>
             <span>历史问答</span>
-            <button type="button" :disabled="!activeBaseId || searching" @click="newConversation()">
-              <el-icon><Plus /></el-icon><span>新对话</span>
+            <button type="button" class="ui-icon-action" aria-label="新对话" title="新对话" :disabled="!activeBaseId || searching" @click="newConversation()">
+              <el-icon><Plus /></el-icon>
             </button>
           </header>
           <div class="conversation-list">
@@ -76,14 +76,14 @@
         <div ref="messageListRef" class="message-list" @scroll="onMessageScroll">
           <div v-if="!messages.length && !historyLoading" class="chat-welcome">
             <div class="welcome-symbol"><el-icon><ChatDotRound /></el-icon></div>
-            <h2>从这本书开始思考</h2>
-            <p>先结合会话理解问题，再从本书编译知识目录选择证据；必要时继续核对原文。</p>
+            <h2>向这本书提问</h2>
             <button v-for="question in starterQuestions" :key="question" @click="ask(question)">{{ question }}</button>
           </div>
           <div v-else-if="historyLoading && !messages.length" class="history-loading">
             <el-icon class="is-loading"><Loading /></el-icon><span>正在恢复历史会话</span>
           </div>
-          <template v-for="message in messages" :key="message.id">
+          <TransitionGroup name="content-arrive" tag="div" class="chat-message-list">
+          <div v-for="message in messages" :key="message.id" class="message-unit">
             <div class="message" :class="message.role">
               <span class="message-role">{{ message.role === 'user' ? '你' : '知识库' }}</span>
               <p v-if="message.role === 'user'">{{ message.content }}</p>
@@ -113,13 +113,14 @@
                 <button v-if="message.interruption.kind === 'truncated' && !message.interruption.canRetry" type="button" @click="router.push({ path: '/knowledge/settings' })">调整模型配置</button>
                 <button v-if="message.originalQuestion && activeBaseId && message.interruption.researchSuggested" type="button" :disabled="searching || !!researchTransferMessageId" @click="openResearchTask(message)">{{ researchTransferMessageId === message.id ? '正在恢复问题…' : '转为分阶段研究任务' }}</button>
               </div>
-              <button v-if="message.role === 'assistant' && message.runId && message.id !== streamingMessageId" type="button" class="save-answer" @click="inspectRun(message.runId)">查看本轮目标与取证预算</button>
-              <button v-if="message.unsavedAnswer && message.runId" class="save-answer" type="button" :disabled="searching || savingHistoryRunId === message.runId" @click="persistRecoveredAnswer(message)">{{ savingHistoryRunId === message.runId ? '正在补存…' : '补存到会话历史' }}</button>
-              <button v-if="message.role === 'assistant' && message.runId && !message.interruption && !message.unsavedAnswer && message.id !== streamingMessageId" class="save-answer" type="button" :disabled="savingRunId === message.runId" @click="saveAnswer(message)">
-                <el-icon :class="{ 'is-loading': savingRunId === message.runId }"><Loading v-if="savingRunId === message.runId" /><Checked v-else /></el-icon>{{ savingRunId === message.runId ? '正在生成候选' : '保存到 Wiki' }}
-              </button>
-              <button v-if="message.role === 'assistant' && message.runId && !message.interruption && message.originalQuestion && message.id !== streamingMessageId" class="save-answer" type="button" :disabled="searching || !!researchTransferMessageId" @click="openResearchTask(message)">{{ researchTransferMessageId === message.id ? '正在准备研究…' : '深入研究此问题' }}</button>
+              <div v-if="message.role === 'assistant' && message.runId && message.id !== streamingMessageId" class="answer-actions" aria-label="回答操作">
+                <UiAction :icon="View" label="查看本轮运行" @click="inspectRun(message.runId)" />
+                <UiAction v-if="message.unsavedAnswer" :icon="DocumentAdd" label="补存到会话历史" :disabled="searching" :loading="savingHistoryRunId === message.runId" @click="persistRecoveredAnswer(message)" />
+                <UiAction v-if="!message.interruption && !message.unsavedAnswer" :icon="Checked" label="保存到 Wiki 待审核候选" :loading="savingRunId === message.runId" @click="saveAnswer(message)" />
+                <UiAction v-if="!message.interruption && message.originalQuestion" :icon="Reading" label="深入研究此问题" :disabled="searching || (!!researchTransferMessageId && researchTransferMessageId !== message.id)" :loading="researchTransferMessageId === message.id" @click="openResearchTask(message)" />
+              </div>
             </div>
+            <Transition name="content-arrive">
             <section v-if="message.evidence?.length && message.id !== streamingMessageId" class="evidence-section" aria-label="回答参考来源">
               <header><strong>参考来源</strong><span>{{ message.evidence.length }} 条{{ message.runId ? '已读证据' : '检索候选' }}</span></header>
               <div class="evidence-grid">
@@ -131,12 +132,14 @@
                 >
                   <span><b>S{{ evidenceIndex + 1 }}</b>{{ entry.source_path || '数据库实体' }}</span>
                   <strong>{{ entry.title }}</strong>
-                  <p>{{ entry.summary || '预览证据正文与引用' }}</p>
+                  <p v-if="entry.summary">{{ entry.summary }}</p>
                   <em>预览来源 <el-icon><ArrowRight /></el-icon></em>
                 </button>
               </div>
             </section>
-          </template>
+            </Transition>
+          </div>
+          </TransitionGroup>
         </div>
 
         <form v-glass-lens class="chat-composer" data-glass-rim @submit.prevent="ask(draft)">
@@ -157,7 +160,7 @@
           <el-select v-model="activeBaseId" class="knowledge-select is-fluid" aria-label="当前问答知识库" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" :disabled="searching" placeholder="选择一本书" @change="changeKnowledgeBase">
             <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
           </el-select>
-          <button class="new-conversation-button" type="button" :disabled="!activeBaseId || searching" @click="contextVisible = false; newConversation()"><el-icon><Plus /></el-icon>新对话</button>
+          <button class="new-conversation-button ui-icon-action" type="button" aria-label="新对话" title="新对话" :disabled="!activeBaseId || searching" @click="contextVisible = false; newConversation()"><el-icon><Plus /></el-icon></button>
           <section class="conversation-history" aria-label="手机端问答历史">
             <div class="conversation-list">
               <button v-for="conversation in conversations" :key="conversation.id" type="button" :class="{ active: conversation.id === activeConversationId }" :disabled="searching" @click="contextVisible = false; openConversation(conversation.id)">
@@ -178,7 +181,7 @@
           <div class="runtime-state"><span class="knowledge-status" :class="runtimeReady ? 'is-healthy' : 'is-warning'">{{ runtimeReady ? 'Harness 启动器可用' : '证据检索模式' }}</span><p>{{ runtimeMessage }}</p></div>
           <p class="boundary-note"><el-icon><Lock /></el-icon>不会跨书检索，也不会直接改写原始文件。</p>
         </div>
-        <footer class="knowledge-modal-actions"><el-button @click="contextVisible = false">关闭</el-button></footer>
+        <footer class="knowledge-modal-actions"><UiAction :icon="Close" label="关闭会话设置" @click="contextVisible = false" /></footer>
       </div>
     </MotionModal>
 
@@ -190,7 +193,7 @@
           <p v-else-if="inspectorError" role="alert">{{ inspectorError }}</p>
           <KnowledgeRunInspector v-else :inspection="inspection" />
         </div>
-        <footer class="knowledge-modal-actions"><el-button @click="inspectorVisible = false">关闭</el-button><el-button :disabled="inspectorLoading" @click="inspectRun(inspectedRunId)">刷新状态</el-button></footer>
+        <footer class="knowledge-modal-actions"><UiAction :icon="Refresh" label="刷新运行状态" :loading="inspectorLoading" @click="inspectRun(inspectedRunId)" /><UiAction :icon="Close" label="关闭运行检查器" @click="inspectorVisible = false" /></footer>
       </div>
     </MotionModal>
 
@@ -227,8 +230,8 @@
           </template>
         </div>
         <footer class="knowledge-modal-actions">
-          <el-button @click="sourceVisible = false">关闭</el-button>
-          <el-button v-if="sourceDetail && sourceDetail.entry_type !== 'external'" type="primary" @click="openSourceWorkspace">在 Wiki 工作台打开当前版本</el-button>
+          <UiAction :icon="Close" label="关闭来源预览" @click="sourceVisible = false" />
+          <el-button v-if="sourceDetail && sourceDetail.entry_type !== 'external'" type="primary" @click="openSourceWorkspace">打开当前版本</el-button>
           <el-button v-else-if="sourceCurrentEntry && sourceError && sourceCurrentEntry.entry_type !== 'external'" @click="openCurrentSource">查看当前版本（非本轮证据）</el-button>
         </footer>
       </div>
@@ -239,12 +242,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ArrowRight, ChatDotRound, ChatLineSquare, Checked, Close, Loading, Lock, Plus, Top } from '@element-plus/icons-vue'
+import { ArrowRight, ChatDotRound, ChatLineSquare, Checked, Close, DocumentAdd, Loading, Lock, Plus, Reading, Refresh, Top, View } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import KnowledgeAnswerMarkdown from '@/components/knowledge/KnowledgeAnswerMarkdown.vue'
 import KnowledgeRunInspector from '@/components/knowledge/KnowledgeRunInspector.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
+import UiAction from '@/components/motion/UiAction'
 import { useMarkdownRender } from '@/composables/useMarkdownRender'
 import { shouldSendComposerOnEnter } from '@/utils/chatComposer'
 import { createStreamedTextBuffer, type StreamedTextBuffer } from '@/utils/streamedText'
@@ -936,9 +940,7 @@ onBeforeUnmount(() => {
 .restored-answer-draft p { white-space: pre-wrap; }
 .restored-answer-draft > span { color: var(--text-muted); font-size: 11px; line-height: 1.5; }
 .restored-answer-draft :deep(.knowledge-answer-markdown) { padding: 0; border-radius: 0; background: transparent; }
-.save-answer { width: fit-content; display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; border: 0; border-radius: 9px; background: transparent; color: var(--accent); font: inherit; font-size: 10px; font-weight: 650; cursor: pointer; }
-.save-answer:hover { background: var(--accent-light); }
-.save-answer:disabled { opacity: .55; cursor: default; }
+.answer-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
 .chat-run-status { min-height: 32px; display: flex; align-items: center; gap: 9px; padding: 4px 2px; }
 .chat-run-dots { display: inline-flex; align-items: center; gap: 3px; flex: none; }
 .chat-run-dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--text-secondary); opacity: .95; animation: chat-dot-wave 900ms ease-in-out infinite alternate; }
@@ -1013,7 +1015,6 @@ onBeforeUnmount(() => {
   .chat-composer { flex: none; margin: 0 8px 8px; }
   .chat-composer textarea { font-size: 16px; }
   .chat-composer button { width: 44px; height: 44px; }
-  .save-answer { min-height: 44px; max-width: 100%; text-align: left; font-size: 12px; }
   .message > p { font-size: 15px; }
   .chat-welcome h2 { font-size: 19px; }
   .chat-welcome > button { min-height: 44px; font-size: 13px; }

@@ -42,7 +42,7 @@
       </template>
       <p v-else-if="!loading && !error && !waitingForReport" class="report-note">尚未记录覆盖报告。旧编译保留原记录，不补造覆盖结果；下次智能编译会建立报告。</p>
       </div>
-      <div class="knowledge-modal-actions"><el-button :loading="loading" @click="load()">刷新最新报告</el-button><el-button v-if="report?.status === 'waiting_review' && report.change_set_id" type="primary" @click="openReview">查看变更审核</el-button><el-button @click="emit('update:modelValue', false)">关闭</el-button></div>
+      <div class="knowledge-modal-actions"><UiAction :icon="Refresh" label="刷新最新编译报告" :loading="loading" @click="load()" /><el-button v-if="report?.status === 'waiting_review' && report.change_set_id" type="primary" @click="openReview">审核变更</el-button><UiAction :icon="Close" label="关闭编译报告" @click="emit('update:modelValue', false)" /></div>
     </div>
   </MotionModal>
 </template>
@@ -50,6 +50,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
+import { Close, Refresh } from '@element-plus/icons-vue'
+import UiAction from '@/components/motion/UiAction'
 import { getBookKnowledgeBase, getKnowledgeCompileReport, type KnowledgeBaseSummary, type KnowledgeCompileFragment, type KnowledgeCompileReport } from '@/api/knowledge'
 import { compileReportStatus, compileFragmentStatus, compileTopicStatus } from '@/utils/knowledgeCompileReport'
 

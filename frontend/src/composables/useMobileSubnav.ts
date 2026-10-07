@@ -1,10 +1,11 @@
-import { computed, inject, onScopeDispose, provide, shallowRef, type ComputedRef, type InjectionKey } from 'vue'
+import { computed, inject, onScopeDispose, provide, shallowRef, type Component, type ComputedRef, type InjectionKey } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 
 export interface MobileSubnavItem {
   id: string
   label: string
   compactLabel?: string
+  icon?: Component
   active: boolean
   to?: RouteLocationRaw
   select?: () => void

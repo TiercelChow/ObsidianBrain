@@ -63,13 +63,18 @@ export function useModalEnvironment(
 
   function deactivate(restoreFocus = true) {
     if (!active) return
+    const wasTopmost = isTopmost()
     active = false
     const index = modalStack.lastIndexOf(token)
     if (index >= 0) modalStack.splice(index, 1)
     unlockPageScroll()
-    if (restoreFocus) {
+    if (restoreFocus && wasTopmost) {
       const target = previousFocus
+      const nextTop = modalStack[modalStack.length - 1]
       nextTick(() => {
+        // A slower outgoing sheet may finish after a new one has entered.
+        // Never pull focus through that new surface to the old trigger.
+        if (modalStack[modalStack.length - 1] !== nextTop) return
         if (canFocusDocument(document) && target?.isConnected) target.focus({ preventScroll: true })
       })
     }

@@ -1,15 +1,15 @@
 <template>
   <Teleport to="body">
-    <Transition :name="`motion-drawer-${direction}`">
-      <div v-if="modelValue" class="motion-drawer" :class="{ 'is-dragging': dragging, 'is-settling': settling }">
+      <div v-if="present" class="motion-drawer" :class="{ 'is-dragging': dragging, 'is-settling': settling }">
         <div class="motion-drawer__scrim" :style="scrimStyle" aria-hidden="true" @click="close" />
         <aside
           ref="panelRef"
           class="motion-drawer__panel"
           :class="`is-${direction}`"
-          :style="panelStyle"
+          :style="{ transform: panelTransform }"
           role="dialog"
           aria-modal="true"
+          :inert="!modelValue ? true : undefined"
           :aria-label="ariaLabel"
           tabindex="-1"
           @pointerdown="onPointerDown"
@@ -18,18 +18,19 @@
           @pointercancel="onPointerCancel"
         >
           <div class="motion-drawer__grabber" aria-hidden="true" />
-          <slot />
+          <MotionContent :live="modelValue"><slot /></MotionContent>
         </aside>
       </div>
-    </Transition>
   </Teleport>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useModalEnvironment } from '@/composables/useModalEnvironment'
-import { animateSpring, projectMotion } from '@/utils/motionSpring'
-import { panelDragPosition, presentationOffset } from '@/utils/panelGesture'
+import { useSurfaceMotion } from '@/composables/useSurfaceMotion'
+import MotionContent from './MotionContent'
+import { projectMotion } from '@/utils/motionSpring'
+import { panelDragPosition } from '@/utils/panelGesture'
 
 const props = withDefaults(defineProps<{
   modelValue: boolean
@@ -43,40 +44,26 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 const panelRef = ref<HTMLElement | null>(null)
 const dragging = ref(false)
-const settling = ref(false)
-const dragX = ref(0)
+const directionSign = computed(() => props.direction === 'left' ? -1 : 1)
+const { present, moving: settling, offset: dragX, opacity, panelTransform, grab, follow, handoff, settle } = useSurfaceMotion(() => props.modelValue, panelRef, 'x', () => directionSign.value)
 let pointerId: number | null = null
 let startX = 0
 let grabX = 0
 let startY = 0
 let axis: 'pending' | 'horizontal' | 'vertical' = 'pending'
 let samples: Array<{ x: number; time: number }> = []
-let cancelSpring: (() => void) | null = null
-
-const directionSign = computed(() => props.direction === 'left' ? -1 : 1)
-const panelStyle = computed(() => ({ '--motion-drawer-x': `${dragX.value}px` }))
-const scrimStyle = computed(() => {
-  const width = panelRef.value?.offsetWidth || 320
-  const progress = Math.max(0, 1 - Math.abs(dragX.value) / width)
-  return { opacity: String(progress) }
-})
+const scrimStyle = computed(() => ({ opacity: opacity.value }))
 
 function close() {
   emit('update:modelValue', false)
 }
 
-function stopSpring() {
-  cancelSpring?.()
-  cancelSpring = null
-  settling.value = false
-}
-
 function onPointerDown(event: PointerEvent) {
   if (event.pointerType === 'mouse' && event.button !== 0) return
   if ((event.target as Element).closest('button, a, input, textarea, select, [contenteditable="true"]')) return
-  stopSpring()
-  grabX = panelRef.value ? presentationOffset(getComputedStyle(panelRef.value).transform, 'x', dragX.value) : dragX.value
-  dragX.value = grabX
+  if (!props.modelValue) return
+  // Don't pause the entry until horizontal intent is confirmed. A vertical
+  // scroll/tap must not strand a partially entered drawer.
   pointerId = event.pointerId
   startX = event.clientX
   startY = event.clientY
@@ -96,12 +83,15 @@ function onPointerMove(event: PointerEvent) {
       return
     }
     dragging.value = true
+    grab()
+    grabX = dragX.value
+    startX = event.clientX
     panelRef.value?.setPointerCapture(event.pointerId)
   }
 
   event.preventDefault()
   const width = panelRef.value?.offsetWidth || 320
-  dragX.value = panelDragPosition(grabX, event.clientX, startX, width, directionSign.value)
+  follow(panelDragPosition(grabX, event.clientX, startX, width, directionSign.value))
   const now = performance.now()
   samples.push({ x: event.clientX, time: now })
   samples = samples.filter((sample) => now - sample.time <= 100)
@@ -120,30 +110,17 @@ function finishGesture() {
   }
   pointerId = null
   dragging.value = false
-  settling.value = true
-  const target = shouldClose ? directionSign.value * (width + 8) : 0
-  cancelSpring = animateSpring(
-    dragX.value,
-    target,
-    velocity,
-    (value) => { dragX.value = value },
-    () => {
-      cancelSpring = null
-      settling.value = false
-      if (shouldClose) close()
-    },
-    { response: 0.34, damping: Math.abs(velocity) > 500 ? 0.9 : 1 },
-  )
+  if (shouldClose) { handoff(velocity); close() }
+  else settle(velocity)
 }
 
 function resetGesture() {
-  stopSpring()
+  grab()
   if (pointerId !== null && panelRef.value?.hasPointerCapture(pointerId)) {
     panelRef.value.releasePointerCapture(pointerId)
   }
   pointerId = null
   dragging.value = false
-  dragX.value = 0
 }
 
 function onPointerUp(event: PointerEvent) {
@@ -157,17 +134,9 @@ function onPointerCancel(event: PointerEvent) {
   if (panelRef.value?.hasPointerCapture(event.pointerId)) panelRef.value.releasePointerCapture(event.pointerId)
   pointerId = null
   dragging.value = false
-  settling.value = true
-  cancelSpring = animateSpring(dragX.value, 0, 0, value => { dragX.value = value }, () => {
-    cancelSpring = null
-    settling.value = false
-  })
+  settle(0)
 }
-
-watch(() => props.modelValue, (open) => {
-  if (open) resetGesture()
-})
-useModalEnvironment(() => props.modelValue, panelRef, close)
+useModalEnvironment(() => present.value, panelRef, close)
 onBeforeUnmount(() => {
   resetGesture()
 })
@@ -184,7 +153,6 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.28);
-  transition: opacity var(--motion-fast) var(--ease-emphasized);
 }
 
 .motion-drawer__panel {
@@ -199,8 +167,6 @@ onBeforeUnmount(() => {
   -webkit-backdrop-filter: var(--glass-panel-filter);
   border: 1px solid var(--border-glass);
   box-shadow: var(--shadow-lg), var(--inset-highlight);
-  transform: translate3d(var(--motion-drawer-x), 0, 0);
-  transition: transform var(--motion-normal) var(--ease-spring-gentle);
   touch-action: pan-y;
   outline: none;
   padding-top: env(safe-area-inset-top);
@@ -223,33 +189,7 @@ onBeforeUnmount(() => {
 .is-left .motion-drawer__grabber { right: 5px; }
 .is-right .motion-drawer__grabber { left: 5px; }
 
-.is-dragging .motion-drawer__panel,
-.is-dragging .motion-drawer__scrim,
-.is-settling .motion-drawer__panel,
-.is-settling .motion-drawer__scrim { transition: none; }
-.motion-drawer.is-dragging .motion-drawer__panel,
-.motion-drawer.is-settling .motion-drawer__panel { transform: translate3d(var(--motion-drawer-x), 0, 0); }
-
-.motion-drawer-left-enter-active,
-.motion-drawer-left-leave-active,
-.motion-drawer-right-enter-active,
-.motion-drawer-right-leave-active {
-  transition: opacity var(--motion-fast) var(--ease-emphasized);
-}
-.motion-drawer-left-enter-active .motion-drawer__panel,
-.motion-drawer-left-leave-active .motion-drawer__panel,
-.motion-drawer-right-enter-active .motion-drawer__panel,
-.motion-drawer-right-leave-active .motion-drawer__panel {
-  transition: transform var(--motion-normal) var(--ease-spring-gentle);
-}
-.motion-drawer-left-enter-from,
-.motion-drawer-left-leave-to,
-.motion-drawer-right-enter-from,
-.motion-drawer-right-leave-to { opacity: 0; }
-.motion-drawer-left-enter-from .motion-drawer__panel,
-.motion-drawer-left-leave-to .motion-drawer__panel { transform: translate3d(-105%, 0, 0); }
-.motion-drawer-right-enter-from .motion-drawer__panel,
-.motion-drawer-right-leave-to .motion-drawer__panel { transform: translate3d(105%, 0, 0); }
+.is-dragging .motion-drawer__panel, .is-settling .motion-drawer__panel { will-change: transform; }
 
 @media (prefers-reduced-motion: reduce) {
   .motion-drawer__panel { transform: none !important; }

@@ -1,5 +1,5 @@
 <template>
-  <KnowledgePageShell title="Wiki 配置" subtitle="集中管理 Agent Runtime、每本书的规则文档与能力边界">
+  <KnowledgePageShell title="Wiki 配置">
     <div class="settings-layout">
       <el-select v-model="section" class="mobile-settings-section knowledge-select is-fluid" aria-label="配置分区" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true">
         <el-option label="Agent Runtime · 执行器与模型" value="runtime" />
@@ -19,8 +19,9 @@
       </aside>
 
       <section class="settings-main knowledge-surface">
+        <MotionSwap :view-key="section">
         <template v-if="section === 'runtime'">
-          <header class="settings-section-head"><div><span>执行环境</span><h2>Agent Runtime</h2><p>DeepSeek Harness 负责执行，模型可连接任意受支持的供应商；业务数据仍由 Rust 与 SQLite 管理。</p></div></header>
+          <header class="settings-section-head"><div><h2>Agent Runtime</h2></div></header>
           <div v-if="loading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
           <article v-for="item in runtimeHealth" v-else :key="item.profile.id" class="runtime-card">
             <div class="runtime-title">
@@ -61,9 +62,9 @@
         </template>
 
         <template v-else-if="section === 'providers'">
-          <header class="settings-section-head split">
-            <div><span>模型路由</span><h2>模型供应商</h2><p>集中管理第三方模型供应商；keychain 模式的 API Key 写入系统凭据库，不落盘。environment 模式仍由启动进程的环境变量提供。</p></div>
-            <el-button type="primary" :icon="Plus" @click="openNewProvider">新增供应商</el-button>
+          <header class="settings-section-head split provider-section-head">
+            <div><h2>模型供应商</h2><p>API Key 写入系统凭据库；环境变量模式使用启动进程提供的密钥。</p></div>
+            <el-button type="primary" class="ui-icon-action" :icon="Plus" aria-label="新增供应商" title="新增供应商" @click="openNewProvider" />
           </header>
           <div v-if="loading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
           <article v-else v-for="provider in modelProviders" :key="provider.provider_id" class="provider-card">
@@ -82,17 +83,17 @@
             <div class="runtime-actions">
               <el-switch v-model="provider.enabled" active-text="启用" @change="toggleProviderEnabled(provider)" />
               <div>
-                <el-button :loading="updatingProviderId === provider.provider_id" @click="openEditProvider(provider)">编辑</el-button>
-                <el-button type="danger" :loading="deletingProviderId === provider.provider_id" @click="removeProvider(provider)">删除</el-button>
+                <UiAction :icon="Edit" label="编辑供应商" :loading="updatingProviderId === provider.provider_id" @click="openEditProvider(provider)" />
+                <UiAction :icon="Delete" label="删除供应商" danger :loading="deletingProviderId === provider.provider_id" @click="removeProvider(provider)" />
               </div>
             </div>
           </article>
-          <p v-if="!loading && !modelProviders.length" class="settings-empty">尚未配置任何模型供应商，点击右上角「新增供应商」开始。</p>
+          <p v-if="!loading && !modelProviders.length" class="settings-empty">尚未配置模型供应商</p>
         </template>
 
         <template v-else-if="section === 'usage'">
           <header class="settings-section-head split usage-head">
-            <div><span>运行可观测性</span><h2>Token 用量</h2><p>按时间与调用方查看输入、输出和调用趋势。</p></div>
+            <div><h2>Token 用量</h2></div>
             <div class="usage-filters">
               <el-date-picker v-model="usageDateRange" type="daterange" value-format="YYYY-MM-DD" format="YYYY/MM/DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :clearable="false" unlink-panels popper-class="glass-picker wiki-usage-picker" @change="loadUsage" />
               <el-select v-model="usageCaller" class="knowledge-select is-fluid" placeholder="全部调用方" aria-label="Token 用量调用方" popper-class="system-select-popper system-toolbar-popper" placement="bottom-start" :offset="0" :fit-input-width="true" @change="loadUsage">
@@ -167,7 +168,7 @@
                 <code>{{ backup.filename }}</code>
               </div>
               <div class="backup-card-actions">
-                <a :href="knowledgeBackupDownloadUrl(backup.filename)" download><el-button text><el-icon><Download /></el-icon>下载</el-button></a>
+                <a class="ui-icon-action" :href="knowledgeBackupDownloadUrl(backup.filename)" download aria-label="下载数据库快照" title="下载数据库快照"><el-icon><Download /></el-icon></a>
                 <el-button text type="danger" @click="openManagedRestore(backup)">恢复</el-button>
               </div>
             </article>
@@ -175,26 +176,28 @@
         </template>
 
         <template v-else-if="section === 'documents'">
-          <header class="settings-section-head split"><div><span>提示词与规则</span><h2>配置文档</h2><p>内容保存在 SQLite，需要运行时才会物化为临时文件。</p></div><el-select v-model="activeBaseId" class="knowledge-select is-compact is-responsive" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库" @change="loadSettings"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" /></el-select></header>
+          <header class="settings-section-head split"><div><h2>配置文档</h2></div><el-select v-model="activeBaseId" class="knowledge-select is-compact is-responsive" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库" @change="loadSettings"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" /></el-select></header>
           <div v-if="!activeBaseId" class="knowledge-empty"><strong>选择一本书</strong><span>查看并调整它的知识建模、问答与任务规则。</span></div>
           <div v-else class="document-editor">
             <nav class="document-tabs"><button v-for="document in documents" :key="document.id" :class="{ active: document.id === activeDocument?.id }" @click="activeDocumentId = document.id"><el-icon><Document /></el-icon>{{ document.name }}</button></nav>
+            <MotionSwap :view-key="activeDocumentId">
             <template v-if="activeDocument">
               <div class="document-meta"><span>{{ activeDocument.scope === 'book' ? '书籍级配置' : '全局配置' }}</span><span>Revision {{ activeDocument.revision }}</span></div>
               <textarea v-model="activeDocument.content_md" spellcheck="false"></textarea>
-              <div class="document-actions"><span>Markdown 内容仅作为配置载荷，数据库是唯一事实来源。</span><el-button type="primary" :loading="savingDocument" @click="saveDocument">保存文档</el-button></div>
+              <div class="document-actions"><el-button type="primary" :loading="savingDocument" @click="saveDocument">保存</el-button></div>
             </template>
+            </MotionSwap>
           </div>
         </template>
 
         <template v-else>
           <header class="settings-section-head split skills-head">
-            <div><span>能力扩展</span><h2>Skills</h2><p>指令保存在 SQLite；当前开发阶段仅保留最新内容，启用范围严格绑定当前书籍。</p></div>
+            <div><h2>Skills</h2><p>启用状态仅作用于当前书籍。</p></div>
             <div class="skills-actions">
               <el-select v-model="activeBaseId" class="knowledge-select is-compact is-responsive" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库" @change="loadSkills"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" /></el-select>
               <input ref="skillArchiveInput" hidden type="file" accept=".zip,application/zip" @change="importSkillArchive" />
-              <el-button :loading="importingSkill" @click="skillArchiveInput?.click()"><el-icon><UploadFilled /></el-icon>导入 ZIP</el-button>
-              <el-button type="primary" @click="openSkillEditor()"><el-icon><Plus /></el-icon>新增 Skill</el-button>
+              <UiAction :icon="UploadFilled" label="导入 ZIP Skill" :loading="importingSkill" @click="skillArchiveInput?.click()" />
+              <el-button type="primary" class="ui-icon-action" aria-label="新增 Skill" title="新增 Skill" @click="openSkillEditor()"><el-icon><Plus /></el-icon></el-button>
             </div>
           </header>
           <div v-if="!activeBaseId" class="knowledge-empty"><strong>选择一本书</strong><span>Skill 的启用状态不会跨知识库共享。</span></div>
@@ -206,20 +209,21 @@
                 <div><h3>{{ skill.name }}</h3><code>{{ skill.slug }}</code></div>
                 <el-switch :model-value="skill.enabled" :loading="savingSkillId === skill.id" @change="toggleSkill(skill, Boolean($event))" />
               </header>
-              <p>{{ skill.description || '没有补充说明' }}</p>
-              <div class="skill-badges"><span>{{ skill.source_type === 'builtin' ? '内置' : '自定义' }}</span><span>Revision {{ skill.revision }}</span><span>只读知识</span></div>
+              <p v-if="skill.description">{{ skill.description }}</p>
+              <div class="skill-badges"><span>{{ skill.source_type === 'builtin' ? '内置' : '自定义' }}</span><span>Revision {{ skill.revision }}</span></div>
               <footer>
                 <el-select v-model="skill.usage_scope" class="knowledge-select is-compact" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" :disabled="savingSkillId === skill.id" @change="updateSkillScope(skill)">
                   <el-option label="问答与研究" value="both" /><el-option label="仅问答" value="qa" /><el-option label="仅研究" value="research" /><el-option label="仅智能编译" value="ingest" /><el-option label="全部场景" value="all" />
                 </el-select>
                 <div class="skill-card-actions">
-                  <el-button text @click="openSkillDetail(skill)">查看内容</el-button>
-                  <el-button v-if="skill.source_type === 'custom'" text @click="openSkillEditor(skill)">编辑</el-button>
+                  <UiAction :icon="View" label="查看 Skill 内容" @click="openSkillDetail(skill)" />
+                  <UiAction v-if="skill.source_type === 'custom'" :icon="Edit" label="编辑 Skill" @click="openSkillEditor(skill)" />
                 </div>
               </footer>
             </article>
           </div>
         </template>
+        </MotionSwap>
       </section>
     </div>
 
@@ -232,7 +236,7 @@
           <el-input v-model="skillDraft.description" type="textarea" :rows="2" :maxlength="500" show-word-limit placeholder="说明这个 Skill 解决什么问题" />
           <el-input v-model="skillDraft.instructions" type="textarea" :rows="8" :maxlength="12000" show-word-limit placeholder="写明分析步骤、质量要求与输出格式" />
         </div>
-        <div class="knowledge-modal-actions"><el-button @click="skillEditorVisible = false">取消</el-button><el-button type="primary" :loading="savingSkill" :disabled="!skillDraft.name.trim() || !skillDraft.slug.trim() || !skillDraft.instructions.trim()" @click="saveSkill">保存修改</el-button></div>
+        <div class="knowledge-modal-actions"><el-button @click="skillEditorVisible = false">取消</el-button><el-button type="primary" :loading="savingSkill" :disabled="!skillDraft.name.trim() || !skillDraft.slug.trim() || !skillDraft.instructions.trim()" @click="saveSkill">保存</el-button></div>
       </div>
     </MotionModal>
 
@@ -271,7 +275,7 @@
           </template>
           <el-switch v-model="providerDraft.enabled" active-text="启用" />
         </div>
-        <div class="knowledge-modal-actions"><el-button @click="providerEditorVisible = false">取消</el-button><el-button type="primary" :loading="savingProvider" :disabled="!providerDraft.display_name.trim() || !providerDraft.base_url.trim() || !providerDraft.model.trim() || Boolean(capabilityError)" @click="saveProviderDraft">保存供应商</el-button></div>
+        <div class="knowledge-modal-actions"><el-button @click="providerEditorVisible = false">取消</el-button><el-button type="primary" :loading="savingProvider" :disabled="!providerDraft.display_name.trim() || !providerDraft.base_url.trim() || !providerDraft.model.trim() || Boolean(capabilityError)" @click="saveProviderDraft">保存</el-button></div>
       </div>
     </MotionModal>
 
@@ -348,13 +352,15 @@
                 <p v-else>尚未运行。它会在只读、无工具权限的 Harness 会话中对比当前版和候选版。</p>
               </section>
             </div>
+            <MotionSwap :view-key="activeSkillFile?.relative_path || 'empty'">
             <pre v-if="activeSkillFile">{{ activeSkillFile.content_text }}</pre>
             <div v-else class="knowledge-empty"><strong>当前版本没有可显示文件</strong></div>
+            </MotionSwap>
           </section>
         </div>
         <div class="knowledge-modal-actions">
           <el-button v-if="skillDetail?.skill.source_type === 'builtin'" @click="cloneSkillToCustom">复制为自定义</el-button>
-          <el-button v-if="skillDetail?.skill.source_type === 'custom'" @click="editDetailedSkill">编辑当前版本</el-button>
+          <UiAction v-if="skillDetail?.skill.source_type === 'custom'" :icon="Edit" label="编辑当前 Skill 版本" @click="editDetailedSkill" />
           <el-button v-if="activeSkillVersion?.release_state === 'candidate'" :loading="skillVersionAction === 'evaluate'" @click="evaluateActiveSkillVersion">运行固定评测</el-button>
           <el-button v-if="activeSkillVersion?.release_state === 'candidate'" :loading="skillVersionAction === 'benchmark'" :disabled="!activeSkillVersion.latest_evaluation?.passed || ['queued', 'running'].includes(activeSkillVersion.latest_benchmark?.status || '')" @click="benchmarkActiveSkillVersion">运行真实基准</el-button>
           <el-button v-if="activeSkillVersion?.release_state === 'candidate'" type="primary" :loading="skillVersionAction === 'publish'" :disabled="!activeSkillVersion.latest_evaluation?.passed || !activeSkillVersion.latest_benchmark?.passed" @click="publishActiveSkillVersion">发布此版本</el-button>
@@ -381,7 +387,9 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowDown, Connection, Cpu, DataAnalysis, Document, Download, InfoFilled, Loading, Lock, MagicStick, Plus, UploadFilled } from '@element-plus/icons-vue'
+import { ArrowDown, Connection, Cpu, DataAnalysis, Delete, Document, Download, Edit, InfoFilled, Loading, Lock, MagicStick, Plus, UploadFilled, View } from '@element-plus/icons-vue'
+import UiAction from '@/components/motion/UiAction'
+import MotionSwap from '@/components/motion/MotionSwap.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import { modelReasoningPolicies, validateModelCapabilities } from '@/utils/knowledgeRuntimePolicy'
@@ -1310,6 +1318,7 @@ onMounted(() => { void initialize(); if (section.value === 'usage') void loadUsa
 .restore-warning .el-icon { flex: none; margin-top: 2px; color: #ff453a; }
 .restore-form label { display: grid; gap: 6px; }
 .document-editor { display: grid; gap: 12px; }
+.document-editor :deep(.motion-swap__panel) { display: grid; gap: 12px; }
 .document-tabs { display: flex; gap: 6px; overflow-x: auto; }
 .document-tabs button { min-height: 38px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--border-faint); border-radius: 11px; background: transparent; color: var(--text-muted); font: inherit; font-size: 11px; white-space: nowrap; cursor: pointer; }
 .document-tabs button.active { border-color: var(--accent-border); background: var(--accent-light); color: var(--accent); }
@@ -1317,7 +1326,6 @@ onMounted(() => { void initialize(); if (section.value === 'usage') void loadUsa
 .document-editor textarea { width: 100%; min-height: 340px; resize: vertical; padding: 17px; border: 1px solid var(--border-subtle); border-radius: 15px; background: color-mix(in srgb, var(--bg-base) 55%, transparent); color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; line-height: 1.75; }
 .document-editor textarea:focus { border-color: var(--accent-border); }
 .document-actions { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
-.document-actions span { color: var(--text-faint); font-size: 10px; }
 .skills-head { align-items: flex-start !important; }
 .skills-actions { display: flex; align-items: center; gap: 8px; }
 .skills-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
@@ -1492,5 +1500,15 @@ onMounted(() => { void initialize(); if (section.value === 'usage') void loadUsa
 }
 @media (prefers-reduced-motion: reduce) {
   .usage-bar-column > i { animation: none; }
+}
+/* Compact familiar actions must not inherit the stacked form-submit layout. */
+.provider-card .runtime-actions { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 12px; }
+.provider-card .runtime-actions > div:not(.el-switch) { display: flex; gap: 8px; }
+@media (max-width: 768px) {
+  .settings-section-head.provider-section-head { display: flex; flex-direction: row; align-items: flex-start; flex-wrap: nowrap; }
+  .provider-section-head > div { flex: 1; min-width: 0; }
+  .skills-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; }
+  .skills-actions .knowledge-select { flex: 1 0 100%; }
+  .skills-actions .ui-icon-action { width: 44px; flex: none; }
 }
 </style>

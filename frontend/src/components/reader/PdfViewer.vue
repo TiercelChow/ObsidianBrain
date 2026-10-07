@@ -1,7 +1,7 @@
 <template>
   <div ref="scrollRef" class="pdf-viewer" :class="`pdf-theme-${theme}`" @dblclick="onDoubleClick">
-    <div v-if="loading" class="pdf-state">
-      <el-icon class="is-loading"><Loading /></el-icon><span>PDF 加载中…</span>
+    <div v-if="loading" class="pdf-state" role="status" aria-label="加载 PDF">
+      <el-icon class="is-loading" aria-hidden="true"><Loading /></el-icon>
     </div>
     <div v-else-if="error" class="pdf-state error">⚠️ {{ error }}</div>
     <div v-else ref="pagesRef" class="pdf-pages">

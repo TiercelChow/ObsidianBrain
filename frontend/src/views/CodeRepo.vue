@@ -3,20 +3,17 @@
     <header class="page-header">
       <div>
         <h1 class="page-title">代码仓管理</h1>
-        <p class="page-subtitle">注册本地 Git 仓库，自动提取元信息，关联笔记</p>
       </div>
       <div class="header-actions">
-        <el-button @click="loadRepos" :loading="loading">
-          <el-icon><Refresh /></el-icon> 刷新
-        </el-button>
-        <el-button type="primary" @click="showAddDialog = true">
-          <el-icon><Plus /></el-icon> 注册仓库
+        <UiAction :icon="Refresh" label="刷新仓库" :loading="loading" @click="loadRepos" />
+        <el-button type="primary" class="ui-icon-action" aria-label="注册仓库" title="注册仓库" @click="showAddDialog = true">
+          <el-icon><Plus /></el-icon>
         </el-button>
       </div>
     </header>
 
     <!-- 仓库列表 -->
-    <div class="repo-grid" v-if="repos.length > 0">
+    <TransitionGroup name="collection-flow" tag="div" class="repo-grid" v-if="repos.length > 0" @before-leave="freezeCollectionLeave" @before-enter="resetCollectionEnter">
       <div v-for="repo in repos" :key="repo.name" class="repo-card">
         <div class="repo-header">
           <div class="repo-name">{{ repo.name }}</div>
@@ -35,19 +32,14 @@
           </span>
         </div>
         <div class="repo-actions">
-          <el-button @click="viewDetail(repo.name)">
-            <el-icon><View /></el-icon> 详情
-          </el-button>
-          <el-button type="primary" @click="openRepo(repo)">
-            <el-icon><component :is="isMobile ? CopyDocument : Monitor" /></el-icon>
-            {{ isMobile ? '复制路径' : 'VSCode' }}
-          </el-button>
+          <UiAction :icon="View" label="查看仓库详情" @click="viewDetail(repo.name)" />
+          <UiAction :icon="isMobile ? CopyDocument : Monitor" :label="isMobile ? '复制仓库路径' : '在 VSCode 打开仓库'" @click="openRepo(repo)" />
         </div>
       </div>
-    </div>
+    </TransitionGroup>
 
     <el-empty v-else-if="!loading" description="暂无注册的代码仓库">
-      <el-button type="primary" @click="showAddDialog = true">注册第一个仓库</el-button>
+      <el-button type="primary" class="ui-icon-action" aria-label="注册第一个仓库" title="注册仓库" @click="showAddDialog = true"><el-icon><Plus /></el-icon></el-button>
     </el-empty>
 
     <!-- 仓库详情对话框 -->
@@ -111,6 +103,8 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { addCodeRepo, listCodeRepos, getRepoDetail, openInVscode } from '@/api'
 import { Refresh, Plus, Connection, View, Monitor, CopyDocument } from '@element-plus/icons-vue'
+import { freezeCollectionLeave, resetCollectionEnter } from '@/utils/collectionMotion'
+import UiAction from '@/components/motion/UiAction'
 import { ElMessage } from 'element-plus'
 
 interface RepoInfo {
@@ -225,7 +219,7 @@ onUnmounted(() => window.removeEventListener('resize', onResize))
 .code-repo-page .repo-card:nth-child(3) { animation-delay: 0.12s; }
 .code-repo-page .repo-card:nth-child(4) { animation-delay: 0.18s; }
 
-.repo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 16px; }
+.repo-grid { position: relative; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 16px; }
 .repo-card { min-width: 0; padding: 20px; border-radius: 16px; transition: box-shadow var(--duration-fast) var(--ease-out); display: flex; flex-direction: column; }
 .repo-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
 .repo-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }

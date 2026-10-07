@@ -3,7 +3,6 @@
     <header class="page-header knowledge-heading">
       <div>
         <h1 class="page-title">{{ title }}</h1>
-        <p class="page-subtitle">{{ subtitle }}</p>
       </div>
       <div class="header-actions"><slot name="actions" /></div>
     </header>
@@ -24,7 +23,7 @@ import { ChatDotRound, Collection, Operation, Setting, Tickets } from '@element-
 import { useRoute } from 'vue-router'
 import { useMobileSubnav } from '@/composables/useMobileSubnav'
 
-defineProps<{ title: string; subtitle: string }>()
+defineProps<{ title: string }>()
 
 const tabs = [
   { path: '/knowledge', label: '知识库', icon: Collection },

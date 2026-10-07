@@ -74,8 +74,10 @@ test('task detail owns a fixed action row and child detail omits redundant root 
   const tasks = await source('src/views/Tasks.vue')
 
   assert.match(tasks, /class="mobile-detail-scroll"/)
-  assert.doesNotMatch(tasks, /返回任务/)
-  assert.match(tasks, /\.page-create \{ display: none; \}/)
+  const childDialog = tasks.match(/<MotionModal v-model="childDetailOpen"[\s\S]*?<\/MotionModal>/)?.[0] || ''
+  assert.doesNotMatch(childDialog, /返回任务/)
+  assert.match(tasks, /label="返回任务列表"/)
+  assert.doesNotMatch(tasks, /class="page-create"/)
 })
 
 test('phone navigation uses direct destinations instead of a module sheet and keeps clear titles', async () => {

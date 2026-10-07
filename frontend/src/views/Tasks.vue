@@ -3,9 +3,7 @@
     <header class="page-header">
       <div>
         <h1 class="page-title">任务中枢</h1>
-        <p class="page-subtitle">让临期待办轻巧落地，让长期目标稳步生长</p>
       </div>
-      <button type="button" class="page-create" @click="openCreate()"><span aria-hidden="true">＋</span>新建</button>
     </header>
 
     <section class="task-toolbar glass-surface" data-glass-rim>
@@ -14,24 +12,12 @@
         <button type="button" :class="{ active: viewMode === 'tasks' }" @click="changeView('tasks')">任务</button>
         <button type="button" :class="{ active: viewMode === 'calendar' }" @click="changeView('calendar')">日历</button>
       </div>
-      <button
-        type="button"
-        class="mobile-filter-toggle"
-        :class="{ active: filtersExpanded || hasAdvancedFilters }"
-        :aria-expanded="filtersExpanded"
-        aria-controls="task-filter-fields"
-        @click="filtersExpanded = !filtersExpanded"
-      >
-        <span>筛选</span>
-        <small>{{ filterSummary }}</small>
-        <i aria-hidden="true">⌄</i>
-      </button>
       <div class="task-search glass-surface" role="search">
         <el-icon class="task-search-icon"><Search /></el-icon>
         <input v-model="searchQuery" type="search" aria-label="搜索任务" placeholder="搜索标题或描述" />
         <button v-if="searchQuery" type="button" class="task-search-clear" aria-label="清除搜索" @click="searchQuery = ''">×</button>
       </div>
-      <div id="task-filter-fields" class="filters" :class="{ expanded: filtersExpanded }">
+      <div class="filters">
         <el-select
           v-model="kindFilter"
           aria-label="任务类型"
@@ -59,6 +45,22 @@
       </div>
     </section>
 
+    <MotionModal v-model="queryPanelOpen" :aria-label="queryPanelMode === 'search' ? '搜索任务' : '筛选任务'">
+      <section class="task-query-sheet glass-surface-heavy">
+        <header class="filter-sheet-header"><h3>{{ queryPanelMode === 'search' ? '搜索任务' : '筛选任务' }}</h3><button type="button" class="ui-icon-action" aria-label="关闭任务查询" @click="queryPanelOpen = false">×</button></header>
+        <div class="task-search glass-surface" role="search">
+          <el-icon class="task-search-icon"><Search /></el-icon>
+          <input ref="mobileSearchInput" v-model="searchQuery" type="search" aria-label="搜索任务" placeholder="搜索任务" />
+          <button v-if="searchQuery" type="button" class="task-search-clear" aria-label="清除搜索" @click="searchQuery = ''">×</button>
+        </div>
+        <div class="query-filter-fields">
+          <label><span>类型</span><el-select v-model="kindFilter" aria-label="任务类型" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option value="all" label="全部类型" /><el-option value="short" label="短期待办" /><el-option value="long" label="长期任务" /></el-select></label>
+          <label><span>状态</span><el-select v-model="statusFilter" aria-label="任务状态" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option value="active" label="未关闭" /><el-option value="all" label="全部状态" /><el-option v-for="option in statusOptions" :key="option.value" :value="option.value" :label="option.label" /></el-select></label>
+        </div>
+        <div class="query-sheet-actions"><button type="button" class="glass-btn" @click="resetListFilters">重置</button><button type="button" class="glass-btn" @click="queryPanelOpen = false">完成</button></div>
+      </section>
+    </MotionModal>
+
     <Transition name="error-banner">
       <div v-if="store.error" class="error-banner" role="alert">
         <span>{{ store.error }}</span>
@@ -66,7 +68,8 @@
       </div>
     </Transition>
 
-    <div v-if="viewMode === 'tasks'" class="task-workspace" :class="{ 'detail-open': !!store.selectedTaskId, 'list-collapsed': !!detail && listCollapsed }">
+    <MotionSwap v-if="viewMode === 'tasks'" class="task-workspace-stage" :view-key="isPhone ? (store.selectedTaskId ? 'detail' : 'list') : 'desktop'" :horizontal="isPhone" :direction="store.selectedTaskId ? 1 : -1" contained>
+    <div class="task-workspace" :class="{ 'detail-open': !!store.selectedTaskId, 'list-collapsed': !!detail && listCollapsed }">
       <aside class="task-list-panel glass-surface" data-glass="structural">
         <div class="list-controls" :aria-hidden="listCollapsed" :inert="listCollapsed ? true : undefined">
         <div class="panel-heading">
@@ -86,7 +89,6 @@
             {{ option.label }}<span>{{ focusCounts[option.value] }}</span>
           </button>
         </div>
-        <p class="list-order">按紧迫程度分组 · 组内重要任务优先</p>
         </div>
 
         <div class="task-list-scroll" :aria-hidden="listCollapsed" :inert="listCollapsed ? true : undefined" @scroll="onPanelScroll">
@@ -138,7 +140,7 @@
           <strong>{{ hasListFilters ? '没有符合条件的任务' : '从一件小事开始' }}</strong>
           <p>{{ hasListFilters ? '试试其他筛选，或清除条件查看未关闭任务。' : '新建短期待办，或拆解一个长期目标。' }}</p>
           <button v-if="hasListFilters" type="button" @click="resetListFilters">重置筛选</button>
-          <button v-else type="button" @click="openCreate()">新建第一个任务</button>
+          <button v-else type="button" class="ui-icon-action" aria-label="新建第一个任务" title="新建任务" @click="openCreate()">＋</button>
         </div>
         </div>
 
@@ -169,9 +171,9 @@
         </div>
         <template v-else-if="detail">
         <div v-if="store.selectedTaskId" class="mobile-detail-nav">
-          <button type="button" @click="closeMobileDetail">‹ 任务列表</button>
+          <UiAction :icon="ArrowLeft" label="返回任务列表" @click="closeMobileDetail" />
           <span>{{ detail.root.kind === 'short' ? '短期待办' : '长期任务' }}</span>
-          <button type="button" class="mobile-detail-edit" aria-label="编辑任务" @click="openEdit(detail.root)"><el-icon><EditPen /></el-icon><span>编辑</span></button>
+          <UiAction :icon="EditPen" label="编辑任务" @click="openEdit(detail.root)" />
         </div>
         <div class="mobile-detail-scroll" @scroll="onPanelScroll">
         <div class="detail-summary">
@@ -198,13 +200,15 @@
           </div>
 
           <div v-if="detail.root.kind === 'long'" class="detail-switch" role="tablist" aria-label="切换拆解与进展">
+            <span class="detail-switch-indicator" :class="detailSection" aria-hidden="true"></span>
             <button type="button" role="tab" :aria-selected="detailSection === 'breakdown'" :class="{ active: detailSection === 'breakdown' }" @click="detailSection = 'breakdown'">任务拆解<span>{{ subtaskCount }}</span></button>
             <button type="button" role="tab" :aria-selected="detailSection === 'progress'" :class="{ active: detailSection === 'progress' }" @click="detailSection = 'progress'">进展记录<span>{{ activity.length }}</span></button>
           </div>
         </div>
 
         <div class="detail-columns" :class="{ split: detail.root.kind === 'long' }">
-          <section v-if="detail.root.kind === 'long'" class="detail-section task-breakdown">
+          <Transition name="collection-flow" @before-leave="freezeCollectionLeave" @before-enter="resetCollectionEnter">
+          <section v-if="detail.root.kind === 'long'" v-show="!isPhone || detailSection === 'breakdown'" class="detail-section task-breakdown">
             <div class="column-heading">
               <div><span>任务拆解</span><strong>{{ detail.completed_leaf_count }}/{{ detail.effective_leaf_count }}</strong></div>
               <button type="button" aria-label="添加子任务" @click="openSubtask(detail.root)">＋</button>
@@ -219,8 +223,10 @@
             />
             </div>
           </section>
+          </Transition>
 
-        <aside ref="activitySectionRef" class="task-progress-panel">
+        <Transition name="collection-flow" @before-leave="freezeCollectionLeave" @before-enter="resetCollectionEnter">
+        <aside v-show="!isPhone || detail.root.kind !== 'long' || detailSection === 'progress'" ref="activitySectionRef" class="task-progress-panel">
           <div class="progress-column-header">
             <div><span>进展</span><strong>{{ activity.length }} 条记录</strong></div>
             <button v-if="detail.root.kind === 'long' && !isTaskClosed(detail.root)" type="button" aria-label="记录进展" @click="openProgress(detail.root)">＋</button>
@@ -253,12 +259,13 @@
             <p v-else class="activity-empty-copy">{{ detail.root.kind === 'long' ? '还没有记录，留下第一步进展。' : '状态变化与关闭说明会保留在这里。' }}</p>
           </div>
         </aside>
+        </Transition>
         </div>
         </div>
         <footer v-if="!isTaskClosed(detail.root)" class="mobile-context-actions" aria-label="任务操作">
           <template v-if="detail.root.kind === 'long'">
-            <button type="button" @click="openSubtask(detail.root)">＋ 添加子任务</button>
-            <button type="button" class="primary" @click="openProgress(detail.root)">记录进展</button>
+            <button type="button" aria-label="添加子任务" title="添加子任务" @click="openSubtask(detail.root)"><el-icon><Plus /></el-icon></button>
+            <UiAction :icon="EditPen" label="记录进展" @click="openProgress(detail.root)" />
           </template>
           <button v-else type="button" class="primary complete-shortcut" @click="openCompleteShort(detail.root)">完成待办</button>
         </footer>
@@ -270,7 +277,6 @@
             <button type="button" class="activity-empty" @click="openTask(store.selectedTaskId)">重新加载</button>
           </template>
           <template v-else>
-            <span class="overview-eyebrow">下一步，从这里开始</span>
             <h2>把注意力留给重要的事</h2>
             <p>{{ suggestedTasks.length ? '根据当前列表的紧迫程度排序，选择一项开始推进。' : '从左侧选择任务，或新建一件想完成的事。' }}</p>
             <div v-if="suggestedTasks.length" class="suggested-tasks">
@@ -279,11 +285,11 @@
                 <span class="suggestion-timing" :class="taskTiming(task, today).tone">{{ taskTiming(task, today).label }} <span aria-hidden="true">↗</span></span>
               </button>
             </div>
-            <small class="overview-note">选择后查看拆解与进展；任务数据不会因筛选改变。</small>
           </template>
         </div>
       </div>
     </div>
+    </MotionSwap>
 
     <TaskCalendar
       v-else
@@ -301,6 +307,7 @@
     />
 
     <MotionModal v-model="childDetailOpen" aria-label="子任务详情">
+      <MotionSwap :view-key="drawerNode?.id || 'empty'" horizontal>
       <section v-if="drawerNode" :key="drawerNode.id" class="child-task-dialog glass-surface-heavy">
         <header class="child-dialog-header" :class="{ 'has-back': drawerParent?.role === 'subtask' }">
           <button v-if="drawerParent?.role === 'subtask'" type="button" class="child-back" aria-label="返回上一级" @click="backFromChild">‹</button>
@@ -351,17 +358,17 @@
           </section>
         </div>
         <footer v-if="!isTaskClosed(drawerNode)" class="child-dialog-actions">
-          <button type="button" @click="openSubtask(drawerNode)">＋ 添加子任务</button>
-          <button type="button" class="primary" @click="openProgress(drawerNode)">记录进展</button>
+          <button type="button" aria-label="添加子任务" title="添加子任务" @click="openSubtask(drawerNode)"><el-icon><Plus /></el-icon></button>
+          <UiAction :icon="EditPen" label="记录进展" @click="openProgress(drawerNode)" />
         </footer>
       </section>
+      </MotionSwap>
     </MotionModal>
 
     <MotionModal v-model="sheetOpen" :aria-label="sheetTitle">
       <form class="task-sheet glass-surface-heavy" @submit.prevent="submitSheet">
         <header class="sheet-header">
           <div>
-            <span>{{ sheetEyebrow }}</span>
             <h3>{{ sheetTitle }}</h3>
             <p v-if="targetNode" class="sheet-target">{{ sheetMode === 'subtask' ? '父任务' : '应用于' }}：{{ targetNode.title }}</p>
           </div>
@@ -520,10 +527,14 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { EditPen, FolderChecked, Search } from '@element-plus/icons-vue'
+import { ArrowLeft, EditPen, Filter, FolderChecked, Plus, Search } from '@element-plus/icons-vue'
+import { useMediaQuery } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import MotionModal from '@/components/motion/MotionModal.vue'
+import MotionSwap from '@/components/motion/MotionSwap.vue'
+import UiAction from '@/components/motion/UiAction'
+import { freezeCollectionLeave, resetCollectionEnter } from '@/utils/collectionMotion'
 import TaskCalendar from '@/components/tasks/TaskCalendar.vue'
 import TaskTree from '@/components/tasks/TaskTree.vue'
 import {
@@ -553,19 +564,25 @@ type SheetMode = 'create' | 'edit' | 'subtask' | 'progress'
 const route = useRoute()
 const router = useRouter()
 const store = useTasksStore()
+const isPhone = useMediaQuery('(max-width: 768px)')
 const appStore = useAppStore()
 const viewMode = ref<ViewMode>(route.query.view === 'calendar' ? 'calendar' : 'tasks')
 useMobileSubnav(() => ({
-  label: '任务视图切换',
-  items: (['tasks', 'calendar'] as const).map(mode => ({
+  label: '任务视图与查询',
+  items: [...(['tasks', 'calendar'] as const).map(mode => ({
     id: mode, label: mode === 'tasks' ? '任务' : '日历', active: viewMode.value === mode, select: () => changeView(mode),
   })),
+    { id: 'search', label: '搜索任务', icon: Search, active: !!searchQuery.value || (queryPanelOpen.value && queryPanelMode.value === 'search'), select: () => openQueryPanel('search') },
+    { id: 'filter', label: '筛选任务', icon: Filter, active: hasAdvancedFilters.value || (queryPanelOpen.value && queryPanelMode.value === 'filter'), select: () => openQueryPanel('filter') },
+  ],
 }))
 const searchQuery = ref('')
 const kindFilter = ref<'all' | TaskKind>('all')
 const statusFilter = ref<'active' | 'all' | TaskStatus>('active')
 const focusFilter = ref<TaskFocus>(['today','overdue','blocked'].includes(String(route.query.focus)) ? route.query.focus as TaskFocus : 'all')
-const filtersExpanded = ref(false)
+const queryPanelOpen = ref(false)
+const queryPanelMode = ref<'search' | 'filter'>('search')
+const mobileSearchInput = ref<HTMLInputElement | null>(null)
 const listCollapsed = ref(false)
 const detailSection = ref<'breakdown' | 'progress'>('breakdown')
 const focusOptions: Array<{ value: TaskFocus; label: string }> = [
@@ -645,12 +662,12 @@ const groupedTasks = computed(() => groupWorkspaceTasks(visibleTasks.value, toda
 const suggestedTasks = computed(() => groupedTasks.value.flatMap(group => group.tasks).filter(task => !isTaskClosed(task)).slice(0, 4))
 const hasListFilters = computed(() => !!searchQuery.value || kindFilter.value !== 'all' || statusFilter.value !== 'active' || focusFilter.value !== 'all')
 const hasAdvancedFilters = computed(() => kindFilter.value !== 'all' || statusFilter.value !== 'active')
-const filterSummary = computed(() => {
-  const kind = kindFilter.value === 'short' ? '待办' : kindFilter.value === 'long' ? '长期' : '全部'
-  const status = statusFilter.value === 'active' ? '未关闭' : statusFilter.value === 'all'
-    ? '全部状态' : taskStatusLabel(statusFilter.value)
-  return `${kind} · ${status}`
-})
+async function openQueryPanel(mode: 'search' | 'filter') {
+  queryPanelMode.value = mode
+  queryPanelOpen.value = true
+  await nextTick()
+  if (mode === 'search' && queryPanelOpen.value && document.hasFocus()) mobileSearchInput.value?.focus({ preventScroll: true })
+}
 
 function resetListFilters() {
   searchQuery.value = ''
@@ -669,9 +686,6 @@ const activity = computed(() => buildTaskActivity(detail.value?.tasks ?? [], det
 const drawerActivity = computed(() => (drawerNode.value ? buildTaskActivity(detail.value?.tasks ?? [], detail.value?.progress ?? [], detail.value?.audit ?? [], drawerNode.value.id) : []))
 const sheetTitle = computed(() => ({
   create: '新建任务', edit: '编辑任务', subtask: '添加子任务', progress: '记录进展',
-})[sheetMode.value])
-const sheetEyebrow = computed(() => ({
-  create: '新的开始', edit: '调整计划', subtask: '拆解下一步', progress: '留下轨迹',
 })[sheetMode.value])
 const sheetAction = computed(() => ({ create: '创建', edit: '保存', subtask: '添加', progress: '记录' })[sheetMode.value])
 
@@ -978,21 +992,8 @@ onMounted(async () => {
 .tasks-page { min-height: 100%; max-width: 100%; color: var(--text-primary); }
 /* Task view locks the page: only the list/detail/drawer panes scroll (Reader.vue pattern). */
 .tasks-page.view-tasks { display: flex; flex-direction: column; height: calc(100vh - 64px); height: calc(100dvh - 64px); overflow: hidden; }
-.tasks-page.view-tasks > :not(.task-workspace) { flex-shrink: 0; }
-.page-create {
-  min-height: 42px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 16px;
-  border: 0;
-  border-radius: 13px;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 620;
-  cursor: pointer;
-}
-.page-create:active { transform: scale(.965); }
+.tasks-page.view-tasks > :not(.task-workspace-stage) { flex-shrink: 0; }
+.task-workspace-stage { flex: 1 1 auto; min-height: 0; }
 .glass-surface { background: var(--bg-glass); border: 1px solid var(--border-glass); box-shadow: var(--shadow-sm), var(--inset-highlight); backdrop-filter: var(--glass-content-filter); -webkit-backdrop-filter: var(--glass-content-filter); }
 .task-toolbar { min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 8px 10px; margin-bottom: 14px; border-radius: 18px; }
 .view-switch { position: relative; display: grid; grid-template-columns: 1fr 1fr; width: 174px; padding: 3px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 5%, transparent); isolation: isolate; }
@@ -1009,6 +1010,16 @@ onMounted(async () => {
 .task-search input::placeholder { color: var(--text-faint); }
 .task-search-clear { width: 22px; height: 22px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--border-faint); color: var(--text-muted); font-size: 13px; line-height: 1; cursor: pointer; transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-instant) ease; }
 .task-search-clear:active { transform: scale(.9); }
+.task-query-sheet { padding: 32px 20px max(20px, var(--safe-bottom)); border-radius: 24px 24px 0 0; max-height: inherit; overflow-y: auto; }
+.filter-sheet-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.filter-sheet-header h3 { flex: 1; margin: 0; font-size: 19px; }
+.task-query-sheet .task-search { min-width: 0; height: 44px; }
+.query-filter-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+.query-filter-fields label { display: flex; flex-direction: column; gap: 8px; min-width: 0; color: var(--text-secondary); font-size: 13px; }
+.query-filter-fields :deep(.el-select) { width: 100%; min-width: 0; }
+.query-filter-fields :deep(.el-select__wrapper) { min-height: 44px; }
+.query-sheet-actions { display: flex; gap: 10px; }
+.query-sheet-actions button { flex: 1; min-height: 46px; justify-content: center; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); color: var(--text-primary); font: inherit; cursor: pointer; }
 .filters { display: flex; gap: 7px; margin-left: auto; }
 .filters :deep(.el-select) { width: 150px; }
 .filters :deep(.el-select__wrapper) { min-height: 40px; border-radius: 12px !important; }
@@ -1019,7 +1030,7 @@ onMounted(async () => {
 .error-banner button { border: 0; background: transparent; color: #ff3b30; cursor: pointer; }
 .error-banner-enter-active, .error-banner-leave-active { transition: opacity var(--motion-fast) ease, transform var(--motion-fast) ease; }
 .error-banner-enter-from, .error-banner-leave-to { opacity: 0; transform: translateY(-5px); }
-.task-workspace { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(300px, 350px) minmax(0, 1fr); gap: 14px; transition: grid-template-columns 400ms var(--ease-spring-gentle); }
+.task-workspace { height: 100%; flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(300px, 350px) minmax(0, 1fr); gap: 14px; transition: grid-template-columns 400ms var(--ease-spring-gentle); }
 .task-workspace.list-collapsed { grid-template-columns: 68px minmax(0, 1fr); }
 .task-detail-zone { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-radius: 22px; overflow: hidden; }
 .mobile-detail-scroll { display: contents; }
@@ -1088,7 +1099,7 @@ onMounted(async () => {
 .empty-orb { width: 54px; height: 54px; display: grid; place-items: center; margin-bottom: 13px; border-radius: 18px; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); font-size: 25px; }
 .detail-section, .task-progress-panel, .task-detail-placeholder { min-width: 0; min-height: 0; }
 .detail-summary { flex: none; padding: 24px 24px 0; min-width: 0; }
-.detail-columns { flex: 1 1 auto; min-width: 0; min-height: 0; display: grid; grid-template-columns: 1fr; gap: 0; }
+.detail-columns { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; display: grid; grid-template-columns: 1fr; gap: 0; }
 .detail-columns.split { grid-template-columns: minmax(0, 1.12fr) minmax(310px, .88fr); }
 .detail-columns.split .task-progress-panel { border-left: 1px solid var(--border-subtle); }
 .task-progress-panel { padding: 0; border-radius: 0 22px 0 0; display: flex; flex-direction: column; overflow: hidden; }
@@ -1128,9 +1139,11 @@ onMounted(async () => {
 .progress-summary span { color: var(--text-muted); font-size: 12px; }
 .progress-summary strong { font-size: 17px; font-variant-numeric: tabular-nums; }
 .progress-overview > small { color: var(--text-faint); font-size: 11px; }
-.detail-switch { display: none; min-width: 200px; gap: 6px; padding: 4px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+.detail-switch { position: relative; isolation: isolate; display: none; min-width: 200px; gap: 6px; padding: 4px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+.detail-switch-indicator { position: absolute; inset: 4px auto 4px 4px; width: calc((100% - 14px) / 2); border-radius: 10px; background: var(--bg-glass-strong); box-shadow: var(--shadow-sm); z-index: -1; transition: transform var(--motion-slow) var(--ease-spring-playful); }
+.detail-switch-indicator.progress { transform: translateX(calc(100% + 6px)); }
 .detail-switch button { flex: 1; min-height: 40px; padding: 8px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); font: inherit; font-size: 14px; cursor: pointer; }
-.detail-switch button.active { color: var(--text-primary); font-weight: 600; background: var(--bg-glass-strong); box-shadow: var(--shadow-sm); }
+.detail-switch button.active { color: var(--text-primary); font-weight: 600; }
 .detail-switch button span { margin-left: 6px; color: var(--text-faint); font-size: 12px; font-variant-numeric: tabular-nums; }
 .detail-section { margin-top: 0; padding: 0 24px 34px; border-radius: 22px 0 0 0; display: flex; flex-direction: column; overflow: hidden; }
 .activity-empty-copy { color: var(--text-faint); font-size: 13px; line-height: 1.7; }
@@ -1180,7 +1193,7 @@ onMounted(async () => {
 .child-list button:hover { background: var(--bg-glass); }
 .child-list button strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .child-status { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }.child-status.status-in_progress { background: var(--accent); }.child-status.status-blocked { background: #ff9500; }.child-status.status-completed { background: #34c759; }
-.child-dialog-actions { display: grid; grid-template-columns: 1fr 1.25fr; gap: 9px; padding: 14px 26px 24px; border-top: 1px solid var(--border-subtle); }
+.child-dialog-actions { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 9px; padding: 14px 26px 24px; border-top: 1px solid var(--border-subtle); }
 .child-dialog-actions button { min-height: 44px; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); color: var(--text-secondary); font: inherit; font-weight: 600; cursor: pointer; }
 .detail-loading { height: 100%; display: flex; align-items: center; justify-content: center; gap: 5px; }.detail-loading span { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite alternate; }.detail-loading span:nth-child(2) { animation-delay: .15s; }.detail-loading span:nth-child(3) { animation-delay: .3s; }
 @keyframes pulse { to { opacity: .25; transform: translateY(-4px); } }
@@ -1221,7 +1234,7 @@ onMounted(async () => {
 .suggested-tasks button:hover { background: var(--bg-glass-strong); border-color: color-mix(in srgb, var(--accent) 30%, var(--border-subtle)); }
 .suggestion-copy { min-width: 0; display: grid; gap: 6px; flex: 1; }
 .suggestion-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
-.suggestion-copy small, .overview-note { color: var(--text-faint); font-size: 12px; }
+.suggestion-copy small { color: var(--text-faint); font-size: 12px; }
 .suggestion-timing { flex: none; font-size: 12px; }
 .suggestion-timing > span { margin-left: 8px; }
 .task-card:focus-visible, .focus-filters button:focus-visible, .detail-switch button:focus-visible, .detail-actions button:focus-visible, .suggested-tasks button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -1274,25 +1287,13 @@ onMounted(async () => {
 }
 
 @media (max-width: 768px) {
-  .page-create { display: none; }
   .tasks-page.view-tasks {
     height: calc(100dvh - var(--mobile-header-height) - var(--mobile-navigation-height) - var(--safe-top) - max(8px, var(--safe-bottom)) - 20px);
   }
   .tasks-page.mobile-focused {
     height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 16px);
   }
-  .page-create {
-    min-height: var(--tap-target);
-    padding: 0 13px;
-    pointer-events: auto;
-  }
-  .task-toolbar {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
-    min-height: 0;
-    padding: 7px;
-  }
+  .task-toolbar { display: none; }
   .task-search {
     grid-column: 1 / -1;
     grid-row: 1;
@@ -1304,39 +1305,7 @@ onMounted(async () => {
   .task-search input { font-size: 16px; }
   .task-toolbar .view-switch { display: none; }
   .view-switch button { min-height: 38px; }
-  .mobile-filter-toggle {
-    grid-column: 1;
-    grid-row: 2;
-    min-width: 0;
-    min-height: 44px;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 6px;
-    padding: 0 10px;
-    border: 1px solid var(--border-subtle);
-    border-radius: 12px;
-    background: var(--bg-glass);
-    color: var(--text-secondary);
-    font: inherit;
-    text-align: left;
-  }
-  .mobile-filter-toggle small { overflow: hidden; color: var(--text-faint); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-  .mobile-filter-toggle i { color: var(--text-faint); font-style: normal; transition: transform var(--motion-normal) var(--ease-spring-gentle); }
-  .mobile-filter-toggle[aria-expanded="true"] i { transform: rotate(180deg); }
-  .mobile-filter-toggle.active { color: var(--accent); border-color: var(--accent-border); }
-  .filters {
-    grid-column: 1 / -1;
-    grid-row: 3;
-    width: 100%;
-    display: none;
-    gap: 8px;
-    margin: 0;
-  }
-  .filters.expanded { display: flex; }
-  .filters :deep(.el-select) { flex: 1; width: auto; min-width: 0; }
-  .filters :deep(.el-select__wrapper) { min-height: var(--tap-target); }
-  .task-workspace { flex: 1 1 auto; min-height: 0; height: auto; display: block; }
+  .task-workspace { flex: 1 1 auto; min-height: 0; height: 100%; display: block; }
   .task-list-panel, .task-detail-zone { height: 100%; min-height: 0; border-radius: 20px; }
   .task-workspace.detail-open .task-list-panel { display: none; }
   .task-workspace:not(.detail-open) .task-detail-zone { display: none; }
@@ -1388,8 +1357,6 @@ onMounted(async () => {
   .progress-column-header { padding: 8px 16px 0; }
   .task-breakdown .column-heading { margin: 0 -16px; padding: 8px 16px 0; }
   .column-heading button, .progress-column-header button { display: none; }
-  .task-detail-zone.mobile-section-progress .task-breakdown { display: none; }
-  .task-detail-zone.mobile-section-breakdown .task-progress-panel { display: none; }
   .mobile-context-actions {
     position: relative;
     flex: none;
@@ -1398,7 +1365,7 @@ onMounted(async () => {
     right: 0;
     bottom: 0;
     display: grid;
-    grid-template-columns: 1fr 1.2fr;
+    grid-template-columns: 48px minmax(0, 1fr);
     gap: 8px;
     padding: 10px 12px max(10px, var(--safe-bottom));
     border-top: 1px solid var(--border-glass);
@@ -1433,7 +1400,10 @@ onMounted(async () => {
   .sheet-footer button { min-height: 48px; }
 }
 
+
 @media (prefers-reduced-motion: reduce) {
+  .detail-switch-indicator { transition: none; }
+  .progress-body, .column-scroll { animation: none !important; }
   .task-workspace, .list-controls, .task-list-scroll, .task-list-rail, .switch-indicator, .task-card, .mini-progress i, .progress-track i, .check-field input, .check-field input::after, .error-banner-enter-active, .error-banner-leave-active, .task-card-enter-active, .task-card-leave-active { transition-duration: 1ms !important; }.task-skeletons span, .detail-loading span { animation: none !important; }
 }
 @media (prefers-reduced-transparency: reduce) { .glass-surface, .task-sheet, .archive-dialog { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--bg-primary); }:global(.task-date-popper.el-popper) { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background: var(--bg-primary) !important; } }

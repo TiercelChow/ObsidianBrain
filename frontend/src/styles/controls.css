@@ -130,6 +130,7 @@
 }
 :root[data-theme] .el-button--primary { font-weight: 650 !important; }
 :root[data-theme] :is(.el-button, .glass-btn, .glass-icon-btn) .el-icon { font-size: 18px; }
+:root[data-theme] .ui-icon-action .el-icon { font-size: 22px; }
 :root[data-theme] .el-switch { --el-switch-on-color: var(--accent); --el-switch-off-color: var(--glass-field-edge); }
 :root[data-theme] .el-switch__core { background: var(--glass-field-edge) !important; border-color: transparent !important; }
 :root[data-theme] .el-switch.is-checked .el-switch__core { background: var(--accent) !important; }

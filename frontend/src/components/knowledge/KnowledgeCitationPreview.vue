@@ -8,7 +8,7 @@
       <div class="knowledge-modal-body">
         <p v-if="preview && !preview.historical" class="preview-status">当前实体版本（非本轮历史证据）</p>
         <p v-if="preview?.read_ranges.length" class="preview-status">已读范围：{{ preview.read_ranges.map(range => `${range.offset_chars}–${range.offset_chars + range.returned_chars} 字符`).join('、') }}</p>
-        <div v-if="loading" class="preview-status" role="status"><el-icon class="is-loading"><Loading /></el-icon>正在读取来源</div>
+        <div v-if="loading" class="preview-status" role="status" aria-label="读取来源"><el-icon class="is-loading"><Loading /></el-icon></div>
         <p v-else-if="error" class="preview-status" role="alert">{{ error }}</p>
         <template v-else-if="preview">
           <KnowledgeAnswerMarkdown :content="preview.content_md" :evidence-count="0" />
@@ -16,8 +16,7 @@
         </template>
       </div>
       <footer class="knowledge-modal-actions">
-        <el-button @click="visible = false">关闭</el-button>
-        <el-button v-if="preview && preview.kind !== 'external'" type="primary" @click="openWorkspace">在 Wiki 工作台打开当前版本</el-button>
+        <el-button v-if="preview && preview.kind !== 'external'" type="primary" @click="openWorkspace">打开当前版本</el-button>
         <el-button v-else-if="error && entry && entry.entry_type !== 'external'" @click="loadCurrent">查看当前版本（非本轮证据）</el-button>
       </footer>
     </div>

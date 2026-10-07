@@ -13,21 +13,21 @@
           {{ c }}
         </button>
       </div>
-      <el-button type="primary" class="shelf-add" @click="openAdd">+ 添加</el-button>
+      <el-button type="primary" class="shelf-add ui-icon-action" aria-label="添加书籍" title="添加书籍" @click="openAdd"><el-icon><Plus /></el-icon></el-button>
     </div>
 
     <div v-if="loadError" class="shelf-state error">⚠️ {{ loadError }}</div>
     <div v-else-if="!books.length" class="shelf-state">
       <el-icon class="ss-icon"><Collection /></el-icon>
       <p>书架还是空的</p>
-      <p class="ss-hint">把一个 Markdown 文件夹或 PDF 登记为书，点击即回到上次读到的位置</p>
-      <el-button type="primary" @click="openAdd">添加第一本书</el-button>
+      <p class="ss-hint">添加文件夹或 PDF，继续上次阅读</p>
+      <el-button type="primary" class="ui-icon-action" aria-label="添加第一本书" title="添加书籍" @click="openAdd"><el-icon><Plus /></el-icon></el-button>
     </div>
     <div v-else-if="!visibleBooks.length" class="shelf-state">
       <p>没有匹配的书籍</p>
       <p class="ss-hint">换个关键词，或清空搜索看看全部</p>
     </div>
-    <div v-else class="shelf-grid">
+    <TransitionGroup v-else name="collection-flow" tag="div" class="shelf-grid" @before-leave="freezeCollectionLeave" @before-enter="resetCollectionEnter">
       <div
         v-for="b in visibleBooks"
         :key="b.id"
@@ -59,7 +59,7 @@
           <span class="bc-label" :class="{ dim: !b.progress }">{{ progressLabel(b) }}</span>
         </div>
       </div>
-    </div>
+    </TransitionGroup>
 
     <el-dialog
       v-model="formVisible"
@@ -78,14 +78,7 @@
               placeholder="/Users/you/Documents/book.pdf"
               @blur="onPathBlur"
             />
-            <el-button
-              class="browse-btn"
-              title="打开文件管理器选择"
-              aria-label="浏览"
-              @click="openPicker"
-            >
-              <el-icon><FolderOpened /></el-icon>&nbsp;浏览
-            </el-button>
+            <UiAction class="browse-btn" :icon="FolderOpened" label="浏览本地路径" @click="openPicker" />
           </div>
         </el-form-item>
         <el-form-item label="书名">
@@ -100,7 +93,7 @@
       </el-form>
       <template #footer>
         <div class="form-footer">
-          <el-button v-if="editingId" class="danger" @click="removeFromDialog">删除</el-button>
+          <UiAction v-if="editingId" :icon="Delete" danger label="删除书籍" @click="removeFromDialog" />
           <span v-else></span>
           <span class="form-footer-main">
             <el-button @click="formVisible = false">取消</el-button>
@@ -121,10 +114,12 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Collection, Delete, Document, EditPen, FolderOpened, MoreFilled } from '@element-plus/icons-vue'
+import { Collection, Delete, Document, EditPen, FolderOpened, MoreFilled, Plus } from '@element-plus/icons-vue'
 import { statLocalPath, type PathStat, type ReaderBook } from '@/api/reader'
 import { useBookshelf } from '@/composables/useBookshelf'
 import PathPickerModal from './PathPickerModal.vue'
+import UiAction from '@/components/motion/UiAction'
+import { freezeCollectionLeave, resetCollectionEnter } from '@/utils/collectionMotion'
 import {
   bookProgressLabel,
   bookProgressRatio,
@@ -386,6 +381,7 @@ async function confirmRemove(b: ReaderBook) {
    Rows are a fixed pitch (cover height + row gap) so one repeating
    gradient paints a board under every row, including the last. */
 .shelf-grid {
+  position: relative;
   --cover-h: 230px;
   --board: 10px;
   --row-gap: 26px;
@@ -600,16 +596,33 @@ async function confirmRemove(b: ReaderBook) {
 
 @media (max-width: 768px) {
   .shelf-grid {
-    /* Same height/width ratio as desktop (230/177): 165px columns capped
-       and centered, instead of stretching covers to half the viewport. */
-    --cover-h: 214px;
-    grid-template-columns: repeat(2, minmax(0, 165px));
-    justify-content: center;
-    gap: var(--row-gap) 12px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-rows: auto;
+    gap: 20px 10px;
+    background: none;
+    padding-bottom: 12px;
   }
+  .book-cover {
+    width: 100%;
+    min-width: 0;
+    min-height: 158px;
+    aspect-ratio: 177 / 230;
+    overflow: hidden;
+  }
+  .book-cover:hover { transform: none; }
+  .book-cover:active { transform: scale(.97); }
+  .bc-more { top: 0; right: 0; border-radius: 0 7px 0 10px; background: transparent; }
+  .bc-kind { top: 13px; left: 9px; font-size: 13px; }
+  .bc-meta { padding: 6px 9px 9px 10px; }
+  .bc-cat { display: none; }
+  .bc-label { font-size: 10px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bc-title {
-    font-size: 13.5px;
-    margin-top: 36px;
+    padding-left: 10px;
+    padding-right: 10px;
+    font-size: clamp(12px, 3.2vw, 16px);
+    margin-top: 44px;
+    line-height: 1.4;
+    -webkit-line-clamp: 3;
   }
   .shelf-add {
     display: none;

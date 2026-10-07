@@ -38,8 +38,8 @@
 
     <!-- Entry list -->
     <div class="pp-list">
-      <div v-if="loading" class="pp-state">
-        <el-icon class="is-loading"><Loading /></el-icon><span>加载中…</span>
+      <div v-if="loading" class="pp-state" role="status" aria-label="加载目录">
+        <el-icon class="is-loading" aria-hidden="true"><Loading /></el-icon>
       </div>
       <div v-else-if="error" class="pp-state error">⚠️ {{ error }}</div>
       <div v-else-if="!pickable.length" class="pp-state">此文件夹下没有可选内容（文件夹或 PDF）</div>

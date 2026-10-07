@@ -15,7 +15,6 @@
     <header class="page-header">
       <div>
         <h1 class="page-title">阅境轩</h1>
-        <p class="page-subtitle">浏览本地 Markdown 与 PDF，沉浸阅读</p>
       </div>
     </header>
 
@@ -32,8 +31,8 @@
         <input v-model="shelfQuery" type="search" aria-label="搜索书籍" placeholder="搜索书名、描述或类别" />
         <button v-if="shelfQuery" type="button" class="shelf-search-clear" aria-label="清除搜索" @click="shelfQuery = ''">×</button>
       </div>
-      <button v-show="viewMode === 'shelf'" type="button" class="reader-shelf-add" @click="bookshelfRef?.openAdd()">
-        <el-icon><Plus /></el-icon><span>添加</span>
+      <button v-show="viewMode === 'shelf'" type="button" class="reader-shelf-add ui-icon-action" aria-label="添加书籍" title="添加书籍" @click="bookshelfRef?.openAdd()">
+        <el-icon><Plus /></el-icon>
       </button>
       <button
         v-show="viewMode === 'read'"
@@ -42,7 +41,7 @@
         @click="openFileSearch"
       >
         <el-icon><Search /></el-icon>
-        <span v-if="rootPath" class="pt-path">搜索当前目录中的 Markdown 与 PDF</span>
+        <span v-if="rootPath" class="pt-path">搜索目录文件</span>
         <span v-else class="pt-hint">请先从书架选择书籍</span>
       </button>
       <div v-if="viewMode === 'read' && fileKind === 'pdf' && displayedFile" class="reader-pdf-controls" aria-label="PDF 缩放">
@@ -61,7 +60,9 @@
     </p>
 
     <!-- Bookshelf view (kept alive via v-show alongside the reading panes) -->
-    <BookshelfView ref="bookshelfRef" v-show="viewMode === 'shelf'" class="bookshelf-root" :query="shelfQuery" @open="openBook" />
+    <Transition name="reader-view" @before-leave="freezeCollectionLeave" @before-enter="resetCollectionEnter">
+      <BookshelfView ref="bookshelfRef" v-show="viewMode === 'shelf'" class="bookshelf-root" :query="shelfQuery" @open="openBook" />
+    </Transition>
 
     <!-- Current-book file search (command-palette style) -->
     <transition name="overlay-fade">
@@ -126,6 +127,7 @@
     </transition>
 
     <!-- Body: 3 panes -->
+    <Transition name="reader-view" @before-leave="freezeCollectionLeave" @before-enter="resetCollectionEnter">
     <div v-show="viewMode === 'read'" ref="readerBodyRef" class="reader-body">
       <!-- Left: file tree -->
       <aside class="pane pane-left" data-glass="structural">
@@ -202,6 +204,7 @@
       </aside>
     </div>
 
+    </Transition>
     <transition name="selection-pop">
       <div
         v-if="selectionMenu.visible && fileKind === 'md'"
@@ -368,6 +371,7 @@ import { useAppStore } from '@/stores/app'
 import FileTree from '@/components/reader/FileTree.vue'
 import MotionDrawer from '@/components/motion/MotionDrawer.vue'
 import BookshelfView from '@/components/reader/BookshelfView.vue'
+import { freezeCollectionLeave, resetCollectionEnter } from '@/utils/collectionMotion'
 import { getMobileReaderToolbarState, isPhoneViewport } from '@/utils/mobileLayoutPolicy'
 import { useModalEnvironment } from '@/composables/useModalEnvironment'
 import { canFocusDocument } from '@/utils/modalFocusPolicy'
@@ -1468,6 +1472,14 @@ onBeforeRouteLeave(() => { flushProgressNow() })
 .view-switch button.active { color: var(--text-primary); }
 
 /* Bookshelf fills the body area like reader-body does */
+.reader-view-enter-active { transition: transform 400ms var(--ease-spring-gentle), opacity 240ms ease; }
+.reader-view-leave-active { position: absolute; pointer-events: none; transition: transform 300ms var(--ease-emphasized), opacity 180ms ease; }
+.reader-view-enter-from { opacity: 0; transform: translate3d(0, 20px, 0) scale(.985); }
+.reader-view-leave-to { opacity: 0; transform: translate3d(0, -10px, 0) scale(.985); }
+@media(prefers-reduced-motion: reduce) {
+  .reader-view-enter-active, .reader-view-leave-active { transition: opacity 100ms ease; }
+  .reader-view-enter-from, .reader-view-leave-to { transform: none; }
+}
 .bookshelf-root {
   flex: 1 1 auto;
   min-height: 0;
@@ -1932,7 +1944,7 @@ onBeforeRouteLeave(() => { flushProgressNow() })
   .shelf-search input { font-size: 16px; }
   .reader-shelf-add {
     order: 2;
-    min-width: 78px;
+    min-width: 44px;
     min-height: var(--tap-target);
     display: inline-flex;
     align-items: center;

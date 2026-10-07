@@ -5,8 +5,8 @@
     <template v-if="workspace">
       <div class="workspace-overview">
         <strong>已保存 {{ coverage.saved }} / {{ coverage.planned }} 个主题</strong>
-        <span>{{ coverage.unfinished ? `${coverage.unfinished} 个主题尚未完成` : '主题成果已保存；交付状态以报告、检查与演示阶段为准' }}</span>
-        <p>已完成阶段在重试后保留；这些是公开业务成果，不是隐藏思考过程，也不代表全部事实已证明。</p>
+        <span>{{ !coverage.planned ? '尚未形成研究主题' : coverage.unfinished ? `${coverage.unfinished} 个主题尚未完成` : '主题成果已保存；交付状态以报告、检查与演示阶段为准' }}</span>
+        <p>展示已保存成果；重试保留已完成阶段，结论仍需核实。</p>
       </div>
       <details v-if="workspace.plan" class="research-scope">
         <summary>研究目标、约束与验收条件</summary>
@@ -18,7 +18,7 @@
         <div v-if="workspace.baselines?.length" class="baseline-list"><h4>已冻结的核验／刷新基线</h4><p>旧版待核验输入，不是当前证据。模型可通过原生工具分页对照当前知识和原文。</p><article v-for="baseline in workspace.baselines" :key="`${baseline.question_id}-${baseline.entry_id}`"><b>{{ baseline.title }}</b><span>版本 {{ baseline.revision }} · {{ baseline.claim_count }} 条具体主张 · {{ baseline.content_characters.toLocaleString() }} 字符</span></article></div>
       </details>
       <details class="research-stage-directory" :open="!isMobile || stageDirectoryOpen" @toggle="stageDirectoryOpen = ($event.target as HTMLDetailsElement).open">
-        <summary>研究阶段 <span>{{ selected?.stage.title || `${workspace.stages.length} 个阶段 · 选择查看成果` }}</span></summary>
+        <summary>研究阶段 <span>{{ selected?.stage.title || (workspace.stages.length ? `${workspace.stages.length} 个阶段` : '尚未生成阶段') }}</span></summary>
       <ol class="research-stages">
         <li v-for="stage in workspace.stages" :key="stage.stage_key">
           <button type="button" :class="{ 'is-selected': selected?.stage.stage_key === stage.stage_key }" :aria-pressed="selected?.stage.stage_key === stage.stage_key" @click="loadStage(stage)">
@@ -29,10 +29,11 @@
       </details>
       <div v-if="stageLoading" class="workspace-state" role="status">正在读取所选阶段…</div>
       <div v-if="stageError" class="workspace-state" role="alert">{{ stageError }}</div>
+      <MotionSwap :view-key="selected?.stage.stage_key || 'empty'">
       <article v-if="selected" class="selected-stage" aria-label="所选阶段成果">
         <header><h4>{{ selected.stage.title }}</h4><span>{{ researchStageStatus(selected.stage.status) }} · {{ selected.stage.revision > 0 ? `版本 ${selected.stage.revision}` : '尚无保存版本' }}</span></header>
         <div v-if="selected.stage.run_id || selected.content_run_id || (currentStage?.revision || 0) > 0" class="stage-controls">
-          <button v-if="selected.stage.run_id" type="button" @click="emit('inspect', selected.stage.run_id)">本次阶段检查器</button>
+          <UiAction v-if="selected.stage.run_id" :icon="View" label="查看本次阶段运行" @click="emit('inspect', selected.stage.run_id)" />
           <button v-if="selected.stage.run_id && ['failed', 'cancelled'].includes(selected.stage.status)" type="button" :disabled="rawOutputLoading" @click="toggleRawOutput">{{ rawOutputExpanded ? '收起未保存输出' : '查看未保存输出' }}</button>
           <button v-if="selected.content_run_id && selected.content_run_id !== selected.stage.run_id" type="button" @click="emit('inspect', selected.content_run_id)">保留正文的来源运行</button>
           <label v-if="(currentStage?.revision || 0) > 0">历史版本 <el-input-number v-model="revision" :min="1" :max="currentStage?.revision" :precision="0" controls-position="right" aria-label="研究阶段历史版本" /></label>
@@ -55,6 +56,7 @@
         </section>
         <section v-if="selected.findings.length" class="findings"><h4>发现与证据缺口</h4><p>以下是模型的公开判定；实际引用及版本由系统校验，不等于独立事实证明。</p><article v-for="(finding, index) in selected.findings" :key="index"><span :class="`is-${finding.status}`">{{ researchFindingStatus(finding.status) }}</span><strong>{{ finding.finding }}</strong><small v-if="finding.baseline_entry_id">核验对象：{{ finding.baseline_entry_id }}<template v-if="finding.baseline_claim_id"> · 主张 {{ finding.baseline_claim_id }}</template></small><ul v-if="finding.limitations.length"><li v-for="limitation in finding.limitations" :key="limitation">{{ limitation }}</li></ul><div class="finding-citations"><button v-for="index in finding.citation_indices" :key="index" type="button" @click="openCitation(index - 1)">S{{ index }} · 实际读取快照</button></div></article></section>
       </article>
+      </MotionSwap>
     </template>
     <p v-else-if="!loading && !error" class="workspace-state">此任务尚未建立阶段记录。旧任务不补造规划或核验历史，已有报告仍可回看。</p>
     <KnowledgeCitationPreview v-model="citationVisible" :entry="null" :run-id="citationRun" :source-index="citationIndex" />
@@ -64,6 +66,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
+import { View } from '@element-plus/icons-vue'
+import UiAction from '@/components/motion/UiAction'
+import MotionSwap from '@/components/motion/MotionSwap.vue'
 import { getKnowledgeResearchWorkspace, getKnowledgeResearchStage, getKnowledgeResearchUnpublishedOutput, type ResearchWorkspace, type ResearchStageContent, type ResearchStageSummary, type ResearchUnpublishedOutput } from '@/api/knowledge'
 import { researchCoverage, researchStageStatus, researchFindingStatus, pickResearchStageToOpen, shouldRefreshResearchStage } from '@/utils/knowledgeResearch'
 import KnowledgeAnswerMarkdown from './KnowledgeAnswerMarkdown.vue'

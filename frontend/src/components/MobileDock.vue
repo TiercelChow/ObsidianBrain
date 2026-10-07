@@ -11,8 +11,8 @@
       '--dock-rebound': rebound,
       '--dock-width': `${width}px`,
     }"
-    :data-progress="Math.round(progress)"
-    :data-settled="progress === 0 || progress === 100"
+    :data-progress="Math.round(effectiveProgress)"
+    :data-settled="effectiveProgress === 0 || effectiveProgress === 100"
     :data-rebound="rebound"
   >
     <nav v-if="subnav?.items.length" v-glass-lens class="mobile-sub-dock dock-glass" data-glass-rim :aria-label="subnav.label">
@@ -20,8 +20,9 @@
         <router-link v-if="item.to" :to="item.to" class="mobile-sub-dock-item" :class="{ active: item.active }" :aria-current="item.active ? 'page' : undefined" :aria-label="item.label">
           {{ item.compactLabel || item.label }}
         </router-link>
-        <button v-else type="button" class="mobile-sub-dock-item" :class="{ active: item.active }" :aria-pressed="item.active" @click="item.select?.()">
-          {{ item.compactLabel || item.label }}
+        <button v-else type="button" class="mobile-sub-dock-item" :class="{ active: item.active, 'is-icon': !!item.icon }" :aria-label="item.label" :title="item.label" :aria-pressed="item.active" @click="item.select?.()">
+          <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
+          <template v-else>{{ item.compactLabel || item.label }}</template>
         </button>
       </template>
     </nav>
@@ -65,8 +66,11 @@ const props = defineProps<{
   subnav: MobileSubnav | null
 }>()
 const emit = defineEmits<{ expand: [] }>()
-const geometry = computed(() => dockGeometry(props.progress))
-const rebound = computed(() => dockRebound(props.progress))
+// Single-layer navigation always retains all five destinations, even during
+// route handoff while the outgoing double dock's spring is still settling.
+const effectiveProgress = computed(() => props.subnav?.items.length ? props.progress : 0)
+const geometry = computed(() => dockGeometry(effectiveProgress.value))
+const rebound = computed(() => dockRebound(effectiveProgress.value))
 const compact = computed(() => geometry.value.sink > .12)
 const orbIcon = computed(() => ({ home: House, reader: Files, timeline: Calendar, tasks: Finished, wiki: Notebook })[props.section])
 const dockRef = ref<HTMLElement | null>(null)
@@ -215,6 +219,8 @@ onScopeDispose(() => observer?.disconnect())
   transition: color var(--motion-fast) ease, background-color var(--motion-fast) ease;
 }
 .mobile-sub-dock-item.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.mobile-sub-dock-item.is-icon { flex: 0 0 44px; }
+.mobile-sub-dock-item .el-icon { font-size: 21px; }
 .mobile-sub-dock-item:active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 @media (prefers-reduced-transparency: reduce) {
   .dock-glass { background: var(--bg-primary); backdrop-filter: none; -webkit-backdrop-filter: none; }

@@ -168,7 +168,7 @@ test('knowledge chat previews numbered sources before an explicit workspace navi
   assert.match(chat, /S\{\{ evidenceIndex \+ 1 \}\}/)
   assert.match(chat, /<MotionModal[^>]+aria-label="来源预览"/)
   assert.match(chat, /getKnowledgeEntry/)
-  assert.match(chat, /在 Wiki 工作台打开/)
+  assert.match(chat, /@click="openSourceWorkspace">打开当前版本/)
   assert.match(chat, /loadKnowledgeCitationPreview/)
   assert.match(chat, /message\.runId, sourceIndex/)
   assert.match(chat, /answer-interruption/)
@@ -258,7 +258,7 @@ test('wiki skills expose current resources, permissions, and a safe clone flow',
     source('src/api/knowledge.ts'),
   ])
 
-  assert.match(settings, /查看内容/)
+  assert.match(settings, /label="查看 Skill 内容"/)
   assert.match(settings, /Skill 内容/)
   assert.match(settings, /当前内容/)
   assert.match(settings, /skillDetail\.versions/)

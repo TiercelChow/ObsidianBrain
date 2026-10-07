@@ -92,7 +92,7 @@ const mobileFocusMode = computed(() => isMobileFocusRoute(route.path, route.quer
 const mobileNavSection = computed(() => getMobileNavSection(route.path))
 const { progress: dockProgress, keyboardOpen: dockKeyboardOpen, expand: expandDock } = useMobileDockMotion(
   appShellRef,
-  () => isMobile.value && !mobileFocusMode.value,
+  () => isMobile.value && !mobileFocusMode.value && !!mobileSubnav.value?.items.length,
   () => route.path,
 )
 const lockMobileReaderOuterScroll = computed(() => (
