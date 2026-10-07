@@ -5,7 +5,7 @@ import test from 'node:test'
 const root = new URL('../', import.meta.url)
 const read = (path) => readFile(new URL(path, root), 'utf8')
 const productChapters = ['reader', 'timeline', 'tasks', 'wiki']
-const chapters = ['install', ...productChapters]
+const chapters = ['start', 'install', ...productChapters]
 const removedChapters = ['intro', 'wiki-dashboard', 'wiki-workbench', 'explore', 'ingest', 'knowledge', 'code-repo', 'config', 'workflow', 'getting-started']
 
 test('manual contains installation and the four current product chapters', async () => {
@@ -44,7 +44,10 @@ test('wiki manual explains the complete reviewable workflow and configuration li
 
 test('manual records the current storage and interaction boundaries', async () => {
   const html = await read('manual/index.html')
-  assert.match(html, /阅读进度保存在当前浏览器的 <code>localStorage<\/code>/)
+  assert.match(html, /书架信息和阅读进度保存在服务端 SQLite/)
+  assert.match(html, /localStorage<\/code> 是即时恢复缓存/)
+  assert.match(html, /约 1.5 秒/)
+  assert.doesNotMatch(html, /不会自动同步到另一台设备/)
   assert.match(html, /timeline\/images\//)
   assert.match(html, /每次加载 20 条/)
   assert.match(html, /编辑小记/)
@@ -67,7 +70,8 @@ test('manual covers native macOS architectures and Windows x86_64 installation',
   for (const phrase of ['Apple Silicon（arm64）', 'Intel（x86_64）', 'Windows 10 / 11', 'x86_64-pc-windows-msvc', 'make install', 'frontend/dist_new/', 'obsidian-brain.exe', 'http://localhost:9876']) {
     assert.match(html, new RegExp(phrase.replace(/[/.]/g, '\\$&')), `missing installation fact: ${phrase}`)
   }
-  assert.match(html, /尚未在 GitHub Releases 提供预编译安装包/)
+  assert.match(html, /从源码构建的安装方式/)
+  assert.match(html, /npm ci/)
   assert.match(html, /Windows ARM64 当前没有经过构建和运行验证/)
 })
 

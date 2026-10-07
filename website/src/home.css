@@ -1,12 +1,34 @@
 /* The homepage is a product tour; long-form instructions live in /manual/. */
 .home-page { --section-space: clamp(4.5rem, 8vw, 7.5rem); }
 .home-page .hero { display: flex; flex-direction: column; gap: 3.5rem; padding-top: clamp(8rem, 13vw, 11rem); padding-bottom: 1.5rem; }
-.home-page .hero-copy { max-width: 54rem; margin-inline: auto; text-align: center; }
+.home-page .hero-copy { width: 100%; max-width: 60rem; margin-inline: auto; text-align: center; }
 .home-page .eyebrow { justify-content: center; font-size: .75rem; letter-spacing: .09em; }
-.home-page .hero h1 { max-width: none; margin: 1.5rem 0; font-size: clamp(2.6rem, 5.8vw, 5rem); line-height: 1.18; letter-spacing: -.045em; }
+.home-page .hero h1 { max-width: none; margin: 1.5rem 0; font-size: clamp(2.6rem, 5.8vw, 5rem); line-height: 1.18; letter-spacing: -.045em; text-wrap: balance; }
+.home-page .hero h1 .hero-job { display: inline-block; color: inherit; white-space: nowrap; }
 .home-page .hero-lead { max-width: 41rem; margin-inline: auto; font-size: clamp(1rem, 1.4vw, 1.18rem); line-height: 1.85; }
 .home-page .hero-actions, .home-page .hero-notes { justify-content: center; }
 .home-page .hero-notes { margin-top: 1.5rem; }
+.hero-feature-map { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .65rem; margin-top: 2rem; text-align: left; }
+.hero-feature-map a { min-width: 0; min-height: 44px; display: grid; grid-template-columns: 1.5rem minmax(0, 1fr); gap: .2rem .6rem; padding: 1rem; border: 1px solid var(--border-faint); border-radius: 1rem; background: var(--glass-content-fill); transition: transform 240ms var(--ease-out), background-color 180ms ease; }
+.hero-feature-map svg { grid-row: 1 / span 2; width: 1.3rem; height: 1.3rem; color: var(--accent); align-self: center; }
+.hero-feature-map strong { font-size: .9rem; }
+.hero-feature-map span { font-size: .75rem; color: var(--text-secondary); line-height: 1.6; }
+.hero-feature-map a:not(:active):hover { transform: translateY(-3px); background: var(--bg-hover); }
+.hero-feature-map a:active, .install-gateways a:active { transform: scale(.97); }
+.feature-guide { display: inline-flex; align-items: center; gap: .5rem; min-height: 44px; margin-top: .75rem; color: var(--accent-strong); font-size: .85rem; font-weight: 650; }
+.feature-guide svg { flex: none; }
+.support-features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; margin-top: 1.25rem; }
+.support-features article { min-width: 0; padding: 1.5rem; border: 1px solid var(--border-faint); border-radius: 1.25rem; background: var(--glass-content-fill); }
+.support-features h3 { font-size: 1.1rem; }
+.support-features p { margin: 0; font-size: .9rem; color: var(--text-secondary); }
+.install-gateways { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.install-gateways a { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; padding: 1.5rem; min-height: 44px; border: 1px solid var(--border-faint); border-radius: 1.25rem; background: var(--glass-content-fill); transition: transform 240ms var(--ease-out); }
+.install-gateways strong { font-size: 1rem; }
+.install-gateways span { grid-column: 1; font-size: .85rem; color: var(--text-secondary); }
+.install-gateways svg { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--accent); }
+.install-gateways a:not(:active):hover { transform: translateY(-3px); }
+.installation-note { text-align: center; color: var(--text-secondary); margin-top: 1.25rem; font-size: .9rem; }
+.installation-note a { color: var(--accent); text-decoration: underline; text-underline-offset: .2em; }
 .home-page .hero-product { width: 100%; max-width: 65rem; min-height: 0; margin: 0; padding: 0; }
 .home-page .hero-window { width: 100%; transform: none; border-radius: 1.5rem; box-shadow: 0 24px 64px color-mix(in srgb, var(--text-primary) 9%, transparent), var(--inset-highlight); }
 .home-page .app-layout { min-height: 25rem; grid-template-columns: 11rem 1fr; }
@@ -60,6 +82,8 @@
   .home-page .file-list { display: none; }
   .manual-gateway { gap: 2rem; }
   .handbook-cover { min-height: 29rem; padding: 2rem; }
+  .hero-feature-map { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .install-gateways { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 600px) {
   .home-page .hero { padding-top: 7.5rem; gap: 2rem; }
@@ -78,10 +102,20 @@
   .home-page .preview-caption { font-size: .7rem; }
   .home-page .preview-caption > span:last-child { width: 100%; margin: 0; text-align: center; }
   .home-page .feature-grid { grid-template-columns: minmax(0, 1fr); }
+  .hero-feature-map { gap: .5rem; margin-top: 1.5rem; }
+  .hero-feature-map a { padding: .8rem; grid-template-columns: 1.2rem minmax(0, 1fr); gap: .2rem .45rem; }
+  .hero-feature-map strong { font-size: .85rem; }
+  .hero-feature-map span { font-size: .7rem; }
+  .support-features { grid-template-columns: minmax(0, 1fr); }
   .home-page .feature-card ul { grid-template-columns: 1fr; }
   .manual-gateway { grid-template-columns: minmax(0, 1fr); }
   .handbook-cover { min-height: 0; padding: 1.5rem 2rem; display: grid; grid-template-columns: 1fr auto; gap: 1rem; border-radius: .5rem 1.5rem 1.5rem .5rem; }
   .handbook-cover > span, .handbook-cover small { grid-column: 1 / -1; }
   .handbook-cover strong { grid-column: 1; grid-row: 2; margin: 0; font-size: 2rem; }
   .handbook-cover > svg { grid-column: 2; grid-row: 2; align-self: center; margin: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-feature-map a, .install-gateways a { transition: background-color 120ms ease; }
+  .hero-feature-map a:not(:active):hover, .install-gateways a:not(:active):hover,
+  .hero-feature-map a:active, .install-gateways a:active { transform: none; }
 }

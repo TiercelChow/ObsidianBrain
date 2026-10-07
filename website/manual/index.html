@@ -39,8 +39,8 @@
         </a>
 
         <nav class="site-nav" id="site-navigation" aria-label="主要导航" data-navigation>
-          <a href="../#tour">产品体验</a>
-          <a href="../#features">功能</a>
+          <a href="../#features">功能一览</a>
+          <a href="../#tour">界面示意</a>
           <a href="../#quick-start">开始使用</a>
           <a href="./" aria-current="page">使用手册</a>
           <a href="../llm-wiki/">LLM Wiki</a>
@@ -66,12 +66,12 @@
       <header class="docs-intro" id="top">
         <a class="docs-back" href="../">← 产品首页</a>
         <div class="docs-title-row"><div><span class="section-label">OBSIDIANBRAIN / HANDBOOK</span><h1>使用手册</h1></div><img src="../favicon.svg" width="72" height="72" alt="" /></div>
-        <p class="docs-lead">先完成安装，再沿着阅读、记录、执行与书籍理解，走通四个核心模块。</p>
+        <p class="docs-lead">先选你要做的事，再按步骤操作：读一本书、写一条小记、安排一个任务，或让 AI 研究你的资料。</p>
         <div class="version-notice"><span class="version-badge">当前版本</span><p><strong>已按现有实现核实</strong> · 功能部分介绍阅境轩、时光机、任务中枢和书籍 Wiki，另附 macOS 与 Windows 安装说明。</p></div>
       </header>
       <details class="mobile-chapters" data-glass="floating" data-glass-rim>
-        <summary>浏览章节 <span data-current-chapter>安装与启动</span><svg aria-hidden="true"><use href="#icon-chevron" /></svg></summary>
-        <nav aria-label="手机章节目录"><a href="#install" data-chapter-link><span>00</span>安装与启动</a>
+        <summary>浏览章节 <span data-current-chapter>从这里开始</span><svg aria-hidden="true"><use href="#icon-chevron" /></svg></summary>
+        <nav aria-label="手机章节目录"><a href="#start" data-chapter-link><span>↗</span>从这里开始</a><a href="#install" data-chapter-link><span>00</span>安装与启动</a>
 <a href="#reader" data-chapter-link><span>01</span>阅境轩</a>
 <a href="#timeline" data-chapter-link><span>02</span>时光机</a>
 <a href="#tasks" data-chapter-link><span>03</span>任务中枢</a>
@@ -80,7 +80,7 @@
       <div class="docs-layout">
         <aside class="docs-sidebar" data-glass="structural">
           <span class="docs-nav-label">阅读目录</span>
-          <nav aria-label="章节目录"><a href="#install" data-chapter-link><span>00</span>安装与启动</a>
+          <nav aria-label="章节目录"><a href="#start" data-chapter-link><span>↗</span>从这里开始</a><a href="#install" data-chapter-link><span>00</span>安装与启动</a>
 <a href="#reader" data-chapter-link><span>01</span>阅境轩</a>
 <a href="#timeline" data-chapter-link><span>02</span>时光机</a>
 <a href="#tasks" data-chapter-link><span>03</span>任务中枢</a>
@@ -90,10 +90,37 @@
         <div class="manual-content">
 
 <!-- current-manual:start -->
+        <section id="start" class="manual-section">
+          <span class="chapter-kicker">START HERE</span>
+          <h2>从这里开始 — 先选你要做的事</h2>
+          <p>ObsidianBrain 是在自己的电脑上运行的阅读、记录、任务与书籍 AI 工作台。官网只提供介绍与手册，不能直接打开你的数据。不需要 Obsidian；阅读、小记和个人任务也不需要先配置 AI。</p>
+          <div class="manual-jobs">
+            <a href="#reader"><strong>我想读本地文档</strong><span>阅境轩：添加 Markdown 文件夹或 PDF，阅读并恢复位置。</span></a>
+            <a href="#timeline"><strong>我想记想法或照片</strong><span>时光机：写小记、加标签和图片，搜索、编辑或删除。</span></a>
+            <a href="#tasks"><strong>我想安排和推进工作</strong><span>任务中枢：短期待办、多级子任务、进展记录和日历。</span></a>
+            <a href="#wiki"><strong>我想让 AI 帮我理解书籍</strong><span>书籍 Wiki：整理主题知识、带引用问答、研究报告和 PPTX。</span></a>
+          </div>
+          <h3>首次使用：先完成一个小目标</h3>
+          <ol class="manual-steps">
+            <li><span>1</span><div><strong><a href="#install">安装并启动</a></strong><p>选择 macOS Apple Silicon、Intel 或 Windows x86_64 的步骤，启动后打开 <code>http://localhost:9876</code>。首页会显示你的任务、最近阅读、小记、Wiki 状态和系统信息；初次使用没有数据是正常的。</p></div></li>
+            <li><span>2</span><div><strong><a href="#reader">先读一本书</a></strong><p>进入阅境轩，在书架点「＋」，登记本地文件夹或 PDF 的绝对路径。点封面阅读，再回书架打开它，确认能继续上次位置。</p></div></li>
+            <li><span>3</span><div><strong><a href="#timeline">留下小记</a>，或<a href="#tasks">创建待办</a></strong><p>时光机点「＋」写一条文字或图片记录；任务中枢点列表中的「＋」安排标题、日期和重要程度。这两步都不产生模型费用。</p></div></li>
+            <li><span>4</span><div><strong>需要 AI 时再开启 Wiki</strong><p>先<a href="#wiki-setup">配置并验证模型</a>，再为一本 Markdown 文件夹<a href="#wiki-compile">建立知识库、同步、编译并审核</a>。然后<a href="#wiki-query">提问</a>，或<a href="#wiki-research">生成报告 / PPTX</a>。</p></div></li>
+          </ol>
+          <h3>按钮与手机导航怎么认</h3>
+          <ul class="manual-points">
+            <li><strong>常用图标：</strong>「＋」用于新增；铅笔用于编辑；垃圾桶进入删除确认；放大镜用于搜索；「…」打开更多功能。电脑悬停可查看按钮名称，手机在操作抽屉中查看行名称。保存、取消、付费运行和破坏性确认仍保留文字。</li>
+            <li><strong>手机五个主入口：</strong>底部 Dock 按「首页 → 阅境轩 → 时光机 → 任务中枢 → Wiki」排列。Wiki 各页面由上方子 Dock 切换；任务子 Dock 提供任务 / 日历、搜索、筛选。阅读或任务详情使用页内返回 / 书架入口离开。</li>
+            <li><strong>首页快捷进入：</strong>点击某项任务进入详情，点最近阅读继续阅读，点小记定位原记录，点 Wiki 动态进入运行或审核。不是只有统计数字。</li>
+            <li><strong>电脑端代码仓：</strong>在「日常 → 代码仓」点「＋」，登记 Git 仓库名称和路径。眼睛图标查看分支、最近提交和语言统计，打开图标在 VSCode 打开仓库；手机端不展示。</li>
+          </ul>
+          <div class="callout subtle"><span class="callout-icon">ⓘ</span><span>「个人长期任务」是你手动推进的计划；「Wiki 研究任务」是 Agent 执行的研究。它们不是同一个列表，小记也不会自动变成 Wiki 知识。当前没有个人任务提醒、重复规则或外部日历同步。</span></div>
+        </section>
+
         <section id="install" class="manual-section">
           <span class="chapter-kicker">00 / INSTALL</span>
           <h2>安装与启动</h2>
-          <p>当前仓库尚未在 GitHub Releases 提供预编译安装包，需要在目标电脑上从源码构建。前端会嵌入最终的单个可执行文件，构建完成后基础功能不再需要 Node.js 或 Rust；若启用默认的 DeepSeek Harness 书籍智能功能，则需保留可用的 npm / npx。</p>
+          <p>下面介绍在目标电脑上从源码构建的安装方式；若使用发布包，请以对应 <a href="https://github.com/tiercelchow/ObsidianBrain/releases" target="_blank" rel="noopener noreferrer">GitHub Release</a> 的安装说明为准。前端会嵌入最终的单个可执行文件，构建完成后基础功能不再需要 Node.js 或 Rust；若启用默认的 DeepSeek Harness 书籍智能功能，则需保留可用的 npm / npx。</p>
 
           <table class="info-table platform-table">
             <thead><tr><th>系统</th><th>处理器</th><th>当前方式</th><th>最终文件</th></tr></thead>
@@ -109,22 +136,24 @@
             <span><strong>架构说明：</strong>macOS 会按当前终端的架构编译。在 Apple Silicon 上先运行 <code>uname -m</code>，结果应为 <code>arm64</code>；若显示 <code>x86_64</code>，说明终端可能正在 Rosetta 下运行。Windows ARM64 当前没有经过构建和运行验证，暂不列为支持平台。</span>
           </div>
 
-          <h3>macOS：Apple Silicon 与 Intel</h3>
-          <p>两种 Mac 使用相同流程。先准备 Git、Node.js 18+、Rust 1.75+ 和 Xcode Command Line Tools；Apple Silicon 会生成 arm64 文件，Intel Mac 会生成 x86_64 文件。</p>
+          <h3 id="install-macos">macOS：Apple Silicon 与 Intel</h3>
+          <p>两种 Mac 使用相同流程。先准备 Git、Node.js、Rust stable 和 Xcode Command Line Tools；Apple Silicon 会生成 arm64 文件，Intel Mac 会生成 x86_64 文件。建议使用能运行本项目测试命令的 Node.js 22.18 或更新版本，不依赖旧版 Rust 的兼容性承诺。</p>
           <ol class="manual-steps">
             <li><span>1</span><div><strong>安装构建环境</strong><p>运行 <code>xcode-select --install</code> 安装 Apple 命令行工具，再从 <a href="https://nodejs.org/" target="_blank" rel="noreferrer">Node.js 官网</a>和 <a href="https://rust-lang.org/tools/install/" target="_blank" rel="noreferrer">Rust 官网</a>安装 Node.js 与 Rust。</p></div></li>
-            <li><span>2</span><div><strong>下载并构建</strong><p>在终端依次执行下面的命令。<code>make install</code> 会先构建前端和 release 后端，再安装到当前用户的 <code>~/.local/bin/</code>，不需要 sudo。</p></div></li>
+            <li><span>2</span><div><strong>下载并构建</strong><p>在终端依次执行下面的命令，先用 <code>npm ci</code> 安装锁定的前端依赖。<code>make install</code> 会构建前后端，再安装到当前用户的 <code>~/.local/bin/</code>，不需要 sudo；只构建而不安装可以运行 <code>make build</code>。</p></div></li>
           </ol>
           <pre class="command-block"><code>git clone https://github.com/TiercelChow/ObsidianBrain.git
-cd ObsidianBrain
+cd ObsidianBrain/frontend
+npm ci
+cd ..
 make install</code></pre>
           <ol class="manual-steps" start="3">
             <li><span>3</span><div><strong>加入 PATH</strong><p>若终端提示找不到命令，把 <code>export PATH="$HOME/.local/bin:$PATH"</code> 加入 <code>~/.zshrc</code>，然后重新打开终端。</p></div></li>
             <li><span>4</span><div><strong>验证并启动</strong><p>运行 <code>obsidian-brain version</code> 检查安装，再运行 <code>obsidian-brain start</code>。</p></div></li>
           </ol>
 
-          <h3>Windows 10 / 11：x86_64</h3>
-          <p>Windows 当前没有一键安装脚本。请先安装 Git、Node.js 18+、Rust stable，以及 Visual Studio Build Tools 的「使用 C++ 的桌面开发」工作负载（包含 MSVC、Windows SDK 和 CMake 工具），然后在 PowerShell 中构建。</p>
+          <h3 id="install-windows">Windows 10 / 11：x86_64</h3>
+          <p>Windows 使用下面的 PowerShell 源码流程。请先安装 Git、Node.js 22.18 或更新版本、Rust stable，以及 Visual Studio Build Tools 的「使用 C++ 的桌面开发」工作负载（包含 MSVC、Windows SDK 和 CMake 工具）。</p>
           <ol class="manual-steps">
             <li><span>1</span><div><strong>准备工具链</strong><p>安装 <a href="https://nodejs.org/" target="_blank" rel="noreferrer">Node.js</a>、<a href="https://rust-lang.org/tools/install/" target="_blank" rel="noreferrer">Rustup</a> 和 <a href="https://visualstudio.microsoft.com/visual-cpp-build-tools/" target="_blank" rel="noreferrer">Visual Studio Build Tools</a>。Rustup 使用默认的 <code>x86_64-pc-windows-msvc</code> 工具链。</p></div></li>
             <li><span>2</span><div><strong>构建嵌入式前端</strong><p>先把 Vue 前端生成到后端要求的 <code>frontend/dist_new/</code>，再编译 release 可执行文件。</p></div></li>
@@ -152,6 +181,9 @@ cargo build --release</code></pre>
             <li><strong>数据目录：</strong>默认位于用户主目录下的 <code>.obsidian-brain/</code>；任务数据库也在其中。</li>
             <li><strong>独立运行：</strong>不再需要 Obsidian 或 Local REST API 插件。小记和任务保存在本地 SQLite，时光机原图保存在数据库同级 <code>timeline/images/</code>；默认位于 <code>~/.obsidian-brain/</code>。</li>
           </ul>
+          <h3 id="install-phone">手机怎么打开</h3>
+          <p>手机界面是访问电脑上的同一服务，不是独立手机安装包。电脑启动服务、允许受信任局域网访问后，手机连接同一网络，在浏览器打开 <code>http://电脑的局域网IP:9876</code>。手机选择的文件路径仍属于电脑，电脑关闭或服务停止后就不能访问。</p>
+          <div class="callout subtle"><span class="callout-icon">🔒</span><span><strong>局域网访问：</strong>绑定 <code>0.0.0.0</code> 会让其他设备也能访问；仅本机使用时设为 <code>127.0.0.1</code>。只在你信任的网络和设备间使用，不要将端口暴露到公网。</span></div>
         </section>
 
         <section id="reader" class="manual-section">
@@ -184,8 +216,8 @@ cargo build --release</code></pre>
 
           <h3>添加一本书</h3>
           <ol class="manual-steps">
-            <li><span>1</span><div><strong>进入书架</strong><p>打开「阅境轩」，在顶部选择「书架」，点击「＋ 添加」。</p></div></li>
-            <li><span>2</span><div><strong>选择本地内容</strong><p>输入绝对路径，或点击「浏览」在文件管理器中选择一个 Markdown 文件夹或 PDF 文件。</p></div></li>
+            <li><span>1</span><div><strong>进入书架</strong><p>打开「阅境轩」，选择「书架」，点击搜索栏旁的「＋」。手机书架每行展示三本书。</p></div></li>
+            <li><span>2</span><div><strong>选择本地内容</strong><p>输入绝对路径，或点路径输入框旁的文件夹图标，用应用内路径选择器选择一个 Markdown 文件夹或 PDF。手机也选择运行服务那台电脑上的路径。</p></div></li>
             <li><span>3</span><div><strong>补充书架信息</strong><p>书名留空时会使用文件名；描述和类别可选，用于后续搜索与筛选。</p></div></li>
             <li><span>4</span><div><strong>开始阅读</strong><p>保存后点击封面。若已有阅读记录，会自动打开上次的文件并恢复其位置。</p></div></li>
           </ol>
@@ -196,7 +228,8 @@ cargo build --release</code></pre>
             <tbody>
               <tr><td>选择文章</td><td>使用左侧文件树；目录变化后可点刷新</td><td>从底部阅读工具栏打开文件列表抽屉</td></tr>
               <tr><td>文章目录</td><td>右侧目录跟随当前标题，点击即可跳转</td><td>从底部工具栏打开目录抽屉</td></tr>
-              <tr><td>PDF 缩放</td><td>在阅读控件中缩放或恢复适宽</td><td>底部工具栏提供缩小、适宽、页码和放大</td></tr>
+              <tr><td>搜索当前目录文件</td><td>点击阅读工具栏搜索入口，在弹窗中按文件名或路径查找</td><td>点击底部放大镜，使用同一搜索弹窗；这不是全文搜索当前文章</td></tr>
+              <tr><td>PDF 缩放</td><td>在阅读控件中缩放或恢复适宽</td><td>阅读页提供缩放、适宽和页码控件；可触控放大，查看后再恢复适宽</td></tr>
               <tr><td>沉浸阅读</td><td>进入全屏后，控件会在静止时自动隐藏；移动鼠标后出现</td><td>使用沉浸模式减少页面干扰，工具栏在滑动后短暂驻留</td></tr>
               <tr><td>查看图表与图片</td><td>点击 Mermaid 或图片进入查看器，可缩放、拖动和重置</td><td>支持触控缩放、拖动，并提供独立关闭按钮</td></tr>
             </tbody>
@@ -204,11 +237,11 @@ cargo build --release</code></pre>
 
           <div class="callout">
             <span class="callout-icon">💾</span>
-            <span><strong>数据说明：</strong>书架信息和路径历史保存在本地服务的 SQLite 中；阅读进度保存在当前浏览器的 <code>localStorage</code>，不会自动同步到另一台设备或另一个浏览器。</span>
+            <span><strong>数据说明：</strong>书架信息和阅读进度保存在服务端 SQLite；浏览器 <code>localStorage</code> 是即时恢复缓存。Markdown 滚动停止约 1.5 秒后记录位置，PDF 随当前页变化记录；切文件、回书架、离开页面或切到后台时刷新待同步状态。同一服务的其他浏览器可读取已成功同步的记录；关闭页面时网络请求不保证完成，失败会保留本地缓存，回来后重试。这不是账号或云端同步。</span>
           </div>
           <div class="callout subtle">
             <span class="callout-icon">⌘</span>
-            <span>不想先建书架时，也可以切换到「阅读」，直接输入本地文件夹路径。历史记录支持置顶、命名和删除。</span>
+            <span><strong>换一本书：</strong>回到书架再点另一张封面，不在阅读页直接更换目录。书籍卡片的「…」可以编辑信息或移出书架；移出书架不删除原始 Markdown / PDF。</span>
           </div>
         </section>
 
@@ -242,9 +275,9 @@ cargo build --release</code></pre>
 
           <h3>写一条小记</h3>
           <ol class="manual-steps">
-            <li><span>1</span><div><strong>打开编辑器</strong><p>点击右上角「写小记」，写下正文；支持常用 Markdown 语法。</p></div></li>
+            <li><span>1</span><div><strong>打开编辑器</strong><p>点击「＋」写下正文。手机「＋」和搜索栏在一行，最右侧「…」打开时间筛选；电脑也使用加号新建。</p></div></li>
             <li><span>2</span><div><strong>添加上下文</strong><p>按需输入标签，并通过「图片」按钮选择图片，或者直接粘贴截图。</p></div></li>
-            <li><span>3</span><div><strong>发布</strong><p>点击「发布小记」。可以只记录文字或只添加图片，最新内容会立即加入时间线顶部。每张图片不超过 20 MB，支持 PNG、JPEG、GIF、WebP。</p></div></li>
+            <li><span>3</span><div><strong>发布</strong><p>点击编辑器底部的「发布小记」（编辑已有内容时是「保存修改」）。可以只记录文字或只添加图片，最新内容会加入时间线；在回看历史或筛选状态下，发布后通过「查看最新」进入。每张图片不超过 20 MB，支持 PNG、JPEG、GIF、WebP。</p></div></li>
             <li><span>4</span><div><strong>继续回看</strong><p>每次加载 20 条；到列表底部后点击「加载更多」继续读取。</p></div></li>
           </ol>
 
@@ -279,7 +312,7 @@ cargo build --release</code></pre>
             <article>
               <span>LONG</span>
               <h3>长期任务</h3>
-              <p>除基础信息外，可拆出任意层级子任务，为根任务或任一子任务记录进展，并持续查看整体完成度。</p>
+              <p>除基础信息外，可拆出多级子任务，为根任务或任一子任务记录进展，并持续查看整体完成度。层级受系统安全限制，不是无限深度。</p>
             </article>
           </div>
 
@@ -291,7 +324,7 @@ cargo build --release</code></pre>
           </ol>
 
           <h3>任务视图</h3>
-          <p>列表按照紧迫程度分组，组内优先显示更重要的任务。点击任务后，电脑端列表会压缩成一条竖向导航，把空间留给详情；手机端则进入任务详情，使用「任务列表」返回。</p>
+          <p>列表按照紧迫程度分组，组内优先显示更重要的任务。点击任务后，电脑端列表会压缩成一条竖向导航，把空间留给详情；手机端进入独立详情，顶部左箭头返回任务列表，右上铅笔修改信息。手机底部固定「＋」添加子任务、铅笔记录进展；长期任务用「任务拆解 / 进展记录」切换内容。</p>
           <div class="task-layout-demo" aria-label="任务详情布局示意">
             <div><span>任务信息</span><strong>标题、状态、日期和描述</strong></div>
             <div><span>任务拆解</span><strong>多级子任务树</strong></div>
@@ -315,7 +348,7 @@ cargo build --release</code></pre>
               <tr><td>切换月份 / 回到今天</td><td>电脑端提供上月、今天、下月；手机端保留前后月份切换</td></tr>
               <tr><td>选择日期</td><td>查看这一天处于开始与结束日期范围内的顶层任务</td></tr>
               <tr><td>双击日期</td><td>电脑端直接新建任务，并把开始、结束日期预设为当天</td></tr>
-              <tr><td>点击「＋ 添加」</td><td>在当日日程中创建任务，日期同样预设为所选日</td></tr>
+              <tr><td>点击当日日程的「＋」</td><td>创建任务，日期预设为所选日</td></tr>
               <tr><td>展开任务</td><td>在当日明细中逐层显示有效子任务；切换日期后自动收起</td></tr>
             </tbody>
           </table>
@@ -335,6 +368,20 @@ cargo build --release</code></pre>
           <h2>书籍 Wiki — 从来源到可审核的知识</h2>
           <p>为阅境轩书架中的每个 Markdown 文件夹建立一个独立知识库。同步先建立章节来源索引；智能编译再尝试跨章节归并概念、论断与关系。原始 Markdown 文件保持只读，结构化实体、引用、版本、审核记录和运行状态保存在本机 SQLite。单个 PDF 目前不能建立 Wiki。</p>
 
+          <nav class="manual-subsections" aria-label="Wiki 操作步骤">
+            <a href="#wiki-setup">① 模型与密钥</a><a href="#wiki-compile">② 建库与编译</a><a href="#wiki-workspace">③ 浏览与审核</a><a href="#wiki-query">④ 连续问答</a><a href="#wiki-research">⑤ 报告与 PPT</a><a href="#wiki-skills">规则与 Skills</a><a href="#wiki-backup">用量与备份</a>
+          </nav>
+          <table class="info-table">
+            <thead><tr><th>页面</th><th>你在这里做什么</th><th>完成后看到什么</th></tr></thead>
+            <tbody>
+              <tr><td>书籍知识库</td><td>建立每书一库，同步原文，运行智能编译</td><td>来源数量、运行阶段、待审核候选、失败原因</td></tr>
+              <tr><td>Wiki 工作台</td><td>搜索主题、阅读正文、查看引用、审核修改</td><td>主题知识、论断、关系和版本历史</td></tr>
+              <tr><td>知识问答</td><td>围绕同一本书连续提问，并核对答案依据</td><td>Markdown 回答、可打开的来源、保存的会话</td></tr>
+              <tr><td>研究任务</td><td>交给 Agent 一个需要分阶段回答的问题</td><td>阶段成果、完整报告或可下载 PPTX</td></tr>
+              <tr><td>Wiki 配置</td><td>配置模型、密钥、书籍规则、Skill 和备份</td><td>可验证的连接、可查看的指令、用量和数据快照</td></tr>
+            </tbody>
+          </table>
+
           <div class="flow-diagram" aria-label="书籍 Wiki 工作流程">
             <div class="flow-step"><span class="flow-icon">01</span><strong class="flow-label">建立知识库</strong><small class="flow-desc">从阅境轩书架选择 Markdown 书籍</small></div>
             <div class="flow-step"><span class="flow-icon">02</span><strong class="flow-label">同步来源</strong><small class="flow-desc">建立章节和可追溯的原文证据</small></div>
@@ -343,26 +390,28 @@ cargo build --release</code></pre>
             <div class="flow-step"><span class="flow-icon">05</span><strong class="flow-label">问答研究</strong><small class="flow-desc">带引用回答、报告与 PPTX</small></div>
           </div>
 
-          <h3>开始前：配置 Agent Runtime 与模型</h3>
+          <h3 id="wiki-setup">开始前：配置 Agent Runtime 与模型</h3>
           <p>智能编译、知识问答和研究任务需要可用的 Agent Runtime。当前只支持通过 ACP 接入 DeepSeek Harness；这里的 “DeepSeek” 指运行时，不要求使用 DeepSeek 的模型 API。你可以配置兼容协议的其他模型供应商。</p>
           <ol class="manual-steps">
-            <li><span>1</span><div><strong>准备运行环境</strong><p>确保运行服务的电脑有可执行的 <code>npx</code> 和 DeepSeek Harness。进入「知识 → 配置 → Agent Runtime」，填写 ACP 启动命令。使用默认命令时，首次启动可能需要下载依赖。</p></div></li>
-            <li><span>2</span><div><strong>填写模型信息</strong><p>若使用第三方供应商，打开对应开关，填写协议、API Base URL、模型 ID，以及保存 API Key 的<strong>环境变量名</strong>（例如 <code>CUSTOM_LLM_API_KEY</code>）。密钥值本身应配置在启动 ObsidianBrain 的进程环境中，不要填进 Skill 或书籍文档。</p></div></li>
-            <li><span>3</span><div><strong>保存并验证</strong><p>先保存配置，再点击「验证已保存配置」。验证会检查 Runtime 是否能实际启动并完成请求；界面显示连接成功后再开始智能编译。</p></div></li>
+            <li><span>1</span><div><strong>添加模型供应商</strong><p>进入「Wiki 配置 → 模型供应商」，点「＋」。填写名称、协议、Base URL 与模型 ID，和供应商提供的信息保持一致。可以保存多个供应商，后续用铅笔修改。</p></div></li>
+            <li><span>2</span><div><strong>配置 API Key</strong><p>选择「系统凭据库」时，在页面密码输入框填写密钥并保存；数据库只记录配置元数据，不保存明文密钥。选择<strong>环境变量模式</strong>时，填写变量名，例如 <code>CUSTOM_LLM_API_KEY</code>，再在启动后端的进程环境设置其值。不要把密钥放进 Skill、书籍文档或截图。</p></div></li>
+            <li><span>3</span><div><strong>声明模型能力</strong><p>按供应商说明填写上下文窗口、最大输出与推理策略；不清楚时不要猜一个很大的值。声明只用于请求规划，不能让模型超出实际能力。启用并保存供应商。</p></div></li>
+            <li><span>4</span><div><strong>绑定执行器</strong><p>电脑需要有可执行的 <code>npx</code>。进入「Agent Runtime」，检查 ACP 启动命令，例如 <code>npx -y @deepseek-ai/dsh@0.1.5-rc.1 --profile acp</code>，选择刚保存的第三方模型供应商、启用并保存 Runtime。首次启动可能下载依赖；不选择供应商则使用 Harness 默认 Profile。</p></div></li>
+            <li><span>5</span><div><strong>验证已保存配置</strong><p>点击「验证已保存配置」，检查执行器能否实际启动并完成模型请求。只有显示「连接已验证」才继续编译或问答；修改供应商或 Runtime 后重新保存、验证。这个步骤会调用模型，可能产生费用。</p></div></li>
           </ol>
           <div class="callout subtle"><span class="callout-icon">ⓘ</span><span>如果系统提示「未找到可执行文件」，先检查服务进程能否找到 <code>npx</code> 或你填写的 ACP 程序；如果模型请求失败，检查 API Key 所在环境变量是否对<strong>后端进程</strong>可见，以及 Base URL、模型 ID、协议是否匹配供应商。更改环境变量后需要重新启动服务。</span></div>
 
-          <h3>从书架建立知识库</h3>
+          <h3 id="wiki-compile">从书架建立知识库</h3>
           <ol class="manual-steps">
             <li><span>1</span><div><strong>添加 Markdown 书籍</strong><p>先在「阅境轩 → 书架」添加一个 Markdown 文件夹。书籍知识库按书架中的每本文件夹书籍隔离；PDF 可以继续阅读，但暂不进入 Wiki 工作流。</p></div></li>
             <li><span>2</span><div><strong>建立知识库</strong><p>进入「知识 → 书籍知识库」，找到对应书籍，点击「建立知识库」。这一步创建知识库及默认配置文档，<strong>不会自动完成来源同步</strong>。</p></div></li>
-            <li><span>3</span><div><strong>同步</strong><p>点击「同步」，读取文件夹中的 Markdown 内容，建立章节来源及检索索引。第一次同步后即能按章节证据查找内容；若以后修改原书，也在这里重新同步。</p></div></li>
+            <li><span>3</span><div><strong>同步</strong><p>点击同步图标（手机在「…」操作抽屉选择「同步来源」），读取 Markdown，建立章节来源与检索索引。同步不调用模型，只产生章节证据，不等于已经生成主题 Wiki；原书修改后也需要重新同步。</p></div></li>
             <li><span>4</span><div><strong>智能编译</strong><p>来源同步完成后，点击「智能编译」。页面会显示运行阶段、来源与批次进度；离开页面不会取消后台任务，需要时可主动停止。编译生成主题知识候选，而不是立即改写正式 Wiki。</p></div></li>
             <li><span>5</span><div><strong>审核并发布</strong><p>运行结束后点击「查看并审核」，逐项核对新增、更新或争议候选的正文、引用、影响范围和前后差异。确认无误再点「批准并应用」；不合适的候选可驳回并注明原因。</p></div></li>
           </ol>
           <div class="callout"><span class="callout-icon">↻</span><span><strong>什么时候再编译：</strong>书籍来源变更后先同步，再做增量编译；模型、配置或生效 Skill 的指纹变化，可能让系统重新分析更多甚至全部来源。同步后的章节证据仍可作为兜底，智能编译没有产生有效候选时也不会伪造待审核内容。</span></div>
 
-          <h3>在 Wiki 工作台查看与维护</h3>
+          <h3 id="wiki-workspace">在 Wiki 工作台查看与维护</h3>
           <p>进入「知识 → Wiki 工作台」，选择一本书后按标题、摘要或正文搜索实体。打开实体可以查看 Markdown 正文、论断、关系、原文引用和版本历史；引用包含来源路径、行号与摘录。关系洞察帮助浏览知识之间的连接，「知识体检」用于检查缺少来源或重复主题，不调用模型，也不会自动修改数据。</p>
           <ul class="manual-points">
             <li><strong>审核队列：</strong>「审核」入口集中展示待决候选；批准时服务端再次校验来源和引用，再原子写入正式知识。</li>
@@ -371,24 +420,38 @@ cargo build --release</code></pre>
             <li><strong>暂停与归档：</strong>在「书籍知识库 → 管理」调整书籍状态。暂停或归档后知识库只读；删除生成知识会移除该书的 Wiki 产物，但不会删除书架条目或原书。</li>
           </ul>
 
-          <h3>知识问答：带着来源追问</h3>
-          <p>进入「知识 → 知识问答」，选择一本书后输入问题。系统先检索该书的主题 Wiki，再用章节证据兜底；回答以流式 Markdown 显示，<code>[S1]</code> 等标记对应引用。点击标记或来源卡片会打开<strong>来源预览</strong>弹窗，不会直接跳走。对话历史会自动保存，可以切换旧会话或新建会话。</p>
+          <h3 id="wiki-query">知识问答：带着来源追问</h3>
+          <p>进入「知识问答」，选择一本书后提问。Agent 按问题决定是否检索，优先选择已编译的主题知识；证据不足时继续读取相关实体或原文。工具目录与检索候选用于定位，不直接当成已读证据。回答以流式 Markdown 显示，引用标记对应本轮实际读取的材料；回答结束后页面在下方展示来源卡片。</p>
+          <ol class="manual-steps">
+            <li><span>1</span><div><strong>问一个具体问题</strong><p>例如「这本书如何解释缓存命中率？有哪些影响因素？」。问题可以包含比较对象、期望深度和适用条件；没有这些内容的书不能凭空给出依据。</p></div></li>
+            <li><span>2</span><div><strong>在同一会话继续追问</strong><p>例如「刚才第二个因素有哪些反例？」。最近会话帮助理解指代，不代替本轮证据；长对话不保证保留全部旧内容，必要时重新说明关键限制。</p></div></li>
+            <li><span>3</span><div><strong>打开来源预览</strong><p>点击回答中的 <code>[S1]</code> 或末尾来源卡片，弹窗核对本轮引用的正文与位置，不直接跳走。再点「打开当前版本」才进入工作台；当前版本可能与引用时的快照不同。</p></div></li>
+            <li><span>4</span><div><strong>决定怎么处理答案</strong><p>回答下方眼睛查看本轮运行，保存图标生成 Wiki 待审核候选，研究图标把问题带到研究任务创建界面。手机通过会话设置查看历史，点「＋」新建会话；中文输入法确认候选不会直接发送。</p></div></li>
+          </ol>
           <ul class="manual-points">
             <li><strong>证据不足：</strong>先确认已同步、书籍选择正确，或换一个更贴近原文的关键词；不要把没有引用的回答当作已核实结论。</li>
             <li><strong>保存回答：</strong>「保存到 Wiki」只创建待审核候选，不会立即把模型回答写入正式知识库。</li>
             <li><strong>边界：</strong>一次问答限定在所选书籍；不同书籍的来源不会混入同一个回答。</li>
           </ul>
 
-          <h3>研究任务：报告和可下载 PPTX</h3>
-          <p>进入「知识 → 研究任务」新建任务，选择书籍、标题与描述，再选择「专题研究」「知识刷新」或「事实审核」。交付物可选择研究报告或 <code>PPTX</code> 演示文稿。PPTX 任务会先保留完整 Markdown 研究报告，再运行一次无工具权限的演示策划，把内容编排为开场、观点、对照、流程、数字、数据图、关系图、证据和收束等多种版式。数据图只使用报告中已有的同口径数值，关系图只表达明确的中心概念连接；二者与正文都由本地渲染器生成可编辑 PPTX 对象。创建后启动任务，运行会进入本地持久化队列；页面展示阶段与进度，允许取消和失败后重试。完成后可以查看报告、总页数、构图数量、引用覆盖和逐项质量检查，也可以打开独立的演示策划运行记录或直接下载 PPTX，目前不提供应用内幻灯片预览。</p>
+          <h3 id="wiki-research">研究任务：报告和可下载 PPTX</h3>
+          <p>适合需要比较多个概念、分阶段整理证据、形成完整成果的问题。研究报告与 PPTX 都以所选书籍为主要依据；它与任务中枢里的个人待办不同。</p>
+          <ol class="manual-steps">
+            <li><span>1</span><div><strong>说明任务</strong><p>在「研究任务」点「＋」，选择书籍、任务类型和交付物。专题研究用于深入分析，知识刷新用于重新核验已有知识，事实审核用于检查具体主张。</p></div></li>
+            <li><span>2</span><div><strong>把交付要求说清楚</strong><p>例如「比较书中三种缓存策略，说明适用负载、成本和失败场景；面向有基础的工程师，用 10 页 PPTX 汇报，只用书内依据」。先分析诉求再确认简报，也可以跳过分析直接确认；分析本身可能调用模型。</p></div></li>
+            <li><span>3</span><div><strong>确认并启动</strong><p>核对研究深度、受众和材料偏好，创建后启动任务。任务进入本地持久化队列，离开页面不会取消，但运行服务的电脑必须保持开机。启动任务可能产生模型费用。</p></div></li>
+            <li><span>4</span><div><strong>查看阶段，而不是只等最终结果</strong><p>打开任务或阶段的查看图标，切换「阶段 / 报告 / 运行检查器」。阶段成果保留；错误页会指出停在哪一步，可取消或恢复未完成阶段，不能把部分输出当作完整交付。</p></div></li>
+            <li><span>5</span><div><strong>阅读报告或下载 PPTX</strong><p>报告在页面以 Markdown 展示。PPTX 先形成研究报告再编排幻灯片，生成后通过下载图标取得文件，用 PowerPoint 或其他兼容软件打开；当前没有应用内幻灯片预览。PPT 生成失败时，已完成的研究报告仍可查看。</p></div></li>
+          </ol>
           <ul class="manual-points">
             <li><strong>外部资料：</strong>外部研究默认关闭。只有专题研究任务中你明确开启，并指定允许的域名和请求次数后，才会读取受限的 HTTPS 文本；这些外部参考与书内引用分开标识。</li>
             <li><strong>检查实际执行：</strong>在任务详情打开「运行检查器」，查看本次生效的 Prompt、Skill 快照、配置、工具白名单与事件时间线，便于追查任务为什么得出某个结果。</li>
             <li><strong>写回知识：</strong>研究结果如需进入正式 Wiki，同样先形成候选并由你审核，不会直接修改原书或绕过审核。</li>
           </ul>
 
-          <h3>配置文档与 Skills</h3>
-          <p>「知识 → 配置」可以分别管理每本书的规则文档和 Skills。书籍规则用于描述领域、术语、边界等，保存于 SQLite；Skill 是运行时可读取的完整指令，页面「查看内容」可以检查正文、版本与来源，不再只能凭名称猜测它会做什么。</p>
+          <h3 id="wiki-skills">配置文档与 Skills</h3>
+          <p>「Wiki 配置 → 配置文档」先选择书籍，编辑领域、术语、边界等规则并保存。配置文档说明这本书的约束；Skill 说明某类工作如何做，两者作用不同。修改只影响后续运行，已经生成的报告不会自动重写。</p>
+          <p>在「Skills」选择同一本书，用眼睛查看完整正文、文件和来源；内置正文只读，需要改时点「复制为自定义」，再用铅笔编辑。不要仅凭名称判断能力，也不要把普通 Markdown 指令当作可以执行任意脚本的插件。</p>
           <table class="info-table">
             <thead><tr><th>内置 Skill</th><th>用途</th></tr></thead>
             <tbody>
@@ -401,12 +464,12 @@ cargo build --release</code></pre>
               <tr><td><code>markdown-collection</code></td><td>Markdown 文集：适配非传统章节式资料</td></tr>
             </tbody>
           </table>
-          <p>7 个内置 Skill 可以查看完整内容和历史版本；内置正文只读，需要调整时可「复制为自定义」再编辑。自定义 Skill 还支持导入受限的 Markdown ZIP。绑定时先选择书籍，再设置启用状态与作用范围，例如「问答与研究」「仅问答」「仅研究」「仅智能编译」或「全部场景」。问答与研究 Skill 只有对当前书籍启用且范围匹配时才注入；<code>book-ingest</code> 是智能编译的内置兜底，PPT 任务也有内置演示 Skill 兜底。不要把 Skill 当成能执行任意脚本的插件。</p>
-          <div class="callout subtle"><span class="callout-icon">🔎</span><span>本批内置 Skill 已直接替换并启用为当前版本，未声称经过样例评测。后续发布自定义候选仍按页面提供的评测与发布流程进行；请先查看完整指令，并用小范围书籍验证输出是否合适。</span></div>
+          <p>7 个内置 Skill 保留当前发布内容，不要求用户从旧版本中挑选。自定义 Skill 可通过上传图标导入受限的 Markdown ZIP。先选择书籍，再启用 Skill 并设置「问答与研究」「仅问答」「仅研究」「仅智能编译」或「全部场景」；问答与研究只有对当前书籍启用且范围匹配时才加载。<code>book-ingest</code> 是智能编译兜底，PPT 任务有内置演示 Skill 兜底，所以关闭自定义 Skill 不等于关闭所有规则。</p>
+          <div class="callout subtle"><span class="callout-icon">🔎</span><span>先用一小份资料验证改动是否符合预期。页面提供自定义候选的评测、基准和发布状态，但这些状态不意味着任意新问题都能保证回答正确；内置正文也不冒充经过完整质量评测。</span></div>
 
-          <h3>Token 用量、备份与排错</h3>
+          <h3 id="wiki-backup">Token 用量、备份与排错</h3>
           <ul class="manual-points">
-            <li><strong>Token 用量：</strong>在「配置 → Token 用量」按时间范围和调用方查看用量。ACP 运行时无法准确拆分的记录会标记为估算，不应当作供应商账单。</li>
+            <li><strong>Token 用量：</strong>在「配置 → Token 用量」按时间范围和调用方查看。没有供应商精确明细时标为估算，通常只覆盖初始 Prompt 和最终输出，不包含 Agent 内部多轮、压缩和推理的全部消耗，不能当作账单。上下文占用也不等于计费 Token。</li>
             <li><strong>数据保护：</strong>在「配置 → 数据保护」创建并下载 SQLite 一致快照；也可导出单本书的 JSON 或 Markdown Wiki。恢复备份会替换当前数据库，务必核对文件并先保留现有备份。</li>
             <li><strong>编译卡住或失败：</strong>先看书籍知识库的阶段和最后错误，再检查 Runtime 连通性、来源同步状态；研究任务则可用「运行检查器」核对本次配置与事件。重新编译前不必删除原书或知识库。</li>
           </ul>

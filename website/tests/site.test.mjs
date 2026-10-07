@@ -31,16 +31,16 @@ test('product site describes installation, configuration and module usage', asyn
 test('product site describes the database-native Book Wiki workflow and current limits', async () => {
   const html = await read('index.html')
 
-  for (const phrase of ['每本书一个独立知识库', '跨章节归并', '人工审核', '真实样例基准', 'PPTX', 'SQLite', '外部研究默认关闭', '授权域名']) {
+  for (const phrase of ['每本书一个独立知识库', '跨章节归并', '人工审核', 'PPTX', 'SQLite', '外部研究默认关闭', '授权域名']) {
     assert.match(html, new RegExp(phrase), `missing Book Wiki phrase: ${phrase}`)
   }
 
   assert.match(html, /书籍知识库只处理 Markdown 文件夹/)
-  assert.match(html, /PPTX[^。]*下载/)
+  assert.match(html, /下载 PPTX|PPTX[^。]*下载/)
   assert.doesNotMatch(html, /Claude Code/)
   assert.doesNotMatch(html, /观察领域分布、孤岛、枢纽、尘封和新生内容/)
   assert.match(html, /href="\.\/manual\/#wiki"/)
-  assert.match(html, /7 个内置 Skill/)
+  assert.match(await read('manual/index.html'), /7 个内置 Skill/)
 })
 
 test('site assets use repository-relative paths and never call the local API', async () => {

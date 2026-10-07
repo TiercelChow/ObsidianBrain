@@ -27,7 +27,7 @@
 .manual-content { min-width: 0; overflow-wrap: anywhere; }
 .manual-section { margin-bottom: 4rem; scroll-margin-top: 7rem; }
 .manual-section > h2 { font-size: 1.65rem; line-height: 1.45; font-weight: 680; letter-spacing: -.025em; margin-bottom: 1.5rem; padding-top: .5rem; }
-.manual-section h3 { font-size: 1.05rem; line-height: 1.6; margin: 1.5rem 0 .65rem; }
+.manual-section h3 { font-size: 1.05rem; line-height: 1.6; margin: 1.5rem 0 .65rem; scroll-margin-top: 7rem; }
 .manual-section p, .manual-section li { font-size: .95rem; line-height: 1.9; color: var(--text-tertiary); }
 .manual-section p { margin: 0 0 1rem; }
 .manual-section ul, .manual-section ol { padding-left: 1.4rem; margin: .75rem 0 1.25rem; }
@@ -71,10 +71,18 @@
 .manual-content .manual-steps { display: grid; gap: .7rem; padding: 0; list-style: none; counter-reset: none; }
 .manual-content .manual-steps li { display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: .8rem; align-items: start; margin: 0; padding: .95rem 1rem; border: 1px solid var(--border-faint); border-radius: .85rem; background: var(--bg-glass-subtle); }
 .manual-content .manual-steps li > span { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: .65rem; background: var(--accent-light); color: var(--accent-strong); font-family: var(--font-mono); font-size: .75rem; font-weight: 700; }
-.manual-content .manual-steps strong { display: block; line-height: 2rem; }
+.manual-content .manual-steps li > div > strong { display: block; line-height: 2rem; }
 .manual-content .manual-steps p { margin: .15rem 0 0; font-size: .84rem; line-height: 1.75; }
 .manual-content .manual-points { display: grid; gap: .35rem; padding-left: 1.2rem; }
 .manual-content .manual-points li { padding-left: .2rem; }
+.manual-jobs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; margin: 1.25rem 0; }
+.manual-content .manual-jobs a { display: grid; align-content: start; gap: .4rem; min-width: 0; min-height: 5.5rem; padding: 1rem; border: 1px solid var(--border-glass); border-radius: 1rem; background: var(--bg-glass); text-decoration: none; transition: background-color .2s, border-color .2s; }
+.manual-jobs a:hover { background: var(--bg-hover); border-color: var(--accent-border); }
+.manual-jobs strong { color: var(--text-primary); font-size: .95rem; }
+.manual-jobs span { color: var(--text-tertiary); font-size: .85rem; line-height: 1.7; }
+.manual-subsections { display: flex; flex-wrap: wrap; gap: .45rem; margin: 1.25rem 0; }
+.manual-subsections a { display: inline-flex; align-items: center; justify-content: center; min-height: 2.75rem; padding: .45rem .8rem; border: 1px solid var(--border-glass); border-radius: .75rem; background: var(--bg-glass); color: var(--text-secondary); font-size: .8rem; transition: background-color .2s, color .2s; }
+.manual-subsections a:hover { background: var(--bg-hover); color: var(--accent-strong); }
 .manual-content .task-kind-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem; margin: 1.25rem 0; }
 .manual-content .task-kind-grid article { min-width: 0; padding: 1.25rem; border: 1px solid var(--border-glass); border-radius: 1rem; background: var(--bg-glass); }
 .manual-content .task-kind-grid article > span { color: var(--accent-strong); font-family: var(--font-mono); font-size: .68rem; font-weight: 650; letter-spacing: .08em; }
@@ -131,12 +139,14 @@
   .mobile-chapters[open] summary > svg { transform: rotate(180deg); }
   .mobile-chapters nav { max-height: min(55dvh, 25rem); overflow-y: auto; overscroll-behavior: contain; padding-block: .5rem; }
   .manual-section { scroll-margin-top: calc(9rem + var(--safe-top)); margin-bottom: 3rem; }
+  .manual-section h3 { scroll-margin-top: calc(9rem + var(--safe-top)); }
   .manual-section > h2 { font-size: 1.4rem; }
 }
 @media (max-width: 520px) {
   .website-start-guide .settings-preview, .website-start-guide .guide-tip { margin-left: 0; }
   .manual-content :is(.feature-grid, .tab-flow, .config-grid, .explore-grid, .insight-grid) { grid-template-columns: minmax(0, 1fr); }
   .manual-content .task-kind-grid, .manual-content .task-layout-demo { grid-template-columns: minmax(0, 1fr); }
+  .manual-jobs { grid-template-columns: minmax(0, 1fr); }
   .manual-content .task-layout-demo div:last-child { grid-column: auto; grid-row: auto; }
   .manual-content .command-block { padding: 1rem; font-size: .68rem; }
   .manual-content :is(.flow-diagram, .pipeline) { flex-direction: column; }
