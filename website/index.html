@@ -4,12 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#f0f0f3" />
-    <meta name="description" content="用 ObsidianBrain 阅读本地 Markdown 和 PDF、记录带图片的小记、管理待办和长期任务，并为书籍建立可引用的 AI 问答知识库、生成研究报告和 PPTX。附完整安装与使用手册。" />
+    <meta name="description" content="ObsidianBrain 是整合 Markdown/PDF 阅读、图文小记与任务管理的本地工作台。以每书独立 Wiki 支持可追溯问答、研究报告与 PPTX 交付，提供交互演示及完整使用手册。" />
     <meta name="keywords" content="Obsidian, 知识管理, Markdown 阅读器, PDF 阅读器, Book Wiki, DeepSeek Harness, MCP, Rust, 本地优先, 任务管理" />
     <meta name="author" content="TiercelChow" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="ObsidianBrain · 本地知识工作台" />
-    <meta property="og:description" content="读 Markdown/PDF、写小记、管任务，用 AI 问答和研究书籍。数据保存在本机，无需 Obsidian。" />
+    <meta property="og:description" content="整合本地文档阅读、图文记录与任务管理。以可追溯的书籍 Wiki 支持知识问答、专题研究和 PPTX 交付。" />
     <meta property="og:url" content="https://tiercelchow.github.io/ObsidianBrain/" />
     <meta property="og:image" content="https://tiercelchow.github.io/ObsidianBrain/favicon.svg" />
     <meta name="twitter:card" content="summary" />
@@ -63,7 +63,7 @@
 
         <nav class="site-nav" id="site-navigation" aria-label="主要导航" data-navigation>
           <a href="#features">功能一览</a>
-          <a href="#tour">界面示意</a>
+          <a href="#tour">功能演示</a>
           <a href="#quick-start">开始使用</a>
           <a href="./manual/">使用手册</a>
           <a href="./llm-wiki/">LLM Wiki</a>
@@ -90,20 +90,20 @@
       <section class="hero section-shell" id="top">
         <div class="hero-copy" data-reveal data-reveal-sequence>
           <div class="eyebrow"><span class="status-dot"></span> OBSIDIANBRAIN · 本地知识工作台</div>
-          <h1><span class="hero-job">读文档，记小记，</span><span class="hero-job">管任务。</span><br /><span><span class="hero-job">用 AI 问答</span><span class="hero-job">和研究你的书。</span></span></h1>
-          <p class="hero-lead">在自己的电脑上阅读 Markdown / PDF，记录文字和照片，拆解长期目标。<br class="desktop-break" />还可以把 Markdown 书籍整理成知识库，获得带来源的回答、研究报告和 PPTX。</p>
+          <h1>阅读、记录与任务管理<br /><span>可追溯的书籍知识库</span></h1>
+          <p class="hero-lead">ObsidianBrain 将 Markdown / PDF 阅读、图文小记与任务管理整合为本地工作台。<br class="desktop-break" />基于每书独立的 Wiki，提供带来源的知识问答、专题研究报告与 PPTX 交付。</p>
           <div class="hero-actions">
-            <a class="button button-primary" href="./manual/#start">第一次使用 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a>
-            <a class="button button-secondary" href="#features">查看全部功能</a>
+            <a class="button button-primary" href="#tour">观看功能演示 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a>
+            <a class="button button-secondary" href="./manual/#start">安装与使用</a>
           </div>
           <div class="hero-notes" aria-label="产品特点">
-            <span><svg aria-hidden="true"><use href="#icon-check" /></svg>数据留在本地</span>
+            <span><svg aria-hidden="true"><use href="#icon-check" /></svg>本地数据存储</span>
             <span><svg aria-hidden="true"><use href="#icon-check" /></svg>无需 Obsidian</span>
             <span><svg aria-hidden="true"><use href="#icon-check" /></svg>电脑与手机界面</span>
           </div>
           <nav class="hero-feature-map" aria-label="四项主要功能与用法">
-            <a href="./manual/#reader"><svg aria-hidden="true"><use href="#icon-book" /></svg><strong>阅境轩</strong><span>读 Markdown / PDF</span></a>
-            <a href="./manual/#timeline"><svg aria-hidden="true"><use href="#icon-clock" /></svg><strong>时光机</strong><span>写小记、存照片</span></a>
+            <a href="./manual/#reader"><svg aria-hidden="true"><use href="#icon-book" /></svg><strong>阅境轩</strong><span>Markdown / PDF 阅读</span></a>
+            <a href="./manual/#timeline"><svg aria-hidden="true"><use href="#icon-clock" /></svg><strong>时光机</strong><span>图文小记与时间回顾</span></a>
             <a href="./manual/#tasks"><svg aria-hidden="true"><use href="#icon-task" /></svg><strong>任务中枢</strong><span>待办、子任务、日历</span></a>
             <a href="./manual/#wiki"><svg aria-hidden="true"><use href="#icon-wiki" /></svg><strong>书籍 Wiki</strong><span>AI 问答、研究、PPT</span></a>
           </nav>
@@ -144,10 +144,10 @@
                   </div>
                   <article class="mock-document">
                     <span class="document-kicker">OBSIDIANBRAIN</span>
-                  <h2>阅读本地文集，<br />继续上次阅读。</h2>
-                    <p>目录、正文和文件列表在同一处。表格、代码、公式和流程图都可以直接阅读。</p>
-                    <div class="document-callout"><i></i><span><b>本地优先</b><small>你的数据始终属于你</small></span></div>
-                    <h3>每篇文档分别记住阅读位置</h3>
+                  <h2>本地文档阅读，<br />保留完整内容结构。</h2>
+                    <p>整合文件列表、章节目录与正文视图，支持表格、代码、公式和流程图。</p>
+                    <div class="document-callout"><i></i><span><b>原始资料只读</b><small>阅读无需迁移或改写来源文件</small></span></div>
+                    <h3>按文档记录与恢复阅读位置</h3>
                     <div class="document-lines"><i></i><i></i><i></i></div>
                   </article>
                 </div>
@@ -165,82 +165,135 @@
       <section class="section-shell features-section" id="features">
         <div class="section-heading centered" data-reveal>
           <span class="section-label">功能一览</span>
-          <h2>你可以用它做什么？</h2>
-          <p>阅读、记录和任务可以独立使用。想让 AI 帮你理解书籍，再开启书籍 Wiki。</p>
+          <h2>四项核心能力，一个本地工作台。</h2>
+          <p>文档阅读、图文记录与个人任务独立运行。书籍 Wiki 在此基础上提供知识编译、问答与研究能力。</p>
         </div>
         <div class="feature-grid" data-reveal-group>
-          <article class="feature-card reader-card" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-book" /></svg></div><span class="feature-state">读文档</span><h3>阅境轩</h3><p>把本地 Markdown 文件夹或 PDF 放进书架，打开就读；下次回来继续上次阅读。</p><ul><li>搜索目录中的文件、按标题跳转</li><li>阅读表格、代码、LaTeX 公式和 Mermaid 图</li><li>PDF 缩放、页码定位和进度恢复</li></ul><a class="feature-guide" href="./manual/#reader">添加第一本书 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></article>
-          <article class="feature-card timeline-card" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-clock" /></svg></div><span class="feature-state">记想法与照片</span><h3>时光机</h3><p>用一条小记保存文字、截图或照片；通过日期、关键词和标签找回，随时编辑和删除。</p><ul><li>Markdown 正文，一条最多 9 张图片</li><li>原图查看、缩放与切换</li><li>图片保存在本机，缓存有大小上限</li></ul><a class="feature-guide" href="./manual/#timeline">写第一条小记 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></article>
-          <article class="feature-card tasks-card" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-task" /></svg></div><span class="feature-state">安排与推进工作</span><h3>任务中枢</h3><p>短期待办记录一件事；长期目标拆成多级子任务，每一步都能记录进展，并在日历中查看日期安排。</p><ul><li>标题、描述、起止日期与重要程度</li><li>子任务详情、进展与关闭说明</li><li>任务 / 日历视图，归档后历史保留</li></ul><a class="feature-guide" href="./manual/#tasks">创建并拆解任务 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></article>
-          <article class="feature-card wiki-card" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-wiki" /></svg></div><span class="feature-state">让 AI 理解一本书</span><h3>书籍知识库</h3><p>每本书一个独立知识库。智能编译跨章节归并概念、解释和关系，经人工审核后保存为可浏览、可引用的知识。</p><ul><li>书籍知识库只处理 Markdown 文件夹</li><li>Wiki 工作台查看正文、引用和历史版本</li><li>原书只读，生成知识保存在本地 SQLite</li></ul><a class="feature-guide" href="./manual/#wiki-compile">从书架建立 Wiki <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></article>
-          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-search" /></svg></div><div><span class="feature-state">用书回答问题</span><h3>书籍问答</h3><p>在同一会话连续追问；回答以 Markdown 流式显示，点引用弹窗核对原文。可把回答保存为待审核知识。</p><a class="feature-guide" href="./manual/#wiki-query">提问并核对来源 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div></article>
-          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-task" /></svg></div><div><span class="feature-state">拿到报告与幻灯片</span><h3>研究任务</h3><p>给出研究问题，查看分阶段进展，完成后阅读研究报告或下载 PPTX。离开页面不停止后台运行，失败后可恢复未完成阶段。</p><a class="feature-guide" href="./manual/#wiki-research">创建报告 / PPT 任务 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div></article>
-          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-wiki" /></svg></div><div><span class="feature-state">查看与维护知识</span><h3>Wiki 工作台</h3><p>搜索主题，查看正文、论断和关系；修改知识先审核再应用。来源变化时提醒重新核对，不把旧引用当成当前事实。</p><a class="feature-guide" href="./manual/#wiki-workspace">浏览和修改实体 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div></article>
-          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-spark" /></svg></div><div><span class="feature-state">接入自己的模型</span><h3>Wiki 配置</h3><p>添加多个模型供应商、配置 API Key，查看或调整 Skill 指令与书籍规则；检查 Token 用量、创建备份并导出知识。</p><a class="feature-guide" href="./manual/#wiki-setup">配置模型与密钥 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div></article>
+          <article class="feature-card reader-card" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-book" /></svg></div><span class="feature-state">文档阅读</span><h3>阅境轩</h3><p>以书架组织本地 Markdown 文集与 PDF，统一阅读视图和章节导航，支持继续上次阅读。</p><ul><li>搜索目录中的文件、按标题跳转</li><li>阅读表格、代码、LaTeX 公式和 Mermaid 图</li><li>PDF 缩放、页码定位和进度恢复</li></ul><a class="feature-guide" href="./manual/#reader">阅读使用指南 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></article>
+          <article class="feature-card timeline-card" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-clock" /></svg></div><span class="feature-state">图文记录</span><h3>时光机</h3><p>以小记保存文字、截图与照片，按时间组织记录，支持关键词检索、标签筛选、编辑和删除。</p><ul><li>Markdown 正文，一条最多 9 张图片</li><li>原图查看、缩放与切换</li><li>图片保存在本机，缓存有大小上限</li></ul><a class="feature-guide" href="./manual/#timeline">小记管理指南 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></article>
+          <article class="feature-card tasks-card" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-task" /></svg></div><span class="feature-state">个人任务</span><h3>任务中枢</h3><p>统一管理短期待办与长期目标，通过多级子任务、进展记录和日历视图组织任务安排。</p><ul><li>标题、描述、起止日期与重要程度</li><li>子任务详情、进展与关闭说明</li><li>任务 / 日历视图，归档后历史保留</li></ul><a class="feature-guide" href="./manual/#tasks">任务管理指南 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></article>
+          <article class="feature-card wiki-card" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-wiki" /></svg></div><span class="feature-state">知识编译</span><h3>书籍知识库</h3><p>每本书一个独立知识库。智能编译跨章节归并概念、解释和关系，经人工审核后形成可浏览、可引用的知识。</p><ul><li>书籍知识库只处理 Markdown 文件夹</li><li>Wiki 工作台查看正文、引用和历史版本</li><li>原书只读，生成知识保存在本地 SQLite</li></ul><a class="feature-guide" href="./manual/#wiki-compile">知识编译指南 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></article>
+          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-search" /></svg></div><div><span class="feature-state">可追溯问答</span><h3>书籍问答</h3><p>围绕所选书籍连续提问，以流式 Markdown 呈现回答，通过引用预览核对原文。回答可保存为待审核知识。</p><a class="feature-guide" href="./manual/#wiki-query">问答与引用指南 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div></article>
+          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-task" /></svg></div><div><span class="feature-state">专题研究</span><h3>研究任务</h3><p>以阶段化流程执行研究，保留证据、阶段成果与运行记录。完成后查看研究报告或下载 PPTX，失败后可恢复未完成阶段。</p><a class="feature-guide" href="./manual/#wiki-research">研究交付指南 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div></article>
+          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-wiki" /></svg></div><div><span class="feature-state">知识维护</span><h3>Wiki 工作台</h3><p>检索主题，浏览正文、论断和关系。知识修改经审核后应用；来源发生变化时提示复核，维护知识与引用的时效性。</p><a class="feature-guide" href="./manual/#wiki-workspace">实体浏览与管理 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div></article>
+          <article class="feature-card compact" data-reveal><div class="feature-icon"><svg aria-hidden="true"><use href="#icon-spark" /></svg></div><div><span class="feature-state">模型与运行配置</span><h3>Wiki 配置</h3><p>配置多个模型供应商与 API Key，管理 Skill 指令和书籍规则，查看 Token 用量，支持知识备份与导出。</p><a class="feature-guide" href="./manual/#wiki-setup">模型与密钥配置 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div></article>
         </div>
         <div class="support-features" data-reveal>
-          <article><h3>首页：从今天要做的事开始</h3><p>集中显示待办、最近阅读、最近小记、Wiki 运行与待审核状态、系统及图片存储信息。点击卡片直接进入对应内容。</p><a class="feature-guide" href="./manual/#start">了解首次使用路径 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></article>
+          <article><h3>首页概览</h3><p>聚合任务、最近阅读、小记、Wiki 运行与待审核状态，以及系统和图片存储信息。支持从概览直接进入相关内容。</p><a class="feature-guide" href="./manual/#start">快速入门指南 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></article>
           <article><h3>代码仓：查看本地 Git 项目</h3><p>电脑端登记仓库路径，查看分支、未提交状态、语言占比和最近提交，并在 VSCode 打开。手机端不显示此功能。</p></article>
         </div>
       </section>
 
-      <section class="showcase-section" id="tour">
+      <section class="showcase-section product-demo" id="tour" data-product-demo>
         <div class="section-shell">
-          <div class="section-heading centered" data-reveal><span class="section-label">界面示意</span><h2>选一个功能，看看操作和结果。</h2><p>以下为静态示意，不会读取你的文件或运行 AI。详细步骤在使用手册中。</p></div>
+          <div class="section-heading centered" data-reveal><span class="section-label">功能演示</span><h2>交互演示，呈现核心功能。</h2><p>自动轮播四项功能的完整流程，也可暂停并手动查看步骤。示例数据仅用于展示，不连接资料或模型。</p></div>
           <div class="showcase-tabs" role="tablist" aria-label="产品场景" data-reveal>
-            <button type="button" role="tab" aria-selected="true" data-feature-target="reader">沉浸阅读</button>
-            <button type="button" role="tab" aria-selected="false" data-feature-target="timeline" tabindex="-1">轻量记录</button>
-            <button type="button" role="tab" aria-selected="false" data-feature-target="tasks" tabindex="-1">目标推进</button>
-            <button type="button" role="tab" aria-selected="false" data-feature-target="knowledge" tabindex="-1">书籍研究</button>
+            <button type="button" role="tab" id="tour-tab-reader" aria-controls="tour-reader" aria-selected="true" data-feature-target="reader">阅境轩</button>
+            <button type="button" role="tab" id="tour-tab-timeline" aria-controls="tour-timeline" aria-selected="false" data-feature-target="timeline" tabindex="-1">时光机</button>
+            <button type="button" role="tab" id="tour-tab-tasks" aria-controls="tour-tasks" aria-selected="false" data-feature-target="tasks" tabindex="-1">任务中枢</button>
+            <button type="button" role="tab" id="tour-tab-knowledge" aria-controls="tour-knowledge" aria-selected="false" data-feature-target="knowledge" tabindex="-1">书籍 Wiki</button>
           </div>
           <div class="showcase-stage" data-reveal>
-            <article class="showcase-panel" data-feature-panel="reader">
-              <div class="showcase-copy"><span class="panel-number">01 / 阅境轩</span><h3>打开一本书，回到上次停下的位置。</h3><p>将 Markdown 文件夹或 PDF 添加到书架。每本书分别记录文件、滚动比例或 PDF 页码；再次打开时自动恢复。</p><ul><li><svg><use href="#icon-check" /></svg>长表格和代码块可横向浏览</li><li><svg><use href="#icon-check" /></svg>Mermaid 图表支持缩放与拖动</li><li><svg><use href="#icon-check" /></svg>全屏模式减少界面干扰</li></ul></div>
-              <div class="showcase-ui reader-ui"><div class="ui-top"><span>阅境轩</span><div class="ui-toggle"><i>书架</i><i class="on">阅读</i></div></div><div class="book-row"><div class="book-cover purple"><i>KNOWLEDGE</i><b>知识系统<br />设计手册</b><span>42%</span></div><div class="book-cover green"><i>THINKING</i><b>深度工作<br />阅读札记</b><span>68%</span></div><div class="book-cover orange"><i>ENGINEERING</i><b>Rust<br />实践指南</b><span>12 / 180</span></div></div><div class="shelf-line"></div></div>
-            </article>
-            <article class="showcase-panel" data-feature-panel="timeline" hidden>
-              <div class="showcase-copy"><span class="panel-number">02 / 时光机</span><h3>先把想法留下，整理可以稍后发生。</h3><p>用 Markdown 写一条小记，附上图片或标签。桌面端专注浏览内容，手机端保持自然的整页滚动。</p><ul><li><svg><use href="#icon-check" /></svg>按关键词、日期和标签筛选</li><li><svg><use href="#icon-check" /></svg>图片自动生成轻量缩略图</li><li><svg><use href="#icon-check" /></svg>记录保留明确时间上下文</li></ul></div>
-              <div class="showcase-ui timeline-ui"><div class="timeline-date"><b>09</b><span>2026 · 九月</span></div><div class="memo-card"><div class="memo-meta"><span>今天 10:42</span><i>#产品思考</i></div><p>好的知识系统不是让人记住更多，而是在恰当的时候帮助人继续思考。</p><div class="memo-image"><span></span><span></span><span></span></div></div><div class="memo-card small"><div class="memo-meta"><span>昨天 22:18</span><i>#阅读</i></div><p>把输入转成下一步行动。</p></div></div>
-            </article>
-            <article class="showcase-panel" data-feature-panel="tasks" hidden>
-              <div class="showcase-copy"><span class="panel-number">03 / 任务中枢</span><h3>把长期目标拆到今天可以开始的程度。</h3><p>创建长期任务，逐层增加子任务并追加进展。日历只呈现顶层日程，展开明细后再查看完整拆解。</p><ul><li><svg><use href="#icon-check" /></svg>重要程度和日期范围清晰可见</li><li><svg><use href="#icon-check" /></svg>每个节点都能记录进展</li><li><svg><use href="#icon-check" /></svg>审计历史保留状态变化</li></ul></div>
-              <div class="showcase-ui tasks-ui"><div class="task-head"><div><span>长期任务</span><b>发布 ObsidianBrain 1.0</b></div><strong>64%</strong></div><div class="progress-bar"><i></i></div><div class="task-tree"><div class="done"><i>✓</i><span><b>完成核心架构</b><small>已完成</small></span></div><div class="active"><i></i><span><b>打磨移动端体验</b><small>进行中 · 72%</small></span></div><div><i></i><span><b>整理使用文档</b><small>计划中</small></span></div><div class="nested"><i></i><span><b>发布 GitHub Pages</b><small>今天截止</small></span></div></div></div>
-            </article>
-            <article class="showcase-panel" data-feature-panel="knowledge" hidden>
-              <div class="showcase-copy"><span class="panel-number">04 / 书籍知识库</span><h3>生成主题知识，再用它回答问题。</h3><p>每本书一个独立知识库。原书保持只读，智能编译跨章节归并概念、论断与关系，审核后才写入本地 SQLite。</p><ul><li><svg><use href="#icon-check" /></svg>回答中的 [S#] 原位预览证据</li><li><svg><use href="#icon-check" /></svg>研究任务可后台生成报告与 PPTX</li><li><svg><use href="#icon-check" /></svg>知识回写、版本与运行全程可审核</li></ul></div>
-              <div class="showcase-ui knowledge-ui">
-                <div class="knowledge-demo-head"><div class="knowledge-demo-mark"><svg><use href="#icon-wiki" /></svg></div><div><span>知识问答 · 单书边界</span><b>AI Systems Performance Engineering</b></div><i>Harness 已连接</i></div>
-                <div class="knowledge-demo-question">如何判断系统瓶颈来自计算还是内存？</div>
-                <div class="knowledge-demo-answer"><span>DS</span><p>先比较算术强度与机器平衡点，再结合带宽、吞吐和利用率定位瓶颈 <button type="button">S1</button>。测量时应同时保留工作负载与硬件上下文 <button type="button">S2</button>。</p></div>
-                <div class="knowledge-demo-sources"><article><i>S1</i><div><b>Roofline 分析</b><small>chapter-04.md · 第 82–96 行</small></div></article><article><i>S2</i><div><b>性能测量方法</b><small>chapter-02.md · 第 31–48 行</small></div></article></div>
+            <div class="demo-controls" data-demo-controls hidden>
+              <div class="demo-control-head"><p data-demo-status aria-live="off">01 / 04 · 选择书籍</p><div class="demo-playback"><button type="button" data-demo-previous aria-label="上一个演示步骤"><svg aria-hidden="true"><use href="#icon-arrow" /></svg></button><button type="button" data-demo-play aria-pressed="false">播放轮播</button><button type="button" data-demo-next aria-label="下一个演示步骤"><svg aria-hidden="true"><use href="#icon-arrow" /></svg></button></div></div>
+              <nav class="demo-steps" data-demo-steps aria-label="演示步骤"></nav>
+              <p class="demo-step-detail" data-demo-detail></p>
+            </div>
+            <div class="demo-display" data-demo-display>
+            <article class="showcase-panel" id="tour-reader" role="tabpanel" aria-labelledby="tour-tab-reader" data-feature-panel="reader">
+              <div class="showcase-copy"><span class="panel-number">01 / 阅境轩</span><h3>保持文档结构，延续阅读进度。</h3><p>以书架组织本地 Markdown 文集和 PDF。正文、文件列表与目录协同显示，阅读位置按文档记录。</p><ul><li><svg aria-hidden="true"><use href="#icon-check" /></svg>表格、代码、公式与图表渲染</li><li><svg aria-hidden="true"><use href="#icon-check" /></svg>目录定位与 PDF 页码导航</li><li><svg aria-hidden="true"><use href="#icon-check" /></svg>跨次阅读的位置恢复</li></ul><a class="feature-guide" href="./manual/#reader">阅境轩使用指南 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div>
+              <div class="demo-viewport" data-demo-viewport>
+                <div class="demo-window-head"><span><svg aria-hidden="true"><use href="#icon-book" /></svg>阅境轩</span><small>示例数据</small></div>
+                <div class="demo-view demo-library" data-demo-view="0">
+                  <div class="demo-view-heading"><span>我的书架</span><small>3 本书</small></div>
+                  <div class="demo-books">
+                    <button class="demo-book" type="button" data-demo-go="1" disabled><span class="demo-cover"><small>ENGINEERING</small><b>缓存策略<br />学习手册</b><span>42% 已读</span></span><strong>缓存策略学习手册</strong><small>Markdown · 3 篇文档</small></button>
+                    <div class="demo-book"><span class="demo-cover green"><small>THINKING</small><b>研究方法<br />与实践</b><span>68% 已读</span></span><strong>研究方法与实践</strong><small>Markdown 文集</small></div>
+                    <div class="demo-book"><span class="demo-cover orange"><small>REFERENCE</small><b>系统设计<br />参考资料</b><span>12 / 180</span></span><strong>系统设计参考资料</strong><small>PDF 文档</small></div>
+                  </div><p class="demo-hint">选择第一本书，进入阅读示例。</p>
+                </div>
+                <div class="demo-view demo-reading" data-demo-view="1 2 3" hidden>
+                  <div class="demo-view-heading"><span>缓存策略学习手册</span><button class="demo-icon-button" type="button" data-demo-go="0" aria-label="返回演示书架" disabled><svg aria-hidden="true"><use href="#icon-folder" /></svg></button></div>
+                  <div class="demo-reader-layout">
+                    <nav class="demo-file-list" aria-label="示例文档"><span>文档列表</span><button type="button" data-demo-go="1" disabled>01 · 基础概念</button><button type="button" data-demo-go="2" disabled>02 · 缓存策略</button></nav>
+                    <div class="demo-document">
+                      <div data-demo-view="1"><small>01 / 基础概念</small><h4>缓存与命中率</h4><p>缓存将高频读取的数据保存在更快的存储层，以减少重复访问的成本。</p><blockquote>命中率需要结合请求分布、容量与失效机制共同评估。</blockquote><button class="demo-action" type="button" data-demo-go="2" disabled>定位缓存策略章节 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></button></div>
+                      <div data-demo-view="2 3" hidden><small>02 / 缓存策略</small><h4>淘汰策略的适用场景</h4><p>不同策略对访问频次和最近访问时间采用不同的权重。</p><table class="demo-data-table"><thead><tr><th>策略</th><th>主要依据</th></tr></thead><tbody><tr><td>LRU</td><td>最近访问时间</td></tr><tr><td>LFU</td><td>访问频次</td></tr></tbody></table></div>
+                    </div>
+                  </div>
+                  <div class="demo-reading-footer"><span data-demo-view="1 2">阅读进度</span><span class="demo-success" data-demo-view="3" hidden>✓ 已恢复上次位置</span><b data-demo-reading-percent>42%</b></div><div class="demo-meter"><i data-demo-reading-progress></i></div>
+                </div>
               </div>
             </article>
+            <article class="showcase-panel" id="tour-timeline" role="tabpanel" aria-labelledby="tour-tab-timeline" data-feature-panel="timeline" hidden>
+              <div class="showcase-copy"><span class="panel-number">02 / 时光机</span><h3>以时间组织记录，以标签连接内容。</h3><p>记录文字、截图与照片，保留清晰的时间上下文。通过日期、关键词和标签回顾内容，并持续维护已有小记。</p><ul><li><svg aria-hidden="true"><use href="#icon-check" /></svg>Markdown 与多图记录</li><li><svg aria-hidden="true"><use href="#icon-check" /></svg>原图查看与受限缓存</li><li><svg aria-hidden="true"><use href="#icon-check" /></svg>编辑、删除与附件清理</li></ul><a class="feature-guide" href="./manual/#timeline">时光机使用指南 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div>
+              <div class="demo-viewport" data-demo-viewport>
+                <div class="demo-window-head"><span><svg aria-hidden="true"><use href="#icon-clock" /></svg>时光机</span><small>示例数据</small></div>
+                <div class="demo-view" data-demo-view="0">
+                  <div class="demo-view-heading"><span>编辑小记</span><small>Markdown</small></div>
+                  <div class="demo-editor"><p>缓存策略不能只比较命中率，还需要记录请求分布、容量限制与失效成本。</p><span class="demo-tag">#阅读</span><div class="demo-attachment"><svg aria-hidden="true"><use href="#icon-folder" /></svg><span>缓存策略草图.png<small>附图示例</small></span></div></div>
+                  <button class="demo-action" type="button" data-demo-go="1" disabled>发布小记 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></button>
+                </div>
+                <div class="demo-view" data-demo-view="1 2" hidden>
+                  <div class="demo-view-heading"><span>10 月 18 日</span><div class="demo-filter"><button type="button" data-demo-go="1" disabled>全部</button><button type="button" data-demo-go="2" disabled>#阅读</button></div></div>
+                  <article class="demo-memo"><div class="demo-memo-meta"><span>10:42</span><span class="demo-tag">#阅读</span></div><p>缓存策略不能只比较命中率，还需要记录请求分布、容量限制与失效成本。</p><div class="demo-sketch"><span>请求分布</span><i>→</i><span>策略评估</span><i>→</i><span>结果验证</span></div><small class="demo-success">✓ 已发布 · 示例记录</small></article>
+                  <article class="demo-memo secondary" data-demo-view="1" hidden><div class="demo-memo-meta"><span>09:15</span><span class="demo-tag">#计划</span></div><p>整理本周任务，确认研究报告的交付范围。</p></article>
+                  <p class="demo-hint" data-demo-view="2" hidden>当前筛选：#阅读 · 1 条小记</p>
+                </div>
+              </div>
+            </article>
+            <article class="showcase-panel" id="tour-tasks" role="tabpanel" aria-labelledby="tour-tab-tasks" data-feature-panel="tasks" hidden>
+              <div class="showcase-copy"><span class="panel-number">03 / 任务中枢</span><h3>从目标拆解到进展追踪。</h3><p>短期待办用于日常安排，长期任务支持多级拆解。任务信息、进展记录和日历日程基于同一套任务数据。</p><ul><li><svg aria-hidden="true"><use href="#icon-check" /></svg>起止日期与重要程度</li><li><svg aria-hidden="true"><use href="#icon-check" /></svg>多级子任务与独立进展</li><li><svg aria-hidden="true"><use href="#icon-check" /></svg>关闭说明与归档历史</li></ul><a class="feature-guide" href="./manual/#tasks">任务中枢使用指南 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div>
+              <div class="demo-viewport" data-demo-viewport>
+                <div class="demo-window-head"><span><svg aria-hidden="true"><use href="#icon-task" /></svg>任务中枢</span><small>示例数据</small></div>
+                <div class="demo-view" data-demo-view="0 1 2">
+                  <div class="demo-view-heading"><span>缓存策略学习计划</span><b data-demo-task-percent>33%</b></div><div class="demo-meter"><i data-demo-task-progress></i></div><div class="demo-task-meta"><span>长期任务</span><span>重要</span><span>10.18 — 10.22</span></div>
+                  <div class="demo-project-brief" data-demo-view="0"><h4>任务目标</h4><p>完成基础概念阅读、整理策略对比，并记录适用场景与边界。</p><button class="demo-action" type="button" data-demo-go="1" disabled>查看任务拆解 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></button></div>
+                  <div class="demo-task-tree" data-demo-view="1 2" hidden><div><i class="done">✓</i><span><b>阅读基础章节</b><small>已完成</small></span></div><div><i class="demo-task-check">2</i><span><b>整理策略对比</b><small data-demo-view="1">进行中</small><small class="demo-success" data-demo-view="2" hidden>已完成</small></span><button class="demo-icon-button" type="button" data-demo-go="2" aria-label="查看进展记录示例" disabled><svg aria-hidden="true"><use href="#icon-check" /></svg></button></div><div class="nested"><i>3</i><span><b>补充适用场景</b><small>待开始 · 对比任务的子任务</small></span></div></div>
+                  <div class="demo-progress-note" data-demo-view="2" hidden><small>进展记录 · 14:30</small><p>已完成 LRU / LFU 对比，下一步核对容量与负载条件。</p></div>
+                </div>
+                <div class="demo-view" data-demo-view="3" hidden><div class="demo-view-heading"><span>10 月 · 日历视图</span><small>任务日程</small></div><div class="demo-calendar"><div><small>周日</small><b>18</b></div><div class="selected"><small>周一</small><b>19</b></div><div><small>周二</small><b>20</b></div><div><small>周三</small><b>21</b></div><div><small>周四</small><b>22</b></div><p>缓存策略学习计划 · 10.18 — 10.22</p></div><div class="demo-progress-note"><small>选中日的任务明细</small><h4>缓存策略学习计划</h4><p>顶层任务显示日程，展开后查看子任务。</p><button class="demo-action" type="button" data-demo-go="1" disabled>展开任务拆解 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></button></div></div>
+              </div>
+            </article>
+            <article class="showcase-panel" id="tour-knowledge" role="tabpanel" aria-labelledby="tour-tab-knowledge" data-feature-panel="knowledge" hidden>
+              <div class="showcase-copy"><span class="panel-number">04 / 书籍 Wiki</span><h3>从主题知识到有据可查的研究。</h3><p>跨章节编译主题，经审核形成正式 Wiki。问答与研究基于所选书籍，通过引用和运行记录保留可追溯性。</p><ul><li><svg aria-hidden="true"><use href="#icon-check" /></svg>来源同步、主题编译与审核</li><li><svg aria-hidden="true"><use href="#icon-check" /></svg>多轮问答与原位来源预览</li><li><svg aria-hidden="true"><use href="#icon-check" /></svg>研究报告与 PPTX 交付</li></ul><a class="feature-guide" href="./manual/#wiki">书籍 Wiki 使用指南 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div>
+              <div class="demo-viewport" data-demo-viewport>
+                <div class="demo-window-head"><span><svg aria-hidden="true"><use href="#icon-wiki" /></svg>书籍 Wiki</span><small>示例数据 · 无模型调用</small></div>
+                <div class="demo-view" data-demo-view="0"><div class="demo-view-heading"><span>缓存策略学习手册</span><span class="demo-success">来源已同步</span></div><div class="demo-source-files"><div><svg aria-hidden="true"><use href="#icon-book" /></svg><span>01-基础概念.md</span></div><div><svg aria-hidden="true"><use href="#icon-book" /></svg><span>02-缓存策略.md</span></div><div><svg aria-hidden="true"><use href="#icon-book" /></svg><span>03-评估方法.md</span></div></div><p>同步建立来源索引；智能编译进一步整理跨章节主题。</p><button class="demo-action" type="button" data-demo-go="1" disabled>查看知识编译示例 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></button></div>
+                <div class="demo-view" data-demo-view="1"><div class="demo-view-heading"><span>主题编译</span><small>跨章节归并</small></div><div class="demo-topic-flow"><span>章节原文</span><svg aria-hidden="true"><use href="#icon-arrow" /></svg><span>主题知识</span></div><div class="demo-topic-list"><div><b>缓存命中率</b><span>定义 · 影响因素 · 引用</span></div><div><b>淘汰策略对比</b><span>适用条件 · 成本 · 关系</span></div><div><b>缓存评估方法</b><span>负载条件 · 测量边界</span></div></div><small>编译产物是候选，尚未写入正式 Wiki。</small><button class="demo-action" type="button" data-demo-go="2" disabled>查看审核示例 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></button></div>
+                <div class="demo-view" data-demo-view="2"><div class="demo-view-heading"><span>审核知识候选</span><span class="demo-tag">待审核</span></div><div class="demo-review-card"><small>新增主题</small><h4>淘汰策略对比</h4><p>比较 LRU 与 LFU 的判断依据、适用条件和边界；保留对原文的引用。</p><div class="demo-review-evidence"><svg aria-hidden="true"><use href="#icon-shield" /></svg><span>引用依据：02-缓存策略.md<br />正式应用前核对正文与来源。</span></div></div><button class="demo-action" type="button" data-demo-go="3" disabled>批准并进入问答示例 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></button></div>
+                <div class="demo-view demo-chat" data-demo-view="3 4" hidden><div class="demo-view-heading"><span>知识问答</span><small>缓存策略学习手册</small></div><p class="demo-question">哪些因素会影响缓存命中率？</p><div class="demo-answer"><small>回答示例</small><h4>结合工作负载评估</h4><p>命中率主要受请求分布、缓存容量与淘汰策略影响。比较策略时，应同时保留负载条件与失效成本。</p><button class="demo-citation" type="button" data-demo-go="4" disabled>[S1] 缓存策略</button></div><div class="demo-evidence" data-demo-view="4" hidden><div class="demo-view-heading"><span>来源预览 · S1</span><button class="demo-icon-button" type="button" data-demo-go="3" aria-label="关闭来源预览示例" disabled>×</button></div><small>02-缓存策略.md · 第 12–18 行 · 示例片段</small><blockquote>命中率的比较应采用相同请求分布与容量限制，并说明淘汰策略及失效成本。</blockquote><p>引用片段用于核对结论，不需要离开当前问答。</p></div></div>
+                <div class="demo-view" data-demo-view="5" hidden><div class="demo-view-heading"><span>研究交付</span><span class="demo-success">成果示例</span></div><div class="demo-research-stages"><span>诉求分析</span><i>→</i><span>证据研究</span><i>→</i><span>报告整合</span></div><article class="demo-artifact"><span>MD</span><div><b>缓存策略研究报告</b><small>比较策略、适用条件与证据</small></div></article><article class="demo-artifact"><span>PPTX</span><div><b>缓存策略研究.pptx</b><small>研究报告转为演示文稿</small></div></article><p class="demo-hint">此处仅演示产物形态，真实生成需在本地应用接入模型。</p><a class="feature-guide" href="./manual/#wiki-research">研究与下载操作指南 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div>
+              </div>
+            </article>
+            </div>
+            <!-- tour:end -->
           </div>
         </div>
       </section>
 
       <section class="section-shell intro-section" id="product">
         <div class="section-heading narrow" data-reveal>
-          <span class="section-label">使用之前</span>
-          <h2>基础功能直接用，AI 功能按需开。</h2>
-          <p>不用一次配置所有功能，也不用先把文件搬进专属笔记库。安装后可以先阅读、记录和安排任务。</p>
+          <span class="section-label">产品特点</span>
+          <h2>独立基础能力，按需启用智能工作流。</h2>
+          <p>基础功能不依赖模型服务，原始文档无需迁移。知识编译、问答与研究通过自行配置的模型供应商执行。</p>
         </div>
         <div class="principle-grid" data-reveal-group>
           <article class="principle-card featured" data-reveal>
             <div class="principle-visual local-visual">
-              <div class="vault-node"><svg><use href="#icon-folder" /></svg><span>你的资料</span></div>
+              <div class="vault-node"><svg><use href="#icon-folder" /></svg><span>本地资料</span></div>
               <div class="connection-lines"><i></i><i></i><i></i></div>
               <div class="capability-nodes"><span>阅读</span><span>任务</span><span>Wiki</span></div>
             </div>
-            <div><span class="card-index">01</span><h3>已有文件直接读</h3><p>登记本地文件夹或 PDF 路径即可阅读，原始文件不会被搬走或改写。手机读取的也是运行服务那台电脑上的文件。</p></div>
+            <div><span class="card-index">01</span><h3>原始资料保持独立</h3><p>通过本地文件夹或 PDF 路径读取内容，不迁移、不改写原文。手机界面访问同一台电脑运行的服务。</p></div>
           </article>
           <article class="principle-card" data-reveal>
             <div class="mini-icon"><svg><use href="#icon-spark" /></svg></div>
-            <span class="card-index">02</span><h3>不接模型也能使用</h3><p>阅境轩、时光机和个人任务不需要模型密钥。AI 编译、问答与研究需要你自行配置模型，调用费用由供应商收取。</p>
+            <span class="card-index">02</span><h3>基础功能独立运行</h3><p>阅境轩、时光机与任务中枢无需模型密钥。智能功能按需接入模型供应商，调用费用以供应商账单为准。</p>
           </article>
           <article class="principle-card" data-reveal>
             <div class="mini-icon"><svg><use href="#icon-code" /></svg></div>
-            <span class="card-index">03</span><h3>回答可以核对，修改需要审核</h3><p>AI 回答附来源预览；编译和知识修改先产生候选，确认后才进入正式 Wiki。没有引用的结论不能视为已核实事实。</p>
+            <span class="card-index">03</span><h3>可追溯回答与审核机制</h3><p>问答提供来源预览，编译与知识修改先生成候选，经审核后应用。模型结论仍需结合原始证据核验。</p>
           </article>
         </div>
       </section>
@@ -248,8 +301,8 @@
       <section class="workflow-section" id="workflow">
         <div class="section-shell">
           <div class="section-heading split" data-reveal>
-            <div><span class="section-label">一个使用例子</span><h2>想读懂一份学习资料？</h2></div>
-            <p>先读，再让 AI 整理、回答和研究。小记与个人任务是独立功能，不会被自动转成知识或研究任务。</p>
+            <div><span class="section-label">书籍 Wiki 工作流</span><h2>从原始资料到可追溯的研究成果。</h2></div>
+            <p>阅读、同步、编译、审核、问答与研究构成书籍知识工作流。小记和个人任务独立管理，不会自动转换为 Wiki 知识或研究任务。</p>
           </div>
           <div class="workflow-track" data-reveal-group>
             <article data-reveal><span>01</span><div class="workflow-icon"><svg><use href="#icon-book" /></svg></div><h3>加入书架</h3><p>选择 Markdown 文件夹并阅读</p></article>
@@ -262,13 +315,13 @@
       </section>
 
       <section class="section-shell quick-start-section" id="quick-start">
-        <div class="section-heading centered" data-reveal><span class="section-label">开始使用</span><h2>选择你的系统，按手册安装。</h2><p>手册提供各平台的源码构建步骤。安装后在浏览器打开本地工作台；这个官网不是在线应用。</p></div>
+        <div class="section-heading centered" data-reveal><span class="section-label">安装与配置</span><h2>支持 macOS 与 Windows 源码安装。</h2><p>使用手册提供各平台构建、启动与配置步骤。应用在本地运行，通过浏览器访问；官网演示不提供在线工作台服务。</p></div>
         <div class="install-gateways" data-reveal-group>
           <a href="./manual/#install-macos" data-reveal><strong>macOS · Apple Silicon</strong><span>arm64 原生构建与启动</span><svg aria-hidden="true"><use href="#icon-arrow" /></svg></a>
           <a href="./manual/#install-macos" data-reveal><strong>macOS · Intel</strong><span>x86_64 原生构建与启动</span><svg aria-hidden="true"><use href="#icon-arrow" /></svg></a>
           <a href="./manual/#install-windows" data-reveal><strong>Windows 10 / 11</strong><span>x86_64 · PowerShell / MSVC</span><svg aria-hidden="true"><use href="#icon-arrow" /></svg></a>
         </div>
-        <p class="installation-note">只有阅读、记录或管理个人任务？安装后就能开始。想用 AI？再按<a href="./manual/#wiki-setup">模型配置步骤</a>接入自己的供应商。</p>
+        <p class="installation-note">安装后可直接使用阅读、小记与个人任务。智能功能需按<a href="./manual/#wiki-setup">模型配置指南</a>接入供应商并验证连接。</p>
       </section>
 
       <section class="guide-section" id="guide">
@@ -276,13 +329,13 @@
           <div class="handbook-cover" data-glass-rim aria-hidden="true">
             <span>OBSIDIANBRAIN</span>
             <svg><use href="#icon-book" /></svg>
-            <strong>安装之后，<br />一步步用起来。</strong>
+            <strong>安装配置<br />与功能指南</strong>
             <small>THE HANDBOOK / 使用手册</small>
           </div>
           <div class="gateway-copy">
-            <span class="section-label">具体怎么用，在这里查</span>
-            <h2>从添加一本书，<br />到下载一份研究 PPT。</h2>
-            <p>手册按页面解释入口、图标和操作步骤，也说明数据放在哪、手机与电脑有哪些区别，以及失败后怎么处理。</p>
+            <span class="section-label">使用手册</span>
+            <h2>完整的配置与操作路径。</h2>
+            <p>覆盖功能入口、操作步骤、数据存储与故障处理，并说明桌面和手机界面的使用差异。</p>
             <div class="gateway-chapters">
               <a href="./manual/#reader"><span>01</span><div><strong>阅境轩</strong><small>阅读本地 Markdown 与 PDF</small></div><svg aria-hidden="true"><use href="#icon-arrow" /></svg></a>
               <a href="./manual/#timeline"><span>02</span><div><strong>时光机</strong><small>记录与回看碎片想法</small></div><svg aria-hidden="true"><use href="#icon-arrow" /></svg></a>
@@ -296,7 +349,7 @@
       </section>
 
       <section class="section-shell privacy-section" id="privacy">
-        <div class="section-heading centered" data-reveal><span class="section-label">本地与隐私</span><h2>原书在原处，知识库在本机。</h2><p>官网只是静态介绍页；真正的 ObsidianBrain、SQLite 数据库与来源文件都运行或保存在自己的设备上。</p></div>
+        <div class="section-heading centered" data-reveal><span class="section-label">本地与隐私</span><h2>本地存储，明确的数据边界。</h2><p>应用与数据库在本机运行，来源文件保留原始位置。官网仅展示固定示例，不连接本地数据；智能功能的必要上下文由所选模型供应商处理。</p></div>
         <div class="architecture" data-reveal data-reveal-sequence>
           <article><div class="architecture-icon browser-icon"><i></i><i></i><i></i></div><span>界面层</span><h3>浏览器</h3><p>访问本地 Web UI</p></article><i class="architecture-arrow">→</i>
           <article><div class="architecture-icon"><svg><use href="#icon-terminal" /></svg></div><span>执行层</span><h3>Rust 引擎</h3><p>默认端口 9876</p></article><i class="architecture-arrow">→</i>
@@ -304,15 +357,15 @@
           <article><div class="architecture-icon"><svg><use href="#icon-folder" /></svg></div><span>来源层</span><h3>本地资料</h3><p>Markdown 文集与 PDF</p></article>
         </div>
         <div class="privacy-grid" data-reveal-group>
-          <article data-reveal><svg><use href="#icon-shield" /></svg><div><h3>数据归你所有</h3><p>原始资料保持原样；结构化知识、任务和运行审计集中保存在本机数据库中。</p></div></article>
+          <article data-reveal><svg><use href="#icon-shield" /></svg><div><h3>本地数据管理</h3><p>原始资料保持原样；结构化知识、任务和运行审计集中保存在本机数据库中。</p></div></article>
           <article data-reveal><svg><use href="#icon-terminal" /></svg><div><h3>本地服务边界清晰</h3><p>可绑定 <code>127.0.0.1</code> 仅供本机使用，也可以主动开启局域网访问。</p></div></article>
-          <article data-reveal><svg><use href="#icon-spark" /></svg><div><h3>AI 会读取必要资料</h3><p>使用第三方模型时，相关问题、上下文和证据会发送给你配置的供应商；外部研究默认关闭，只有单项任务授权域名和额度后才读取网站。</p></div></article>
+          <article data-reveal><svg><use href="#icon-spark" /></svg><div><h3>模型调用与外部访问</h3><p>模型请求包含相关问题、上下文和证据，发送至已配置供应商；外部研究默认关闭，只有单项任务授权域名和额度后才读取网站。</p></div></article>
         </div>
       </section>
 
       <section class="faq-section" id="faq">
         <div class="section-shell faq-layout">
-          <div class="faq-heading" data-reveal><span class="section-label">常见问题</span><h2>开始之前，<br />你可能还想知道。</h2><p>如果问题没有列在这里，可以直接在 GitHub 提交 Issue。</p><a class="text-link" href="https://github.com/TiercelChow/ObsidianBrain/issues" target="_blank" rel="noreferrer">前往 Issues <svg><use href="#icon-arrow" /></svg></a></div>
+          <div class="faq-heading" data-reveal><span class="section-label">常见问题</span><h2>部署、数据与模型服务。</h2><p>了解运行条件与功能边界。其他问题可通过 GitHub Issues 反馈。</p><a class="text-link" href="https://github.com/TiercelChow/ObsidianBrain/issues" target="_blank" rel="noreferrer">前往 Issues <svg><use href="#icon-arrow" /></svg></a></div>
           <div class="faq-list" data-reveal>
             <details><summary>这个 GitHub Pages 页面可以直接使用 ObsidianBrain 吗？<svg><use href="#icon-chevron" /></svg></summary><p>不可以。这里是完全静态的产品介绍和使用指南，不会连接你的本地数据。实际应用需要在自己的电脑上启动 <code>obsidian-brain</code> 后访问本地地址。</p></details>
             <details><summary>必须安装 Obsidian 才能使用吗？<svg><use href="#icon-chevron" /></svg></summary><p>不需要。阅境轩读取本地文件，小记、个人任务和 Wiki 使用本地 SQLite，时光机原图保存在应用数据目录。旧小记图片可安全复制迁入，不会修改旧库文件。</p></details>
@@ -327,7 +380,7 @@
       </section>
 
       <section class="section-shell final-cta" data-reveal data-reveal-sequence>
-        <div class="cta-copy"><span class="section-label">开始第一项操作</span><h2>选一本书读，<br />或先记下今天的想法。</h2><p>操作步骤都在手册里。想了解知识库如何运行，再看独立的 LLM Wiki 架构说明。</p><div><a class="button button-primary" href="./manual/#start">打开首次使用指南 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a><a class="button button-secondary" href="./llm-wiki/">了解 Wiki 架构</a></div></div>
+        <div class="cta-copy"><span class="section-label">快速入门</span><h2>建立本地工作台，<br />开启书籍知识工作流。</h2><p>从安装与基础功能开始，按需启用智能编译、问答和研究。完整操作与架构说明分别提供独立指南。</p><div><a class="button button-primary" href="./manual/#start">查看使用手册 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a><a class="button button-secondary" href="./llm-wiki/">了解 Wiki 架构</a></div></div>
         <div class="cta-mark" aria-hidden="true"><img class="brand-mark giant" src="./favicon.svg" alt="" width="32" height="32" /></div>
       </section>
     </main>

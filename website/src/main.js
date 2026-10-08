@@ -67,7 +67,7 @@ const featureButtons = [...document.querySelectorAll('[data-feature-target]')]
 const featurePanels = [...document.querySelectorAll('[data-feature-panel]')]
 
 function animateFeaturePanel(panel) {
-  if (reducedMotion || typeof panel.animate !== 'function') return
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || typeof panel.animate !== 'function') return
   panel.getAnimations().forEach((animation) => animation.cancel())
   panel.animate([
     { opacity: 0, transform: 'translate3d(0, 18px, 0) scale(.985)', filter: 'blur(8px)' },
@@ -78,18 +78,20 @@ function animateFeaturePanel(panel) {
   })
 }
 
-function selectFeature(id, focus = false) {
+export function selectFeature(id, { focus = false, notify = true, animate = true } = {}) {
   featureButtons.forEach((button) => {
     const selected = button.dataset.featureTarget === id
     button.setAttribute('aria-selected', String(selected))
     button.tabIndex = selected ? 0 : -1
     if (selected && focus) button.focus()
   })
+  // Let the demo capture its outgoing frame before the panel is hidden.
+  if (notify) document.dispatchEvent(new CustomEvent('ob-feature-change', { detail: { id } }))
   featurePanels.forEach((panel) => {
     const selected = panel.dataset.featurePanel === id
     const wasHidden = panel.hidden
     panel.hidden = !selected
-    if (selected && wasHidden) animateFeaturePanel(panel)
+    if (selected && wasHidden && animate) animateFeaturePanel(panel)
   })
 }
 
@@ -103,7 +105,7 @@ featureButtons.forEach((button, index) => {
     if (event.key === 'ArrowLeft') next = (index - 1 + featureButtons.length) % featureButtons.length
     if (event.key === 'Home') next = 0
     if (event.key === 'End') next = featureButtons.length - 1
-    selectFeature(featureButtons[next].dataset.featureTarget, true)
+    selectFeature(featureButtons[next].dataset.featureTarget, { focus: true })
   })
 })
 
