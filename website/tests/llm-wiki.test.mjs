@@ -7,6 +7,57 @@ const read = (path) => readFile(new URL(path, root), 'utf8')
 
 const chapters = ['overview', 'sources', 'compile', 'review', 'workspace', 'qa', 'budgets', 'tasks', 'config', 'security', 'limits']
 
+test('wiki overview leads with product uses and verified handbook entry points', async () => {
+  const [html, manual] = await Promise.all([read('llm-wiki/index.html'), read('manual/index.html')])
+  const overview = section(html, 'overview')
+  assert.match(html, /LLM Wiki：书籍知识工作流/)
+  assert.match(html, /不依赖 Obsidian/)
+  for (const use of ['主题知识整理', '知识浏览与维护', '连续问答', '专题研究与演示']) assert.ok(overview.includes(use), use)
+  for (const anchor of ['wiki-setup', 'wiki-compile', 'wiki-workspace', 'wiki-query', 'wiki-research']) {
+    assert.ok(overview.includes(`../manual/#${anchor}`), anchor)
+  }
+  for (const [, id] of html.matchAll(/href="\.\.\/manual\/#([^"]+)"/g)) assert.ok(manual.includes(`id="${id}"`), id)
+  assert.match(overview, /逻辑隔离/)
+  assert.match(overview, /章节索引[^。]*不等于[^。]*语义编译/)
+})
+
+test('wiki capacity defaults agree with current application constants without promising model capacity', async () => {
+  const [html, policy] = await Promise.all([read('llm-wiki/index.html'), read('../backend/src/models/agent_budget.rs')])
+  const budgets = section(html, 'budgets')
+  for (const name of ['DEFAULT_AGENT_CONTEXT_TOKENS', 'MAX_AGENT_OUTPUT_TOKENS']) {
+    const value = Number(policy.match(new RegExp(`${name}: u32 = ([\\d_]+)`))[1].replaceAll('_', ''))
+    assert.ok(budgets.includes(value.toLocaleString('en-US')), `${name} must match source`)
+  }
+  assert.match(budgets, /不是模型能力承诺/)
+  assert.doesNotMatch(budgets, /32,768 token/)
+  for (const reason of ['startup_timeout', 'idle_timeout']) assert.ok(budgets.includes(reason), reason)
+})
+
+test('wiki QA distinguishes output recovery, turn limits and unsaved conversation results', async () => {
+  const html = await read('llm-wiki/index.html')
+  const qa = section(html, 'qa')
+  for (const phrase of ['max_tokens', 'max_turn_requests', '最多两次', '转为分阶段研究', '用户确认', '未完成记录', '补存到会话历史', 'qa_output_scope_limit']) assert.ok(qa.includes(phrase), phrase)
+  assert.match(qa, /轮次上限[^。]*不能[^。]*输出 token/)
+  assert.match(qa, /补存[^。]*不再调用模型/)
+})
+
+test('wiki research documents confirmed brief, projected manifest and saved versus raw output', async () => {
+  const html = await read('llm-wiki/index.html')
+  const tasks = section(html, 'tasks')
+  for (const phrase of ['材料准备情况', '预分析', '用户简报', '受众', '用途', '手动确认', '手动启动研究', 'knowledge_get_research_manifest', 'insufficient', '查看未保存输出']) assert.ok(tasks.includes(phrase), phrase)
+  assert.match(tasks, /预分析[^。]*不[^。]*启动研究/)
+  assert.match(tasks, /未保存输出[^。]*不[^。]*最终报告/)
+})
+
+test('wiki quality claims cite real isolated acceptance and keep artifacts outside SQLite backup', async () => {
+  const html = await read('llm-wiki/index.html')
+  const limits = section(html, 'limits')
+  for (const phrase of ['2026-10-03', '真实隔离验收', '首字等待', '语义去重', '报告重复', '大规模真书']) assert.ok(limits.includes(phrase), phrase)
+  assert.match(limits, /2026-10-03-wiki-acceptance-closeout-results\.md/)
+  assert.doesNotMatch(limits, /未做真实供应商的答案质量前后对比/)
+  assert.match(section(html, 'security'), /SQLite 快照不包含 PPTX/)
+})
+
 test('streaming documentation distinguishes real agent frames from committed ACP messages', async () => {
   const html = await read('llm-wiki/index.html')
   assert.match(html, /agent\/assistant-stream/)

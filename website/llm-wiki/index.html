@@ -4,11 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#f0f0f3" />
-    <meta name="description" content="ObsidianBrain LLM Wiki 架构图解：每书独立知识库、完整知识编译、来源变更复核、自适应多轮问答、版本化证据快照与可恢复研究。应用管理数据和边界，DeepSeek Harness 负责原生 Agent 执行，报告与 PPTX 可追溯交付。" />
+    <meta name="description" content="ObsidianBrain 书籍知识工作流：将 Markdown 文集编译为可浏览的主题 Wiki，支持带来源的连续问答、按用途组织的研究报告和 PPTX 下载。介绍建库、审核、Skill、模型配置与失败恢复；数据保存在本机，不依赖 Obsidian。" />
     <meta name="keywords" content="Book Wiki, LLM, 自适应检索, 证据账本, ACP, DeepSeek Harness, SQLite FTS5, 变更集审核, 可恢复研究, PPTX" />
     <link rel="canonical" href="https://tiercelchow.github.io/ObsidianBrain/llm-wiki/" />
     <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
-    <title>LLM Wiki · 架构剖析 · ObsidianBrain</title>
+    <title>LLM Wiki · 书籍知识工作流 · ObsidianBrain</title>
     <script>document.documentElement.classList.add('js')</script>
   </head>
   <body class="manual-page llmwiki-page">
@@ -38,8 +38,9 @@
     <main id="main-content" class="section-shell docs-shell">
       <header class="docs-intro" id="top">
         <a class="docs-back" href="../">← 产品首页</a>
-        <div class="docs-title-row"><div><span class="section-label">OBSIDIANBRAIN / LLM WIKI ARCHITECTURE</span><h1>LLM Wiki 架构剖析</h1></div><img src="../favicon.svg" width="72" height="72" alt="" /></div>
-        <p class="docs-lead">从原书到知识，再从知识到答案与研究成果。书籍知识库、Wiki 工作台、知识问答和研究任务共享一套<strong>可追溯、可检查、可恢复</strong>的数据底座：按问题分配资源，按实际读取登记证据，按阶段保存成果，而不是把所有问题塞进相同的检索数量和输出预算。</p>
+        <div class="docs-title-row"><div><span class="section-label">OBSIDIANBRAIN / BOOK KNOWLEDGE WORKFLOW</span><h1>LLM Wiki：书籍知识工作流</h1></div><img src="../favicon.svg" width="72" height="72" alt="" /></div>
+        <p class="docs-lead">将 Markdown 书籍整理为可浏览、可核对的主题知识，围绕同一本书连续提问、开展研究，并交付研究报告与 PPTX。<strong>原书只读，知识与运行记录保存在本机，不依赖 Obsidian。</strong></p>
+        <div class="version-notice"><span class="version-badge">当前实现</span><p>内容核实于 <time datetime="2026-10-09">2026-10-09</time>。本篇说明功能、工作流和架构；安装、配置与具体操作请查阅<a href="../manual/#wiki">书籍 Wiki 使用手册</a>。</p></div>
       </header>
       <details class="mobile-chapters" data-glass="floating" data-glass-rim>
         <summary>浏览章节 <span data-current-chapter>总览</span><svg aria-hidden="true"><use href="#icon-chevron" /></svg></summary>
@@ -54,7 +55,7 @@
           <a href="#tasks" data-chapter-link><span>07</span>可恢复研究与 PPT</a>
           <a href="#config" data-chapter-link><span>08</span>配置与 Skill</a>
           <a href="#security" data-chapter-link><span>09</span>安全与数据边界</a>
-          <a href="#limits" data-chapter-link><span>10</span>改进与能力边界</a>
+          <a href="#limits" data-chapter-link><span>10</span>验证与能力边界</a>
         </nav>
       </details>
       <div class="docs-layout">
@@ -71,15 +72,42 @@
             <a href="#tasks" data-chapter-link><span>07</span>可恢复研究与 PPT</a>
             <a href="#config" data-chapter-link><span>08</span>配置与 Skill</a>
             <a href="#security" data-chapter-link><span>09</span>安全与数据边界</a>
-            <a href="#limits" data-chapter-link><span>10</span>改进与能力边界</a>
+            <a href="#limits" data-chapter-link><span>10</span>验证与能力边界</a>
           </nav>
           <a class="docs-top-link" href="#top">返回顶部 ↑</a>
         </aside>
         <div class="manual-content">
           <section id="overview" class="manual-section">
             <span class="chapter-kicker">00 / OVERVIEW</span>
-            <h2>总览 — 一套知识底座，两类执行职责</h2>
-            <p class="stage-lead">Book Wiki 是<strong>数据库原生、每书隔离、由 DeepSeek Harness 执行</strong>的 Markdown 知识系统。应用管理数据与业务流程，Harness 在授权范围内自主进行多轮判断、工具调用与生成。</p>
+            <h2>总览 — 从书籍资料到可维护的知识</h2>
+            <p class="stage-lead">LLM Wiki 不止于检索原文片段：先跨章节整理概念、方法、论断与关系，经审核形成主题知识，再以这些知识支持问答和研究。每本书在共享的本地 SQLite 中<strong>逻辑隔离</strong>，默认不混入其他书籍的内容。</p>
+            <h3>四类使用场景</h3>
+            <div class="manual-jobs" aria-label="书籍 Wiki 功能与使用指南">
+              <a href="../manual/#wiki-compile"><strong>主题知识整理</strong><span>同步 Markdown 来源，智能编译跨章主题，审核后形成正式知识。</span></a>
+              <a href="../manual/#wiki-workspace"><strong>知识浏览与维护</strong><span>阅读完整正文，核对引用与论断，处理来源变化和待审核内容。</span></a>
+              <a href="../manual/#wiki-query"><strong>连续问答</strong><span>围绕书籍追问、比较和解释，在回答中原位查看本轮引用。</span></a>
+              <a href="../manual/#wiki-research"><strong>专题研究与演示</strong><span>确认受众与用途，获得阶段化研究报告或可下载 PPTX。</span></a>
+            </div>
+            <h3>五个页面的职责</h3>
+            <table class="info-table">
+              <thead><tr><th>页面</th><th>主要操作</th><th>得到什么</th></tr></thead>
+              <tbody>
+                <tr><td>书籍知识库</td><td>同步来源、启动编译、查看进度与审核入口</td><td>每本书的来源、编译和健康状态</td></tr>
+                <tr><td>Wiki 工作台</td><td>检索主题，阅读正文、论断、引用与历史</td><td>可持续维护的正式知识</td></tr>
+                <tr><td>知识问答</td><td>选择书籍和会话，连续提问并核对来源</td><td>流式回答、会话历史与本轮证据</td></tr>
+                <tr><td>研究任务</td><td>确认简报，启动研究，查看阶段与交付</td><td>完整报告、已保存章节或 PPTX 文件</td></tr>
+                <tr><td>Wiki 配置</td><td>管理供应商、密钥、规则、Skill、用量与备份</td><td>可查看、可调整的执行配置</td></tr>
+              </tbody>
+            </table>
+            <h3>首次使用路径</h3>
+            <ol class="how-steps">
+              <li><strong><a href="../manual/#wiki-setup">配置并验证模型</a></strong>：在 Wiki 配置中添加供应商与 API Key，选择模型和真实容量。DeepSeek Harness 是执行器，不要求使用 DeepSeek 的模型 API。</li>
+              <li><strong><a href="../manual/#wiki-compile">同步、编译并审核</a></strong>：从阅境轩登记 Markdown 文件夹，为这本书建立知识库。来源同步后启动智能编译，在审核通过后查看主题知识。</li>
+              <li><strong><a href="../manual/#wiki-query">问答或研究</a></strong>：短问题从问答开始；需要多主题分析或演示材料时，确认材料偏好、创建研究任务，再手动启动。原文、当前知识与历史引用分别保留。</li>
+            </ol>
+            <div class="callout subtle"><span class="callout-icon">ⓘ</span><span><strong>来源同步不等于知识编译：</strong>同步建立可检索的章节索引，不等于已经完成语义编译。章节索引可作兜底，正式主题知识仍需模型编译和审核。添加书籍不会自动启动全书模型调用；PDF 只用于阅境轩阅读，不进入 Book Wiki。</span></div>
+            <h3 class="how">系统分工 — 业务数据与原生 Agent 执行</h3>
+            <p>应用负责来源、知识存储、工具范围、审核和运行生命周期；DeepSeek Harness 负责授权范围内的多轮决策、工具调用、Skill 读取与生成，不重复实现其原生 Agent Loop。</p>
             <figure class="diagram">
               <svg viewBox="0 0 960 460" class="dg" role="img" aria-label="整体架构：五个知识页面通过 HTTP、SSE 和状态查询连接 Rust 业务服务，Rust 管理 SQLite 和只读 Markdown 来源，经 ACP 连接 Harness 原生执行器，Harness 通过受控 MCP 工具取证">
                 <rect class="accent" x="30" y="18" width="900" height="64" rx="12" />
@@ -116,7 +144,7 @@
               </svg>
               <figcaption>图 0-1 · 应用不重写 Harness 的原生 Agent Loop；它提供可审计的数据、工具、权限和任务生命周期。</figcaption>
             </figure>
-            <h3 class="how">怎么连起来 — 四个工位与一条回流</h3>
+            <h3 class="how">知识管线 — 编译、应用与审核回流</h3>
             <pre class="command-block compact"><code>Markdown 原书（只读）
   → 书籍知识库：扫描、结构抽取、版本、编译报告
   → 语义编译：完整正文 + 原子论断 + 关系与引用
@@ -481,7 +509,19 @@ completed                → 正常完成、引用校验、单事务保存交换
 error / cancelled        → 保留已收到的部分内容，明确原因</code></pre>
             <p>正文使用安全 Markdown 渲染，最终校正完整结果；检索来源在输出结束后展示，首 token 前用公开阶段提示过程，不展示或存储隐藏思维链。断开前台问答流会取消该 Run，后台编译与研究则不依赖页面存活。</p>
             <p>Harness 默认 ACP 在已提交消息后可能只给整段正文。应用的临时插件订阅公开的 <code>agent/assistant-stream</code>，按模型尝试身份转发真实增量，再用提交事件校正；不靠前端延迟播放冒充模型流式。插件与受限 MCP 工具用 Run 级 <code>insert</code> 配置加载，不修改全局 Harness 或扩大工具权限。</p>
-            <p>输出或轮数截断不伪装为完整成功。用户可选择<strong>“继续完成完整答案”</strong>，建立关联新 Run，重新规划、取证和引用，并在硬能力范围内调整输出预留；旧草稿仍保留。临时失败不会永久切换后续问答为检索模式，取消或凭据拒绝不会自动反复续写。</p>
+            <h3 class="how">输出不足、轮次上限与研究衔接</h3>
+            <table class="info-table">
+              <thead><tr><th>情况</th><th>系统处理</th><th>下一步</th></tr></thead>
+              <tbody>
+                <tr><td><code>max_tokens</code> · 输出截断</td><td>在有效容量允许时最多两次自动扩大输出预留，建立关联回答 Run，保留已有规划而不重复目录规划；重新取证并生成完整回答，用 <code>text_replace</code> 替换草稿，不把残缺片段拼成成功答案</td><td>仍不足或已达硬限时，调整模型输出能力、推理策略或问题范围；也可转为分阶段研究</td></tr>
+                <tr><td><code>max_turn_requests</code> · 请求轮次耗尽</td><td>轮次上限不能通过增加输出 token 修复，不进入输出扩容重试</td><td>拆分目标、转为研究任务，或调整运行配置后显式重试</td></tr>
+                <tr><td><code>qa_output_scope_limit</code> · 范围预检不通过</td><td>规划估计的完整回答明显超出可见正文容量时，在启动回答 Run 前停止；估计不是实际用量，已发生的规划调用仍可能产生费用</td><td>缩小本轮范围，或将复杂目标交给持久研究流程</td></tr>
+              </tbody>
+            </table>
+            <p>“深入研究此问题”保留当前书籍与补全指代后的独立问题，预填可编辑的研究简报；需要<strong>用户确认</strong>后才创建研究任务，不自动启动付费研究，也不把旧答案当作新证据。取消、凭据拒绝和硬容量不足不会触发相同预算的循环请求。</p>
+            <h3 class="how">未完成记录 — 保留输出，不改写对话历史</h3>
+            <p>失败、取消或未写入会话的回答可从<strong>未完成记录</strong>继续查看。未完成正文以草稿呈现，不冒充成功回答，不启用可能不完整的引用跳转。可恢复的输出截断提供“继续完成完整答案”入口，建立关联新 Run 重新生成；达到硬限时先调整配置或范围，不直接拼接旧草稿。</p>
+            <p>完整回答已经生成、但会话写入未完成时，可以<strong>补存到会话历史</strong>，不再调用模型。服务端确认同书、同会话及对话顺序仍匹配后，以幂等事务保存原回答和冻结来源；如果后续对话已改变顺序，则拒绝插入，避免悄悄改写历史。</p>
             <div class="callout why"><span class="callout-icon">💡</span><span><strong>为什么目录不跟着答案走？</strong>目录是候选索引，不是证据。把未选材料和旧模型结论不断拼接，会消耗上下文并混淆依据。保留意图、舍弃无关候选、重读真实证据，才能兼顾追问连贯性与引用可靠性。</span></div>
           </section>
 
@@ -526,8 +566,19 @@ error / cancelled        → 保留已收到的部分内容，明确原因</code
               </tbody>
             </table>
             <h3 class="how">模型能力、应用护栏与实时占用</h3>
-            <p>供应商配置声明上下文与最大输出，回答需求决定预留。未知容量使用明确标注的 32,768 token <strong>应用护栏</strong>，不是猜测模型真实规格；ACP 后续上报真实容量可替代未知保护值。已配置的能力仍作为上限，输入与输出、推理和修复预算分开考虑。</p>
+            <p>供应商配置声明上下文与最大输出，问题或阶段需求决定实际预留。问答与研究在未声明上下文时使用 <strong>1,048,576 token 的应用规划默认值</strong>，输出另有 <strong>262,144 token 的应用护栏</strong>；两者都不是模型能力承诺，也不表示每次请求会读满或输出到上限。</p>
+            <p>填写供应商真实能力后按该能力计算；显式声明更大的上下文不会被固定裁成 1M。同一模型路由的 ACP 容量上报可替代未知默认值，若低于配置则进一步收紧。输入、输出、推理余量、工具返回和合同修复分别预留；智能编译还使用独立的批次安全边界，不能把问答默认值理解为所有运行的统一预算。</p>
             <p>检查器展示规划目标、目录总量与实际浏览量、预算扩展理由、已读证据、覆盖自报及停止原因。实时占用跟随 Harness 原生压缩更新，但数据取证的累计负载不因压缩归零。到硬上限、连续补查无新依据或缺少来源时停止，不无限重试。</p>
+            <h3 class="how">等待与失败 — 按实际运行阶段判断</h3>
+            <table class="info-table">
+              <thead><tr><th>边界</th><th>当前策略</th><th>恢复原则</th></tr></thead>
+              <tbody>
+                <tr><td><code>startup_timeout</code></td><td>准备工作区、启动与连接阶段默认 120 秒；尚未提交问题时可作有限重试</td><td>不把未连接和模型长回答混为一谈</td></tr>
+                <tr><td><code>idle_timeout</code></td><td>已提交问题后，默认连续 600 秒没有 ACP 进展才判定停滞；真实进度消息刷新计时</td><td>保留已收到的正文，不自动重放可能已付费的请求</td></tr>
+                <tr><td>整体期限</td><td>问答与研究按预算计算，应用最大期限为 2,400 秒；编译单批另按 90–600 秒管理</td><td>是运行保护，不是供应商响应速度承诺</td></tr>
+              </tbody>
+            </table>
+            <p>重试只针对可恢复的限定错误，不以相同预算无限重放。凭据无效、拒绝授权、取消和已知硬限需要先解决原因；后台研究的队列退避与前台问答的恢复操作分别管理。</p>
             <div class="callout why"><span class="callout-icon">💡</span><span><strong>为什么不直接放开到最大上下文？</strong>容量大不等于需要读满。简单问题应低成本响应，复杂问题应按子问题取证；无关内容越多，越容易污染依据。自适应的目标是足够而且相关，不是单纯增加 token。</span></div>
           </section>
 
@@ -535,6 +586,14 @@ error / cancelled        → 保留已收到的部分内容，明确原因</code
             <span class="chapter-kicker">07 / DURABLE RESEARCH</span>
             <h2>可恢复研究 — 阶段成果不会随失败消失</h2>
             <p class="stage-lead">研究不再是一次长回答。目标、主题、证据矩阵、综合、报告与交付分别保存；各阶段借助 Harness 原生多轮能力完成，应用负责耐久状态和恢复。</p>
+            <h3 class="how">创建前 — 确认材料与用户简报</h3>
+            <ol class="how-steps">
+              <li><strong>材料准备情况</strong>：先显示知识库状态、来源同步、编译与待审核情况。暂停或归档的库不能启动研究；未同步、只有章节索引或待审核时提示实际可用材料，而不是假定语义知识已经就绪。加载失败可重试。</li>
+              <li><strong>可选预分析</strong>：根据用户诉求建议受众、用途、深度、语气和交付偏好。预分析不读取书籍内容，也不启动研究；这是独立的模型调用，可能产生供应商费用，不属于资料调查或研究成果。</li>
+              <li><strong>用户简报</strong>：预分析结果只是建议，用户确认重点选择；可以跳过预分析或在失败后手动确认。报告与 PPT 的受众、用途、主题和叙事形式按需设置，而不是让系统自行替用户决定。</li>
+              <li><strong>保存并启动</strong>：确认简报后创建任务，由用户手动启动研究。简报保存在数据库，未启动的草稿可修改；已执行的输入与成果保留当次版本，不因之后的配置调整而悄悄变化。</li>
+            </ol>
+            <p>研究与演示分别使用已确认的偏好。决策、参考类报告优先呈现结论与行动依据，教学、机制类内容按理解顺序展开；PPT 依据受众形成叙事，不强制把每个研究问题变成一页。这些规则改善组织方式，但不保证模型每次都能产出无需编辑的成品。</p>
             <figure class="diagram">
               <svg viewBox="0 0 960 370" class="dg" role="img" aria-label="持久研究阶段依次为 plan、多个 section、synthesis、report、validation 和可选 presentation；每阶段保存版本正文和原始引用，失败只恢复未完成阶段，来源变化只失效受影响章节与下游交付">
                 <rect class="box" x="24" y="26" width="264" height="84" rx="10" />
@@ -583,7 +642,8 @@ error / cancelled        → 保留已收到的部分内容，明确原因</code
               <li><strong>缺基线不伪造</strong>：找不到基线时只能输出 <code>partial/missing</code>，不能声称已核验或发现版本变化。</li>
             </ol>
             <h3 class="how">跨主题综合 — 保留差异，而非强行统一</h3>
-            <p><code>synthesis</code> 使用全部已保存主题的完整发现、限制和准确版本，并可通过 <code>knowledge_get_research_section</code> 分页查看任意完整章节。旧章节引用编号被中性化；新增事实仍需重读当前证据获得本轮编号。</p>
+            <p><code>synthesis</code> 使用已保存主题的发现、限制和准确版本。容量不足时提供覆盖全部主题身份的结构投影，而不是截取开头；Agent 可通过 <code>knowledge_get_research_manifest</code> 分页读取完整发现矩阵，通过 <code>knowledge_get_research_section</code> 回读完整章节。旧章节引用编号被中性化，新增事实仍需重读当前证据获得本轮编号。</p>
+            <p>投影保留全部主题 ID 与 revision，但不等于模型已经阅读全部正文。未读完整矩阵不能宣称全部主题一致、合格或没有冲突；无法取得所需材料时应标为 <code>insufficient</code> 并说明缺口。工具读取记录证明实际提供的范围，不等于独立证明模型的每条结论。</p>
             <p><code>section_checks</code> 必须对应全部真实主题与当前 revision，检查目标覆盖、术语、比较维度、版本 / 条件、反例、同源重复和冲突。不同条件下成立的结论不强行合并，原章节不被综合摘要替换。综合自报不等于独立事实证明，综合阶段新增读取的来源同样进入失效链。</p>
             <h3 class="how">完整报告 — 正文与引用一起组装</h3>
             <p>应用确定性合并完整章节及综合对照，不截掉报告尾部。同一对象同一版本的引用统一编号，合并实际已读范围并保留来源 Run。组装不是新的模型取证，也不产生虚构的 token 用量。引用与结构校验之后，任务最终完成事务再查来源版本，避免交付途中变化被误认证为当前成果。</p>
@@ -640,6 +700,10 @@ error / cancelled        → 保留已收到的部分内容，明确原因</code
               <li><strong>成果身份</strong>：<code>run_id</code> 表示当前阶段尝试，<code>content_run_id</code> 标识已保存正文的原始 Run。恢复中预览仍读原证据，状态轮询不会把报告替换成排队摘要。</li>
               <li><strong>交互窗口</strong>：“阶段与已保存成果”展示目标、基线、证据矩阵、历史版本与检查器；关闭 / 隐藏停止相关轮询，不改变后台任务，也不自动申请焦点。</li>
             </ul>
+            <h3 class="how">恢复与草稿 — 只重做需要重做的阶段</h3>
+            <p>规划、主题、综合和演示策划遇到 <code>max_tokens</code> 时，各阶段最多两次自动扩容；格式合同另有一次有界修复，不与输出扩容混为同一计数。新尝试只重做对应阶段，已保存的其他章节与报告仍可查看。达到有效输出硬限后，不再用相同预算付费重放；调整能力或范围后再显式恢复。</p>
+            <p><code>research_turn_limit</code> 与 <code>presentation_turn_limit</code> 表示请求轮次耗尽，不靠扩大 token 修复。缩小目标另建任务时仍需用户确认，不隐式继承旧任务的阶段成果或外部网络授权。容量预检失败可记录阶段失败，但不会伪造一个模型 Run 或用量。</p>
+            <p><strong>查看未保存输出</strong>提供失败或取消尝试的原始草稿，不再发起模型调用。未保存输出不进入阶段正文或最终报告；已通过合同的正文由 <code>content_run_id</code> 保留原运行身份，与最近一次失败尝试分开。原始草稿不是可发布的研究成果，也不冒充已核验的引用。</p>
             <div class="callout why"><span class="callout-icon">💡</span><span><strong>为什么保存阶段，而不是只保存最终回答？</strong>长研究包含多个可以复用的成果。最后一步 PPT 失败不应让前面所有章节重做；综合失败也不应重生成已完成章节。阶段保存同时提供明确的恢复边界与来源变化影响范围。</span></div>
           </section>
 
@@ -725,18 +789,30 @@ error / cancelled        → 保留已收到的部分内容，明确原因</code
               </tbody>
             </table>
             <p>知识库不是仅凭原书就能恢复的缓存。SQLite Online Backup 创建包含 WAL 最新写入的一致快照，迁移、删库和大变更前自动备份。恢复前检查完整性、外键与迁移版本，并生成操作前安全快照；运行期间不执行恢复，失败可回退。FTS 可重建，但知识、历史和引用需要备份。</p>
+            <div class="callout subtle"><span class="callout-icon">ⓘ</span><span><strong>完整备份：</strong>SQLite 快照不包含 PPTX 等磁盘成果文件。需要保留演示交付物时，还应备份系统数据目录中的 <code>artifacts/</code>；原书目录也应单独备份。只恢复数据库可以恢复成果元数据，不能重新获得已经丢失的 PPTX 文件。</span></div>
           </section>
 
           <section id="limits" class="manual-section">
-            <span class="chapter-kicker">10 / IMPROVEMENTS &amp; LIMITS</span>
-            <h2>四批改进 — 已完成什么，仍不保证什么</h2>
+            <span class="chapter-kicker">10 / VERIFICATION &amp; LIMITS</span>
+            <h2>当前能力、验证结果与已知边界</h2>
             <table class="info-table">
-              <thead><tr><th>批次</th><th>已落地的变化</th><th>用户价值</th></tr></thead>
+              <thead><tr><th>能力</th><th>当前实现</th><th>用户价值</th></tr></thead>
               <tbody>
-                <tr><td>01 · 可靠性底座</td><td>稳定引用、实际已读快照、完整与截断终态、模型能力、用量边界、临时失败恢复</td><td>历史可核对，不完整回答不伪装成功</td></tr>
-                <tr><td>02 · 自适应问答</td><td>目标规划、动态资源、多轮取证与扩展、上下文隔离、意图记忆、显式续答</td><td>复杂问题可以读更多，简单问题避免不必要成本</td></tr>
-                <tr><td>03 · 知识质量与更新</td><td>结构无损、完整正文、原子条件、全书身份、跨批归并、来源影响、报告与复核</td><td>减少知识丢失，更新影响与待处理事项可见</td></tr>
-                <tr><td>04 · 可恢复研究</td><td>持久阶段、真实基线、综合对照、完整报告、精确引用、租约保护、全结构 PPT 选材</td><td>失败保留成果，按阶段恢复，交付范围可查</td></tr>
+                <tr><td>可靠性与审计</td><td>稳定引用、实际已读快照、完整与截断终态、模型能力、用量边界、有限失败恢复</td><td>历史可核对，不完整回答不伪装成功</td></tr>
+                <tr><td>连续知识问答</td><td>隔离规划、动态资源、多轮取证、意图记忆、真实流式、输出扩容与会话补存</td><td>复杂问题按缺口补查，追问不污染证据，失败输出可追溯</td></tr>
+                <tr><td>知识编译与维护</td><td>结构无损、完整正文、原子条件、身份归并、来源影响、报告与审核复核</td><td>减少知识丢失，更新影响与待处理事项可见</td></tr>
+                <tr><td>分阶段研究与交付</td><td>简报确认、持久阶段、真实基线、综合矩阵、完整报告、租约保护、PPT 策划与下载</td><td>控制研究用途，失败保留成果，按阶段恢复，交付范围可查</td></tr>
+              </tbody>
+            </table>
+            <h3>真实隔离验收 — 已观察到什么</h3>
+            <p><a href="https://github.com/TiercelChow/ObsidianBrain/blob/main/docs/development/2026-10-03-wiki-acceptance-closeout-results.md" target="_blank" rel="noreferrer">2026-10-03 真实隔离验收</a>使用独立实例、八篇虚构资料及一个真实供应商模型，核对编译、六轮问答、研究、恢复与两份 PPT。它补充了 Mock 与自动回归，但不是所有供应商、所有书籍的质量保证，也不是严格受控的质量前后对比。</p>
+            <table class="info-table">
+              <thead><tr><th>已验证的流程</th><th>观察结果</th><th>仍需改进或验证</th></tr></thead>
+              <tbody>
+                <tr><td>语义编译与审核</td><td>多来源主题、关键公式与条件保留，候选审核和版本发布可用；不合格归并被合同拦截</td><td>别名归并、语义去重与关系组织仍不足，偶发编译合同失败仍存在</td></tr>
+                <tr><td>流式与连续问答</td><td>六轮真实分片重放与最终正文一致，追问指代及冻结来源可核对</td><td>首字等待仍较长，个别引用格式需要修正；不承诺端到端时延已全部解决</td></tr>
+                <tr><td>研究恢复与来源变化</td><td>服务重启保留已完成章节；旧基线可回读，仅受影响阶段重做，无依赖成果不重复调用模型</td><td>报告重复、个别绝对化表述和未经证实的自审说法仍需人工编辑</td></tr>
+                <tr><td>PPTX 下载与离线检查</td><td>两份 9 页、11 页演示实际下载并逐页查看，关键条件可见，未发现遮挡或截断</td><td>窄列折行、关系连线仍需打磨；未完成 Microsoft PowerPoint 兼容认证</td></tr>
               </tbody>
             </table>
             <h3>明确未实现或未验证的能力</h3>
@@ -745,13 +821,13 @@ error / cancelled        → 保留已收到的部分内容，明确原因</code
               <li><strong>跨全部目录页的全局语义候选重排：未实现。</strong>当前候选按页选择、交错合并；不能保证最优全局召回。</li>
               <li><strong>独立逐句蕴含或事实核验：未实现。</strong>程序验证结构、权限、实际读取范围、引用与当前版本，不等于逐句事实核验；Agent 的覆盖 / 综合判断是公开自报。</li>
               <li><strong>更丰富的会话对象记忆：未实现。</strong>现有意图记忆包含目标与约束，不等于完整跟踪每个方案、比较标准和中间决策。</li>
-              <li><strong>真实模型质量保证：不存在。</strong>四批通过实现契约、Mock Runtime 与桌面 / 手机隔离交互验证，但未做真实供应商的答案质量前后对比；测试通过不能保证每个问题正确。</li>
+              <li><strong>普遍的真实模型质量保证：不存在。</strong>已有真实样本验证，但大规模真书、其他供应商全矩阵与全面召回评估尚未完成；不能将结构通过、模型自报一致或引用覆盖率等同于每句话正确。</li>
             </ul>
             <div class="callout subtle"><span class="callout-icon">ⓘ</span><span><strong>使用边界：</strong>安全与容量上限依然存在，应在配置中填写模型真实能力。Book Wiki 不支持 PDF / OCR；PPTX 作为下载交付物。检查器能解释公开流程与材料范围，不展示模型隐藏思维链。</span></div>
             <h3>继续阅读</h3>
-            <p>本篇更新以四批实际实现为准，可对照仓库中的<a href="https://github.com/TiercelChow/ObsidianBrain/blob/main/docs/development/2026-09-26-wiki-adaptive-quality-plan.md" target="_blank" rel="noreferrer">实施与验收记录</a>和<a href="https://github.com/TiercelChow/ObsidianBrain/blob/main/docs/development/08-llm-wiki.md" target="_blank" rel="noreferrer">开发设计</a>。核心服务位于 <code>backend/src/core/book_wiki.rs</code>，研究编排位于 <code>backend/src/core/book_wiki/research_workflow.rs</code>，强制合同位于 <code>backend/prompts/wiki/</code>。</p>
+            <p>本篇按当前源码与已执行的验收更新。具体操作见<a href="../manual/#wiki">书籍 Wiki 使用手册</a>；架构细节可对照<a href="https://github.com/TiercelChow/ObsidianBrain/blob/main/docs/development/2026-09-26-wiki-adaptive-quality-plan.md" target="_blank" rel="noreferrer">自适应工作流实施计划</a>和<a href="https://github.com/TiercelChow/ObsidianBrain/blob/main/docs/development/08-llm-wiki.md" target="_blank" rel="noreferrer">开发设计</a>。核心服务位于 <code>backend/src/core/book_wiki.rs</code>，研究编排位于 <code>backend/src/core/book_wiki/research_workflow.rs</code>，强制合同位于 <code>backend/prompts/wiki/</code>。</p>
           </section>
-          <div class="docs-end"><span>你已读完全部章节</span><p>从知识编译到问答和研究，数据、证据与成果都属于应用；多轮决策交给 Harness，正式知识交给审核。</p><a class="button button-secondary" href="../manual/#wiki">阅读使用手册的书籍 Wiki 章节 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div>
+          <div class="docs-end"><span>了解架构，开始使用</span><p>从资料整理到问答、研究与演示交付：本地应用管理数据与证据，Harness 执行多轮取证，正式知识经过审核发布。</p><a class="button button-secondary" href="../manual/#wiki">阅读书籍 Wiki 使用手册 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div>
         </div>
       </div>
     </main>
