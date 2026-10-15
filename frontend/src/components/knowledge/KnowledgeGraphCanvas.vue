@@ -6,9 +6,9 @@
         <span>{{ snapshot.entries.length }} / {{ snapshot.total_entries }} 个实体 · {{ snapshot.relations.length }} 条可见关系</span>
       </div>
       <div class="canvas-controls">
-        <button type="button" aria-label="缩小图谱" @click="zoomBy(-0.18)">−</button>
+        <button data-icon-only type="button" aria-label="缩小图谱" @click="zoomBy(-0.18)">−</button>
         <button type="button" aria-label="重置图谱视角" @click="resetView">{{ Math.round(view.scale * 100) }}%</button>
-        <button type="button" aria-label="放大图谱" @click="zoomBy(0.18)">＋</button>
+        <button data-icon-only type="button" aria-label="放大图谱" @click="zoomBy(0.18)">＋</button>
       </div>
     </header>
     <div

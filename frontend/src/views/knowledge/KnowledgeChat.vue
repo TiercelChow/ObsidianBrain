@@ -5,7 +5,7 @@
         <el-select v-model="activeBaseId" class="knowledge-select is-fluid" aria-label="当前问答知识库" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" :disabled="searching" placeholder="选择一本书" @change="changeKnowledgeBase">
           <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
         </el-select>
-        <button type="button" aria-label="问答历史与设置" @click="contextVisible = true"><el-icon><ChatLineSquare /></el-icon></button>
+        <button data-icon-only type="button" aria-label="问答历史与设置" @click="contextVisible = true"><el-icon><ChatLineSquare /></el-icon></button>
       </div>
       <aside class="chat-context knowledge-surface" data-glass="structural">
         <span class="context-label">当前知识边界</span>
@@ -30,9 +30,7 @@
         <section class="conversation-history" aria-label="问答历史">
           <header>
             <span>历史问答</span>
-            <button type="button" class="ui-icon-action" aria-label="新对话" title="新对话" :disabled="!activeBaseId || searching" @click="newConversation()">
-              <el-icon><Plus /></el-icon>
-            </button>
+            <UiAction :icon="Plus" label="新对话" appearance="quiet" :disabled="!activeBaseId || searching" @click="newConversation()" />
           </header>
           <div class="conversation-list">
             <button
@@ -113,40 +111,57 @@
                 <button v-if="message.interruption.kind === 'truncated' && !message.interruption.canRetry" type="button" @click="router.push({ path: '/knowledge/settings' })">调整模型配置</button>
                 <button v-if="message.originalQuestion && activeBaseId && message.interruption.researchSuggested" type="button" :disabled="searching || !!researchTransferMessageId" @click="openResearchTask(message)">{{ researchTransferMessageId === message.id ? '正在恢复问题…' : '转为分阶段研究任务' }}</button>
               </div>
-              <div v-if="message.role === 'assistant' && message.runId && message.id !== streamingMessageId" class="answer-actions" aria-label="回答操作">
-                <UiAction :icon="View" label="查看本轮运行" @click="inspectRun(message.runId)" />
-                <UiAction v-if="message.unsavedAnswer" :icon="DocumentAdd" label="补存到会话历史" :disabled="searching" :loading="savingHistoryRunId === message.runId" @click="persistRecoveredAnswer(message)" />
-                <UiAction v-if="!message.interruption && !message.unsavedAnswer" :icon="Checked" label="保存到 Wiki 待审核候选" :loading="savingRunId === message.runId" @click="saveAnswer(message)" />
-                <UiAction v-if="!message.interruption && message.originalQuestion" :icon="Reading" label="深入研究此问题" :disabled="searching || (!!researchTransferMessageId && researchTransferMessageId !== message.id)" :loading="researchTransferMessageId === message.id" @click="openResearchTask(message)" />
-              </div>
+              <footer v-if="message.role === 'assistant' && message.id !== streamingMessageId && (message.runId || message.evidence?.length)" class="answer-footer">
+                <div class="answer-footer-bar">
+                  <button
+                    v-if="message.evidence?.length"
+                    type="button"
+                    class="evidence-toggle"
+                    :aria-expanded="Boolean(message.evidenceExpanded)"
+                    :aria-controls="`answer-sources-${message.id}`"
+                    :aria-label="`${message.evidenceExpanded ? '收起' : '展开'}参考来源，${message.evidence.length} 条${message.runId ? '已读证据' : '检索候选'}`"
+                    @click="message.evidenceExpanded = !message.evidenceExpanded"
+                  >
+                    <span>参考来源</span><span class="evidence-count">{{ message.evidence.length }}</span>
+                    <el-icon class="evidence-chevron" :class="{ 'is-expanded': message.evidenceExpanded }"><ArrowRight /></el-icon>
+                  </button>
+                  <div v-if="message.runId" class="answer-actions" role="group" aria-label="回答操作">
+                    <UiAction :icon="View" label="查看本轮运行" appearance="quiet" @click="inspectRun(message.runId)" />
+                    <UiAction v-if="message.unsavedAnswer" :icon="DocumentAdd" label="补存到会话历史" appearance="quiet" :disabled="searching" :loading="savingHistoryRunId === message.runId" @click="persistRecoveredAnswer(message)" />
+                    <UiAction v-if="!message.interruption && !message.unsavedAnswer" :icon="Checked" label="保存到 Wiki 待审核候选" appearance="quiet" :loading="savingRunId === message.runId" @click="saveAnswer(message)" />
+                    <UiAction v-if="!message.interruption && message.originalQuestion" :icon="Reading" label="深入研究此问题" appearance="quiet" :disabled="searching || (!!researchTransferMessageId && researchTransferMessageId !== message.id)" :loading="researchTransferMessageId === message.id" @click="openResearchTask(message)" />
+                  </div>
+                </div>
+                <Transition name="evidence-expand">
+                  <section v-if="message.evidence?.length" v-show="Boolean(message.evidenceExpanded)" :id="`answer-sources-${message.id}`" :inert="!message.evidenceExpanded" class="evidence-section" aria-label="回答参考来源">
+                    <div class="evidence-reveal-body">
+                      <div class="evidence-grid">
+                        <button
+                          v-for="(entry, evidenceIndex) in message.evidence"
+                          :key="`${message.id}-${evidenceIndex}-${entry.id}`"
+                          type="button"
+                          @click="previewEvidence(message, evidenceIndex)"
+                        >
+                          <span><b>S{{ evidenceIndex + 1 }}</b>{{ entry.source_path || '数据库实体' }}</span>
+                          <strong>{{ entry.title }}</strong>
+                          <p v-if="entry.summary">{{ entry.summary }}</p>
+                          <em>预览来源 <el-icon><ArrowRight /></el-icon></em>
+                        </button>
+                      </div>
+                    </div>
+                  </section>
+                </Transition>
+              </footer>
             </div>
-            <Transition name="content-arrive">
-            <section v-if="message.evidence?.length && message.id !== streamingMessageId" class="evidence-section" aria-label="回答参考来源">
-              <header><strong>参考来源</strong><span>{{ message.evidence.length }} 条{{ message.runId ? '已读证据' : '检索候选' }}</span></header>
-              <div class="evidence-grid">
-                <button
-                  v-for="(entry, evidenceIndex) in message.evidence"
-                  :key="`${message.id}-${evidenceIndex}-${entry.id}`"
-                  type="button"
-                  @click="previewEvidence(message, evidenceIndex)"
-                >
-                  <span><b>S{{ evidenceIndex + 1 }}</b>{{ entry.source_path || '数据库实体' }}</span>
-                  <strong>{{ entry.title }}</strong>
-                  <p v-if="entry.summary">{{ entry.summary }}</p>
-                  <em>预览来源 <el-icon><ArrowRight /></el-icon></em>
-                </button>
-              </div>
-            </section>
-            </Transition>
           </div>
           </TransitionGroup>
         </div>
 
         <form v-glass-lens class="chat-composer" data-glass-rim @submit.prevent="ask(draft)">
-          <button class="chat-short-context-button" type="button" aria-label="问答历史与设置" @click="contextVisible = true"><el-icon><ChatLineSquare /></el-icon></button>
+          <button data-icon-only class="chat-short-context-button" type="button" aria-label="问答历史与设置" @click="contextVisible = true"><el-icon><ChatLineSquare /></el-icon></button>
           <textarea v-model="draft" :disabled="!activeBaseId" rows="1" placeholder="询问本书中的概念、章节或观点…" @compositionstart="composerIsComposing = true" @compositionend="finishComposerComposition" @keydown="handleComposerKeydown"></textarea>
-          <button v-if="searching && runtimeReady" type="button" class="is-stop" aria-label="停止生成" @click="stopAnswer"><span class="stop-square"></span></button>
-          <button v-else type="submit" :disabled="!activeBaseId || !draft.trim() || searching" aria-label="发送问题">
+          <button data-icon-only v-if="searching && runtimeReady" type="button" class="is-stop" aria-label="停止生成" @click="stopAnswer"><span class="stop-square"></span></button>
+          <button data-icon-only v-else type="submit" :disabled="!activeBaseId || !draft.trim() || searching" aria-label="发送问题">
             <el-icon><Top /></el-icon>
           </button>
         </form>
@@ -155,12 +170,14 @@
 
     <MotionModal v-model="contextVisible" aria-label="问答历史与设置">
       <div class="knowledge-modal-card chat-context-sheet">
-        <header class="knowledge-modal-head"><h3>历史问答</h3><p>{{ activeBase?.book_name || '请先选择一本书' }}</p></header>
+        <header class="knowledge-modal-head">
+          <div><h3>历史问答</h3><p>{{ activeBase?.book_name || '请先选择一本书' }}</p></div>
+          <UiAction :icon="Plus" label="新对话" appearance="quiet" :disabled="!activeBaseId || searching" @click="contextVisible = false; newConversation()" />
+        </header>
         <div class="knowledge-modal-body">
           <el-select v-model="activeBaseId" class="knowledge-select is-fluid" aria-label="当前问答知识库" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" :disabled="searching" placeholder="选择一本书" @change="changeKnowledgeBase">
             <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
           </el-select>
-          <button class="new-conversation-button ui-icon-action" type="button" aria-label="新对话" title="新对话" :disabled="!activeBaseId || searching" @click="contextVisible = false; newConversation()"><el-icon><Plus /></el-icon></button>
           <section class="conversation-history" aria-label="手机端问答历史">
             <div class="conversation-list">
               <button v-for="conversation in conversations" :key="conversation.id" type="button" :class="{ active: conversation.id === activeConversationId }" :disabled="searching" @click="contextVisible = false; openConversation(conversation.id)">
@@ -187,7 +204,7 @@
 
     <MotionModal v-model="inspectorVisible" aria-label="问答运行检查器" size="wide">
       <div class="knowledge-modal-card qa-inspector-modal">
-        <header class="source-preview-head"><h3>本轮问答</h3><button type="button" aria-label="关闭问答运行检查器" @click="inspectorVisible = false"><el-icon><Close /></el-icon></button></header>
+        <header class="source-preview-head"><h3>本轮问答</h3><button data-icon-only type="button" aria-label="关闭问答运行检查器" @click="inspectorVisible = false"><el-icon><Close /></el-icon></button></header>
         <div class="source-preview-body">
           <p v-if="inspectorLoading" role="status">正在读取运行记录…</p>
           <p v-else-if="inspectorError" role="alert">{{ inspectorError }}</p>
@@ -208,7 +225,7 @@
             <p v-else-if="sourceDetail" class="source-snapshot-note">当前实体版本（非本轮历史证据）</p>
             <p v-if="sourceRanges.length" class="source-snapshot-note">已读范围：{{ sourceRanges.map(range => `${range.offset_chars}–${range.offset_chars + range.returned_chars} 字符`).join('、') }}</p>
           </div>
-          <button type="button" aria-label="关闭来源预览" @click="sourceVisible = false">
+          <button data-icon-only type="button" aria-label="关闭来源预览" @click="sourceVisible = false">
             <el-icon><Close /></el-icon>
           </button>
         </header>
@@ -282,6 +299,7 @@ interface ChatMessage {
   content: string
   knowledgeBaseId?: string
   evidence?: KnowledgeEntrySummary[]
+  evidenceExpanded?: boolean
   runId?: string
   originalQuestion?: string
   requestConversationId?: string
@@ -312,6 +330,8 @@ const historyLoading = ref(false)
 const runtimeReady = ref(false)
 const runtimeMessage = ref('DeepSeek Harness 尚未连接；当前只返回真实命中的书内证据。')
 const messageListRef = ref<HTMLElement | null>(null)
+let messageEndPinned = true
+let messageResizeObserver: ResizeObserver | null = null
 const sourceVisible = ref(false)
 const sourceLoading = ref(false)
 const sourceDetail = ref<Pick<KnowledgeEntryDetail, 'id' | 'title' | 'entry_type' | 'source_path' | 'content_md' | 'citations'> | null>(null)
@@ -854,8 +874,19 @@ async function scrollToBottom(smooth = true) {
 
 function onMessageScroll(event: Event) {
   const element = event.target as HTMLElement
-  followOutput.value = element.scrollHeight - element.clientHeight - element.scrollTop < 96
+  const distance = element.scrollHeight - element.clientHeight - element.scrollTop
+  followOutput.value = distance < 96
+  messageEndPinned = distance <= 2
 }
+
+watch(messageListRef, list => {
+  messageResizeObserver?.disconnect()
+  if (!list) return
+  messageResizeObserver = new ResizeObserver(() => {
+    if (window.matchMedia('(max-width: 768px)').matches && messageEndPinned) void scrollToBottom(false)
+  })
+  messageResizeObserver.observe(list)
+}, { flush: 'post' })
 
 function followAnswer() {
   if (followOutput.value) void scrollToBottom(false)
@@ -871,6 +902,7 @@ watch(sourceVisible, (visible) => {
 onMounted(loadContext)
 onBeforeUnmount(() => {
   viewActive = false
+  messageResizeObserver?.disconnect()
   ++historyRequestId
   ++unfinishedRequestId
   ++sourceRequestId
@@ -883,8 +915,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .chat-mobile-context { display: none; }
-.new-conversation-button { min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 12px; color: var(--accent); background: var(--accent-light); font: inherit; cursor: pointer; }
-.new-conversation-button:disabled { opacity: .45; cursor: default; }
+.chat-context-sheet .knowledge-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.chat-context-sheet .knowledge-modal-head > div { min-width: 0; overflow-wrap: anywhere; }
 .chat-context-sheet .conversation-list { display: grid; max-height: none; }
 .chat-context-sheet .conversation-list > button { width: 100%; min-height: 54px; padding: 10px 12px; }
 .chat-context-sheet .conversation-list strong { font-size: 14px; }
@@ -905,9 +937,7 @@ onBeforeUnmount(() => {
 .context-book strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .context-book span { color: var(--text-faint); font-size: 10px; }
 .conversation-history { min-width: 0; display: grid; gap: 7px; padding-top: 2px; }
-.conversation-history header { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-faint); font-size: 10px; font-weight: 720; }
-.conversation-history header > button { display: inline-flex; align-items: center; gap: 3px; padding: 4px 6px; border: 0; border-radius: 7px; background: transparent; color: var(--accent); font: inherit; font-size: 10px; cursor: pointer; }
-.conversation-history header > button:hover { background: var(--accent-light); }
+.conversation-history header { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-faint); font-size: 13px; font-weight: 650; }
 .conversation-list { max-height: 208px; display: grid; gap: 4px; overflow: auto; }
 .conversation-list > button { min-width: 0; display: grid; gap: 2px; padding: 8px 9px; border: 0; border-radius: 10px; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; transition: background var(--motion-fast) var(--ease-emphasized), box-shadow var(--motion-fast) var(--ease-emphasized); }
 .conversation-list > button:hover { background: var(--bg-hover); }
@@ -940,18 +970,26 @@ onBeforeUnmount(() => {
 .restored-answer-draft p { white-space: pre-wrap; }
 .restored-answer-draft > span { color: var(--text-muted); font-size: 11px; line-height: 1.5; }
 .restored-answer-draft :deep(.knowledge-answer-markdown) { padding: 0; border-radius: 0; background: transparent; }
-.answer-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.answer-footer { min-width: 0; margin-top: 2px; }
+.answer-footer-bar { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.answer-actions { display: flex; align-items: center; gap: 2px; flex: none; margin-left: auto; }
+.evidence-toggle { min-width: 0; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 0 6px; border: 0; border-radius: 12px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: var(--transition-interactive); }
+.evidence-toggle:hover { background: var(--bg-hover); }
+.evidence-toggle:active { background: var(--accent-light); transform: scale(.98); }
+.evidence-count { min-width: 18px; padding: 0 4px; border-radius: 6px; background: var(--bg-glass-subtle); color: var(--text-muted); font-size: 11px; line-height: 20px; text-align: center; font-variant-numeric: tabular-nums; }
+.evidence-chevron { color: var(--text-faint); font-size: 12px; transition: transform var(--motion-normal) var(--ease-emphasized); }
+.evidence-chevron.is-expanded { transform: rotate(90deg); }
 .chat-run-status { min-height: 32px; display: flex; align-items: center; gap: 9px; padding: 4px 2px; }
 .chat-run-dots { display: inline-flex; align-items: center; gap: 3px; flex: none; }
 .chat-run-dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--text-secondary); opacity: .95; animation: chat-dot-wave 900ms ease-in-out infinite alternate; }
 .chat-run-dots i:nth-child(2) { animation-delay: 130ms; }
 .chat-run-dots i:nth-child(3) { animation-delay: 260ms; }
 .chat-run-label { color: var(--text-muted); font-size: 13px; font-weight: 600; line-height: 1.6; background-image: linear-gradient(90deg, var(--text-muted) 0%, var(--text-muted) 42%, var(--text-secondary) 50%, var(--text-muted) 58%, var(--text-muted) 100%); background-size: 250% 100%; background-position: 100% 0; background-repeat: no-repeat; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: chat-status-shimmer 2.4s linear infinite; }
-.evidence-section { max-width: min(100%, 900px); margin: 2px 0 22px; }
-.evidence-section > header { display: flex; align-items: baseline; gap: 8px; margin: 0 0 9px; color: var(--text-muted); }
-.evidence-section > header strong { color: var(--text-secondary); font-size: 11px; font-weight: 700; }
-.evidence-section > header span { color: var(--text-faint); font-size: 10px; }
-.evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.evidence-section { min-width: 0; display: grid; grid-template-rows: 1fr; margin: 0; }
+.evidence-reveal-body { min-height: 0; overflow: hidden; }
+.evidence-expand-enter-active, .evidence-expand-leave-active { transition: grid-template-rows var(--motion-normal) var(--ease-emphasized), opacity var(--motion-fast) ease; }
+.evidence-expand-enter-from, .evidence-expand-leave-to { grid-template-rows: 0fr; opacity: 0; }
+.evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding-top: 8px; }
 .evidence-grid button { min-width: 0; display: grid; gap: 5px; padding: 13px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); color: var(--text-primary); text-align: left; cursor: pointer; transition: var(--transition-interactive); }
 .evidence-grid button:hover { border-color: var(--accent-border); transform: translateY(-1px); }
 .evidence-grid span { overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
@@ -990,6 +1028,8 @@ onBeforeUnmount(() => {
 @keyframes chat-status-shimmer { to { background-position: 0% 0; } }
 @media (min-width: 1151px) {
   .chat-layout, .chat-panel { min-height: 0; }
+  .chat-layout { grid-template-rows: minmax(0, 1fr); }
+  .chat-context { min-height: 0; max-height: 100%; overflow: auto; overscroll-behavior-y: contain; }
   .message-list { min-height: 0; max-height: none; padding: 20px clamp(16px, 3vw, 40px) 100px; }
   .chat-welcome { min-height: 100%; }
   .chat-composer { margin: 0 12px 12px; }
@@ -1008,7 +1048,7 @@ onBeforeUnmount(() => {
   .chat-mobile-context { min-width: 0; flex: none; display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: stretch; gap: 8px; margin-bottom: 10px; }
   .chat-mobile-context > button { min-height: 44px; display: grid; place-items: center; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); color: var(--accent); font-size: 20px; cursor: pointer; }
   .chat-panel { min-height: 0; flex: 1; }
-  .message-list { min-height: 0; max-height: none; padding: 16px 12px 100px; overscroll-behavior-y: contain; }
+  .message-list { min-height: 0; max-height: none; padding: 16px 12px 100px; overscroll-behavior-y: contain; overflow-anchor: none; }
   .chat-welcome { min-height: 100%; }
   .message { max-width: 92%; }
   .evidence-grid { grid-template-columns: 1fr; }
@@ -1026,6 +1066,9 @@ onBeforeUnmount(() => {
   .source-preview-modal .knowledge-modal-actions { padding: 10px 16px 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .evidence-expand-enter-active, .evidence-expand-leave-active { transition: none; }
+  .evidence-chevron, .evidence-toggle { transition: none; }
+  .evidence-toggle:active { transform: none; }
   .chat-run-dots i { animation: none; opacity: .6; }
   .chat-run-label { animation: none; background: none; -webkit-text-fill-color: currentColor; }
 }

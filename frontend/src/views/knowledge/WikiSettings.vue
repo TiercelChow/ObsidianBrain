@@ -64,7 +64,7 @@
         <template v-else-if="section === 'providers'">
           <header class="settings-section-head split provider-section-head">
             <div><h2>模型供应商</h2><p>API Key 写入系统凭据库；环境变量模式使用启动进程提供的密钥。</p></div>
-            <el-button type="primary" class="ui-icon-action" :icon="Plus" aria-label="新增供应商" title="新增供应商" @click="openNewProvider" />
+            <el-button data-icon-only type="primary" class="ui-icon-action" :icon="Plus" aria-label="新增供应商" title="新增供应商" @click="openNewProvider" />
           </header>
           <div v-if="loading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
           <article v-else v-for="provider in modelProviders" :key="provider.provider_id" class="provider-card">
@@ -168,7 +168,7 @@
                 <code>{{ backup.filename }}</code>
               </div>
               <div class="backup-card-actions">
-                <a class="ui-icon-action" :href="knowledgeBackupDownloadUrl(backup.filename)" download aria-label="下载数据库快照" title="下载数据库快照"><el-icon><Download /></el-icon></a>
+                <a data-icon-only class="ui-icon-action" :href="knowledgeBackupDownloadUrl(backup.filename)" download aria-label="下载数据库快照" title="下载数据库快照"><el-icon><Download /></el-icon></a>
                 <el-button text type="danger" @click="openManagedRestore(backup)">恢复</el-button>
               </div>
             </article>
@@ -197,7 +197,7 @@
               <el-select v-model="activeBaseId" class="knowledge-select is-compact is-responsive" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库" @change="loadSkills"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" /></el-select>
               <input ref="skillArchiveInput" hidden type="file" accept=".zip,application/zip" @change="importSkillArchive" />
               <UiAction :icon="UploadFilled" label="导入 ZIP Skill" :loading="importingSkill" @click="skillArchiveInput?.click()" />
-              <el-button type="primary" class="ui-icon-action" aria-label="新增 Skill" title="新增 Skill" @click="openSkillEditor()"><el-icon><Plus /></el-icon></el-button>
+              <el-button data-icon-only type="primary" class="ui-icon-action" aria-label="新增 Skill" title="新增 Skill" @click="openSkillEditor()"><el-icon><Plus /></el-icon></el-button>
             </div>
           </header>
           <div v-if="!activeBaseId" class="knowledge-empty"><strong>选择一本书</strong><span>Skill 的启用状态不会跨知识库共享。</span></div>

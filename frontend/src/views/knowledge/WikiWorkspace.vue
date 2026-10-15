@@ -16,7 +16,7 @@
         <el-icon><Search /></el-icon>
         <input v-model="query" placeholder="搜索标题、摘要与正文" @input="scheduleSearch" />
       </label>
-      <button class="mobile-actions-button" type="button" :disabled="!activeBase" aria-label="Wiki 操作" @click="mobileActionsVisible = true">
+      <button data-icon-only class="mobile-actions-button" type="button" :disabled="!activeBase" aria-label="Wiki 操作" @click="mobileActionsVisible = true">
         <el-icon><MoreFilled /></el-icon>
       </button>
     </div>
@@ -35,7 +35,7 @@
       <el-button type="primary" @click="$router.push('/knowledge')">前往初始化</el-button>
     </div>
 
-    <MotionSwap v-else :view-key="singleColumn ? (selectedEntry ? 'detail' : 'list') : 'desktop'" :horizontal="singleColumn" :direction="selectedEntry ? 1 : -1">
+    <MotionSwap v-else class="wiki-workspace-stage" :contained="!singleColumn" :view-key="singleColumn ? (selectedEntry ? 'detail' : 'list') : 'desktop'" :horizontal="singleColumn" :direction="selectedEntry ? 1 : -1">
     <section class="wiki-workspace" :class="{ 'show-detail': Boolean(selectedEntry) }">
       <aside class="entry-pane knowledge-surface" data-glass="structural">
         <div class="entry-pane-head">
@@ -233,7 +233,7 @@
               <label><span>Markdown 正文</span><el-input v-model="part.contentMd" type="textarea" :rows="5" :maxlength="30000" /></label>
             </article>
           </div>
-          <button v-if="splitParts.length < 12" class="add-split-part ui-icon-action" type="button" aria-label="添加拆分实体" title="添加拆分实体" @click="addSplitPart">＋</button>
+          <button data-icon-only v-if="splitParts.length < 12" class="add-split-part ui-icon-action" type="button" aria-label="添加拆分实体" title="添加拆分实体" @click="addSplitPart">＋</button>
         </template>
         <div class="knowledge-modal-actions"><el-button @click="editVisible = false">取消</el-button><el-button type="primary" :loading="savingEdit" @click="submitStructureChange">生成审核候选</el-button></div>
       </div>
@@ -888,7 +888,7 @@ onBeforeUnmount(() => {
 .wiki-workspace { min-height: 570px; display: grid; grid-template-columns: minmax(250px, 320px) minmax(0, 1fr); gap: 12px; }
 .entry-pane, .entry-detail { min-height: 0; overflow: hidden; }
 .entry-pane { display: flex; flex-direction: column; }
-.entry-pane-head { min-height: 68px; display: grid; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border-faint); }
+.entry-pane-head { flex: 0 0 auto; min-height: 68px; display: grid; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border-faint); }
 .entry-pane-head > div { min-width: 0; display: grid; gap: 2px; }
 .entry-pane-head > .entry-statuses { display: flex; flex-wrap: wrap; gap: 5px; }
 .entry-pane-head strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
@@ -929,9 +929,13 @@ onBeforeUnmount(() => {
 .health-entry-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .entity-markdown { color: var(--text-secondary); font-size: 15px; line-height: 1.8; overflow-wrap: anywhere; }
 @media (min-width: 1101px) {
+  .wiki-toolbar, .workspace-alert { flex-shrink: 0; }
+  /* Keep the page's remaining height bounded through both transition wrappers. */
+  .wiki-workspace-stage { min-height: 0; display: flex; flex-direction: column; }
+  .wiki-workspace-stage > :deep(.motion-swap__panel) { min-height: 0; flex: 1; display: flex; flex-direction: column; }
   .wiki-workspace { min-height: 0; overflow: hidden; }
-  .entry-list { min-height: 0; max-height: none; }
-  .entry-detail { max-height: none; }
+  .entry-list { min-height: 0; max-height: none; overscroll-behavior-y: contain; }
+  .entry-detail { max-height: none; overscroll-behavior-y: contain; }
 }
 .review-modal { max-height: min(780px, calc(100dvh - 48px)); }
 .review-content { min-height: 0; display: grid; align-content: start; gap: 10px; flex: 1; overflow: auto; padding: 0 24px 12px; overscroll-behavior: contain; }

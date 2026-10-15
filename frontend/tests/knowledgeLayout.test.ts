@@ -71,6 +71,14 @@ test('Wiki pages share the global page width and title rhythm', async () => {
   assert.doesNotMatch(settings, /\.settings-layout\s*\{[^}]*min-height:\s*585px/)
 })
 
+test('desktop Wiki headers reserve the same action height even without actions or loaded data', async () => {
+  const shared = await source('src/styles/knowledge.css')
+  const desktop = shared.split('@media (min-width: 769px) {')[1]?.split('}\n}')[0] || ''
+  assert.match(desktop, /\.knowledge-heading\s*\{[^}]*min-height:\s*44px/)
+  assert.match(shared, /\.knowledge-tabs\s*\{[^}]*flex-shrink:\s*0/)
+  assert.match(shared, /\.knowledge-heading\s*\{[^}]*display:\s*none\s*!important/)
+})
+
 test('desktop Wiki reading surfaces fill the available height without clipping their own scroll areas', async () => {
   const [shared, workspace, chat] = await Promise.all([
     source('src/styles/knowledge.css'),
@@ -85,13 +93,20 @@ test('desktop Wiki reading surfaces fill the available height without clipping t
   assert.match(chat, /\.message-list\s*\{[^}]*min-height:\s*0;[^}]*max-height:\s*none/)
 })
 
+test('short desktop windows bound chat tracks so history cannot push the composer below the viewport', async () => {
+  const chat = await source('src/views/knowledge/KnowledgeChat.vue')
+  const desktop = chat.split('@media (min-width: 1151px) {')[1]?.split('}\n}')[0] || ''
+  assert.match(desktop, /\.chat-layout\s*\{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\)/)
+  assert.match(desktop, /\.chat-context\s*\{[^}]*min-height:\s*0;[^}]*max-height:\s*100%;[^}]*overflow:\s*auto/)
+})
+
 test('mobile Wiki chat keeps its composer above the global dock', async () => {
   const [shared, chat] = await Promise.all([
     source('src/styles/knowledge.css'),
     source('src/views/knowledge/KnowledgeChat.vue'),
   ])
 
-  assert.match(shared, /\.app-main \.route-stage:has\(\.chat-layout\)\s*\{[^}]*height:\s*calc\(100dvh[^}]*var\(--mobile-navigation-height\)/)
+  assert.match(shared, /\.app-main \.route-stage:has\(\.chat-layout\)\s*\{[^}]*height:\s*calc\(var\(--visual-viewport-height, 100dvh\)[^}]*var\(--chat-dock-height\)/)
   assert.match(shared, /\.knowledge-page:has\(\.chat-layout\)\s+\.knowledge-content\s*\{[^}]*flex:\s*1/)
   assert.match(chat, /\.chat-panel\s*\{[^}]*min-height:\s*0;[^}]*flex:\s*1/)
   assert.match(chat, /\.chat-composer\s*\{[^}]*flex:\s*none/)

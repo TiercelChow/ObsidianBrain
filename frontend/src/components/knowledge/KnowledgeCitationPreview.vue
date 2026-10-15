@@ -3,7 +3,7 @@
     <div class="knowledge-modal-card citation-preview">
       <header class="knowledge-modal-head">
         <div><span>{{ preview?.kind === 'external' ? '外部资料' : '来源预览' }}</span><h3>{{ preview?.entry.title || entry?.title || '来源预览' }}</h3><p>{{ preview?.entry.source_path || entry?.source_path || '数据库实体' }}</p><p v-if="preview?.historical">本轮实际读取的历史快照 · {{ preview.version_id }}</p></div>
-        <button type="button" aria-label="关闭来源预览" @click="visible = false"><el-icon><Close /></el-icon></button>
+        <button data-icon-only type="button" aria-label="关闭来源预览" @click="visible = false"><el-icon><Close /></el-icon></button>
       </header>
       <div class="knowledge-modal-body">
         <p v-if="preview && !preview.historical" class="preview-status">当前实体版本（非本轮历史证据）</p>

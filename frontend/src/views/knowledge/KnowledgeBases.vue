@@ -7,7 +7,7 @@
     <div v-if="runningOnly || attentionOnly" class="activity-context knowledge-toolbar"><span>首页 · {{ attentionOnly ? '需要检查的知识编译' : '运行中的知识编译' }}</span><RouterLink :to="{path:'/knowledge/tasks',query:{status:attentionOnly ? 'attention' : 'running'}}">{{ attentionOnly ? '查看失败的研究 / PPT 任务' : '查看排队 / 运行中的研究任务' }}</RouterLink><button type="button" @click="router.replace('/knowledge')">显示全部知识库</button></div>
     <div class="mobile-base-actions">
       <span>{{ cards.length }} 本 Markdown 书籍</span>
-      <button type="button" class="ui-icon-action" :disabled="loading" aria-label="刷新书籍知识库" title="刷新" @click="loadCards()"><el-icon :class="{ 'is-loading': loading }"><Refresh /></el-icon></button>
+      <button data-icon-only type="button" class="ui-icon-action" :disabled="loading" aria-label="刷新书籍知识库" title="刷新" @click="loadCards()"><el-icon :class="{ 'is-loading': loading }"><Refresh /></el-icon></button>
     </div>
 
     <section v-if="cards.length" class="overview-strip knowledge-surface">
@@ -36,7 +36,15 @@
           <div class="book-card-title-row">
             <div>
               <span v-if="card.book.category" class="book-category">{{ card.book.category }}</span>
-              <h2>{{ card.book.name }}</h2>
+              <h2>
+                <RouterLink
+                  v-if="isMobile && card.knowledge_base"
+                  class="book-wiki-link"
+                  :to="{ path: '/knowledge/wiki', query: { base: card.knowledge_base.id } }"
+                  :aria-label="`打开${card.book.name}的 Wiki`"
+                >{{ card.book.name }}</RouterLink>
+                <template v-else>{{ card.book.name }}</template>
+              </h2>
             </div>
             <div class="knowledge-status-stack">
               <span
@@ -53,6 +61,7 @@
                 class="knowledge-status is-warning"
               >{{ lifecycleLabel(card.knowledge_base.lifecycle) }}</span>
             </div>
+            <button v-if="isMobile" data-icon-only class="book-more" type="button" aria-label="知识库操作" :title="`${card.book.name} · 更多操作`" aria-haspopup="dialog" :aria-expanded="actionSheetVisible && actionBookId === card.book.id" @click.stop="actionBookId = card.book.id; actionSheetVisible = true"><el-icon><MoreFilled /></el-icon></button>
           </div>
           <p v-if="card.book.description" class="book-description">{{ card.book.description }}</p>
           <p class="book-path" :title="card.book.path">{{ card.book.path }}</p>
@@ -108,7 +117,20 @@
             原书目录已失效。历史知识仍可浏览，请先在阅境轩重新添加正确目录。
           </div>
 
-          <div class="book-actions">
+          <p v-if="card.knowledge_base?.compile_error || card.knowledge_base?.last_error" class="book-error">
+            {{ card.knowledge_base.compile_error || card.knowledge_base.last_error }}
+          </p>
+        </div>
+        <footer v-if="!isMobile" class="book-actions">
+          <div class="book-utility-actions" role="group" :aria-label="`${card.book.name} · 书籍操作`">
+            <UiAction :icon="Reading" label="阅读原书" @click="$router.push({ path: '/reader', query: { book: card.book.id } })" />
+            <template v-if="card.knowledge_base">
+              <UiAction :icon="Refresh" label="同步知识库来源" :loading="busyBookId === card.book.id" :disabled="card.knowledge_base.lifecycle !== 'active' || !card.knowledge_base.source_available || card.knowledge_base.compile_state === 'compiling'" @click="sync(card)" />
+              <UiAction :icon="Tickets" label="查看编译报告" @click="reportBase = card.knowledge_base; reportVisible = true" />
+              <UiAction :icon="Setting" label="管理知识库" @click="openManage(card)" />
+            </template>
+          </div>
+          <div class="book-primary-actions">
             <el-button
               v-if="!card.knowledge_base"
               type="primary"
@@ -116,25 +138,17 @@
               @click="initialize(card)"
             >建立知识库</el-button>
             <template v-else>
-              <el-button type="primary" @click="openWiki(card.knowledge_base.id)">打开 Wiki</el-button>
               <el-button
-                class="book-secondary-action"
                 v-if="card.book.kind === 'folder' && card.knowledge_base.sync_state === 'clean' && card.knowledge_base.compile_state !== 'compiling'"
+                :icon="MagicStick"
                 :disabled="card.knowledge_base.lifecycle !== 'active' || !card.knowledge_base.source_available"
                 :loading="compilingBaseId === card.knowledge_base.id"
                 @click="compileWiki(card)"
-              ><el-icon><MagicStick /></el-icon>{{ compileActionLabel(card.knowledge_base) }}</el-button>
-              <UiAction class="book-secondary-action" :icon="Refresh" label="同步知识库来源" :loading="busyBookId === card.book.id" :disabled="card.knowledge_base.lifecycle !== 'active' || !card.knowledge_base.source_available || card.knowledge_base.compile_state === 'compiling'" @click="sync(card)" />
-              <UiAction class="book-secondary-action" :icon="Setting" label="管理知识库" @click="openManage(card)" />
-              <UiAction class="book-secondary-action" :icon="Tickets" label="查看编译报告" @click="reportBase = card.knowledge_base; reportVisible = true" />
+              >{{ compileActionLabel(card.knowledge_base) }}</el-button>
+              <el-button type="primary" @click="openWiki(card.knowledge_base.id)">打开 Wiki</el-button>
             </template>
-            <UiAction class="book-secondary-action" :icon="Reading" label="阅读原书" @click="$router.push({ path: '/reader', query: { book: card.book.id } })" />
-            <button class="mobile-book-more" type="button" aria-label="知识库操作" @click="actionBookId = card.book.id; actionSheetVisible = true"><el-icon><MoreFilled /></el-icon></button>
           </div>
-          <p v-if="card.knowledge_base?.compile_error || card.knowledge_base?.last_error" class="book-error">
-            {{ card.knowledge_base.compile_error || card.knowledge_base.last_error }}
-          </p>
-        </div>
+        </footer>
       </article>
     </TransitionGroup>
 
@@ -157,6 +171,7 @@
             <el-button @click="actionSheetVisible = false; reportBase = actionCard.knowledge_base; reportVisible = true">编译报告</el-button>
             <el-button @click="actionSheetVisible = false; openManage(actionCard)">管理知识库</el-button>
           </template>
+          <el-button v-else type="primary" :loading="busyBookId === actionCard.book.id" @click="actionSheetVisible = false; initialize(actionCard)">建立知识库</el-button>
           <el-button @click="actionSheetVisible = false; router.push({ path: '/reader', query: { book: actionCard.book.id } })">阅读原书</el-button>
           <details class="book-location"><summary>查看原书目录</summary><code>{{ actionCard.book.path }}</code></details>
         </div>
@@ -197,6 +212,7 @@ import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import KnowledgeCompileReport from '@/components/knowledge/KnowledgeCompileReport.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import UiAction from '@/components/motion/UiAction'
+import { usePhoneViewport } from '@/composables/usePhoneViewport'
 import { freezeCollectionLeave, resetCollectionEnter } from '@/utils/collectionMotion'
 import { canFocusDocument } from '@/utils/modalFocusPolicy'
 import {
@@ -212,6 +228,7 @@ import {
 } from '@/api/knowledge'
 
 const router = useRouter()
+const { isMobile } = usePhoneViewport()
 const cards = ref<BookKnowledgeCard[]>([])
 let pageAlive = true
 const runningOnly = computed(() => router.currentRoute.value.query.activity === 'running')
@@ -470,7 +487,6 @@ onBeforeUnmount(() => {
 .activity-context { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; font-size:13px; }
 .activity-context a,.activity-context button { color:var(--text-secondary); min-height:44px; display:inline-flex; align-items:center; background:none; border:0; font:inherit; cursor:pointer; }
 .mobile-base-actions { display: none; }
-.mobile-book-more { display: none; }
 .book-action-sheet .el-button { width: 100%; min-height: 48px; height: auto; margin: 0; padding: 12px; justify-content: flex-start; white-space: normal; }
 .book-location { min-width: 0; color: var(--text-muted); font-size: 13px; }
 .book-location summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
@@ -509,8 +525,11 @@ onBeforeUnmount(() => {
 .compile-controls .el-button { margin: 0; }
 .book-uninitialized { margin-top: 13px; padding: 9px 11px; border-radius: 10px; background: var(--bg-glass-subtle); color: var(--text-faint); font-size: 11px; line-height: 1.55; }
 .book-uninitialized.is-warning { color: #b56600; background: color-mix(in srgb, #ff9f0a 10%, var(--bg-glass-subtle)); }
-.book-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 15px; }
-.book-actions .el-button + .el-button { margin-left: 0; }
+.book-actions { grid-column: 1 / -1; align-self: end; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; padding-top: 4px; }
+.book-utility-actions { min-width: 0; display: flex; align-items: center; gap: 2px; }
+.book-utility-actions .ui-action { width: 36px; min-width: 36px; height: 36px; min-height: 36px; }
+.book-primary-actions { min-width: 0; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-inline-start: auto; }
+.book-primary-actions .el-button { min-height: 36px; height: auto; margin: 0; padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 18px; }
 .book-error { margin-top: 10px; overflow-wrap: anywhere; color: #d52d25; font-size: 11px; }
 .empty-orb { width: 62px; height: 62px; display: grid; place-items: center; border-radius: 20px; background: var(--accent-light); color: var(--accent); font-size: 28px; }
 .manage-modal { display: flex; flex-direction: column; }
@@ -523,6 +542,7 @@ onBeforeUnmount(() => {
 @keyframes knowledge-card-in { from { opacity: 0; transform: translateY(12px) scale(.985); } to { opacity: 1; transform: none; } }
 @keyframes compile-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 32%, transparent); } 70%, 100% { box-shadow: 0 0 0 8px transparent; } }
 @media (prefers-reduced-motion: reduce) { .compile-phase-dot { animation: none; } }
+@media (min-width: 769px) { .book-wiki-card { grid-template-rows: minmax(0, 1fr) auto; } }
 @media (max-width: 1050px) { .book-wiki-grid { grid-template-columns: 1fr; } }
 @media (max-width: 768px) {
   .mobile-base-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--text-faint); font-size: 12px; }
@@ -533,23 +553,25 @@ onBeforeUnmount(() => {
   .overview-strip > div:first-child { padding-left: 4px; }
   .overview-strip strong { font-size: 21px; }
   .overview-strip span { font-size: 10px; }
-  .book-wiki-card { grid-template-columns: 44px minmax(0, 1fr); gap: 10px 12px; padding: 14px; }
+  .book-wiki-card { position: relative; grid-template-columns: 44px minmax(0, 1fr); gap: 10px 12px; padding: 14px; }
+  .book-wiki-link { color: inherit; text-decoration: none; }
+  .book-wiki-link::after { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit; cursor: pointer; }
+  .book-wiki-link:focus-visible { outline: none; box-shadow: none !important; }
+  .book-wiki-card:has(.book-wiki-link:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .compile-controls > * { position: relative; z-index: 2; }
   .book-cover { grid-row: 1; height: 60px; border-radius: 10px; gap: 3px; }
   .book-cover .el-icon { font-size: 21px; }
   .book-card-main { display: contents; }
   .book-card-main > * { min-width: 0; grid-column: 1 / -1; }
   .book-card-main > .book-card-title-row { grid-column: 2; }
-  .book-card-title-row { display: block; }
+  .book-card-title-row { display: block; padding-inline-end: 44px; }
   .book-card-title-row h2 { margin-top: 0; font-size: 17px; line-height: 1.45; }
   .knowledge-status-stack { max-width: 100%; display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 4px; margin-top: 6px; }
   .knowledge-status-stack .knowledge-status { font-size: 10px; padding: 3px 7px; }
-  .book-description, .book-stats, .book-actions { margin-top: 0; }
+  .book-description, .book-stats { margin-top: 0; }
   .book-stats { gap: 6px 12px; }
   .compile-activity { grid-column: 1 / -1; }
-  .book-actions { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
-  .book-actions .el-button { width: 100%; min-height: 44px; height: auto; margin: 0; }
-  .book-actions .book-secondary-action { display: none; }
-  .mobile-book-more { min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 14px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); color: var(--text-secondary); font: inherit; cursor: pointer; }
+  .book-more { position: absolute; top: 8px; right: 8px; z-index: 2; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--text-muted); font-size: 20px; cursor: pointer; }
   .compile-controls .el-button, .manage-actions .el-button, .delete-zone .el-button { min-height: 44px; height: auto; }
   .compile-phase p, .compile-meta { font-size: 12px; }
 }

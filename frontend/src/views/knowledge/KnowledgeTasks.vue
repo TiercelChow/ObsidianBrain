@@ -1,14 +1,14 @@
 <template>
   <KnowledgePageShell title="研究任务">
     <template #actions>
-      <el-button type="primary" class="ui-icon-action" aria-label="新建研究任务" title="新建研究任务" :disabled="!bases.length" @click="openCreate"><el-icon><Plus /></el-icon></el-button>
+      <el-button data-icon-only type="primary" class="ui-icon-action" aria-label="新建研究任务" title="新建研究任务" :disabled="!bases.length" @click="openCreate"><el-icon><Plus /></el-icon></el-button>
     </template>
 
     <div class="task-filter knowledge-toolbar">
       <el-select v-model="filterBaseId" class="knowledge-select is-responsive" popper-class="system-select-popper system-toolbar-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="全部知识库" clearable @change="loadTasks()">
         <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
       </el-select>
-      <button class="mobile-create-task" type="button" aria-label="新建研究任务" :disabled="!bases.length" @click="openCreate"><el-icon><Plus /></el-icon></button>
+      <button data-icon-only class="mobile-create-task" type="button" aria-label="新建研究任务" :disabled="!bases.length" @click="openCreate"><el-icon><Plus /></el-icon></button>
       <div class="task-summary">{{ tasks.length }} 项任务</div>
     </div>
 
@@ -19,7 +19,10 @@
         <div class="task-kind" :class="`is-${task.task_type}`"><el-icon><component :is="taskIcon(task.task_type)" /></el-icon></div>
         <div class="task-main">
           <div class="task-topline"><span>{{ task.book_name }}</span><span class="knowledge-status" :class="`is-${task.status}`">{{ statusLabel(task.status) }}</span></div>
-          <h2>{{ task.title }}</h2>
+          <div class="task-title-row">
+            <h2>{{ task.title }}</h2>
+            <UiAction class="task-view-action" :icon="View" label="查看阶段与成果" :loading="loadingResultId === task.id" @click="openTaskDetails(task)" />
+          </div>
           <p v-if="task.description">{{ task.description }}</p>
           <div v-if="task.brief?.confirmed" class="task-brief-summary">{{ briefSummary(task.brief, task.deliverable_type) }}</div>
           <UiAction v-if="task.status === 'draft'" :icon="Edit" label="编辑研究简报" :disabled="creating || Boolean(executingTaskId)" @click="openEditBrief(task)" />
@@ -29,12 +32,10 @@
           <p v-if="task.result_summary" class="task-result-preview">{{ taskResultPreview(task.result_summary) }}</p>
           <footer><span>{{ typeLabel(task.task_type) }}</span><span>{{ task.deliverable_type === 'presentation' ? 'PPTX 演示文稿' : '研究报告' }}</span><span v-if="task.external_research_enabled">外部资料 {{ task.external_requests_used }}/{{ task.external_request_limit }}</span><span v-if="task.knowledge_change_state === 'proposed'">待知识审核</span><time>{{ formatDate(task.updated_at) }}</time></footer>
         </div>
-        <div class="task-card-actions">
-          <UiAction :icon="View" label="查看阶段与成果" @click="openStages(task)" />
+        <div v-if="task.status !== 'completed' && task.status !== 'failed'" class="task-card-actions">
           <button class="task-action" type="button" :class="{ 'is-cancel': task.status === 'running' || task.status === 'queued' }" :aria-label="taskActionLabel(task)" :disabled="(Boolean(executingTaskId) && executingTaskId !== task.id) || Boolean(loadingResultId)" @click="runOrOpen(task)">
             <el-icon :class="{ 'is-loading': task.status === 'running' || executingTaskId === task.id || loadingResultId === task.id }">
               <Loading v-if="task.status === 'running' || executingTaskId === task.id || loadingResultId === task.id" />
-              <View v-else-if="task.status === 'completed'" />
               <VideoPlay v-else />
             </el-icon>
             <span>{{ taskActionLabel(task) }}</span>
@@ -131,13 +132,12 @@
           <div class="task-result-content">
             <KnowledgeAnswerMarkdown :content="reportContent" :evidence-count="activeEvidence.length" @citation="openEvidence" />
           </div>
-          <div v-if="activeArtifacts.length" class="task-artifacts">
+          <div v-if="activeArtifacts.length" class="task-artifacts" aria-label="研究成果下载">
             <article v-for="artifact in activeArtifacts" :key="artifact.id" class="artifact-card">
               <div class="artifact-main-row">
                 <span class="artifact-icon"><el-icon><Download /></el-icon></span>
                 <span class="artifact-copy"><b>{{ artifact.title }}</b><small>{{ formatBytes(artifact.size_bytes) }} · {{ artifact.validation_message }}</small></span>
-                <UiAction v-if="artifact.agent_run_id" :icon="View" label="查看演示文稿策划过程" @click="inspectArtifact(artifact)" />
-                <a class="ui-icon-action" :href="knowledgeArtifactDownloadUrl(artifact.id)" download aria-label="下载演示文稿" title="下载演示文稿"><el-icon><Download /></el-icon></a>
+                <a data-icon-only class="ui-icon-action" :href="knowledgeArtifactDownloadUrl(artifact.id)" download :aria-label="`下载演示文稿：${artifact.title}`" :title="artifact.title"><el-icon><Download /></el-icon></a>
               </div>
               <div v-if="artifactQuality(artifact)" class="artifact-quality" aria-label="演示文稿质量摘要">
                 <span><b>{{ artifactQuality(artifact)?.slide_count }}</b><small>总页数</small></span>
@@ -609,13 +609,18 @@ async function createTask() {
   }
 }
 
+function openTaskDetails(task: KnowledgeTask) {
+  if (task.status === 'completed' || (task.status === 'failed' && task.artifact_state === 'failed')) void openResult(task)
+  else if (task.status === 'failed') void openFailedInspection(task)
+  else openStages(task)
+}
+
 function runOrOpen(task: KnowledgeTask) {
   if (task.status === 'running' || task.status === 'queued') {
     void cancelTask(task)
     return
   }
-  if (task.status === 'completed' || (task.status === 'failed' && task.artifact_state === 'failed')) openResult(task)
-  else if (task.status === 'failed') openFailedInspection(task)
+  if (task.status === 'completed' || task.status === 'failed') openTaskDetails(task)
   else runTask(task)
 }
 
@@ -717,13 +722,6 @@ function showResult(result: KnowledgeTaskExecution) {
   void loadRunInspection(result.run_id)
 }
 
-function inspectArtifact(artifact: KnowledgeArtifact) {
-  if (!artifact.agent_run_id) return
-  activeRunId.value = artifact.agent_run_id
-  resultTab.value = 'inspector'
-  void loadRunInspection(artifact.agent_run_id)
-}
-
 function artifactQuality(artifact: KnowledgeArtifact) {
   const details = artifact.validation_details
   return typeof details?.slide_count === 'number'
@@ -819,9 +817,9 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
 <style scoped>
 .task-filter { margin-bottom: 12px; }
 .task-summary { color: var(--text-faint); font-size: 12px; }
-.task-card-actions { min-width: 0; display: grid; gap: 8px; }
+.task-card-actions { min-width: 0; grid-column: 2; justify-self: end; }
 .research-task-list { display: grid; gap: 9px; }
-.research-task { display: grid; grid-template-columns: 52px minmax(0, 1fr) minmax(96px, auto); align-items: center; gap: 15px; padding: 16px 17px; animation: task-in var(--motion-normal) var(--ease-spring-gentle) both; animation-delay: calc(var(--order) * 30ms); }
+.research-task { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: start; gap: 12px 15px; padding: 16px 17px; animation: task-in var(--motion-normal) var(--ease-spring-gentle) both; animation-delay: calc(var(--order) * 30ms); }
 .task-kind { width: 52px; height: 52px; display: grid; place-items: center; border-radius: 16px; background: var(--accent-light); color: var(--accent); font-size: 22px; }
 .task-kind.is-refresh { background: color-mix(in srgb, #32ade6 13%, transparent); color: #1685b8; }
 .task-kind.is-review { background: color-mix(in srgb, #34c759 13%, transparent); color: #248a3d; }
@@ -829,6 +827,9 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
 .task-topline { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 9px; color: var(--accent); font-size: 10px; font-weight: 650; }
 .task-topline > span:first-child { min-width: 0; overflow-wrap: anywhere; }
 .task-main h2 { margin: 5px 0 4px; overflow-wrap: anywhere; font-size: 16px; }
+.task-title-row { min-width: 0; display: flex; align-items: center; gap: 12px; margin: 4px 0; }
+.task-title-row h2 { min-width: 0; flex: 1; margin: 0; }
+.task-view-action { flex: none; }
 .task-main > p { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; color: var(--text-muted); font-size: 12px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .task-main > p.task-result-preview { margin-top: 6px; color: var(--text-faint); font-size: 11px; }
 .task-live { display: flex; align-items: center; gap: 7px; margin-top: 7px; color: var(--accent); font-size: 11px; font-weight: 620; }
@@ -905,13 +906,13 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
 .research-recovery-advice p { margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.6; }
 .task-artifacts { display: grid; gap: 8px; }
 .artifact-card { overflow: hidden; border: 1px solid var(--accent-border); border-radius: 14px; background: var(--accent-light); }
-.artifact-main-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 10px 12px; }
+.artifact-main-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 12px; }
 .artifact-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; background: var(--accent); color: white; font-size: 18px; }
 .artifact-copy { min-width: 0; display: grid; gap: 3px; }
 .artifact-copy b, .artifact-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artifact-copy b { font-size: 12px; }
 .artifact-copy small { color: var(--text-faint); font-size: 9px; }
-.artifact-main-row > button, .artifact-main-row > a { min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 9px; border: 0; border-radius: 9px; background: color-mix(in srgb, var(--bg-base) 48%, transparent); color: var(--accent); font: inherit; font-size: 10px; font-weight: 700; text-decoration: none; cursor: pointer; }
+.artifact-main-row > a { min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 9px; border: 0; border-radius: 9px; background: color-mix(in srgb, var(--bg-base) 48%, transparent); color: var(--accent); font: inherit; font-size: 10px; font-weight: 700; text-decoration: none; cursor: pointer; }
 .artifact-quality { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; border-top: 1px solid var(--accent-border); background: var(--accent-border); }
 .artifact-quality span { min-width: 0; display: grid; gap: 2px; padding: 9px 11px; background: color-mix(in srgb, var(--bg-base) 74%, transparent); }
 .artifact-quality b { overflow: hidden; color: var(--text-primary); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
@@ -977,10 +978,8 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
 @keyframes task-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes task-live-pulse { 60%, 100% { box-shadow: 0 0 0 7px transparent; } }
 @media (min-width: 769px) and (max-width: 1100px) {
-  .research-task { grid-template-columns: 44px minmax(0, 1fr) 42px; gap: 10px; }
+  .research-task { grid-template-columns: 44px minmax(0, 1fr); gap: 10px; }
   .task-kind { width: 44px; height: 44px; }
-  .task-action { width: 42px; min-height: 42px; padding: 0; }
-  .task-action span { display: none; }
 }
 @media (max-width: 768px) {
   .research-readiness-state { font-size: 12px; }
@@ -1000,7 +999,7 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
   .research-task { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 14px; }
   .task-kind { display: none; }
   .task-main { grid-column: 1 / -1; }
-  .task-card-actions { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding-top: 10px; border-top: 1px solid var(--border-faint); }
+  .task-card-actions { grid-column: 1 / -1; justify-self: stretch; padding-top: 10px; border-top: 1px solid var(--border-faint); }
   .task-action { width: 100%; min-height: 44px; padding: 8px; border-radius: 11px; font-size: 13px; }
   .task-action span { display: inline; }
   .task-main > p { font-size: 14px; }
@@ -1016,9 +1015,7 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
   .task-result-modal .knowledge-modal-head { flex-wrap: wrap; gap: 8px; }
   .task-result-heading { flex: 1 1 100%; }
   .task-result-scroll { padding: 0 16px max(24px, env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; }
-  .artifact-main-row { grid-template-columns: 38px minmax(0, 1fr) auto; }
-  .artifact-main-row > button { grid-column: 2; justify-self: start; }
-  .artifact-main-row > a { grid-column: 3; grid-row: 1 / 3; min-height: 38px; }
+  .artifact-main-row > a { min-height: 44px; }
   .artifact-quality { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .run-inspector-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .run-skill-list { grid-template-columns: 1fr; }
