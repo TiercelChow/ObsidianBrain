@@ -6,7 +6,7 @@
       </div>
       <div class="header-actions">
         <UiAction :icon="Refresh" label="刷新仓库" :loading="loading" @click="loadRepos" />
-        <el-button type="primary" class="ui-icon-action" aria-label="注册仓库" title="注册仓库" @click="showAddDialog = true">
+        <el-button data-icon-only type="primary" class="ui-icon-action" aria-label="注册仓库" title="注册仓库" @click="showAddDialog = true">
           <el-icon><Plus /></el-icon>
         </el-button>
       </div>
@@ -39,7 +39,7 @@
     </TransitionGroup>
 
     <el-empty v-else-if="!loading" description="暂无注册的代码仓库">
-      <el-button type="primary" class="ui-icon-action" aria-label="注册第一个仓库" title="注册仓库" @click="showAddDialog = true"><el-icon><Plus /></el-icon></el-button>
+      <el-button data-icon-only type="primary" class="ui-icon-action" aria-label="注册第一个仓库" title="注册仓库" @click="showAddDialog = true"><el-icon><Plus /></el-icon></el-button>
     </el-empty>
 
     <!-- 仓库详情对话框 -->

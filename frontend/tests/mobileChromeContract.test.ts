@@ -48,7 +48,7 @@ test('reader file search reuses the original centered path dialog instead of a d
 test('reader routes folder changes through the shelf and keeps read controls focused', async () => {
   const reader = await source('src/views/Reader.vue')
 
-  assert.match(reader, /class="path-trigger reader-file-search-trigger"[^>]*@click="openFileSearch"/)
+  assert.match(reader, /class="path-trigger reader-file-search-trigger reader-search-field"[^>]*@click="openFileSearch"/)
   assert.match(reader, /class="icon-btn reader-fullscreen-btn"/)
   assert.match(reader, /@click="openMobileFilePicker"/)
   assert.match(reader, /function openFileSearch\(\) \{[\s\S]*?if \(!rootPath\.value\) \{[\s\S]*?changeView\('shelf'\)/)

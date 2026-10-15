@@ -3,8 +3,8 @@
     <header class="page-header">
       <div><h1 class="page-title">首页</h1><p class="page-subtitle">{{ dateLabel }}</p></div>
       <div class="header-actions">
-        <el-button class="home-theme-action ui-icon-action" @click="appStore.toggleTheme()" :title="`切换主题，当前${themeName}`" :aria-label="`切换主题，当前${themeName}`"><el-icon><component :is="themeIcon" /></el-icon></el-button>
-        <el-button class="ui-icon-action" @click="loadOverview()" :loading="loading" aria-label="刷新工作台" title="刷新工作台"><el-icon v-if="!loading"><Refresh /></el-icon></el-button>
+        <el-button data-icon-only class="home-theme-action ui-icon-action" @click="appStore.toggleTheme()" :title="`切换主题，当前${themeName}`" :aria-label="`切换主题，当前${themeName}`"><el-icon><component :is="themeIcon" /></el-icon></el-button>
+        <el-button data-icon-only class="ui-icon-action" @click="loadOverview()" :loading="loading" aria-label="刷新工作台" title="刷新工作台"><el-icon v-if="!loading"><Refresh /></el-icon></el-button>
       </div>
     </header>
     <div class="workbench-heading"><span>今日关注</span><small v-if="overview">{{ error ? '更新失败 · 显示上次结果' : `更新于 ${updatedLabel}` }}</small></div>

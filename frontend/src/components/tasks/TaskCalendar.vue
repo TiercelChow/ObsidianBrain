@@ -6,9 +6,9 @@
         <span>{{ currentMonthTaskCount }} 项安排</span>
       </div>
       <div class="calendar-nav">
-        <button type="button" aria-label="上个月" @click="requestMonthShift(-1)">‹</button>
+        <button data-icon-only type="button" aria-label="上个月" @click="requestMonthShift(-1)">‹</button>
         <button type="button" class="today-button" @click="$emit('today')">今天</button>
-        <button type="button" aria-label="下个月" @click="requestMonthShift(1)">›</button>
+        <button data-icon-only type="button" aria-label="下个月" @click="requestMonthShift(1)">›</button>
       </div>
     </header>
 
@@ -80,7 +80,7 @@
             <strong>{{ selectedDateLabel }}</strong>
             <span>{{ selectedRootCount ? `${selectedRootCount} 项任务` : '暂无安排' }}</span>
           </div>
-          <button type="button" class="ui-icon-action" aria-label="新建任务" title="新建任务" @click="$emit('create', selectedDate)">＋</button>
+          <button data-icon-only type="button" class="ui-icon-action" aria-label="新建任务" title="新建任务" @click="$emit('create', selectedDate)">＋</button>
         </div>
         <div class="agenda-body">
           <TransitionGroup name="agenda-item" tag="div" class="agenda-list">
@@ -99,7 +99,7 @@
                 </span>
               </button>
               <span class="agenda-progress">{{ entry.task.progress_percent }}%</span>
-              <button
+              <button data-icon-only
                 v-if="entry.depth === 0 && entry.hasChildren"
                 type="button"
                 class="agenda-expand"

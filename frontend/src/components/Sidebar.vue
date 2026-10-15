@@ -194,13 +194,13 @@ function isActive(path: string) {
 }
 
 .nav-group { display: flex; flex-direction: column; gap: 2px; }
-.nav-group + .nav-group { margin-top: 8px; }
+.nav-group + .nav-group { margin-top: 4px; }
 .nav-group-label {
-  height: 28px;
+  height: 22px;
   flex: none;
   display: flex;
   align-items: center;
-  padding: 6px 12px 4px;
+  padding: 4px 12px 2px;
   color: var(--text-faint);
   font-size: 11px;
   font-weight: 700;
@@ -309,6 +309,7 @@ function isActive(path: string) {
 
 /* Keep grid participants mounted: label fading never re-centers the icons. */
 @media (min-width: 769px) {
+  .sidebar.collapsed .nav-group-label { height: 0; padding-block: 0; }
   .logo-name, .nav-label, .nav-group-label {
     transition: opacity var(--motion-fast) var(--ease-emphasized),
                 visibility 0s;

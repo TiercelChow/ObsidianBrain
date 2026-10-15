@@ -18,10 +18,18 @@ test('collapsing fades labels in place instead of removing layout participants',
   const source = await sidebar()
   assert.doesNotMatch(source, /v-show="!isCollapsed"/)
   assert.doesNotMatch(source, /<transition name="(?:logo-text|nav-label)"/)
-  assert.match(source, /\.nav-group-label\s*\{[^}]*height:\s*28px/)
+  assert.match(source, /\.nav-group-label\s*\{[^}]*height:\s*22px/)
   assert.match(source, /:aria-expanded="!isCollapsed"/)
   assert.match(source, /:aria-label="item.label"/)
   assert.match(source, /ref="navListRef"/)
+})
+
+test('sidebar group spacing stays compact and hidden rail headings leave no empty row', async () => {
+  const source = await sidebar()
+  assert.match(source, /\.nav-group \+ \.nav-group\s*\{[^}]*margin-top:\s*4px/)
+  assert.match(source, /\.sidebar\.collapsed \.nav-group-label\s*\{[^}]*height:\s*0;[^}]*padding-block:\s*0/)
+  assert.match(source, /watch\(isCollapsed, updateActiveIndicator\)/)
+  assert.doesNotMatch(source, /\.sidebar\.collapsed \.nav-group-label\s*\{[^}]*display:\s*none/)
 })
 
 test('desktop rail preserves its layout without obsolete mobile module-sheet controls', async () => {

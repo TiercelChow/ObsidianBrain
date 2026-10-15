@@ -26,17 +26,17 @@
         <button type="button" :class="{ active: viewMode === 'shelf' }" @click="changeView('shelf')">书架</button>
         <button type="button" :class="{ active: viewMode === 'read' }" @click="changeView('read')">阅读</button>
       </div>
-      <div v-show="viewMode === 'shelf'" class="shelf-search glass-surface" role="search">
+      <div v-show="viewMode === 'shelf'" class="shelf-search glass-surface reader-search-field" role="search">
         <el-icon class="shelf-search-icon"><Search /></el-icon>
         <input v-model="shelfQuery" type="search" aria-label="搜索书籍" placeholder="搜索书名、描述或类别" />
-        <button v-if="shelfQuery" type="button" class="shelf-search-clear" aria-label="清除搜索" @click="shelfQuery = ''">×</button>
+        <button data-icon-only v-if="shelfQuery" type="button" class="shelf-search-clear" aria-label="清除搜索" @click="shelfQuery = ''">×</button>
       </div>
-      <button v-show="viewMode === 'shelf'" type="button" class="reader-shelf-add ui-icon-action" aria-label="添加书籍" title="添加书籍" @click="bookshelfRef?.openAdd()">
+      <button data-icon-only v-show="viewMode === 'shelf'" type="button" class="reader-shelf-add ui-icon-action" aria-label="添加书籍" title="添加书籍" @click="bookshelfRef?.openAdd()">
         <el-icon><Plus /></el-icon>
       </button>
       <button
         v-show="viewMode === 'read'"
-        class="path-trigger reader-file-search-trigger"
+        class="path-trigger reader-file-search-trigger reader-search-field"
         :aria-label="rootPath ? '搜索当前目录文件' : '返回书架选择书籍'"
         @click="openFileSearch"
       >
@@ -45,11 +45,11 @@
         <span v-else class="pt-hint">请先从书架选择书籍</span>
       </button>
       <div v-if="viewMode === 'read' && fileKind === 'pdf' && displayedFile" class="reader-pdf-controls" aria-label="PDF 缩放">
-        <button type="button" class="icon-btn" aria-label="缩小 PDF" :disabled="pdfZoomRatio <= .6" @click="setPdfZoom(-1)"><el-icon><Minus /></el-icon></button>
+        <button data-icon-only type="button" class="icon-btn" aria-label="缩小 PDF" :disabled="pdfZoomRatio <= .6" @click="setPdfZoom(-1)"><el-icon><Minus /></el-icon></button>
         <button type="button" class="pdf-fit-btn" aria-label="PDF 适宽" title="恢复整页适宽" @click="fitPdf">{{ Math.round(pdfZoomRatio * 100) }}%</button>
-        <button type="button" class="icon-btn" aria-label="放大 PDF" :disabled="pdfZoomRatio >= 4" @click="setPdfZoom(1)"><el-icon><Plus /></el-icon></button>
+        <button data-icon-only type="button" class="icon-btn" aria-label="放大 PDF" :disabled="pdfZoomRatio >= 4" @click="setPdfZoom(1)"><el-icon><Plus /></el-icon></button>
       </div>
-      <el-button v-show="viewMode === 'read'" class="icon-btn reader-fullscreen-btn" :title="isImmersive ? '退出沉浸阅读' : '沉浸阅读'" @click="toggleFullscreen">
+      <el-button data-icon-only v-show="viewMode === 'read'" class="icon-btn reader-fullscreen-btn" :title="isImmersive ? '退出沉浸阅读' : '沉浸阅读'" @click="toggleFullscreen">
         <el-icon><FullScreen /></el-icon>
       </el-button>
     </div>
@@ -83,9 +83,9 @@
                   <div class="pane-title">搜索文件</div>
                   <small :title="rootPath">{{ rootPath }}</small>
                 </div>
-                <button type="button" class="reader-search-close" aria-label="关闭文件搜索" @click="fileSearchOpen = false">×</button>
+                <button data-icon-only type="button" class="reader-search-close" aria-label="关闭文件搜索" @click="fileSearchOpen = false">×</button>
               </div>
-              <label class="reader-file-search glass-surface">
+              <label class="reader-file-search glass-surface reader-search-field">
                 <el-icon><Search /></el-icon>
                 <input
                   ref="fileSearchInputRef"
@@ -97,7 +97,7 @@
                   placeholder="输入文件名或路径"
                   @keydown.escape="fileSearchOpen = false"
                 />
-                <button v-if="fileSearchQuery" type="button" aria-label="清除文件搜索" @click="fileSearchQuery = ''">×</button>
+                <button data-icon-only v-if="fileSearchQuery" type="button" aria-label="清除文件搜索" @click="fileSearchQuery = ''">×</button>
               </label>
               <p v-if="fileSearchQuery" class="reader-search-count">找到 {{ fileSearchResults.length }} 个可阅读文件</p>
               <ul v-if="fileSearchResults.length" class="reader-search-results">
@@ -133,7 +133,7 @@
       <aside class="pane pane-left" data-glass="structural">
         <div class="pane-title-bar">
           <span class="pane-title-text">文件</span>
-          <button v-if="tree.length" class="pane-title-btn" title="刷新目录" @click="refreshTree">
+          <button data-icon-only v-if="tree.length" class="pane-title-btn" title="刷新目录" @click="refreshTree">
             <el-icon :size="14"><Refresh /></el-icon>
           </button>
         </div>
@@ -236,7 +236,7 @@
       @pointerdown="revealMobileToolbar"
     >
       <div class="mobile-toolbar-side mobile-toolbar-left">
-        <button
+        <button data-icon-only
           type="button"
           :aria-label="!rootPath ? '返回书架选择书籍' : mobileToolbarState.pinned ? '选择文章' : '打开文件列表'"
           :title="!rootPath ? '返回书架' : mobileToolbarState.pinned ? '选择文章' : '文件'"
@@ -244,7 +244,7 @@
         >
           <el-icon><FolderOpened /></el-icon>
         </button>
-        <button type="button" aria-label="切换沉浸阅读" :title="isImmersive ? '退出沉浸阅读' : '沉浸阅读'" @click="toggleFullscreen">
+        <button data-icon-only type="button" aria-label="切换沉浸阅读" :title="isImmersive ? '退出沉浸阅读' : '沉浸阅读'" @click="toggleFullscreen">
           <el-icon><FullScreen /></el-icon>
         </button>
       </div>
@@ -264,18 +264,18 @@
       </div>
       <div class="mobile-toolbar-side mobile-toolbar-right">
         <template v-if="fileKind === 'pdf' && displayedFile">
-          <button type="button" aria-label="缩小 PDF" title="缩小" :disabled="pdfZoomRatio <= .6" @click="setPdfZoom(-1)">
+          <button data-icon-only type="button" aria-label="缩小 PDF" title="缩小" :disabled="pdfZoomRatio <= .6" @click="setPdfZoom(-1)">
             <el-icon><Minus /></el-icon>
           </button>
-          <button type="button" aria-label="放大 PDF" title="放大" :disabled="pdfZoomRatio >= 4" @click="setPdfZoom(1)">
+          <button data-icon-only type="button" aria-label="放大 PDF" title="放大" :disabled="pdfZoomRatio >= 4" @click="setPdfZoom(1)">
             <el-icon><Plus /></el-icon>
           </button>
         </template>
         <template v-else>
-          <button type="button" aria-label="打开文章目录" title="目录" @click="tocDrawer = true">
+          <button data-icon-only type="button" aria-label="打开文章目录" title="目录" @click="tocDrawer = true">
             <el-icon><Menu /></el-icon>
           </button>
-          <button type="button" aria-label="搜索当前目录文件" title="搜索文件" @click="openFileSearch">
+          <button data-icon-only type="button" aria-label="搜索当前目录文件" title="搜索文件" @click="openFileSearch">
             <el-icon><Search /></el-icon>
           </button>
         </template>
@@ -313,7 +313,7 @@
     </MotionDrawer>
     <!-- Floating fullscreen UI (auto-hides) -->
     <div v-if="isImmersive" class="fs-ui" :class="{ hidden: isFullscreen && !showFsUI }">
-      <button class="fs-fab" :title="isFullscreen ? '退出全屏 (Esc)' : '退出沉浸阅读'" @click="toggleFullscreen">
+      <button data-icon-only class="fs-fab" :title="isFullscreen ? '退出全屏 (Esc)' : '退出沉浸阅读'" @click="toggleFullscreen">
         <el-icon :size="20"><FullScreen /></el-icon>
       </button>
     </div>
@@ -1617,33 +1617,34 @@ onBeforeRouteLeave(() => { flushProgressNow() })
   border-radius: 18px;
 }
 .reader-shelf-add { display: none; }
-/* Book search pill — task-search metrics (nested glass inside the toolbar). */
-.shelf-search {
-  flex: 1;
-  min-width: 170px;
-  height: 40px;
+/* Shelf, reading trigger and dialog use one nested search control. */
+.reader-search-field {
+  min-width: 0;
+  height: 44px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 0 14px;
+  border: 1px solid var(--border-glass);
   border-radius: 12px;
   color: var(--text-faint);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.4;
   transition: background-color var(--motion-fast) var(--ease-emphasized),
     border-color var(--motion-fast) var(--ease-emphasized),
     box-shadow var(--motion-fast) var(--ease-emphasized);
 }
-.shelf-search:focus-within {
-  background: var(--bg-glass-strong);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.03);
-}
-.shelf-search-icon {
+.reader-search-field > .el-icon {
   flex: none;
+  font-size: 16px;
   color: var(--text-faint);
   transition: color var(--motion-fast) var(--ease-emphasized);
 }
-.shelf-search:focus-within .shelf-search-icon { color: var(--accent); }
-.shelf-search input {
-  width: 100%;
+.reader-search-field:focus-within > .el-icon { color: var(--accent); }
+.reader-search-field input {
+  flex: 1;
   min-width: 0;
   padding: 0;
   border: 0;
@@ -1653,50 +1654,36 @@ onBeforeRouteLeave(() => { flushProgressNow() })
   background: transparent;
   color: var(--text-primary);
   font: inherit;
-  font-size: 14px;
 }
-.shelf-search input::-webkit-search-cancel-button { display: none; }
-.shelf-search input::placeholder { color: var(--text-faint); }
-.shelf-search-clear {
-  width: 22px;
-  height: 22px;
+.reader-search-field input::-webkit-search-cancel-button { display: none; }
+.reader-search-field input::placeholder { color: var(--text-faint); }
+.reader-search-field button {
+  width: 44px;
+  height: 42px;
   flex: none;
   display: grid;
   place-items: center;
+  margin-inline: -4px -14px;
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: var(--border-faint);
+  background: transparent;
   color: var(--text-muted);
-  font-size: 13px;
+  font: inherit;
+  font-size: 20px;
   line-height: 1;
   cursor: pointer;
   transition: color var(--motion-fast) ease, background var(--motion-fast) ease,
     transform var(--motion-instant) ease;
 }
-.shelf-search-clear:active { transform: scale(0.9); }
+.reader-search-field button:active { transform: scale(0.9); }
+.shelf-search { flex: 1; min-width: 170px; }
 .path-trigger {
-  flex: 1; display: flex; align-items: center; gap: 8px;
-  min-height: 40px; padding: 0 14px; border-radius: 12px;
-  border: 1px solid var(--border-glass);
-  background: var(--bg-glass);
-  backdrop-filter: var(--glass-floating-filter);
-  -webkit-backdrop-filter: var(--glass-floating-filter);
-  color: var(--text-muted); font-size: 14px;
+  flex: 1;
   cursor: pointer; text-align: left;
-  transition: color var(--motion-fast) var(--ease-emphasized),
-              background-color var(--motion-fast) var(--ease-emphasized),
-              border-color var(--motion-fast) var(--ease-emphasized),
-              transform var(--motion-instant) var(--ease-emphasized),
-              box-shadow var(--motion-fast) var(--ease-emphasized);
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
-.path-trigger:hover { background: var(--bg-hover); color: var(--text-secondary); border-color: var(--accent-border); }
-.pt-name { font-weight: 600; color: var(--text-primary); flex-shrink: 0; }
-.pt-path { color: var(--text-faint); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
-.pt-hint { color: var(--text-faint); }
-.path-trigger:hover { background: var(--bg-hover); color: var(--text-secondary); border-color: var(--accent-border); }
-/* Fullscreen tile — 40px glass square matching the path pill beside it
+.pt-path, .pt-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Fullscreen tile — compact glass square beside directory search
    (colors ride Element Plus button vars so hover/active stay native). */
 .reader-topbar .icon-btn {
   --el-button-bg-color: var(--bg-glass);
@@ -1902,11 +1889,6 @@ onBeforeRouteLeave(() => { flushProgressNow() })
 .reader-search-header .pane-title { padding: 0; margin: 0 0 2px; border: 0; font-size: 17px; color: var(--text-primary); }
 .reader-search-header small { display: block; max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-size: 11px; }
 .reader-search-close { width: 44px; height: 44px; display: grid; place-items: center; flex: none; padding: 0; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); color: var(--text-muted); font: inherit; font-size: 23px; }
-.reader-file-search { height: 46px; display: flex; align-items: center; gap: 9px; padding: 0 12px; border-radius: 14px; color: var(--text-faint); }
-.reader-file-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: inherit; font-size: 16px; }
-.reader-file-search input::-webkit-search-cancel-button { display: none; }
-.reader-file-search input::placeholder { color: var(--text-faint); }
-.reader-file-search button { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--border-faint); color: var(--text-muted); font: inherit; }
 .reader-search-count { margin: 12px 4px 7px; color: var(--text-faint); font-size: 12px; }
 .reader-search-results { min-height: 0; display: grid; gap: 7px; margin: 0; padding: 2px; overflow: hidden auto; overscroll-behavior: contain; list-style: none; }
 .reader-search-result { width: 100%; min-height: 58px; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); color: var(--text-secondary); text-align: left; }
@@ -1941,7 +1923,7 @@ onBeforeRouteLeave(() => { flushProgressNow() })
   .view-switch { width: 100%; }
   .view-switch button { min-height: 34px; }
   .shelf-search { order: 2; min-width: 0; flex: 1; min-height: 44px; }
-  .shelf-search input { font-size: 16px; }
+  .reader-search-field { font-size: 16px; }
   .reader-shelf-add {
     order: 2;
     min-width: 44px;
@@ -1961,7 +1943,6 @@ onBeforeRouteLeave(() => { flushProgressNow() })
   .reader-file-search-trigger,
   .reader-fullscreen-btn { display: none !important; }
   .reader-pdf-controls { display: none !important; }
-  .path-trigger { min-height: var(--tap-target); padding-block: 8px; }
   .reader-topbar .icon-btn { width: 44px; height: 44px; }
   .pane-left, .pane-right { display: none; }
   .pane-center {

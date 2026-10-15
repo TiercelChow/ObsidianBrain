@@ -7,6 +7,7 @@ export default defineComponent({
   props: {
     label: { type: String, required: true },
     icon: { type: [Object, Function] as PropType<Component>, required: true },
+    appearance: { type: String as PropType<'glass' | 'quiet'>, default: 'quiet' },
     loading: Boolean,
     disabled: Boolean,
     danger: Boolean,
@@ -14,10 +15,10 @@ export default defineComponent({
   emits: { click: (_event: MouseEvent) => true },
   setup(props, { emit }) {
     return () => h('button', {
-      type: 'button', class: 'ui-icon-action ui-action',
+      type: 'button', class: ['ui-action', props.appearance === 'quiet' ? 'ui-action--quiet' : 'ui-icon-action', { 'is-danger': props.danger }],
       'aria-label': props.label, title: props.label,
       'aria-busy': props.loading || undefined,
-      'data-glass-action': props.danger ? 'danger' : 'neutral',
+      'data-glass-action': props.appearance === 'quiet' ? undefined : props.danger ? 'danger' : 'neutral',
       disabled: props.disabled || props.loading,
       onClick: (event: MouseEvent) => { if (!props.disabled && !props.loading) emit('click', event) },
     }, [h(props.loading ? Loading : props.icon, {

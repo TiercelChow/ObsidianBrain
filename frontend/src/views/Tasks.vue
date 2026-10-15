@@ -15,7 +15,7 @@
       <div class="task-search glass-surface" role="search">
         <el-icon class="task-search-icon"><Search /></el-icon>
         <input v-model="searchQuery" type="search" aria-label="搜索任务" placeholder="搜索标题或描述" />
-        <button v-if="searchQuery" type="button" class="task-search-clear" aria-label="清除搜索" @click="searchQuery = ''">×</button>
+        <button data-icon-only v-if="searchQuery" type="button" class="task-search-clear" aria-label="清除搜索" @click="searchQuery = ''">×</button>
       </div>
       <div class="filters">
         <el-select
@@ -47,11 +47,11 @@
 
     <MotionModal v-model="queryPanelOpen" :aria-label="queryPanelMode === 'search' ? '搜索任务' : '筛选任务'">
       <section class="task-query-sheet glass-surface-heavy">
-        <header class="filter-sheet-header"><h3>{{ queryPanelMode === 'search' ? '搜索任务' : '筛选任务' }}</h3><button type="button" class="ui-icon-action" aria-label="关闭任务查询" @click="queryPanelOpen = false">×</button></header>
+        <header class="filter-sheet-header"><h3>{{ queryPanelMode === 'search' ? '搜索任务' : '筛选任务' }}</h3><button data-icon-only type="button" class="ui-icon-action" aria-label="关闭任务查询" @click="queryPanelOpen = false">×</button></header>
         <div class="task-search glass-surface" role="search">
           <el-icon class="task-search-icon"><Search /></el-icon>
           <input ref="mobileSearchInput" v-model="searchQuery" type="search" aria-label="搜索任务" placeholder="搜索任务" />
-          <button v-if="searchQuery" type="button" class="task-search-clear" aria-label="清除搜索" @click="searchQuery = ''">×</button>
+          <button data-icon-only v-if="searchQuery" type="button" class="task-search-clear" aria-label="清除搜索" @click="searchQuery = ''">×</button>
         </div>
         <div class="query-filter-fields">
           <label><span>类型</span><el-select v-model="kindFilter" aria-label="任务类型" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option value="all" label="全部类型" /><el-option value="short" label="短期待办" /><el-option value="long" label="长期任务" /></el-select></label>
@@ -78,8 +78,8 @@
             <span>{{ visibleTasks.length }} 项</span>
           </div>
           <div class="panel-heading-actions">
-            <button v-if="detail" type="button" aria-label="收起任务列表" title="收起任务列表" @click="listCollapsed = true">‹</button>
-            <button type="button" aria-label="新建任务" @click="openCreate()">＋</button>
+            <button data-icon-only v-if="detail" type="button" aria-label="收起任务列表" title="收起任务列表" @click="listCollapsed = true">‹</button>
+            <button data-icon-only type="button" aria-label="新建任务" @click="openCreate()">＋</button>
           </div>
         </div>
         <div class="focus-filters" aria-label="快速筛选当前列表">
@@ -140,12 +140,12 @@
           <strong>{{ hasListFilters ? '没有符合条件的任务' : '从一件小事开始' }}</strong>
           <p>{{ hasListFilters ? '试试其他筛选，或清除条件查看未关闭任务。' : '新建短期待办，或拆解一个长期目标。' }}</p>
           <button v-if="hasListFilters" type="button" @click="resetListFilters">重置筛选</button>
-          <button v-else type="button" class="ui-icon-action" aria-label="新建第一个任务" title="新建任务" @click="openCreate()">＋</button>
+          <button data-icon-only v-else type="button" class="ui-icon-action" aria-label="新建第一个任务" title="新建任务" @click="openCreate()">＋</button>
         </div>
         </div>
 
         <div class="task-list-rail" aria-label="任务快速导航" :aria-hidden="!listCollapsed" :inert="!listCollapsed ? true : undefined">
-          <button type="button" class="rail-expand" aria-label="展开任务列表" title="展开任务列表" @click="listCollapsed = false">›</button>
+          <button data-icon-only type="button" class="rail-expand" aria-label="展开任务列表" title="展开任务列表" @click="listCollapsed = false">›</button>
           <div class="rail-items">
             <button
               v-for="task in visibleTasks"
@@ -161,7 +161,7 @@
               <i :class="`status-${task.status}`"></i>
             </button>
           </div>
-          <button type="button" class="rail-create" aria-label="新建任务" title="新建任务" @click="openCreate()">＋</button>
+          <button data-icon-only type="button" class="rail-create" aria-label="新建任务" title="新建任务" @click="openCreate()">＋</button>
         </div>
       </aside>
 
@@ -191,7 +191,7 @@
               </div>
             </div>
             <div class="detail-actions">
-              <button type="button" class="edit-action" aria-label="编辑任务" @click="openEdit(detail.root)"><el-icon><EditPen /></el-icon></button>
+              <button data-icon-only type="button" class="edit-action" aria-label="编辑任务" @click="openEdit(detail.root)"><el-icon><EditPen /></el-icon></button>
             </div>
           </header>
 
@@ -211,7 +211,7 @@
           <section v-if="detail.root.kind === 'long'" v-show="!isPhone || detailSection === 'breakdown'" class="detail-section task-breakdown">
             <div class="column-heading">
               <div><span>任务拆解</span><strong>{{ detail.completed_leaf_count }}/{{ detail.effective_leaf_count }}</strong></div>
-              <button type="button" aria-label="添加子任务" @click="openSubtask(detail.root)">＋</button>
+              <button data-icon-only type="button" aria-label="添加子任务" @click="openSubtask(detail.root)">＋</button>
             </div>
             <div class="column-scroll" @scroll="onPanelScroll">
             <TaskTree
@@ -229,7 +229,7 @@
         <aside v-show="!isPhone || detail.root.kind !== 'long' || detailSection === 'progress'" ref="activitySectionRef" class="task-progress-panel">
           <div class="progress-column-header">
             <div><span>进展</span><strong>{{ activity.length }} 条记录</strong></div>
-            <button v-if="detail.root.kind === 'long' && !isTaskClosed(detail.root)" type="button" aria-label="记录进展" @click="openProgress(detail.root)">＋</button>
+            <button data-icon-only v-if="detail.root.kind === 'long' && !isTaskClosed(detail.root)" type="button" aria-label="记录进展" @click="openProgress(detail.root)">＋</button>
           </div>
           <div class="progress-body" @scroll="onPanelScroll">
             <div v-if="activity.length" class="activity-list">
@@ -264,7 +264,7 @@
         </div>
         <footer v-if="!isTaskClosed(detail.root)" class="mobile-context-actions" aria-label="任务操作">
           <template v-if="detail.root.kind === 'long'">
-            <button type="button" aria-label="添加子任务" title="添加子任务" @click="openSubtask(detail.root)"><el-icon><Plus /></el-icon></button>
+            <button data-icon-only type="button" aria-label="添加子任务" title="添加子任务" @click="openSubtask(detail.root)"><el-icon><Plus /></el-icon></button>
             <UiAction :icon="EditPen" label="记录进展" @click="openProgress(detail.root)" />
           </template>
           <button v-else type="button" class="primary complete-shortcut" @click="openCompleteShort(detail.root)">完成待办</button>
@@ -310,7 +310,7 @@
       <MotionSwap :view-key="drawerNode?.id || 'empty'" horizontal>
       <section v-if="drawerNode" :key="drawerNode.id" class="child-task-dialog glass-surface-heavy">
         <header class="child-dialog-header" :class="{ 'has-back': drawerParent?.role === 'subtask' }">
-          <button v-if="drawerParent?.role === 'subtask'" type="button" class="child-back" aria-label="返回上一级" @click="backFromChild">‹</button>
+          <button data-icon-only v-if="drawerParent?.role === 'subtask'" type="button" class="child-back" aria-label="返回上一级" @click="backFromChild">‹</button>
           <div>
             <span>{{ drawerParent?.title || detail?.root.title }}</span>
             <h3>{{ drawerNode.title }}</h3>
@@ -320,8 +320,8 @@
             </div>
           </div>
           <div class="child-header-actions">
-            <button type="button" class="child-edit" aria-label="编辑任务" @click="openEdit(drawerNode)"><el-icon><EditPen /></el-icon></button>
-            <button type="button" class="child-close" aria-label="关闭子任务详情" @click="closeDrawer">×</button>
+            <button data-icon-only type="button" class="child-edit" aria-label="编辑任务" @click="openEdit(drawerNode)"><el-icon><EditPen /></el-icon></button>
+            <button data-icon-only type="button" class="child-close" aria-label="关闭子任务详情" @click="closeDrawer">×</button>
           </div>
         </header>
         <div class="child-dialog-scroll">
@@ -358,7 +358,7 @@
           </section>
         </div>
         <footer v-if="!isTaskClosed(drawerNode)" class="child-dialog-actions">
-          <button type="button" aria-label="添加子任务" title="添加子任务" @click="openSubtask(drawerNode)"><el-icon><Plus /></el-icon></button>
+          <button data-icon-only type="button" aria-label="添加子任务" title="添加子任务" @click="openSubtask(drawerNode)"><el-icon><Plus /></el-icon></button>
           <UiAction :icon="EditPen" label="记录进展" @click="openProgress(drawerNode)" />
         </footer>
       </section>
@@ -372,7 +372,7 @@
             <h3>{{ sheetTitle }}</h3>
             <p v-if="targetNode" class="sheet-target">{{ sheetMode === 'subtask' ? '父任务' : '应用于' }}：{{ targetNode.title }}</p>
           </div>
-          <button type="button" aria-label="关闭" @click="sheetOpen = false">×</button>
+          <button data-icon-only type="button" aria-label="关闭" @click="sheetOpen = false">×</button>
         </header>
 
         <div v-if="sheetMode === 'progress'" class="sheet-body">

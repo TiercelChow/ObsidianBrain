@@ -20,7 +20,7 @@
       @dragover.prevent
       @drop.prevent="dropOn(item.node.id)"
     >
-      <button
+      <button data-icon-only
         v-if="item.hasChildren"
         type="button"
         class="disclosure"

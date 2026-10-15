@@ -13,7 +13,7 @@
           {{ c }}
         </button>
       </div>
-      <el-button type="primary" class="shelf-add ui-icon-action" aria-label="添加书籍" title="添加书籍" @click="openAdd"><el-icon><Plus /></el-icon></el-button>
+      <el-button data-icon-only type="primary" class="shelf-add ui-icon-action" aria-label="添加书籍" title="添加书籍" @click="openAdd"><el-icon><Plus /></el-icon></el-button>
     </div>
 
     <div v-if="loadError" class="shelf-state error">⚠️ {{ loadError }}</div>
@@ -21,7 +21,7 @@
       <el-icon class="ss-icon"><Collection /></el-icon>
       <p>书架还是空的</p>
       <p class="ss-hint">添加文件夹或 PDF，继续上次阅读</p>
-      <el-button type="primary" class="ui-icon-action" aria-label="添加第一本书" title="添加书籍" @click="openAdd"><el-icon><Plus /></el-icon></el-button>
+      <el-button data-icon-only type="primary" class="ui-icon-action" aria-label="添加第一本书" title="添加书籍" @click="openAdd"><el-icon><Plus /></el-icon></el-button>
     </div>
     <div v-else-if="!visibleBooks.length" class="shelf-state">
       <p>没有匹配的书籍</p>
@@ -39,14 +39,14 @@
         <span class="bc-kind">
           <el-icon><FolderOpened v-if="b.kind === 'folder'" /><Document v-else /></el-icon>
         </span>
-        <button type="button" class="bc-more" title="书籍操作" aria-label="书籍操作" @click.stop="openEdit(b)">
+        <button data-icon-only type="button" class="bc-more" title="书籍操作" aria-label="书籍操作" @click.stop="openEdit(b)">
           <el-icon><MoreFilled /></el-icon>
         </button>
         <span class="bc-actions" @click.stop>
-          <button type="button" title="编辑" aria-label="编辑" @click="openEdit(b)">
+          <button data-icon-only type="button" title="编辑" aria-label="编辑" @click="openEdit(b)">
             <el-icon><EditPen /></el-icon>
           </button>
-          <button type="button" title="删除" aria-label="删除" @click="confirmRemove(b)">
+          <button data-icon-only type="button" title="删除" aria-label="删除" @click="confirmRemove(b)">
             <el-icon><Delete /></el-icon>
           </button>
         </span>

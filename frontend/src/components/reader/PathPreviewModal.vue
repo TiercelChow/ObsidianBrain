@@ -12,7 +12,7 @@
         >
           <el-icon><FullScreen /></el-icon><span class="rbtn-label">阅读器</span>
         </button>
-        <button class="ppm-close-btn" title="关闭" @click="close">
+        <button data-icon-only class="ppm-close-btn" title="关闭" @click="close">
           <el-icon><Close /></el-icon>
         </button>
       </header>

@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body" :disabled="isNativeFullscreen">
     <div class="mermaid-viewer" role="dialog" aria-modal="true" :aria-label="title" @click.self="close">
-    <button
+    <button data-icon-only
       v-if="viewerPolicy.floatingClose"
       type="button"
       class="mv-mobile-close"
@@ -17,16 +17,16 @@
       <span class="mv-title">{{ title }}</span>
       <span class="mv-zoom-label">{{ zoomPct }}%</span>
       <div class="mv-actions">
-        <button type="button" class="mv-btn" aria-label="缩小图表" title="缩小" @click="zoomBy(0.8)">
+        <button data-icon-only type="button" class="mv-btn" aria-label="缩小图表" title="缩小" @click="zoomBy(0.8)">
           <el-icon><Minus /></el-icon>
         </button>
-        <button type="button" class="mv-btn" aria-label="放大图表" title="放大" @click="zoomBy(1.25)">
+        <button data-icon-only type="button" class="mv-btn" aria-label="放大图表" title="放大" @click="zoomBy(1.25)">
           <el-icon><Plus /></el-icon>
         </button>
-        <button type="button" class="mv-btn" aria-label="重置图表视图" title="重置" @click="reset">
+        <button data-icon-only type="button" class="mv-btn" aria-label="重置图表视图" title="重置" @click="reset">
           <el-icon><Refresh /></el-icon>
         </button>
-        <button
+        <button data-icon-only
           v-if="!viewerPolicy.floatingClose"
           type="button"
           class="mv-btn mv-close"

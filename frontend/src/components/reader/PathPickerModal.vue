@@ -12,7 +12,7 @@
   >
     <!-- Breadcrumb + up -->
     <div class="pp-bar">
-      <el-button
+      <el-button data-icon-only
         class="pp-up"
         :disabled="currentPath === '/'"
         title="上一级"
