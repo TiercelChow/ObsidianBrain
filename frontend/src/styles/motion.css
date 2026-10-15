@@ -232,7 +232,6 @@ select:focus-visible,
   .collection-flow-move, .collection-flow-enter-active, .collection-flow-leave-active, .content-arrive-enter-active, .content-arrive-leave-active { transition: opacity 100ms ease !important; }
   .collection-flow-enter-from, .collection-flow-leave-to, .content-arrive-enter-from { transform: none !important; }
   :is(.ui-icon-action, .ui-action, .mobile-compose-action, .mobile-filter-summary, .bc-more, .focus-filters button, .panel-heading-actions button, .detail-switch button, .calendar-nav button, .viewer-close, .viewer-zoom-btn, .settings-nav button) { transform: none !important; transition: none !important; }
-  .viewer-enter-from .viewer-image { transform: none !important; }
   :root {
     --motion-instant: 80ms;
     --motion-fast: 120ms;

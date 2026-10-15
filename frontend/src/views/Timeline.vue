@@ -6,10 +6,10 @@
         <h1 class="page-title">时光机</h1>
       </div>
       <div class="header-actions">
-        <el-button class="desktop-sync-action ui-icon-action" aria-label="图片存储" title="图片存储" @click="storageOpen = true">
+        <el-button data-icon-only class="desktop-sync-action ui-icon-action" aria-label="图片存储" title="图片存储" @click="storageOpen = true">
           <el-icon><FolderOpened /></el-icon>
         </el-button>
-        <el-button type="primary" class="ui-icon-action" aria-label="写小记" title="写小记" @click="openCreateDialog">
+        <el-button data-icon-only type="primary" class="ui-icon-action" aria-label="写小记" title="写小记" @click="openCreateDialog">
           <el-icon><Plus /></el-icon>
         </el-button>
       </div>
@@ -26,14 +26,14 @@
             class="glass-input"
             @input="onSearchInput"
           />
-          <button v-if="searchQuery" type="button" class="clear-btn" aria-label="清除搜索" @click="clearSearch">✕</button>
+          <button data-icon-only v-if="searchQuery" type="button" class="clear-btn" aria-label="清除搜索" @click="clearSearch">✕</button>
         </div>
 
-        <button v-if="isMobile" type="button" class="mobile-compose-action" aria-label="写小记" @click="openCreateDialog">
+        <button data-icon-only v-if="isMobile" type="button" class="mobile-compose-action" aria-label="写小记" @click="openCreateDialog">
           <el-icon><Plus /></el-icon>
         </button>
 
-        <button
+        <button data-icon-only
           v-if="isMobile"
           type="button"
           class="mobile-filter-summary glass-surface"
@@ -78,7 +78,7 @@
               @change="onCustomDateChange"
               :clearable="true"
             />
-            <button
+            <button data-icon-only
               v-if="hasActiveFilter"
               class="glass-icon-btn clear-filter"
               @click="clearFilter"
@@ -96,8 +96,8 @@
       <section id="timeline-mobile-filters" class="timeline-filter-sheet glass-surface-heavy">
         <header class="filter-sheet-header">
           <h3>时间范围</h3>
-          <button type="button" class="glass-icon-btn" aria-label="图片存储" title="图片存储" @click="mobileFiltersOpen = false; storageOpen = true"><el-icon><FolderOpened /></el-icon></button>
-          <button type="button" class="glass-icon-btn" aria-label="关闭时间筛选" @click="mobileFiltersOpen = false">✕</button>
+          <button data-icon-only type="button" class="glass-icon-btn" aria-label="图片存储" title="图片存储" @click="mobileFiltersOpen = false; storageOpen = true"><el-icon><FolderOpened /></el-icon></button>
+          <button data-icon-only type="button" class="glass-icon-btn" aria-label="关闭时间筛选" @click="mobileFiltersOpen = false">✕</button>
         </header>
         <div class="filter-sheet-presets">
           <button type="button" class="chip" :class="{ active: !hasActiveFilter }" :aria-pressed="!hasActiveFilter" @click="clearFilter">全部</button>
@@ -178,9 +178,9 @@
                 <div class="memo-card-body glass-surface">
                   <div class="memo-time">{{ formatTime(memo.timestamp) }}</div>
                   <div class="memo-actions">
-                    <button v-if="!isMobile" type="button" class="memo-action-btn" aria-label="编辑小记" title="编辑小记" @click="openEditDialog(memo)"><el-icon><Edit /></el-icon></button>
-                    <button v-if="!isMobile" type="button" class="memo-action-btn danger" aria-label="删除小记" title="删除小记" @click="deleteTarget = memo"><el-icon><Delete /></el-icon></button>
-                    <button v-else type="button" class="memo-action-btn" aria-label="小记操作" @click="actionMemo = memo"><el-icon><MoreFilled /></el-icon></button>
+                    <button data-icon-only v-if="!isMobile" type="button" class="memo-action-btn" aria-label="编辑小记" title="编辑小记" @click="openEditDialog(memo)"><el-icon><Edit /></el-icon></button>
+                    <button data-icon-only v-if="!isMobile" type="button" class="memo-action-btn danger" aria-label="删除小记" title="删除小记" @click="deleteTarget = memo"><el-icon><Delete /></el-icon></button>
+                    <button data-icon-only v-else type="button" class="memo-action-btn" aria-label="小记操作" @click="actionMemo = memo"><el-icon><MoreFilled /></el-icon></button>
                   </div>
                   <div class="memo-card-main" :class="{ 'has-images': memo.images.length > 0 }">
                     <div v-if="memo.images.length > 0" class="memo-images-wrap">
@@ -249,7 +249,7 @@
       <div class="dialog-content glass-surface-heavy">
           <div class="dialog-header">
             <h3>{{ editedMemo ? '编辑小记' : '写小记' }}</h3>
-            <button type="button" class="glass-icon-btn" aria-label="关闭小记面板" :disabled="creating" @click="closeDraft">✕</button>
+            <button data-icon-only type="button" class="glass-icon-btn" aria-label="关闭小记面板" :disabled="creating" @click="closeDraft">✕</button>
           </div>
           <div class="create-form">
             <textarea
@@ -269,12 +269,12 @@
                 class="image-preview-item"
               >
                 <img :src="img.preview" class="image-preview-img" />
-                <button type="button" class="image-remove-btn" :aria-label="`移除第 ${idx + 1} 张图片`" :disabled="creating" @click="removePendingImage(idx)">✕</button>
+                <button data-icon-only type="button" class="image-remove-btn" :aria-label="`移除第 ${idx + 1} 张图片`" :disabled="creating" @click="removePendingImage(idx)">✕</button>
                 <div v-if="img.uploading" class="image-upload-overlay">
                   <el-icon class="is-loading"><Loading /></el-icon>
                 </div>
               </div>
-              <button
+              <button data-icon-only
                 v-if="pendingImages.length < 9"
                 type="button"
                 class="image-add-btn"
@@ -332,7 +332,7 @@
 
     <MotionModal v-model="actionSheetOpen" aria-label="小记操作">
       <div class="dialog-content glass-surface-heavy memo-action-sheet compact-dialog">
-        <div class="dialog-header"><h3>小记操作</h3><button type="button" class="glass-icon-btn" aria-label="关闭操作" @click="actionMemo = null">✕</button></div>
+        <div class="dialog-header"><h3>小记操作</h3><button data-icon-only type="button" class="glass-icon-btn" aria-label="关闭操作" @click="actionMemo = null">✕</button></div>
         <button type="button" class="glass-btn" @click="editFromSheet"><el-icon><Edit /></el-icon>编辑</button>
         <button type="button" class="glass-btn danger" @click="deleteFromSheet"><el-icon><Delete /></el-icon>删除小记</button>
       </div>
@@ -352,7 +352,7 @@
 
     <MotionModal v-model="storageOpen" aria-label="时光机图片存储">
       <div class="dialog-content glass-surface-heavy">
-        <div class="dialog-header"><h3>图片存储</h3><button type="button" class="glass-icon-btn" aria-label="关闭图片存储" @click="storageOpen = false">✕</button></div>
+        <div class="dialog-header"><h3>图片存储</h3><button data-icon-only type="button" class="glass-icon-btn" aria-label="关闭图片存储" @click="storageOpen = false">✕</button></div>
         <div class="create-form"><TimelineStoragePanel @migrated="loadMemos()" /></div>
       </div>
     </MotionModal>
@@ -362,25 +362,43 @@
     <Teleport to="body">
       <Transition name="viewer">
         <div v-if="imageViewer.show" ref="viewerOverlayRef" class="image-viewer-overlay" role="dialog" aria-modal="true" aria-label="小记图片" tabindex="-1" @click.self="closeImageViewer">
-          <button class="viewer-close" aria-label="关闭图片" @click="closeImageViewer">✕</button>
-          <button
+          <button data-icon-only class="viewer-close" aria-label="关闭图片" @click="closeImageViewer">✕</button>
+          <button data-icon-only
             v-if="imageViewer.images.length > 1"
             class="viewer-nav viewer-prev"
             aria-label="上一张图片"
             @click="viewerPrev"
           ><el-icon :size="22"><ArrowLeft /></el-icon></button>
-          <div class="viewer-image-wrap" ref="viewerStageRef">
-            <img
-              ref="viewerImgRef"
-              :key="`${imageViewer.images[imageViewer.index]}:${viewerRetry}`"
-              :src="memoImageUrl(imageViewer.images[imageViewer.index])"
-              class="viewer-image"
-              :class="{ 'viewer-image-pending': viewerStatus !== 'ready', 'viewer-image-ready': viewerStatus === 'ready' }"
-              alt="小记原图"
-              @load="onViewerLoad"
-              @error="viewerStatus = 'error'"
-              @click.stop
-            />
+          <div
+            class="viewer-image-wrap" ref="viewerStageRef"
+            :class="{ 'is-zoomed': viewerFrame.scale > 1.01, 'is-dragging': viewerFrame.dragging }"
+            @pointerdown="onViewerPointerDown" @pointermove="onViewerPointerMove"
+            @pointerup="onViewerPointerUp" @pointercancel="viewerMotion.cancel()"
+            @lostpointercapture="onViewerPointerLost"
+            @wheel.prevent="onViewerWheel" @dblclick.prevent="onViewerDoubleClick"
+            @click.capture="onViewerClick"
+          >
+            <template v-if="imageViewer.images.length > 1">
+              <div v-for="offset in [-1, 1]" :key="offset" class="viewer-slide" :style="viewerSlideStyle(offset)" aria-hidden="true">
+                <img :src="thumbnailUrl(viewerNeighbor(offset))" class="viewer-preview" alt="" draggable="false" @load="onViewerPreviewLoad" @error="onViewerPreviewError" />
+              </div>
+            </template>
+            <div class="viewer-slide" :style="viewerSlideStyle(0)">
+              <img :src="thumbnailUrl(imageViewer.images[imageViewer.index])" class="viewer-preview" alt="" draggable="false" @load="onViewerPreviewLoad" @error="onViewerPreviewError" />
+              <img
+                ref="viewerImgRef"
+                :key="`${imageViewer.images[imageViewer.index]}:${viewerRetry}`"
+                :src="memoImageUrl(imageViewer.images[imageViewer.index])"
+                class="viewer-image"
+                :style="viewerPhotoStyle"
+                :class="{ 'viewer-image-pending': viewerStatus !== 'ready', 'viewer-image-ready': viewerStatus === 'ready' }"
+                alt="小记原图"
+                draggable="false"
+                @load="onViewerLoad"
+                @error="onViewerError"
+                @click.stop
+              />
+            </div>
             <div v-if="viewerStatus === 'loading'" class="viewer-spinner" role="status" aria-label="加载原图"><el-icon class="is-loading"><Loading /></el-icon></div>
             <div v-if="viewerStatus === 'error'" class="viewer-status" role="alert">
               <p>原图暂时无法读取。旧图片可在「图片存储」中重新迁移。</p>
@@ -392,12 +410,12 @@
               {{ imageViewer.index + 1 }} / {{ imageViewer.images.length }}
             </div>
             <div class="viewer-controls">
-              <button class="viewer-zoom-btn" aria-label="缩小" title="缩小" :disabled="viewerStatus !== 'ready'" @click.stop="viewerZoom(0.8)"><el-icon :size="20"><Minus /></el-icon></button>
-              <button class="viewer-zoom-btn" aria-label="放大" title="放大" :disabled="viewerStatus !== 'ready'" @click.stop="viewerZoom(1.25)"><el-icon :size="20"><Plus /></el-icon></button>
-              <button class="viewer-zoom-btn" aria-label="重置" title="重置" :disabled="viewerStatus !== 'ready'" @click.stop="viewerReset"><el-icon :size="20"><Refresh /></el-icon></button>
+              <button data-icon-only class="viewer-zoom-btn" aria-label="缩小" title="缩小" :disabled="viewerStatus !== 'ready' || viewerFrame.scale <= 1.001" @click.stop="viewerZoom(0.8)"><el-icon :size="20"><Minus /></el-icon></button>
+              <button data-icon-only class="viewer-zoom-btn" aria-label="放大" title="放大" :disabled="viewerStatus !== 'ready' || viewerFrame.scale >= 7.999" @click.stop="viewerZoom(1.25)"><el-icon :size="20"><Plus /></el-icon></button>
+              <button data-icon-only class="viewer-zoom-btn" aria-label="重置" title="重置" :disabled="viewerStatus !== 'ready'" @click.stop="viewerReset"><el-icon :size="20"><Refresh /></el-icon></button>
             </div>
           </footer>
-          <button
+          <button data-icon-only
             v-if="imageViewer.images.length > 1"
             class="viewer-nav viewer-next"
             aria-label="下一张图片"
@@ -418,7 +436,7 @@ import { ElMessage } from 'element-plus'
 import { Plus, Minus, Search, PriceTag, Loading, Picture, Refresh, ArrowLeft, ArrowRight, MoreFilled, Edit, Delete, FolderOpened } from '@element-plus/icons-vue'
 import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/github-dark.css'
-import panzoom, { type PanZoom } from 'panzoom'
+import { createImageViewerMotion, type PhotoFrame } from '@/utils/imageViewerMotion'
 import { createMemo, browseTimeline, searchMemos, uploadImages, updateMemo, deleteMemo, discardMemoImages } from '@/api'
 import { memoImageUrl, memoImageSource, memoLocalDate, memoToolResult, type TimelineMemo } from '@/utils/timelineMemo'
 import TimelineStoragePanel from '@/components/timeline/TimelineStoragePanel.vue'
@@ -501,51 +519,96 @@ const viewerOverlayRef = ref<HTMLElement | null>(null)
 const viewerImgRef = ref<HTMLImageElement | null>(null)
 const viewerStatus = ref<'loading' | 'ready' | 'error'>('loading')
 const viewerRetry = ref(0)
-let viewerPz: PanZoom | null = null
+const viewerFrame = ref<PhotoFrame>({ width: 0, height: 0, stageWidth: 0, stageHeight: 0, x: 0, y: 0, scale: 1, slide: 0, dragging: false })
+const viewerMotion = createImageViewerMotion({
+  count: () => imageViewer.value.images.length,
+  change: frame => { viewerFrame.value = frame },
+  navigate: direction => {
+    const v = imageViewer.value
+    if (!v.show) return
+    viewerStatus.value = 'loading'
+    v.index = (v.index + direction + v.images.length) % v.images.length
+  },
+  clock: {
+    now: () => performance.now(), request: callback => requestAnimationFrame(callback),
+    cancel: id => cancelAnimationFrame(id), reduced: () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  },
+})
+const viewerPhotoStyle = computed(() => {
+  const f = viewerFrame.value
+  return { width: `${f.width}px`, height: `${f.height}px`, transform: `translate3d(${(f.stageWidth - f.width) / 2 + f.x}px, ${(f.stageHeight - f.height) / 2 + f.y}px, 0) scale(${f.scale})` }
+})
+let viewerResizeObserver: ResizeObserver | null = null
 useModalEnvironment(() => imageViewer.value.show, viewerOverlayRef, closeImageViewer)
 
-function onViewerLoad() {
-  if (!imageViewer.value.show) return
+function onViewerLoad(event: Event) {
+  const img = viewerImgRef.value
+  if (!imageViewer.value.show || !img || event.target !== viewerImgRef.value) return
+  viewerMotion.load(img.naturalWidth, img.naturalHeight)
   viewerStatus.value = 'ready'
-  void nextTick(initViewerPz)
+}
+function onViewerPreviewLoad(event: Event) { (event.target as HTMLImageElement).style.visibility = '' }
+function onViewerPreviewError(event: Event) { (event.target as HTMLImageElement).style.visibility = 'hidden' }
+function onViewerError(event: Event) {
+  if (imageViewer.value.show && event.target === viewerImgRef.value) viewerStatus.value = 'error'
 }
 function retryViewerImage() {
   viewerStatus.value = 'loading'
   viewerRetry.value++
 }
 
-function initViewerPz() {
-  if (!viewerImgRef.value || !imageViewer.value.show) return
-  viewerPz?.dispose()
-  const img = viewerImgRef.value
-  img.style.transform = ''
-  img.style.transformOrigin = ''
-  viewerPz = panzoom(img, {
-    maxZoom: 8,
-    minZoom: 0.1,
-    zoomDoubleClickSpeed: 1.8,
-    bounds: false,
-  })
+function fitViewerPhoto() {
+  const img = viewerImgRef.value, stage = viewerStageRef.value
+  if (!imageViewer.value.show || !stage) return
+  viewerMotion.fit(img?.naturalWidth || 0, img?.naturalHeight || 0, stage.clientWidth, stage.clientHeight)
 }
 function viewerZoom(factor: number) {
-  if (!viewerPz || !viewerStageRef.value) return
-  const r = viewerStageRef.value.getBoundingClientRect()
-  viewerPz.smoothZoom(r.width / 2 + r.left, r.height / 2 + r.top, factor)
+  if (viewerStatus.value === 'ready') viewerMotion.zoom(factor)
 }
-function viewerReset() {
-  if (!viewerPz || !viewerImgRef.value) return
-  viewerPz.dispose()
-  const img = viewerImgRef.value
-  img.style.transform = ''
-  img.style.transformOrigin = ''
-  viewerPz = panzoom(img, {
-    maxZoom: 8,
-    minZoom: 0.1,
-    zoomDoubleClickSpeed: 1.8,
-    bounds: false,
-  })
+function viewerReset() { viewerMotion.reset() }
+function viewerNeighbor(offset: number) {
+  const v = imageViewer.value
+  return v.images[(v.index + offset + v.images.length) % v.images.length]
+}
+function viewerSlideStyle(offset: number) {
+  return { transform: `translate3d(${offset * (viewerFrame.value.stageWidth + 16) + viewerFrame.value.slide}px, 0, 0)` }
+}
+function viewerPointer(event: PointerEvent) {
+  const rect = viewerStageRef.value?.getBoundingClientRect()
+  return { id: event.pointerId, x: event.clientX - (rect?.left || 0), y: event.clientY - (rect?.top || 0), time: event.timeStamp }
+}
+function onViewerPointerDown(event: PointerEvent) {
+  if (event.button !== 0 || (event.target as HTMLElement).closest('button')) return
+  if (viewerMotion.down(viewerPointer(event))) viewerStageRef.value?.setPointerCapture(event.pointerId)
+}
+function onViewerPointerMove(event: PointerEvent) { viewerMotion.move(viewerPointer(event)) }
+function onViewerPointerUp(event: PointerEvent) { viewerMotion.up(viewerPointer(event)) }
+function onViewerPointerLost(event: PointerEvent) {
+  // An ordinary pointerup already released this contact; only cancel live loss.
+  viewerMotion.cancel(event.pointerId)
+}
+function onViewerClick(event: MouseEvent) {
+  if (viewerMotion.consumeClick()) { event.preventDefault(); event.stopPropagation() }
+}
+function viewerAnchor(event: MouseEvent) {
+  const rect = viewerStageRef.value!.getBoundingClientRect()
+  return { x: event.clientX - rect.left - rect.width / 2, y: event.clientY - rect.top - rect.height / 2 }
+}
+function onViewerWheel(event: WheelEvent) {
+  if (viewerStatus.value !== 'ready') return
+  viewerMotion.zoom(Math.exp(-Math.max(-100, Math.min(100, event.deltaY)) * .0025), viewerAnchor(event))
+}
+function onViewerDoubleClick(event: MouseEvent) {
+  if (viewerStatus.value !== 'ready') return
+  if (viewerFrame.value.scale > 1.01) viewerReset()
+  else viewerMotion.zoom(2.5, viewerAnchor(event))
 }
 function openImageViewer(images: string[], index: number) {
+  if (!images.length) return
+  const stage = viewerStageRef.value
+  viewerMotion.fit(0, 0, stage?.clientWidth || 0, stage?.clientHeight || 0)
+  // A reopen can interrupt the outgoing transition with the same image URL.
+  viewerRetry.value++
   viewerStatus.value = 'loading'
   imageViewer.value = { show: true, images, index }
   document.addEventListener('keydown', onViewerKeydown)
@@ -553,30 +616,26 @@ function openImageViewer(images: string[], index: number) {
 function closeImageViewer() {
   imageViewer.value.show = false
   document.removeEventListener('keydown', onViewerKeydown)
-  viewerPz?.dispose()
-  viewerPz = null
+  viewerMotion.dispose()
 }
 function viewerPrev() {
-  if (imageViewer.value.images.length < 2) return
-  viewerPz?.dispose()
-  viewerPz = null
-  viewerStatus.value = 'loading'
-  const v = imageViewer.value
-  v.index = (v.index - 1 + v.images.length) % v.images.length
+  viewerMotion.navigate(-1)
 }
 function viewerNext() {
-  if (imageViewer.value.images.length < 2) return
-  viewerPz?.dispose()
-  viewerPz = null
-  viewerStatus.value = 'loading'
-  const v = imageViewer.value
-  v.index = (v.index + 1) % v.images.length
+  viewerMotion.navigate(1)
 }
 function onViewerKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') closeImageViewer()
-  if (e.key === 'ArrowLeft') viewerPrev()
-  if (e.key === 'ArrowRight') viewerNext()
+  if (e.key === 'ArrowLeft') { e.preventDefault(); viewerPrev() }
+  if (e.key === 'ArrowRight') { e.preventDefault(); viewerNext() }
 }
+watch(viewerStageRef, stage => {
+  viewerResizeObserver?.disconnect()
+  if (!stage) return
+  fitViewerPhoto()
+  viewerResizeObserver = new ResizeObserver(fitViewerPhoto)
+  viewerResizeObserver.observe(stage)
+}, { flush: 'post' })
 
 onMounted(() => {
   window.addEventListener('resize', onResize)
@@ -588,7 +647,8 @@ onUnmounted(() => {
   if (searchTimer) clearTimeout(searchTimer)
   void releaseDraftImages()
   pendingImages.value.forEach((image) => { if (image.file) URL.revokeObjectURL(image.preview) })
-  viewerPz?.dispose()
+  viewerMotion.dispose()
+  viewerResizeObserver?.disconnect()
 })
 
 function triggerFileInput() {
@@ -2196,6 +2256,7 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
   gap: 14px;
   padding: calc(var(--safe-top) + 68px) max(20px, var(--safe-right), var(--safe-left)) calc(var(--safe-bottom) + 20px);
   overflow: hidden;
+  outline: none;
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: var(--glass-scrim-filter);
   -webkit-backdrop-filter: var(--glass-scrim-filter);
@@ -2246,33 +2307,39 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
 .viewer-prev { left: 20px; }
 .viewer-next { right: 20px; }
 .viewer-image-wrap {
+  position: relative;
   width: 100%;
   height: 100%;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
   overflow: hidden;
-  max-width: 80vw;
+  max-width: min(1600px, calc(100vw - 144px));
+  touch-action: none;
+  user-select: none;
+  cursor: default;
 }
+.viewer-image-wrap.is-zoomed { cursor: grab; }
+.viewer-image-wrap.is-dragging { cursor: grabbing; }
+.viewer-slide { position: absolute; inset: 0; }
+.viewer-preview { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 .viewer-image {
-  max-width: 100%;
-  max-height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  max-height: none;
   object-fit: contain;
+  transform-origin: center;
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  cursor: grab;
-  touch-action: pan-x pan-y;
+  pointer-events: none;
 }
-.viewer-image:active { cursor: grabbing; }
-.viewer-image-pending { display: none; }
-.viewer-image-ready { animation: photo-arrive 380ms var(--ease-spring-gentle); }
-/* Opacity does not compete with the pan/zoom inline transform. */
+.viewer-image-pending { visibility: hidden; }
+.viewer-image-ready { animation: photo-arrive 180ms var(--ease-emphasized); }
+/* Only fade image decoding; the motion engine alone owns its transform. */
 @keyframes photo-arrive { from { opacity: 0; } to { opacity: 1; } }
 @media(prefers-reduced-motion: reduce) { .viewer-image-ready { animation: none; } }
-.viewer-status { max-width: min(70vw, 420px); color: #fff; text-align: center; line-height: 1.6; }
-.viewer-spinner { color: #fff; font-size: 30px; }
+.viewer-status { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(80%, 420px); padding: 16px; border-radius: 16px; background: rgba(0, 0, 0, .72); color: #fff; text-align: center; line-height: 1.6; }
+.viewer-spinner { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 30px; pointer-events: none; }
 .viewer-footer { display: flex; flex-direction: column; align-items: center; gap: 12px; min-height: 44px; z-index: 10; }
 .viewer-controls {
   display: flex;
@@ -2306,10 +2373,8 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
 
 /* Viewer transitions */
 .viewer-enter-active { transition: opacity var(--duration-normal) var(--ease-out); }
-.viewer-enter-active .viewer-image { transition: transform var(--duration-slow) var(--ease-spring), opacity var(--duration-normal) var(--ease-out); }
 .viewer-leave-active { transition: opacity var(--duration-fast) var(--ease-out); }
 .viewer-enter-from { opacity: 0; }
-.viewer-enter-from .viewer-image { transform: scale(0.9); opacity: 0; }
 .viewer-leave-to { opacity: 0; }
 
 /* Mobile-only controls stay out of the desktop hierarchy. */

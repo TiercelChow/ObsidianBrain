@@ -79,6 +79,8 @@ HTTP：POST /v1/upload/images（multipart images）；GET /v1/timeline/images/*p
 
 TimelineStoragePanel 仅用于时光机「图片存储」；首页移除整个系统配置区，不加载配置或挂载存储面板，只请求状态/统计。memoImageUrl 按路径段编码特殊字符，正文旧图也解析到本地入口；日期分组用持久化 date。查看器使用 load/error 初始化缩放，不依赖固定延迟。
 
+图片查看器通过 `imageViewerMotion.ts` 的局部坐标、独立弹簧轨道和可测试 Pointer 状态机实现适屏、锚定缩放、平移与滑动切图，替代时光机原先的 panzoom 初始化。ResizeObserver 更新视口；原图 load 只更新照片尺寸，不取消拖动/切图轨道。画布仅保留当前原图和三张缩略图（当前及前后预览），不预加载相邻原图；关闭/卸载停止轨道、指针与观察器，迟到的旧图片事件忽略。具体方案见[图片查看交互修复](2026-10-15-timeline-photo-viewer.md)。
+
 测试覆盖格式/路径、只复制迁移、正文引用、共享图与最后引用删除、更新冲突、IO 失败跨重启 GC、LRU/超额/降容量、不可写缓存回退、HTTP 完整生命周期、旧连接设置清理。前端覆盖日期、URL、旧嵌入、错误结果，界面验收使用隔离数据库。
 
 ## 8. 备份限制
