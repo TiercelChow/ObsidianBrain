@@ -34,14 +34,14 @@ test('phone settings and entity reading avoid redundant persistent chrome', asyn
     source('views/knowledge/WikiSettings.vue'), source('views/knowledge/WikiWorkspace.vue'),
     source('components/knowledge/KnowledgeResearchWorkspace.vue'),
   ])
-  assert.match(settings, /aria-label="配置分区"/)
-  assert.match(settings, /\.settings-main\s*\{[^}]*padding:\s*14px/)
+  assert.match(settings, /:view-key="isMobile \? 'feed' : section"/)
+  assert.match(settings, /\.settings-card\s*\{[^}]*padding:\s*14px/)
   assert.match(workspace, /'is-reading': Boolean\(selectedEntry\)/)
   assert.match(workspace, /\.wiki-toolbar\.is-reading \.knowledge-search\s*\{[^}]*display:\s*none/)
   assert.match(research, /class="research-stage-directory"/)
   assert.match(research, /stageDirectoryOpen\.value = false/)
   assert.match(settings, /class="mobile-skill-metadata-toggle"/)
-  assert.match(settings, /\.skill-detail-content > pre\s*\{[^}]*max-height:\s*none/)
+  assert.match(settings, /:deep\(\.skill-file-content\)\s*\{[^}]*max-height:\s*none/)
 })
 
 test('phone Wiki drawers respect both the panel and keyboard viewport', async () => {

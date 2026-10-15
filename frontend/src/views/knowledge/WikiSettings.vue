@@ -1,15 +1,7 @@
 <template>
   <KnowledgePageShell title="Wiki 配置">
     <div class="settings-layout">
-      <el-select v-model="section" class="mobile-settings-section knowledge-select is-fluid" aria-label="配置分区" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true">
-        <el-option label="Agent Runtime · 执行器与模型" value="runtime" />
-        <el-option label="模型供应商 · 路由与 API Key" value="providers" />
-        <el-option label="Token 用量 · 调用趋势" value="usage" />
-        <el-option label="数据保护 · 备份与恢复" value="protection" />
-        <el-option label="配置文档 · 提示词与规则" value="documents" />
-        <el-option label="Skills · 可配置能力" value="skills" />
-      </el-select>
-      <aside class="settings-nav knowledge-surface" data-glass="structural">
+      <aside v-if="!isMobile" class="settings-nav knowledge-surface" data-glass="structural">
         <button :class="{ active: section === 'runtime' }" @click="section = 'runtime'"><el-icon><Cpu /></el-icon><span><strong>Agent Runtime</strong><small>执行器与模型</small></span></button>
         <button :class="{ active: section === 'providers' }" @click="section = 'providers'"><el-icon><Connection /></el-icon><span><strong>模型供应商</strong><small>路由与 API Key</small></span></button>
         <button :class="{ active: section === 'usage' }" @click="section = 'usage'"><el-icon><DataAnalysis /></el-icon><span><strong>Token 用量</strong><small>调用趋势与来源</small></span></button>
@@ -19,9 +11,9 @@
       </aside>
 
       <section class="settings-main knowledge-surface">
-        <MotionSwap :view-key="section">
-        <template v-if="section === 'runtime'">
-          <header class="settings-section-head"><div><h2>Agent Runtime</h2></div></header>
+        <MotionSwap class="settings-sections" :view-key="isMobile ? 'feed' : section">
+        <section v-if="isMobile || section === 'runtime'" class="settings-card" id="settings-runtime" aria-labelledby="settings-runtime-title">
+          <header class="settings-section-head"><div><h2 id="settings-runtime-title">Agent Runtime</h2></div></header>
           <div v-if="loading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
           <article v-for="item in runtimeHealth" v-else :key="item.profile.id" class="runtime-card">
             <div class="runtime-title">
@@ -54,16 +46,18 @@
             <div class="runtime-actions">
               <el-switch v-model="item.profile.enabled" active-text="启用" />
               <div>
-                <el-button :loading="verifyingRuntimeId === item.profile.id" :disabled="!item.profile.enabled || savingRuntime" @click="verifyRuntime(item.profile)">验证已保存配置</el-button>
-                <el-button type="primary" :loading="savingRuntime" @click="saveRuntime(item.profile)">保存</el-button>
+                <UiAction v-if="isMobile" :icon="Connection" label="验证已保存配置" :loading="verifyingRuntimeId === item.profile.id" :disabled="!item.profile.enabled || savingRuntime" @click="verifyRuntime(item.profile)" />
+                <el-button v-else :loading="verifyingRuntimeId === item.profile.id" :disabled="!item.profile.enabled || savingRuntime" @click="verifyRuntime(item.profile)">验证已保存配置</el-button>
+                <UiAction v-if="isMobile" :icon="Check" label="保存运行配置" :loading="savingRuntime" @click="saveRuntime(item.profile)" />
+                <el-button v-else type="primary" :loading="savingRuntime" @click="saveRuntime(item.profile)">保存</el-button>
               </div>
             </div>
           </article>
-        </template>
+        </section>
 
-        <template v-else-if="section === 'providers'">
+        <section v-if="isMobile || section === 'providers'" class="settings-card" id="settings-providers" aria-labelledby="settings-providers-title">
           <header class="settings-section-head split provider-section-head">
-            <div><h2>模型供应商</h2><p>API Key 写入系统凭据库；环境变量模式使用启动进程提供的密钥。</p></div>
+            <div><h2 id="settings-providers-title">模型供应商</h2><p>API Key 写入系统凭据库；环境变量模式使用启动进程提供的密钥。</p></div>
             <el-button data-icon-only type="primary" class="ui-icon-action" :icon="Plus" aria-label="新增供应商" title="新增供应商" @click="openNewProvider" />
           </header>
           <div v-if="loading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
@@ -89,11 +83,11 @@
             </div>
           </article>
           <p v-if="!loading && !modelProviders.length" class="settings-empty">尚未配置模型供应商</p>
-        </template>
+        </section>
 
-        <template v-else-if="section === 'usage'">
+        <section v-if="isMobile || section === 'usage'" class="settings-card" id="settings-usage" aria-labelledby="settings-usage-title">
           <header class="settings-section-head split usage-head">
-            <div><h2>Token 用量</h2></div>
+            <div><h2 id="settings-usage-title">Token 用量</h2></div>
             <div class="usage-filters">
               <el-date-picker v-model="usageDateRange" type="daterange" value-format="YYYY-MM-DD" format="YYYY/MM/DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :clearable="false" unlink-panels popper-class="glass-picker wiki-usage-picker" @change="loadUsage" />
               <el-select v-model="usageCaller" class="knowledge-select is-fluid" placeholder="全部调用方" aria-label="Token 用量调用方" popper-class="system-select-popper system-toolbar-popper" placement="bottom-start" :offset="0" :fit-input-width="true" @change="loadUsage">
@@ -134,11 +128,11 @@
               </article>
             </section>
           </div>
-        </template>
+        </section>
 
-        <template v-else-if="section === 'protection'">
+        <section v-if="isMobile || section === 'protection'" class="settings-card" id="settings-protection" aria-labelledby="settings-protection-title">
           <header class="settings-section-head split protection-head">
-            <div><span>本地数据安全</span><h2>数据保护</h2><p>快照使用 SQLite Online Backup，能够一致地包含 WAL 中尚未合并的写入。</p></div>
+            <div><span>本地数据安全</span><h2 id="settings-protection-title">数据保护</h2><p>快照使用 SQLite Online Backup，能够一致地包含 WAL 中尚未合并的写入。</p></div>
             <div class="protection-actions">
               <input ref="backupUploadInput" hidden type="file" accept=".sqlite,.sqlite3,.db,application/vnd.sqlite3" @change="selectRestoreUpload" />
               <el-button @click="backupUploadInput?.click()"><el-icon><UploadFilled /></el-icon>上传恢复</el-button>
@@ -152,7 +146,7 @@
           <section class="wiki-export-card">
             <div><span>单书可迁移导出</span><h3>导出可检查的知识资产</h3><p>JSON 包适合程序迁移与审计；Markdown Wiki 可直接解压浏览，包含实体、来源引用、问答与研究任务。</p></div>
             <div class="wiki-export-actions">
-              <el-select v-model="activeBaseId" class="knowledge-select is-compact is-responsive" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" /></el-select>
+              <el-select v-model="activeBaseId" class="settings-base-select knowledge-select is-compact is-responsive" :popper-class="baseSelectPopperClass" :popper-options="baseSelectPopperOptions" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库" aria-label="导出知识库" @change="changeSettingsBase"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :title="base.book_name" :value="base.id" /></el-select>
               <a v-if="activeBaseId" :href="bookWikiExportDownloadUrl(activeBaseId, 'json')" download><el-button><el-icon><Download /></el-icon>结构化 JSON</el-button></a>
               <a v-if="activeBaseId" :href="bookWikiExportDownloadUrl(activeBaseId, 'markdown')" download><el-button><el-icon><Download /></el-icon>Markdown Wiki</el-button></a>
             </div>
@@ -173,31 +167,34 @@
               </div>
             </article>
           </div>
-        </template>
+        </section>
 
-        <template v-else-if="section === 'documents'">
-          <header class="settings-section-head split"><div><h2>配置文档</h2></div><el-select v-model="activeBaseId" class="knowledge-select is-compact is-responsive" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库" @change="loadSettings"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" /></el-select></header>
+        <section v-if="isMobile || section === 'documents'" class="settings-card" id="settings-documents" aria-labelledby="settings-documents-title">
+          <header class="settings-section-head split documents-head"><div><h2 id="settings-documents-title">配置文档</h2></div><el-select v-model="activeBaseId" class="settings-base-select knowledge-select is-compact is-responsive" :popper-class="baseSelectPopperClass" :popper-options="baseSelectPopperOptions" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库" aria-label="配置文档知识库" @change="changeSettingsBase"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :title="base.book_name" :value="base.id" /></el-select></header>
           <div v-if="!activeBaseId" class="knowledge-empty"><strong>选择一本书</strong><span>查看并调整它的知识建模、问答与任务规则。</span></div>
+          <div v-else-if="isMobile && loading" class="settings-loading" role="status" aria-label="加载配置文档"><el-icon class="is-loading"><Loading /></el-icon></div>
           <div v-else class="document-editor">
             <nav class="document-tabs"><button v-for="document in documents" :key="document.id" :class="{ active: document.id === activeDocument?.id }" @click="activeDocumentId = document.id"><el-icon><Document /></el-icon>{{ document.name }}</button></nav>
             <MotionSwap :view-key="activeDocumentId">
             <template v-if="activeDocument">
               <div class="document-meta"><span>{{ activeDocument.scope === 'book' ? '书籍级配置' : '全局配置' }}</span><span>Revision {{ activeDocument.revision }}</span></div>
-              <textarea v-model="activeDocument.content_md" spellcheck="false"></textarea>
-              <div class="document-actions"><el-button type="primary" :loading="savingDocument" @click="saveDocument">保存</el-button></div>
+              <textarea v-model="activeDocument.content_md" spellcheck="false" :aria-label="`${activeDocument.name} 配置内容`"></textarea>
+              <div class="document-actions"><UiAction v-if="isMobile" :icon="Check" label="保存配置文档" :loading="savingDocument" @click="saveDocument" /><el-button v-else type="primary" :loading="savingDocument" @click="saveDocument">保存</el-button></div>
             </template>
             </MotionSwap>
           </div>
-        </template>
+        </section>
 
-        <template v-else>
+        <section v-if="isMobile || section === 'skills'" class="settings-card" id="settings-skills" aria-labelledby="settings-skills-title">
           <header class="settings-section-head split skills-head">
-            <div><h2>Skills</h2><p>启用状态仅作用于当前书籍。</p></div>
+            <div><h2 id="settings-skills-title">Skills</h2><p>启用状态仅作用于当前书籍。</p></div>
             <div class="skills-actions">
-              <el-select v-model="activeBaseId" class="knowledge-select is-compact is-responsive" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库" @change="loadSkills"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" /></el-select>
+              <el-select v-model="activeBaseId" class="settings-base-select knowledge-select is-compact is-responsive" :popper-class="baseSelectPopperClass" :popper-options="baseSelectPopperOptions" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库" aria-label="Skills 知识库" @change="changeSettingsBase"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :title="base.book_name" :value="base.id" /></el-select>
               <input ref="skillArchiveInput" hidden type="file" accept=".zip,application/zip" @change="importSkillArchive" />
-              <UiAction :icon="UploadFilled" label="导入 ZIP Skill" :loading="importingSkill" @click="skillArchiveInput?.click()" />
-              <el-button data-icon-only type="primary" class="ui-icon-action" aria-label="新增 Skill" title="新增 Skill" @click="openSkillEditor()"><el-icon><Plus /></el-icon></el-button>
+              <div class="skills-create-actions">
+                <UiAction :icon="UploadFilled" label="导入 ZIP Skill" :loading="importingSkill" @click="skillArchiveInput?.click()" />
+                <el-button data-icon-only type="primary" class="ui-icon-action" aria-label="新增 Skill" title="新增 Skill" @click="openSkillEditor()"><el-icon><Plus /></el-icon></el-button>
+              </div>
             </div>
           </header>
           <div v-if="!activeBaseId" class="knowledge-empty"><strong>选择一本书</strong><span>Skill 的启用状态不会跨知识库共享。</span></div>
@@ -207,12 +204,12 @@
               <header>
                 <div class="skill-symbol"><el-icon><MagicStick /></el-icon></div>
                 <div><h3>{{ skill.name }}</h3><code>{{ skill.slug }}</code></div>
-                <el-switch :model-value="skill.enabled" :loading="savingSkillId === skill.id" @change="toggleSkill(skill, Boolean($event))" />
+                <el-switch :model-value="skill.enabled" :aria-label="`启用 ${skill.name}`" :loading="savingSkillId === skill.id" @change="toggleSkill(skill, Boolean($event))" />
               </header>
               <p v-if="skill.description">{{ skill.description }}</p>
               <div class="skill-badges"><span>{{ skill.source_type === 'builtin' ? '内置' : '自定义' }}</span><span>Revision {{ skill.revision }}</span></div>
               <footer>
-                <el-select v-model="skill.usage_scope" class="knowledge-select is-compact" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" :disabled="savingSkillId === skill.id" @change="updateSkillScope(skill)">
+                <el-select v-model="skill.usage_scope" class="knowledge-select is-compact" :aria-label="`${skill.name} 使用场景`" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" :disabled="savingSkillId === skill.id" @change="updateSkillScope(skill)">
                   <el-option label="问答与研究" value="both" /><el-option label="仅问答" value="qa" /><el-option label="仅研究" value="research" /><el-option label="仅智能编译" value="ingest" /><el-option label="全部场景" value="all" />
                 </el-select>
                 <div class="skill-card-actions">
@@ -222,7 +219,7 @@
               </footer>
             </article>
           </div>
-        </template>
+        </section>
         </MotionSwap>
       </section>
     </div>
@@ -282,7 +279,7 @@
     <MotionModal v-model="skillDetailVisible" aria-label="Skill 内容" size="wide">
       <div class="knowledge-modal-card skill-detail-modal">
         <div class="knowledge-modal-head">
-          <div><h3>Skill 内容</h3><p>这里展示当前指令、资源与权限声明；是否实际注入以运行检查器为准。</p></div>
+          <div><h3>{{ !isMobile && skillDetail ? skillDetail.skill.name : 'Skill 内容' }}</h3><p>{{ !isMobile && skillDetail ? (skillDetail.skill.description || '查看指令、资源与权限声明') : '这里展示当前指令、资源与权限声明；是否实际注入以运行检查器为准。' }}</p></div>
           <span v-if="skillDetail" class="knowledge-status" :class="skillDetail.skill.source_type === 'builtin' ? 'is-healthy' : 'is-draft'">{{ skillDetail.skill.source_type === 'builtin' ? '系统内置' : '自定义' }}</span>
         </div>
         <div v-if="skillDetailLoading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
@@ -294,6 +291,10 @@
               <strong>{{ skillDetail.skill.name }}</strong>
               <p>{{ skillDetail.skill.description || '没有补充说明' }}</p>
             </section>
+            <nav v-if="!isMobile" class="skill-file-tabs desktop-skill-files" aria-label="Skill 文件">
+              <h4>文件<span>{{ activeSkillVersion?.files.length || 0 }}</span></h4>
+              <button v-for="file in activeSkillVersion?.files || []" :key="file.relative_path" type="button" class="skill-file-button" data-glass-action :class="{ active: file.relative_path === activeSkillFilePath }" :aria-pressed="file.relative_path === activeSkillFilePath" :title="file.relative_path" @click="activeSkillFilePath = file.relative_path"><el-icon><Document /></el-icon><span><strong>{{ file.relative_path.split('/').pop() }}</strong><small v-if="file.relative_path.includes('/')">{{ file.relative_path.slice(0, file.relative_path.lastIndexOf('/')) }}</small></span></button>
+            </nav>
             <section class="skill-detail-access">
               <h4>权限与依赖</h4>
               <div><span v-for="permission in skillDetail.skill.permissions" :key="permission">{{ permission }}</span><span v-if="!skillDetail.skill.permissions.length">无扩展权限</span></div>
@@ -308,11 +309,13 @@
             </section>
           </aside>
           <section class="skill-detail-content">
-            <nav class="skill-file-tabs" aria-label="Skill 文件">
+            <nav v-if="isMobile" class="skill-file-tabs" aria-label="Skill 文件">
               <button v-for="file in activeSkillVersion?.files || []" :key="file.relative_path" type="button" class="skill-file-button" data-glass-action :class="{ active: file.relative_path === activeSkillFilePath }" :aria-pressed="file.relative_path === activeSkillFilePath" :title="file.relative_path" @click="activeSkillFilePath = file.relative_path"><el-icon><Document /></el-icon><span>{{ file.relative_path }}</span></button>
             </nav>
             <header v-if="activeSkillFile"><div><strong :title="activeSkillFile.relative_path">{{ activeSkillFile.relative_path }}</strong><span>{{ activeSkillFile.media_type }} · {{ formatBytes(activeSkillFile.size_bytes) }}</span></div><code :title="activeSkillFile.content_hash">{{ activeSkillFile.content_hash }}</code></header>
-            <div v-if="activeSkillVersion" class="skill-version-audit">
+            <details v-if="activeSkillVersion" class="skill-version-audit" :open="isMobile">
+              <summary class="skill-audit-toggle">版本与质量信息<el-icon><ArrowDown /></el-icon></summary>
+              <div class="skill-audit-grid">
               <section>
                 <strong>版本说明</strong>
                 <p>{{ activeSkillVersion.changelog || '没有版本说明' }}</p>
@@ -351,9 +354,10 @@
                 </template>
                 <p v-else>尚未运行。它会在只读、无工具权限的 Harness 会话中对比当前版和候选版。</p>
               </section>
-            </div>
-            <MotionSwap :view-key="activeSkillFile?.relative_path || 'empty'">
-            <pre v-if="activeSkillFile">{{ activeSkillFile.content_text }}</pre>
+              </div>
+            </details>
+            <MotionSwap class="skill-body-swap" :view-key="activeSkillFile?.relative_path || 'empty'">
+            <pre v-if="activeSkillFile" class="skill-file-content" tabindex="0" aria-label="Skill 文件内容">{{ activeSkillFile.content_text }}</pre>
             <div v-else class="knowledge-empty"><strong>当前版本没有可显示文件</strong></div>
             </MotionSwap>
           </section>
@@ -384,14 +388,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { ArrowDown, Connection, Cpu, DataAnalysis, Delete, Document, Download, Edit, InfoFilled, Loading, Lock, MagicStick, Plus, UploadFilled, View } from '@element-plus/icons-vue'
+import { ElMessage, type SelectProps } from 'element-plus'
+import { ArrowDown, Check, Connection, Cpu, DataAnalysis, Delete, Document, Download, Edit, InfoFilled, Loading, Lock, MagicStick, Plus, UploadFilled, View } from '@element-plus/icons-vue'
 import UiAction from '@/components/motion/UiAction'
 import MotionSwap from '@/components/motion/MotionSwap.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
+import { usePhoneViewport } from '@/composables/usePhoneViewport'
+import { settingsSelectMaxHeight } from '@/utils/wikiSettingsLayout'
 import { modelReasoningPolicies, validateModelCapabilities } from '@/utils/knowledgeRuntimePolicy'
 import {
   getBookWikiSettings,
@@ -431,6 +437,19 @@ import {
 } from '@/api/knowledge'
 
 const section = ref<'runtime' | 'providers' | 'usage' | 'protection' | 'documents' | 'skills'>('runtime')
+const { isMobile } = usePhoneViewport()
+const baseSelectPopperClass = computed(() => isMobile.value ? 'system-select-popper wiki-settings-base-popper' : 'system-select-popper')
+const baseSelectPopperOptions = computed<SelectProps['popperOptions']>(() => isMobile.value ? {
+  modifiers: [{
+    name: 'settingsViewport', enabled: true, phase: 'beforeWrite', requires: ['computeStyles'],
+    fn({ state }) {
+      const trigger = state.elements.reference.getBoundingClientRect()
+      const viewport = window.visualViewport
+      const height = settingsSelectMaxHeight(trigger, viewport?.offsetTop ?? 0, viewport?.height ?? window.innerHeight, state.placement)
+      state.elements.popper.style.setProperty('--settings-menu-height', `${height}px`)
+    },
+  }],
+} : {})
 const settingsRoute = useRoute()
 const requestedSection = String(settingsRoute.query.section || '')
 if (['runtime','providers','usage','protection','documents','skills'].includes(requestedSection)) section.value = requestedSection as typeof section.value
@@ -492,6 +511,8 @@ const restoreConfirmation = ref('')
 const restoring = ref(false)
 const skills = ref<WikiSkill[]>([])
 const skillsLoading = ref(false)
+let settingsRequest = 0
+let skillsRequest = 0
 const savingSkillId = ref('')
 const savingSkill = ref(false)
 const importingSkill = ref(false)
@@ -829,19 +850,23 @@ async function initialize() {
 }
 
 async function loadSkills() {
+  const request = ++skillsRequest
+  const baseId = activeBaseId.value
   if (!activeBaseId.value) {
     skills.value = []
+    skillsLoading.value = false
     return
   }
   skillsLoading.value = true
   try {
-    const response = await listWikiSkills(activeBaseId.value)
+    const response = await listWikiSkills(baseId)
+    if (request !== skillsRequest || baseId !== activeBaseId.value) return
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || 'Skills 加载失败')
     skills.value = response.result.skills
   } catch (error) {
-    ElMessage.error((error as Error).message)
+    if (request === skillsRequest) ElMessage.error((error as Error).message)
   } finally {
-    skillsLoading.value = false
+    if (request === skillsRequest) skillsLoading.value = false
   }
 }
 
@@ -1071,14 +1096,16 @@ async function importSkillArchive(event: Event) {
 
 async function persistSkillBinding(skill: WikiSkill, enabled: boolean) {
   if (!activeBaseId.value) return
+  const baseId = activeBaseId.value
   savingSkillId.value = skill.id
   try {
     const response = await setWikiSkillBinding({
-      knowledgeBaseId: activeBaseId.value,
+      knowledgeBaseId: baseId,
       skillId: skill.id,
       enabled,
       usageScope: skill.usage_scope,
     })
+    if (baseId !== activeBaseId.value) return
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || 'Skill 配置保存失败')
     const index = skills.value.findIndex(item => item.id === skill.id)
     if (index >= 0) skills.value[index] = response.result
@@ -1098,22 +1125,34 @@ function updateSkillScope(skill: WikiSkill) {
   void persistSkillBinding(skill, skill.enabled)
 }
 
-async function loadSettings() {
+async function loadSettings(bookOnly = false) {
+  const request = ++settingsRequest
+  const baseId = activeBaseId.value
   loading.value = true
   try {
-    const response = await getBookWikiSettings(activeBaseId.value || undefined)
+    const response = await getBookWikiSettings(baseId || undefined)
+    if (request !== settingsRequest || baseId !== activeBaseId.value) return
     if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '配置加载失败')
-    runtimeHealth.value = response.result.runtime_profiles
-    modelProviders.value = response.result.model_providers
+    // Changing a book in the mobile feed must not discard unsaved global fields.
+    if (!bookOnly) {
+      runtimeHealth.value = response.result.runtime_profiles
+      modelProviders.value = response.result.model_providers
+    }
     documents.value = response.result.documents
     activeDocumentId.value = documents.value.some(document => document.id === activeDocumentId.value)
       ? activeDocumentId.value
       : (documents.value[0]?.id || '')
   } catch (error) {
-    ElMessage.error((error as Error).message)
+    if (request === settingsRequest) ElMessage.error((error as Error).message)
   } finally {
-    loading.value = false
+    if (request === settingsRequest) loading.value = false
   }
+}
+
+async function changeSettingsBase() {
+  if (isMobile.value) await Promise.all([loadSettings(true), loadSkills()])
+  else if (section.value === 'documents') await loadSettings()
+  else if (section.value === 'skills') await loadSkills()
 }
 
 async function loadUsage() {
@@ -1185,11 +1224,26 @@ watch(section, value => {
   if (value === 'protection' && !backups.value.length) void loadBackups()
   if (value === 'skills' && !skills.value.length) void loadSkills()
 })
-onMounted(() => { void initialize(); if (section.value === 'usage') void loadUsage() })
+async function revealRequestedSection() {
+  if (!isMobile.value || !requestedSection) return
+  await nextTick()
+  document.getElementById(`settings-${section.value}`)?.scrollIntoView({ block: 'start' })
+}
+watch(isMobile, async mobile => {
+  if (!mobile) return
+  await Promise.all([usageStats.value ? undefined : loadUsage(), backups.value.length ? undefined : loadBackups()])
+})
+onMounted(async () => {
+  await Promise.all([
+    initialize(),
+    isMobile.value || section.value === 'usage' ? loadUsage() : undefined,
+    isMobile.value || section.value === 'protection' ? loadBackups() : undefined,
+  ])
+  await revealRequestedSection()
+})
 </script>
 
 <style scoped>
-.mobile-settings-section { display: none; }
 .mobile-skill-metadata-toggle { display: none; }
 .settings-layout { min-height: 0; display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 12px; }
 .settings-nav { align-self: start; display: grid; gap: 4px; padding: 7px; }
@@ -1201,6 +1255,8 @@ onMounted(() => { void initialize(); if (section.value === 'usage') void loadUsa
 .settings-nav strong { color: inherit; font-size: 13px; }
 .settings-nav small { color: var(--text-faint); font-size: 10px; }
 .settings-main { min-width: 0; container-type: inline-size; padding: clamp(16px, 1.8vw, 24px); }
+.settings-card { min-width: 0; }
+.skills-create-actions { display: contents; }
 .settings-section-head { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border-faint); }
 .settings-section-head.split { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
 .settings-section-head > div { min-width: 0; max-width: 100%; }
@@ -1296,7 +1352,8 @@ onMounted(() => { void initialize(); if (section.value === 'usage') void loadUsa
 .wiki-export-card span { color: var(--accent); font-size: 9px; font-weight: 720; letter-spacing: .06em; }
 .wiki-export-card h3 { margin: 0; color: var(--text-primary); font-size: 14px; }
 .wiki-export-card p { max-width: 590px; color: var(--text-muted); font-size: 10px; line-height: 1.55; }
-.wiki-export-actions { width: min(100%, 460px); display: grid; grid-template-columns: minmax(150px, 1fr) auto auto; gap: 7px; }
+.wiki-export-actions { width: min(100%, 460px); min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 7px; }
+.wiki-export-actions .settings-base-select { min-width: 0; width: 100%; max-width: 100%; }
 .wiki-export-actions a { text-decoration: none; }
 .backup-list { display: grid; gap: 9px; }
 .backup-card { min-width: 0; display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--border-faint); border-radius: 16px; background: var(--bg-glass-subtle); box-shadow: var(--inset-highlight); transition: var(--transition-interactive); }
@@ -1373,7 +1430,9 @@ onMounted(() => { void initialize(); if (section.value === 'usage') void loadUsa
 .skill-detail-content > header strong { overflow: hidden; color: var(--text-primary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .skill-detail-content > header code { flex: none; max-width: 12ch; }
 .skill-detail-content > header span, .skill-detail-content > header code { overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.skill-version-audit { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border-faint); background: color-mix(in srgb, var(--bg-base) 42%, transparent); }
+.skill-version-audit { flex: none; min-width: 0; border-bottom: 1px solid var(--border-faint); background: color-mix(in srgb, var(--bg-base) 42%, transparent); }
+.skill-audit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 11px 14px; }
+.skill-audit-toggle { display: none; }
 .skill-version-audit section:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .skill-version-audit section { min-width: 0; display: grid; align-content: start; gap: 4px; padding: 10px; border: 1px solid var(--border-faint); border-radius: 12px; }
 .skill-version-audit strong { color: var(--text-primary); font-size: 11px; }
@@ -1394,7 +1453,44 @@ onMounted(() => { void initialize(); if (section.value === 'usage') void loadUsa
 .skill-benchmark-details article header em { color: var(--danger, #dc2626); font-size: 10px; font-style: normal; }
 .skill-benchmark-details article header em.passed { color: var(--accent); }
 .skill-benchmark-details article p, .skill-benchmark-details article small { overflow-wrap: anywhere; color: var(--text-faint); font-size: 10px; line-height: 1.45; }
-.skill-detail-content > pre { min-height: 220px; max-height: min(48dvh, 420px); margin: 0; overflow: auto; padding: 18px; background: color-mix(in srgb, var(--bg-base) 56%, transparent); color: var(--text-secondary); font-family: var(--font-mono); font-size: 11px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (min-width: 769px) {
+  .wiki-export-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .wiki-export-actions { width: 100%; align-items: stretch; }
+  .wiki-export-actions a { min-width: 0; display: flex; }
+  .wiki-export-actions a .el-button { min-width: 0; width: 100%; margin: 0; white-space: normal; }
+  .skill-detail-modal { height: min(800px, calc(100dvh - 64px)); }
+  .skill-detail-modal > .knowledge-modal-head { padding: 22px 24px 18px; }
+  .skill-detail-modal > .knowledge-modal-head h3 { font-size: 22px; }
+  .skill-detail-layout { grid-template-columns: 230px minmax(0, 1fr); margin: 0 20px; border-radius: 16px; }
+  .skill-detail-sidebar { gap: 22px; padding: 18px 14px; overscroll-behavior: contain; }
+  .skill-detail-summary > strong, .skill-detail-summary > p { display: none; }
+  .desktop-skill-files { display: grid; gap: 5px; padding: 0; border: 0; }
+  .desktop-skill-files h4 { display: flex; justify-content: space-between; align-items: center; margin: 0 0 5px; color: var(--text-muted); font-size: 12px; font-weight: 650; }
+  .desktop-skill-files h4 span { color: var(--text-faint); font-size: 11px; font-weight: 500; }
+  .skill-detail-modal .skill-detail-sidebar .desktop-skill-files .skill-file-button[data-glass-action] { width: 100%; justify-content: flex-start; align-items: flex-start; padding: 9px 10px; background: transparent !important; border-color: transparent !important; box-shadow: none !important; }
+  .skill-detail-modal .skill-detail-sidebar .desktop-skill-files .skill-file-button[data-glass-action]:hover { background: var(--bg-hover) !important; }
+  .skill-detail-modal .skill-detail-sidebar .desktop-skill-files .skill-file-button[data-glass-action].active { background: var(--accent-light) !important; color: var(--accent); }
+  .desktop-skill-files .skill-file-button span { display: grid; gap: 2px; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+  .desktop-skill-files .skill-file-button strong { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 12px; font-weight: 550; }
+  .desktop-skill-files .skill-file-button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-size: 10px; }
+  .desktop-skill-files .el-icon { margin-top: 2px; }
+  .skill-detail-access h4, .skill-detail-versions h4 { font-size: 12px; letter-spacing: 0; }
+  .skill-detail-access small { font-size: 11px; line-height: 1.65; }
+  .skill-detail-content { overflow: hidden; }
+  .skill-detail-content > header { flex: none; min-height: 62px; padding: 12px 20px; }
+  .skill-detail-content > header strong { overflow-wrap: anywhere; white-space: normal; font-size: 13px; }
+  .skill-body-swap { flex: 1; min-height: 0; overflow: hidden; }
+  .skill-body-swap :deep(.motion-swap__panel) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .skill-body-swap :deep(.skill-file-content) { min-width: 0; flex: 1; min-height: 0; margin: 0; overflow: auto; padding: 22px; background: color-mix(in srgb, var(--bg-base) 45%, transparent); color: var(--text-secondary); font: 13px/1.8 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .skill-version-audit { order: 2; border-bottom: 0; border-top: 1px solid var(--border-faint); }
+  .skill-audit-toggle { min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 20px; color: var(--text-muted); font-size: 12px; cursor: pointer; list-style: none; }
+  .skill-audit-toggle::-webkit-details-marker { display: none; }
+  .skill-audit-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; border-radius: 8px; }
+  .skill-audit-toggle .el-icon { transition: transform var(--motion-fast) var(--ease-emphasized); }
+  .skill-version-audit[open] > .skill-audit-toggle .el-icon { transform: rotate(180deg); }
+  .skill-audit-grid { max-height: min(28dvh, 220px); overflow-y: auto; padding: 0 14px 14px; overscroll-behavior: contain; }
+  .skill-detail-modal > .knowledge-modal-actions { padding: 14px 20px 18px; }
+}
 @media (max-width: 1200px) {
   .settings-layout { display: block; }
   .settings-nav { display: flex; gap: 5px; margin-bottom: 12px; overflow-x: auto; scrollbar-width: none; }
@@ -1431,15 +1527,15 @@ onMounted(() => { void initialize(); if (section.value === 'usage') void loadUsa
 @media (max-width: 768px) {
   .settings-layout { display: block; }
   .settings-nav { display: none; }
-  .mobile-settings-section { display: block; margin-bottom: 10px; }
-  .settings-nav button { min-height: 48px; justify-content: center; padding: 8px 12px; }
-  .settings-nav button span { display: grid; }
-  .settings-nav strong { font-size: 12px; }
-  .settings-main { padding: 14px; }
-  .settings-section-head { margin-bottom: 14px; padding-bottom: 12px; }
+  .settings-main { padding: 0; border: 0; background: none; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .settings-sections > :deep(.motion-swap__panel) { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .settings-card { padding: 14px; border: 1px solid var(--border-glass); border-radius: 20px; background: var(--bg-glass-strong); box-shadow: var(--shadow-sm), var(--inset-highlight); scroll-margin-top: 12px; }
+  .settings-section-head { margin-bottom: 14px; padding-bottom: 0; border-bottom: 0; }
   .settings-section-head h2 { font-size: 19px; }
   .settings-section-head p { font-size: 13px; line-height: 1.6; }
   .runtime-card, .provider-card { gap: 12px; padding: 12px; }
+  .runtime-card { padding: 0; border: 0; background: none; }
+  .provider-card + .provider-card, .runtime-card + .runtime-card { margin-top: 12px; }
   .runtime-title { gap: 8px; }
   .runtime-logo { width: 36px; height: 36px; border-radius: 11px; flex: none; }
   .provider-mode { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; padding: 10px; }
@@ -1458,12 +1554,12 @@ onMounted(() => { void initialize(); if (section.value === 'usage') void loadUsa
   .runtime-title { flex-wrap: wrap; }
   .runtime-title > div:nth-child(2) { flex: 1 1 calc(100% - 44px); }
   .runtime-title .knowledge-status { margin-left: 44px; }
-  .runtime-actions { align-items: stretch; flex-direction: column; gap: 12px; }
-  .runtime-actions > div:not(.el-switch) { display: grid; grid-template-columns: 1fr; gap: 7px; }
+  .runtime-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+  .runtime-actions > div:not(.el-switch) { display: flex; align-items: center; gap: 2px; }
   .runtime-actions .el-button { min-width: 0; margin: 0; white-space: normal; }
   .provider-fields { grid-template-columns: 1fr; }
   .provider-fields .is-wide { grid-column: auto; }
-  .document-actions { align-items: stretch; flex-direction: column; }
+  .document-actions { align-items: center; justify-content: flex-end; flex-direction: row; }
   .usage-filters { --usage-control-height: 44px; width: 100%; grid-template-columns: 1fr; }
   .usage-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .usage-bars { height: 190px; }
@@ -1472,14 +1568,13 @@ onMounted(() => { void initialize(); if (section.value === 'usage') void loadUsa
   .wiki-export-card { align-items: stretch; flex-direction: column; }
   .wiki-export-actions { width: 100%; grid-template-columns: 1fr; }
   .wiki-export-actions .knowledge-select { grid-column: auto; }
-  .skill-version-audit { grid-template-columns: 1fr; }
+  .skill-audit-grid { grid-template-columns: 1fr; }
   .wiki-export-actions a .el-button { width: 100%; }
   .backup-card { align-items: flex-start; flex-wrap: wrap; }
   .backup-copy { width: calc(100% - 58px); flex: auto; }
   .backup-card-actions { width: 100%; justify-content: flex-end; border-top: 1px solid var(--border-faint); padding-top: 7px; }
   .backup-card:hover { transform: none; }
-  .skills-actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .skills-actions .knowledge-select { min-width: 0; grid-column: 1 / -1; }
+  .skills-actions { display: contents; }
   .skills-actions .el-button { min-width: 0; width: 100%; margin: 0; white-space: normal; }
   .skills-grid { grid-template-columns: 1fr; }
   .skill-card:hover { transform: none; }
@@ -1491,10 +1586,12 @@ onMounted(() => { void initialize(); if (section.value === 'usage') void loadUsa
   .skill-detail-sidebar { overflow: visible; border-right: 0; border-bottom: 1px solid var(--border-faint); }
   .skill-detail-versions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .skill-detail-versions h4 { grid-column: 1 / -1; }
-  .skill-detail-content { overflow: visible; }
-  .skill-detail-content > pre { min-height: 0; max-height: none; padding: 14px; font-size: 13px; }
+  .skill-detail-content { display: block; overflow: visible; }
+  .skill-detail-content :deep(.skill-file-content) { min-width: 0; min-height: 0; max-height: none; margin: 0; padding: 14px; background: color-mix(in srgb, var(--bg-base) 56%, transparent); color: var(--text-secondary); font: 13px/1.75 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .skill-detail-content :deep(.motion-swap), .skill-detail-content :deep(.motion-swap__panel) { max-height: none; }
   .skill-file-tabs { flex-wrap: wrap; }
   .skill-file-tabs button { min-height: 44px; }
+  .skill-file-tabs button span { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
   .skill-detail-content > header { flex-wrap: wrap; gap: 6px; }
   .skill-detail-content > header > div { min-width: 0; }
 }
@@ -1507,8 +1604,36 @@ onMounted(() => { void initialize(); if (section.value === 'usage') void loadUsa
 @media (max-width: 768px) {
   .settings-section-head.provider-section-head { display: flex; flex-direction: row; align-items: flex-start; flex-wrap: nowrap; }
   .provider-section-head > div { flex: 1; min-width: 0; }
-  .skills-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; }
-  .skills-actions .knowledge-select { flex: 1 0 100%; }
-  .skills-actions .ui-icon-action { width: 44px; flex: none; }
+  .settings-section-head.split { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .settings-base-select { min-width: 0; width: 100%; max-width: 100%; }
+  .settings-base-select :deep(.el-select__selection) { min-width: 0; }
+  .settings-base-select :deep(.el-select__placeholder) { position: static; transform: none; white-space: normal; overflow-wrap: anywhere; }
+  .settings-base-select :deep(.el-select__wrapper) { min-height: 44px; height: auto; }
+  .settings-section-head.skills-head { grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+  .skills-actions .settings-base-select { grid-column: 1 / -1; grid-row: 2; }
+  .skills-create-actions { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 2px; }
+  .skills-create-actions .ui-icon-action { width: 44px; flex: none; }
+  .provider-card .runtime-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+  .provider-card .runtime-actions > div:not(.el-switch) { display: flex; align-items: center; gap: 2px; }
+  .skill-card footer { flex-wrap: nowrap; gap: 8px; }
+  .skill-card footer .knowledge-select { min-width: 0; width: auto; flex: 1; }
+  .skill-card-actions { width: auto; flex: none; }
+  .skill-card > p { font-size: 13px; }
+  .runtime-card label > span, .provider-mode strong { font-size: 13px; }
+  .mobile-skill-metadata-toggle .el-icon { transition: transform var(--motion-fast) var(--ease-emphasized); }
+  .mobile-skill-metadata-toggle[aria-expanded="true"] .el-icon { transform: rotate(180deg); }
+}
+</style>
+
+<!-- Teleported overlays live outside the scoped settings surface. -->
+<style>
+@media (min-width: 769px) {
+  .motion-modal .motion-modal__panel.is-wide:has(> .skill-detail-modal) { width: min(1080px, calc(100vw - 48px)); }
+}
+@media (max-width: 768px) {
+  .wiki-settings-base-popper.el-popper { max-width: calc(100vw - 24px); }
+  .wiki-settings-base-popper .el-select-dropdown__wrap { max-height: var(--settings-menu-height, 274px) !important; overscroll-behavior: contain; }
+  .wiki-settings-base-popper .el-select-dropdown__item { height: auto; white-space: normal; overflow-wrap: anywhere; min-height: 44px; padding: 10px; line-height: 1.5; }
+  .wiki-settings-base-popper .el-select-dropdown__item > span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 }
 </style>

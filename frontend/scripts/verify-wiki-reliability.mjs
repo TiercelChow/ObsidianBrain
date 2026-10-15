@@ -272,8 +272,7 @@ try {
     }
     async function selectSettings(label) {
       if (phone) {
-        await page.locator('.mobile-settings-section').click()
-        await page.getByRole('option', { name: new RegExp(`^${label}`) }).click()
+        await page.locator('.settings-card').filter({ has: page.getByRole('heading', { name: label, exact: true }) }).scrollIntoViewIfNeeded()
       } else await page.locator('.settings-nav').getByRole('button', { name: new RegExp(label) }).click()
     }
     async function selectStage(dialog, title) {
@@ -472,14 +471,14 @@ try {
         await picker.setFiles([]) // Cancel only: never upload or mutate fixture data.
         await page.getByRole('button', { name: '查看内容', exact: true }).click()
         const skill = page.getByRole('dialog', { name: 'Skill 内容' })
-        await skill.locator('.skill-detail-content > pre').waitFor()
+        await skill.locator('.skill-file-content').waitFor()
         const resource = skill.locator('.skill-file-tabs button').nth(1)
         await resource.click()
         assert.equal(await resource.getAttribute('aria-pressed'), 'true', 'file selection exposes active state')
         await page.mouse.move(1, 1)
         await neutralAction(resource)
         await within('.skill-file-tabs button:nth-child(2)', '.skill-file-tabs')
-        assert.match(await skill.locator('.skill-detail-content > pre').innerText(), /可以切换查看/)
+        assert.match(await skill.locator('.skill-file-content').innerText(), /可以切换查看/)
         await checkLayout(`controls-${theme}-skill-files`, skill)
         await skill.getByRole('button', { name: '完成', exact: true }).click()
         await selectSettings('数据保护')
@@ -954,7 +953,7 @@ try {
         if (name === 'skills') {
           await page.getByRole('button', { name: '查看内容', exact: true }).click()
           const skill = page.getByRole('dialog', { name: 'Skill 内容' })
-          await skill.locator('.skill-detail-content > pre').waitFor()
+          await skill.locator('.skill-file-content').waitFor()
           await checkLayout('skill-body', skill)
           if (phone) {
             assert.equal(await skill.locator('.skill-detail-sidebar').isVisible(), false)
