@@ -111,3 +111,26 @@ test('mobile Wiki chat keeps its composer above the global dock', async () => {
   assert.match(chat, /\.chat-panel\s*\{[^}]*min-height:\s*0;[^}]*flex:\s*1/)
   assert.match(chat, /\.chat-composer\s*\{[^}]*flex:\s*none/)
 })
+
+test('only mobile chat follows the actual dock arc while outer lists retain stable reserves', async () => {
+  const [app, shared, chat, motion] = await Promise.all([
+    source('src/App.vue'), source('src/styles/knowledge.css'), source('src/views/knowledge/KnowledgeChat.vue'), source('src/composables/useMobileDockMotion.ts'),
+  ])
+  assert.match(app, /:style="mobileChatDockStyle"/)
+  assert.match(app, /route\.path !== '\/knowledge\/chat'/)
+  assert.match(app, /'--chat-dock-sink': geometry\.sink/)
+  assert.match(app, /'--chat-dock-travel-y': geometry\.travelY/)
+  assert.match(app, /'--chat-dock-visible': dockKeyboardOpen\.value \? 0 : 1/)
+  assert.match(app, /\.has-mobile-subnav \{ --mobile-navigation-height: calc\(var\(--mobile-dock-height\) \+ var\(--mobile-sub-dock-height\) \+ 8px\)/)
+  const container = shared.match(/\.app-shell \.app-main\.mobile-full:has\(\.chat-layout\)\s*\{([^}]+)\}/)?.[1] ?? ''
+  assert.match(container, /padding-bottom: calc\(var\(--chat-dock-height\)/)
+  assert.match(container, /overflow-y: hidden/)
+  assert.match(container, /var\(--chat-dock-sink, 0\)/)
+  assert.match(container, /var\(--chat-dock-travel-y, 0\)/)
+  assert.doesNotMatch(container, /transition:/)
+  assert.match(chat, /new ResizeObserver/)
+  assert.match(chat, /messageEndPinned/)
+  assert.match(chat, /messageResizeObserver\?\.disconnect\(\)/)
+  assert.match(chat, /overflow-anchor: none/)
+  assert.match(motion, /resizeAwareScrollDelta\(/)
+})

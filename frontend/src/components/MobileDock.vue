@@ -45,7 +45,7 @@
           <el-icon><Notebook /></el-icon><span>Wiki</span>
         </router-link>
       </nav>
-      <button type="button" class="mobile-dock-orb" aria-label="展开主要导航" aria-controls="mobile-main-navigation" :aria-expanded="!compact" :aria-hidden="!compact ? 'true' : undefined" :inert="!compact ? true : undefined" @click="expand">
+      <button data-icon-only type="button" class="mobile-dock-orb" aria-label="展开主要导航" aria-controls="mobile-main-navigation" :aria-expanded="!compact" :aria-hidden="!compact ? 'true' : undefined" :inert="!compact ? true : undefined" @click="expand">
         <el-icon><component :is="orbIcon" /></el-icon>
         <span class="dock-orb-hint" aria-hidden="true"></span>
       </button>
@@ -115,6 +115,8 @@ onScopeDispose(() => observer?.disconnect())
 .mobile-navigation.has-subnav { height: calc(var(--mobile-dock-height) + var(--mobile-sub-dock-height) + var(--dock-gap)); }
 .dock-glass {
   border: 1px solid var(--border-glass);
+  /* The browser clamps the same pill contour to every live height and width. */
+  border-radius: 999px;
   background: color-mix(in srgb, var(--bg-glass-strong) 94%, transparent);
   backdrop-filter: var(--glass-floating-filter);
   -webkit-backdrop-filter: var(--glass-floating-filter);
@@ -126,7 +128,6 @@ onScopeDispose(() => observer?.disconnect())
   bottom: 0;
   width: calc(100% - (var(--dock-width) - var(--dock-orb-size)) * var(--dock-progress));
   height: var(--mobile-dock-height);
-  border-radius: calc(20px + (var(--mobile-dock-height) / 2 - 20px) * var(--dock-progress));
   overflow: hidden;
   transform-origin: right bottom;
   transform: translate3d(0, calc(-4px * var(--dock-rebound)), 0) scale(calc(1 + .012 * var(--dock-rebound)), calc(1 - .06 * var(--dock-rebound)));
@@ -194,7 +195,6 @@ onScopeDispose(() => observer?.disconnect())
   height: calc(var(--mobile-sub-dock-height) + (var(--mobile-dock-height) - var(--mobile-sub-dock-height)) * var(--dock-settle-progress));
   display: flex;
   padding: calc(2px + 2px * var(--dock-settle-progress));
-  border-radius: calc(18px + 2px * var(--dock-settle-progress));
   /* A continuous clearing arc follows the retracting capsule; hit areas don't scale. */
   transform: translate3d(0, calc(-1 * (var(--mobile-dock-height) + var(--dock-gap)) + (var(--mobile-dock-height) + var(--mobile-sub-dock-height) + 2 * var(--dock-gap)) / 2 * var(--dock-travel-y) + (var(--mobile-dock-height) - var(--mobile-sub-dock-height)) / 2 * var(--dock-settle-progress) - 4px * var(--dock-rebound)), 0);
   pointer-events: auto;

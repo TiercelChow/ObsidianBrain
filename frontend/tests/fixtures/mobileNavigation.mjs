@@ -62,6 +62,31 @@ const resultFor = {
 }
 const readOnlyPreview = {
   name: 'isolated-mobile-navigation',
+  transformIndexHtml() {
+    // Opt-in UI controls replay gestures through the real app listeners. They
+    // only exist on this isolated server, never in the production application.
+    return [{ tag: 'script', attrs: { type: 'module' }, children: `
+      if (new URL(location.href).searchParams.get('dockPreview') === '1') {
+        const tools = document.createElement('div');
+        tools.setAttribute('aria-label', '隔离布局验收');
+        tools.style.cssText = 'position:fixed;top:106px;right:12px;z-index:900;display:grid;gap:4px;font:11px system-ui';
+        const actions = {
+          '回看中段': el => { el.scrollTop = (el.scrollHeight - el.clientHeight) / 2 },
+          '滑动收起': el => { el.dispatchEvent(new WheelEvent('wheel', { deltaY:160, bubbles:true })); el.scrollTop += 160 },
+          '滑动展开': el => { el.dispatchEvent(new WheelEvent('wheel', { deltaY:-160, bubbles:true })); el.scrollTop -= 160 },
+          '跳至末尾': el => { el.scrollTop = el.scrollHeight },
+          '隐藏验收工具': () => tools.remove(),
+        };
+        for (const [label, action] of Object.entries(actions)) {
+          const button = document.createElement('button'); button.textContent = label;
+          button.style.cssText = 'padding:5px;border:1px solid #9aa4b3;border-radius:8px;background:#f8fafc;color:#283243;font:inherit';
+          button.onclick = () => { const el = document.querySelector('.message-list'); if (el) action(el) };
+          tools.append(button);
+        }
+        document.body.append(tools);
+      }
+    ` }]
+  },
   configureServer(server) {
     server.middlewares.use(async (request, response, next) => {
       if (!request.url?.startsWith('/v1')) return next()
@@ -117,6 +142,28 @@ const readOnlyPreview = {
         if (request.url !== '/v1/tools/call' || !Object.hasOwn(resultFor, call.tool)) throw new Error('Read-only preview')
         console.log(`Preview read: ${call.tool}`)
         let result=resultFor[call.tool]
+        if ((request.headers.referer || '').includes('preview=research-actions')) {
+          const completed = {...researchTask, id:'research-completed', title:'从阅读到实践的知识体系', status:'completed', deliverable_type:'presentation', artifact_state:'ready', result_summary:'# 研究报告\n\n从明确的问题出发，将书内证据组织成主题，再结合实践持续验证。\n\n## 建议\n\n保留来源，定期复盘，将关键结论转化为下一步行动。'}
+          if (call.tool === 'list_knowledge_tasks') result = {tasks:[completed, researchTask, {...completed,id:'research-ppt-failed',title:'演示生成失败但报告保留',status:'failed',artifact_state:'failed'}]}
+          if (call.tool === 'get_knowledge_task_result') result = {task:completed,evidence:[],artifacts:[{id:'artifact-preview',task_id:completed.id,kind:'pptx',title:'知识体系.pptx',media_type:'application/vnd.openxmlformats-officedocument.presentationml.presentation',size_bytes:4096,validation_message:'隔离预览校验',agent_run_id:null,validation_details:{slide_count:8,layout_count:4,citation_coverage_percent:100,theme:'editorial',checks:[]}}],run_id:''}
+        }
+        if (call.tool === 'list_book_knowledge_bases' && (request.headers.referer || '').includes('preview=uninitialized')) {
+          result = structuredClone(result)
+          result.items[0].knowledge_base = null
+          result.items[0].book.name = '尚未建立知识库的长标题：阅读、记录与持续成长'
+        }
+        if (call.tool === 'list_book_knowledge_bases' && (request.headers.referer || '').includes('preview=card-states')) {
+          result = structuredClone(result)
+          result.items[0].book.name = '从阅读与思考到持续实践：个人知识体系的构建与维护'
+          Object.assign(result.items[0].knowledge_base, { compile_state: 'failed', compile_phase: 'failed', compile_error: '隔离布局用例：编译失败，保留已有知识；可检查编译报告后重试。' })
+          result.items[1].knowledge_base = null
+          result.items[2].knowledge_base.lifecycle = 'paused'
+          result.items[3].knowledge_base.source_available = false
+        }
+        if (call.tool === 'get_knowledge_conversation' && (request.headers.referer || '').includes('dockPreview=1')) {
+          result = structuredClone(result)
+          result.messages[1].content = Array.from({length:32}, (_,index) => `## 阅读片段 ${index + 1}\n\n这段隔离会话用于验证 Dock 收起后对话获得更多空间。查看历史时保持阅读位置，浏览到末尾时让最后一条回答与输入框自然跟随，不把布局变化当作反向手势。`).join('\n\n')
+        }
         if(call.tool==='list_tasks') {
           const filters=call.arguments
           result={tasks:result.tasks.filter(task=>(!filters.query || task.title.includes(filters.query)) && (!filters.kinds || filters.kinds.includes(task.kind)) && (!filters.statuses || filters.statuses.includes(task.status))),next_cursor:null}

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { advanceDockGesture, dockReleaseTarget, boundedScrollTop, createDockGesture, stepDockSpring, dockGeometry, dockRebound } from '../src/utils/mobileDockMotion.ts'
+import { advanceDockGesture, dockReleaseTarget, boundedScrollTop, createDockGesture, stepDockSpring, dockGeometry, dockRebound, resizeAwareScrollDelta } from '../src/utils/mobileDockMotion.ts'
 
 test('finger up contracts and finger down expands the dock continuously', () => {
   let state = advanceDockGesture(createDockGesture(0), 36)
@@ -35,6 +35,19 @@ test('overscroll and invalid values cannot produce dock progress outside bounds'
   assert.equal(boundedScrollTop(20, 80, 100), 0)
   assert.equal(boundedScrollTop(Number.NaN, 400, 100), 0)
   assert.deepEqual(advanceDockGesture(createDockGesture(20), Number.NaN), createDockGesture(20))
+})
+
+test('chat viewport growth and bottom pinning do not count as reverse dock gestures', () => {
+  const before = { top: 800, height: 1200, viewport: 400 }
+  assert.equal(resizeAwareScrollDelta(before, { top: 742, height: 1200, viewport: 458 }), 0)
+  assert.equal(resizeAwareScrollDelta({ top: 742, height: 1200, viewport: 458 }, before), 0)
+  assert.equal(resizeAwareScrollDelta({ top: 300, height: 1200, viewport: 400 }, { top: 300, height: 1200, viewport: 458 }), 0)
+})
+
+test('real scrolling survives resizing and at-bottom clamping in the same frame', () => {
+  assert.equal(resizeAwareScrollDelta({ top: 800, height: 1200, viewport: 400 }, { top: 710, height: 1200, viewport: 458 }), -32)
+  assert.equal(resizeAwareScrollDelta({ top: 300, height: 1200, viewport: 400 }, { top: 340, height: 1200, viewport: 458 }), 40)
+  assert.equal(resizeAwareScrollDelta({ top: 800, height: 1200, viewport: 400 }, { top: 760, height: 1200, viewport: 400 }), -40)
 })
 
 test('dock motion is quicker but still shows the retracting surface instead of snapping', () => {
@@ -92,8 +105,8 @@ test('the arc clears a continuously visible retracting capsule at every frame', 
       const height = 50 + 12 * sink
       const centerY = -95 + 64 * travelY
       // Distance between the core rectangles of two rounded glass surfaces.
-      const primaryRadius = 20 + 11 * shape
-      const subRadius = 18 + 2 * sink
+      const primaryRadius = 62 / 2
+      const subRadius = height / 2
       const primaryLeft = (width - 62) * shape
       const subBottom = centerY + height / 2
       const dx = Math.max(primaryLeft + primaryRadius - (right - subRadius), 0)

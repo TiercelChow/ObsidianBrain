@@ -64,3 +64,16 @@ export function dockReleaseTarget(progress: number, velocity: number): 0 | 100 {
 export function boundedScrollTop(top: number, scrollHeight: number, clientHeight: number): number {
   return Number.isFinite(top) ? clamp(top, 0, Math.max(0, scrollHeight - clientHeight)) : 0
 }
+
+interface ScrollMetrics { top: number; height: number; viewport: number }
+
+/** Resizing a bottom-pinned chat moves scrollTop without moving the user's finger. */
+export function resizeAwareScrollDelta(previous: ScrollMetrics, current: ScrollMetrics): number {
+  const oldTop = boundedScrollTop(previous.top, previous.height, previous.viewport)
+  const newTop = boundedScrollTop(current.top, current.height, current.viewport)
+  const oldMax = Math.max(0, previous.height - previous.viewport)
+  const newMax = Math.max(0, current.height - current.viewport)
+  const wasAtEnd = oldMax > 0 && oldMax - oldTop <= 2
+  const baseline = previous.viewport !== current.viewport && wasAtEnd ? newMax : Math.min(oldTop, newMax)
+  return newTop - baseline
+}

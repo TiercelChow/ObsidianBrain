@@ -3,6 +3,7 @@
     ref="appShellRef"
     class="app-shell"
     :class="{ 'mobile-focus': isMobile && mobileFocusMode, 'has-mobile-subnav': !!mobileSubnav?.items.length }"
+    :style="mobileChatDockStyle"
   >
     <!-- Mobile root header: one title. Page-level actions occupy the right slot. -->
     <div v-if="isMobile && !mobileFocusMode" v-glass-lens="'css'" class="mobile-global-header" data-glass="scroll-edge" :class="{ 'header-scrolled': isScrolled }">
@@ -59,6 +60,7 @@ import { getMobileNavSection, getMobileRouteRedirect, isMobileFocusRoute } from 
 import { usePhoneViewport } from './composables/usePhoneViewport'
 import { provideMobileSubnav } from './composables/useMobileSubnav'
 import { useMobileDockMotion } from './composables/useMobileDockMotion'
+import { dockGeometry } from './utils/mobileDockMotion'
 
 const route = useRoute()
 const router = useRouter()
@@ -95,6 +97,16 @@ const { progress: dockProgress, keyboardOpen: dockKeyboardOpen, expand: expandDo
   () => isMobile.value && !mobileFocusMode.value && !!mobileSubnav.value?.items.length,
   () => route.path,
 )
+// Only a bounded chat viewport reclaims space; scrolling lists keep a stable reserve.
+const mobileChatDockStyle = computed(() => {
+  if (!isMobile.value || route.path !== '/knowledge/chat') return undefined
+  const geometry = dockGeometry(mobileSubnav.value?.items.length ? dockProgress.value : 0)
+  return {
+    '--chat-dock-sink': geometry.sink,
+    '--chat-dock-travel-y': geometry.travelY,
+    '--chat-dock-visible': dockKeyboardOpen.value ? 0 : 1,
+  }
+})
 const lockMobileReaderOuterScroll = computed(() => (
   shouldLockMobileReaderOuterScroll(windowWidth.value, route.path)
 ))
@@ -255,6 +267,27 @@ code, pre, .code-block { font-family: var(--font-mono); }
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.15);
+}
+
+/* Mobile scroll planes: a desktop track must not consume one side of the page
+   or disappear when a sheet locks its background. Local tables/code keep rails. */
+@media (max-width: 768px) {
+  :is(
+    .app-main.mobile-full, .pane-center, .memo-scroll, .task-list-scroll,
+    .task-detail-zone, .mobile-detail-scroll, .pdf-viewer, .message-list,
+    .entry-list, .entry-detail, .progress-body, .column-scroll
+  ) {
+    scrollbar-width: none;
+    scrollbar-gutter: auto;
+  }
+  :is(
+    .app-main.mobile-full, .pane-center, .memo-scroll, .task-list-scroll,
+    .task-detail-zone, .mobile-detail-scroll, .pdf-viewer, .message-list,
+    .entry-list, .entry-detail, .progress-body, .column-scroll
+  )::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
 }
 
 /* Theme colors and shared geometry are owned by styles/tokens.css. */

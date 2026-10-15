@@ -86,3 +86,13 @@ test('one persistent glass capsule retracts into the orb without an early circle
   assert.doesNotMatch(dock, /\.mobile-dock\s*\{[^}]*opacity:/)
   assert.match(dock, /\.mobile-dock\s*\{[^}]*overflow:\s*hidden/)
 })
+
+test('both dock surfaces retain semicircular pill ends throughout their height and width changes', async () => {
+  const dock = await source('components/MobileDock.vue')
+  const material = dock.match(/\.dock-glass\s*\{([^}]+)\}/)?.[1] ?? ''
+  assert.match(material, /border-radius:\s*999px;/)
+  for (const selector of ['mobile-dock', 'mobile-sub-dock']) {
+    const geometry = dock.match(new RegExp(`\\.${selector}\\s*\\{([^}]+)\\}`))?.[1] ?? ''
+    assert.doesNotMatch(geometry, /border-radius:/, `${selector} keeps the shared pill contour rather than a separate rounded rectangle`)
+  }
+})

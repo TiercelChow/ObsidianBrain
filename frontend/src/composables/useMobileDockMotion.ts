@@ -1,5 +1,5 @@
 import { onMounted, onScopeDispose, ref, watch, type Ref } from 'vue'
-import { advanceDockGesture, boundedScrollTop, createDockGesture, dockReleaseTarget, stepDockSpring } from '@/utils/mobileDockMotion'
+import { advanceDockGesture, boundedScrollTop, createDockGesture, dockReleaseTarget, stepDockSpring, resizeAwareScrollDelta } from '@/utils/mobileDockMotion'
 
 /** Only deliberate scrolling of the touched pane drives navigation geometry. */
 export function useMobileDockMotion(root: Ref<HTMLElement | null>, enabled: () => boolean, routeKey: () => string) {
@@ -12,6 +12,8 @@ export function useMobileDockMotion(root: Ref<HTMLElement | null>, enabled: () =
   let releaseTimer = 0
   let scroller: HTMLElement | null = null
   let lastTop = 0
+  let lastHeight = 0
+  let lastViewport = 0
   let lastTime = 0
   let intentUntil = 0
   let touching = false
@@ -89,6 +91,8 @@ export function useMobileDockMotion(root: Ref<HTMLElement | null>, enabled: () =
       cancelSpring()
       scroller = next
       lastTop = boundedScrollTop(next.scrollTop, next.scrollHeight, next.clientHeight)
+      lastHeight = next.scrollHeight
+      lastViewport = next.clientHeight
       gesture = createDockGesture(progress.value)
       gestureVelocity = 0
       targetProgress = progress.value
@@ -122,8 +126,13 @@ export function useMobileDockMotion(root: Ref<HTMLElement | null>, enabled: () =
     if (blocked() || !scroller || event.target !== scroller || (!touching && performance.now() > intentUntil)) return
     const now = performance.now()
     const top = boundedScrollTop(scroller.scrollTop, scroller.scrollHeight, scroller.clientHeight)
-    const delta = top - lastTop
+    const delta = resizeAwareScrollDelta(
+      { top: lastTop, height: lastHeight, viewport: lastViewport },
+      { top, height: scroller.scrollHeight, viewport: scroller.clientHeight },
+    )
     lastTop = top
+    lastHeight = scroller.scrollHeight
+    lastViewport = scroller.clientHeight
     if (delta === 0) return
     const previous = gesture.progress
     gesture = advanceDockGesture(gesture, delta)
