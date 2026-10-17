@@ -57,3 +57,16 @@ test('desktop dashboard stretches both columns without imposing fixed card heigh
   assert.match(home, /@media \(max-width: 768px\)[\s\S]*\.workbench-main,\.workbench-side\s*\{[^}]*display:contents/)
   assert.doesNotMatch(home, /\.workbench-(?:grid|main|side)\s*\{[^}]*\b(?:min-|max-)?height:/)
 })
+
+test('Wiki activity groups its title and status pill into one compact heading', async () => {
+  const home = await source('views/Home.vue')
+  const wiki = home.match(/<HomePanel class="wiki-panel"[\s\S]*?<\/HomePanel>/)?.[0] || ''
+  assert.match(wiki, /class="wiki-row-heading"><strong[^>]*>\{\{ item\.title \}\}<\/strong><small class="wiki-status"[^>]*>\{\{ wikiStatus\(item\) \}\}<\/small><\/span>/)
+  assert.match(wiki, /class="row-meta" :title="item\.book_name"/)
+  assert.match(wiki, /class="wiki-status"[^>]*item\.status === 'failed' \|\| item\.artifact_state === 'failed'/)
+  assert.match(wiki, /:to="wikiItemRoute\(item\)"/)
+  assert.match(home, /\.wiki-row\s*\{[^}]*min-height:64px;[^}]*padding:9px 8px/)
+  assert.match(home, /\.wiki-row-heading\s*\{[^}]*display:flex/)
+  assert.match(home, /\.wiki-row \.wiki-status\s*\{[^}]*max-width:60%;[^}]*border-radius:999px/)
+  assert.match(home, /@media \(max-width: 768px\)[\s\S]*\.wiki-row\s*\{[^}]*padding:9px 2px/)
+})

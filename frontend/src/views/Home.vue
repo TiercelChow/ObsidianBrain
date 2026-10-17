@@ -49,7 +49,11 @@
         <div v-if="overview?.wiki.data?.items.length" class="home-list">
           <RouterLink v-for="item in overview.wiki.data.items" :key="`${item.kind}-${item.id}`" class="home-row wiki-row" :to="wikiItemRoute(item)">
             <span class="row-icon" :class="{'is-warning':item.status === 'failed' || item.artifact_state === 'failed'}"><el-icon><component :is="item.kind === 'review' ? EditPen : item.kind === 'compile' ? Collection : DataAnalysis" /></el-icon></span>
-            <span class="row-content"><strong>{{ item.title }}</strong><span class="row-meta">{{ item.book_name }}</span><small :class="{'is-warning':item.status === 'failed' || item.artifact_state === 'failed'}">{{ wikiStatus(item) }}</small><span v-if="item.detail && item.kind !== 'research'" class="wiki-detail">{{ item.detail }}</span></span><el-icon class="entry-chevron"><ArrowRight /></el-icon>
+            <span class="row-content">
+              <span class="wiki-row-heading"><strong :title="item.title">{{ item.title }}</strong><small class="wiki-status" :class="{'is-warning':item.status === 'failed' || item.artifact_state === 'failed'}">{{ wikiStatus(item) }}</small></span>
+              <span class="row-meta" :title="item.book_name">{{ item.book_name }}</span>
+              <span v-if="item.detail && item.kind !== 'research'" class="wiki-detail">{{ item.detail }}</span>
+            </span><el-icon class="entry-chevron"><ArrowRight /></el-icon>
           </RouterLink>
         </div>
         <div v-else class="panel-empty"><el-icon><Collection /></el-icon><p>暂时没有 Wiki 动态</p><RouterLink to="/knowledge">查看书籍知识库</RouterLink></div>
@@ -194,7 +198,13 @@ onBeforeUnmount(() => { active = false; ++request; controller?.abort(); clearTim
 .is-warning { color:var(--glass-warning-label,var(--text-secondary))!important; }
 .book-spine { flex:none; display:grid; place-items:center; width:40px; height:50px; border-radius:6px 11px 11px 6px; background:var(--bg-hover); color:var(--text-secondary); box-shadow:inset 3px 0 0 var(--border-subtle); font-size:22px; }
 .reading-position,.memo-tags { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; display:block; }
-.wiki-row { align-items:flex-start; } .wiki-row > .entry-chevron { align-self:center; }
+.wiki-row { align-items:center; min-height:64px; padding:9px 8px; }
+.wiki-row .row-content { gap:3px; }
+.wiki-row-heading { display:flex; align-items:center; gap:8px; min-width:0; }
+.wiki-row-heading strong { flex:0 1 auto; min-width:0; }
+.wiki-row .wiki-status { flex:none; max-width:60%; padding:1px 7px; border:1px solid var(--border-faint); border-radius:999px; background:var(--bg-hover); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
+.wiki-row .wiki-status.is-warning { background:color-mix(in srgb, var(--glass-warning-label,var(--text-secondary)) 10%, transparent); border-color:color-mix(in srgb, var(--glass-warning-label,var(--text-secondary)) 20%, transparent); }
+.wiki-row .row-meta { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .wiki-detail { font-size:12px; color:var(--text-muted); line-height:1.5; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
 .week-link { display:flex; justify-content:space-between; gap:8px; align-items:center; min-height:44px; padding:0 8px; font-size:12px; color:var(--text-muted); text-decoration:none; }
 .week-link > span { display:flex; align-items:center; gap:3px; }
@@ -228,6 +238,7 @@ onBeforeUnmount(() => { active = false; ++request; controller?.abort(); clearTim
   .workbench-grid { grid-template-columns:minmax(0,1fr); grid-template-areas:'tasks' 'reading' 'wiki' 'memos'; gap:14px; }
   .workbench-main,.workbench-side { display:contents; }
   .home-row { padding:12px 2px; gap:10px; } .row-content strong { font-size:15px; } .child-risk { padding-left:48px; }
+  .wiki-row { padding:9px 2px; }
   .home-system { padding:16px; } .system-grid { gap:16px 10px; }
 }
 @media(prefers-reduced-motion:reduce) { .home-row,.attention-tile { transition:none; transform:none!important; } }
