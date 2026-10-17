@@ -278,22 +278,14 @@ test('wiki skills expose current resources, permissions, and a safe clone flow',
   assert.match(api, /publish_wiki_skill_version/)
 })
 
-test('wiki settings expose consistent database snapshots and guarded restore flows', async () => {
+test('wiki settings no longer expose database backup or restore operations', async () => {
   const [settings, api] = await Promise.all([
     source('src/views/knowledge/WikiSettings.vue'),
     source('src/api/knowledge.ts'),
   ])
 
-  assert.match(settings, /SQLite Online Backup/)
-  assert.match(settings, /listKnowledgeBackups/)
-  assert.match(settings, /createKnowledgeBackup/)
-  assert.match(settings, /knowledgeBackupDownloadUrl/)
-  assert.match(settings, /uploadAndRestoreKnowledgeBackup/)
-  assert.match(settings, /restoreConfirmation !== 'RESTORE'/)
-  assert.match(api, /list_knowledge_backups/)
-  assert.match(api, /create_knowledge_backup/)
-  assert.match(api, /restore_knowledge_backup/)
-  assert.match(api, /knowledge\/backups\/restore\/upload/)
+  assert.doesNotMatch(settings, /SQLite Online Backup|KnowledgeBackup|restoreConfirmation|settings-protection/)
+  assert.doesNotMatch(api, /list_knowledge_backups|create_knowledge_backup|restore_knowledge_backup|knowledge\/backups/)
 })
 
 test('knowledge tasks expose durable execution controls and real presentation artifacts', async () => {

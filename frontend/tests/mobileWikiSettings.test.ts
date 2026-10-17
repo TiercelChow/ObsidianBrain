@@ -4,12 +4,12 @@ import test from 'node:test'
 
 const source = () => readFile(new URL('../src/views/knowledge/WikiSettings.vue', import.meta.url), 'utf8')
 
-test('mobile settings expose six cards while desktop retains its single section navigation', async () => {
+test('mobile settings expose five cards while desktop retains its single section navigation', async () => {
   const settings = await source()
   assert.doesNotMatch(settings, /mobile-settings-section/)
   assert.match(settings, /usePhoneViewport\(/)
   assert.match(settings, /:view-key="isMobile \? 'feed' : section"/)
-  for (const section of ['runtime', 'providers', 'usage', 'protection', 'documents', 'skills']) {
+  for (const section of ['runtime', 'providers', 'usage', 'documents', 'skills']) {
     assert.match(settings, new RegExp(`v-if="isMobile \\|\\| section === '${section}'"[^>]*class="settings-card"[^>]*id="settings-${section}"`))
   }
   assert.match(settings, /<aside v-if="!isMobile" class="settings-nav knowledge-surface"/)
@@ -18,8 +18,8 @@ test('mobile settings expose six cards while desktop retains its single section 
 
 test('mobile book selectors wrap full names and synchronize visible book-scoped cards', async () => {
   const settings = await source()
-  assert.equal((settings.match(/class="settings-base-select knowledge-select/g) || []).length, 3)
-  assert.equal((settings.match(/@change="changeSettingsBase"/g) || []).length, 3)
+  assert.equal((settings.match(/class="settings-base-select knowledge-select/g) || []).length, 2)
+  assert.equal((settings.match(/@change="changeSettingsBase"/g) || []).length, 2)
   assert.match(settings, /isMobile\.value \? 'system-select-popper wiki-settings-base-popper' : 'system-select-popper'/)
   assert.match(settings, /\.wiki-settings-base-popper \.el-select-dropdown__item\s*\{[^}]*height:\s*auto;[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere/s)
   assert.match(settings, /async function changeSettingsBase\(\)[\s\S]*isMobile\.value[\s\S]*Promise\.all\(\[loadSettings\(true\), loadSkills\(\)\]\)/)

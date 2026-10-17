@@ -294,7 +294,7 @@ cargo build --release</code></pre>
 
           <div class="callout">
             <span class="callout-icon">ℹ️</span>
-            <span><strong>备份注意：</strong>SQLite 一致快照不包含原图。完整备份需要保留数据库及同级 <code>timeline/images/</code>，缓存无需备份；备份时暂停写入并使用一致快照。恢复数据库不能找回已经物理删除的照片，确认旧图片迁移完成前请保留旧库。</span>
+            <span><strong>备份注意：</strong>SQLite 一致快照不包含原图。完整备份请先退出应用，再复制整个系统数据目录，其中 <code>timeline/images/</code> 保存原图，缓存无需备份。恢复数据库不能找回已经物理删除的照片，确认旧图片迁移完成前请保留旧库。</span>
           </div>
         </section>
 
@@ -355,7 +355,7 @@ cargo build --release</code></pre>
 
           <div class="callout">
             <span class="callout-icon">🔒</span>
-            <span><strong>数据说明：</strong>任务数据只保存在本地 SQLite 的 <code>task_documents</code>、<code>task_nodes</code>、<code>task_progress</code> 和 <code>task_audit_events</code> 表中，不会写入 Obsidian 的 <code>Tasks/</code> 文件夹。任务数据不能从 Vault 重建，请定期在应用的数据保护区创建并下载 SQLite 一致快照。</span>
+            <span><strong>数据说明：</strong>任务数据只保存在本地 SQLite 的 <code>task_documents</code>、<code>task_nodes</code>、<code>task_progress</code> 和 <code>task_audit_events</code> 表中，不会写入 Obsidian 的 <code>Tasks/</code> 文件夹。任务数据不能从 Vault 重建，如需备份，请先退出应用并复制完整系统数据目录。</span>
           </div>
           <div class="callout subtle">
             <span class="callout-icon">↻</span>
@@ -369,7 +369,7 @@ cargo build --release</code></pre>
           <p>为阅境轩书架中的每个 Markdown 文件夹建立一个独立知识库。同步先建立章节来源索引；智能编译再尝试跨章节归并概念、论断与关系。原始 Markdown 文件保持只读，结构化实体、引用、版本、审核记录和运行状态保存在本机 SQLite。单个 PDF 目前不能建立 Wiki。</p>
 
           <nav class="manual-subsections" aria-label="Wiki 操作步骤">
-            <a href="#wiki-setup">① 模型与密钥</a><a href="#wiki-compile">② 建库与编译</a><a href="#wiki-workspace">③ 浏览与审核</a><a href="#wiki-query">④ 连续问答</a><a href="#wiki-research">⑤ 报告与 PPT</a><a href="#wiki-skills">规则与 Skills</a><a href="#wiki-backup">用量与备份</a>
+            <a href="#wiki-setup">① 模型与密钥</a><a href="#wiki-compile">② 建库与编译</a><a href="#wiki-workspace">③ 浏览与审核</a><a href="#wiki-query">④ 连续问答</a><a href="#wiki-research">⑤ 报告与 PPT</a><a href="#wiki-skills">规则与 Skills</a><a href="#wiki-backup">用量与排错</a>
           </nav>
           <table class="info-table">
             <thead><tr><th>页面</th><th>你在这里做什么</th><th>完成后看到什么</th></tr></thead>
@@ -378,7 +378,7 @@ cargo build --release</code></pre>
               <tr><td>Wiki 工作台</td><td>搜索主题、阅读正文、查看引用、审核修改</td><td>主题知识、论断、关系和版本历史</td></tr>
               <tr><td>知识问答</td><td>围绕同一本书连续提问，并核对答案依据</td><td>Markdown 回答、可打开的来源、保存的会话</td></tr>
               <tr><td>研究任务</td><td>交给 Agent 一个需要分阶段回答的问题</td><td>阶段成果、完整报告或可下载 PPTX</td></tr>
-              <tr><td>Wiki 配置</td><td>配置模型、密钥、书籍规则、Skill 和备份</td><td>可验证的连接、可查看的指令、用量和数据快照</td></tr>
+              <tr><td>Wiki 配置</td><td>配置模型、密钥、书籍规则与 Skill，查看用量</td><td>可验证的连接、可查看的指令与调用统计</td></tr>
             </tbody>
           </table>
 
@@ -467,13 +467,13 @@ cargo build --release</code></pre>
           <p>7 个内置 Skill 保留当前发布内容，不要求用户从旧版本中挑选。自定义 Skill 可通过上传图标导入受限的 Markdown ZIP。先选择书籍，再启用 Skill 并设置「问答与研究」「仅问答」「仅研究」「仅智能编译」或「全部场景」；问答与研究只有对当前书籍启用且范围匹配时才加载。<code>book-ingest</code> 是智能编译兜底，PPT 任务有内置演示 Skill 兜底，所以关闭自定义 Skill 不等于关闭所有规则。</p>
           <div class="callout subtle"><span class="callout-icon">🔎</span><span>先用一小份资料验证改动是否符合预期。页面提供自定义候选的评测、基准和发布状态，但这些状态不意味着任意新问题都能保证回答正确；内置正文也不冒充经过完整质量评测。</span></div>
 
-          <h3 id="wiki-backup">Token 用量、备份与排错</h3>
+          <h3 id="wiki-backup">Token 用量与排错</h3>
           <ul class="manual-points">
             <li><strong>Token 用量：</strong>在「配置 → Token 用量」按时间范围和调用方查看。没有供应商精确明细时标为估算，通常只覆盖初始 Prompt 和最终输出，不包含 Agent 内部多轮、压缩和推理的全部消耗，不能当作账单。上下文占用也不等于计费 Token。</li>
-            <li><strong>数据保护：</strong>在「配置 → 数据保护」创建并下载 SQLite 一致快照；也可导出单本书的 JSON 或 Markdown Wiki。恢复备份会替换当前数据库，务必核对文件并先保留现有备份。</li>
+            <li><strong>本地数据：</strong>如需手动备份，请先退出应用，再复制完整系统数据目录，包括数据库、<code>timeline/images/</code> 原图与 <code>artifacts/</code> 研究成果；原书目录另行备份。迁移与删库前的自动安全快照只包含数据库，不是完整备份。</li>
             <li><strong>编译卡住或失败：</strong>先看书籍知识库的阶段和最后错误，再检查 Runtime 连通性、来源同步状态；研究任务则可用「运行检查器」核对本次配置与事件。重新编译前不必删除原书或知识库。</li>
           </ul>
-          <div class="callout"><span class="callout-icon">🔒</span><span><strong>数据边界：</strong>Wiki 的实体、引用、候选、审计和任务产物存在本机 SQLite；导出不是实时同步。模型会接收到任务所需的检索片段，因此使用第三方供应商时请自行确认其数据政策。智能编译和研究流程不会直接写回或更改原书 Markdown 文件。</span></div>
+          <div class="callout"><span class="callout-icon">🔒</span><span><strong>数据边界：</strong>Wiki 的实体、引用、候选、审计和任务元数据存在本机 SQLite，PPTX 文件保存在系统数据目录。模型会接收到任务所需的检索片段，因此使用第三方供应商时请自行确认其数据政策。智能编译和研究流程不会直接写回或更改原书 Markdown 文件。</span></div>
         </section>
 <!-- current-manual:end -->
           <div class="docs-end"><span>你已读完全部章节</span><p>使用手册现已独立于应用，可在这里随时查阅。</p><a class="button button-secondary" href="../">返回产品首页 <svg aria-hidden="true"><use href="#icon-arrow" /></svg></a></div>

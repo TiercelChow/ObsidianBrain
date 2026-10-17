@@ -126,7 +126,7 @@ test('Wiki settings fields shrink within their own grid and Skill file buttons e
 
 test('file uploads expose styled triggers rather than unstyled native file buttons', async () => {
   const settings = await source('views/knowledge/WikiSettings.vue')
-  for (const ref of ['skillArchiveInput', 'backupUploadInput']) {
+  for (const ref of ['skillArchiveInput']) {
     const input = settings.match(new RegExp(`<input ref="${ref}"[^>]+>`))?.[0] || ''
     assert.match(input, /\s+hidden(?:\s|\/?>)/, `${ref}: native picker is hidden`)
     assert.match(settings, new RegExp(`<(?:el-button|UiAction)[^>]*@click="${ref}\\?\\.click\\(\\)"`), `${ref}: system styled trigger remains available`)

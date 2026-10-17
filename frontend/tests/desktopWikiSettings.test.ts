@@ -4,11 +4,13 @@ import test from 'node:test'
 
 const source = () => readFile(new URL('../src/views/knowledge/WikiSettings.vue', import.meta.url), 'utf8')
 
-test('desktop exports bound the select to its grid track instead of its compact fixed width', async () => {
+test('settings retire data protection without leaving a route, dialog, request or style behind', async () => {
   const settings = await source()
-  assert.match(settings, /\.wiki-export-actions \.settings-base-select\s*\{[^}]*min-width:\s*0;[^}]*width:\s*100%;[^}]*max-width:\s*100%/)
-  assert.match(settings, /@media \(min-width: 769px\)[\s\S]*\.wiki-export-card\s*\{[^}]*display:\s*grid/)
-  assert.match(settings, /\.wiki-export-actions\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto auto/)
+  assert.doesNotMatch(settings, /protection|数据保护|restoreVisible|loadBackups|KnowledgeBackup|wiki-export/)
+  assert.match(settings, /const section = ref<'runtime' \| 'providers' \| 'usage' \| 'documents' \| 'skills'>\('runtime'\)/)
+  assert.match(settings, /\['runtime','providers','usage','documents','skills'\]\.includes\(requestedSection\)/)
+  const api = await readFile(new URL('../src/api/knowledge.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(api, /DatabaseBackup|DatabaseValidationReport|KnowledgeBackup|knowledgeBackupDownloadUrl|bookWikiExportDownloadUrl|knowledge\/backups/)
 })
 
 test('desktop Skill reading separates a file sidebar and a bounded body through motion wrappers', async () => {

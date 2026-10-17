@@ -54,7 +54,6 @@ const resultFor = {
   get_knowledge_conversation: {...previewConversation,messages:[{id:'question-0',role:'user',content:'如何让阅读转化为行动？',run_id:null,evidence:[],created_at:timestamp},{id:'answer-0',role:'assistant',content:'## 从一个问题开始\n\n将阅读中的观点变成可执行的行动，再回到来源核对结果。\n\n1. 提出具体问题。\n2. 将观点与实践连接。\n3. 保留证据与反思。',run_id:'run-preview',evidence:previewEntries,created_at:timestamp}]},
   list_unfinished_qa_runs: { runs: [] },
   list_wiki_skills: { skills: [{id:'preview-skill',slug:'knowledge-query',name:'知识问答',description:'根据本书的知识与来源回答问题。',source_type:'custom',status:'ready',permissions:[],requirements:[],revision:1,instructions:'Preview only',enabled:false,usage_scope:'both',updated_at:timestamp}] },
-  list_knowledge_backups: { backups: [], retention: 7 },
   get_book_wiki_settings: { runtime_profiles: [], model_providers: [previewProvider], documents: [{id:'doc-0',name:'问答规则',scope:'book',revision:1,content_md:'# 问答规则\n根据来源提供回答。'},{id:'doc-1',name:'研究规则',scope:'book',revision:1,content_md:'# 研究规则\n规划、取证、检查与交付。'}] },
   get_knowledge_task_result: {task:{...researchTask,result_summary:'# 研究报告\n\n隔离预览：通过记录与实践构建持续更新的知识体系。'},evidence:previewEntries,artifacts:[]},
   get_agent_usage_stats: { usage_source: 'unavailable', totals: { runs: 0, unreported_runs: 0, total_tokens: 0, input_tokens: 0, output_tokens: 0 }, daily: [], by_caller: [] },

@@ -32,7 +32,7 @@ test('wiki manual explains the complete reviewable workflow and configuration li
     'Markdown 文件夹', '建立知识库', '同步', '智能编译', '审核', '批准并应用',
     'Wiki 工作台', '知识问答', '来源预览', '研究任务', 'PPTX',
     'Agent Runtime', '验证已保存配置', 'Skills', 'book-ingest', '仅智能编译',
-    '运行检查器', 'Token 用量', '数据保护', 'SQLite', 'Markdown Wiki',
+    '运行检查器', 'Token 用量', 'SQLite', '完整系统数据目录',
   ]) {
     assert.match(wiki, new RegExp(phrase), `missing Wiki guidance: ${phrase}`)
   }
@@ -40,6 +40,8 @@ test('wiki manual explains the complete reviewable workflow and configuration li
   assert.match(wiki, /问答与研究[^。]*启用/)
   assert.match(wiki, /来源变更|指纹变化/)
   assert.match(wiki, /不会[^。]*直接[^。]*原书/)
+  assert.doesNotMatch(wiki, /配置 → 数据保护|数据保护区|数据保护<|RESTORE/)
+  assert.match(wiki, /先退出应用[^。]*复制完整系统数据目录/)
 })
 
 test('manual records the current storage and interaction boundaries', async () => {

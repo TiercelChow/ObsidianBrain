@@ -33,7 +33,6 @@ const fixtures = {
     { relative_path: 'references/' + 'very-long-resource-path-'.repeat(6) + '.md', content_text: '# 资源文件\n\n资源正文：RESOURCE_END', content_hash: 'b'.repeat(64), media_type: 'text/markdown', size_bytes: 100 },
   ] }] }),
   get_agent_usage_stats: args => ({ start_date: args.start_date, end_date: args.end_date, usage_source: 'unavailable', totals: { runs: 0, total_tokens: 0, input_tokens: 0, output_tokens: 0, unreported_runs: 0 }, daily: [], by_caller: [] }),
-  list_knowledge_backups: () => ({ backups: [{ filename: 'mock-backup-long-name.sqlite', reason: 'manual', created_at: timestamp, size_bytes: 1024 }], retention: 7 }),
 }
 const mockApi = {
   name: 'mobile-settings-in-memory-api',
@@ -79,29 +78,17 @@ try {
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
     await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort())
-    await page.goto(`${origin}/knowledge/settings`)
+    await page.goto(`${origin}/knowledge/settings?section=protection`)
     await page.locator('.runtime-card').waitFor()
-    assert.equal(await page.locator('.settings-card').count(), phone ? 6 : 1)
+    assert.equal(await page.locator('.settings-card').count(), phone ? 5 : 1)
     assert.equal(await page.locator('.settings-nav').count(), phone ? 0 : 1)
+    assert.equal(await page.locator('#settings-protection, .restore-modal-card, .wiki-export-card').count(), 0)
+    assert.equal(await page.getByRole('button', { name: /数据保护/ }).count(), 0)
+    assert.ok(await page.locator('#settings-runtime').isVisible(), 'retired section links fall back to Runtime')
     await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()))
     if (phone) {
       await page.screenshot({ path: join(screenshots, `${viewport.width}-runtime.png`) })
       await page.locator('.runtime-card input').first().fill('unsaved-local-command')
-    } else {
-      await page.locator('.settings-nav button').filter({ hasText: '数据保护' }).click()
-      const actions = page.locator('.wiki-export-actions')
-      await actions.locator('a').last().waitFor()
-      await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()))
-      const boxes = await actions.evaluate(element => [...element.children].map(child => {
-        const rect = child.getBoundingClientRect()
-        return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom }
-      }))
-      await page.screenshot({ path: join(screenshots, `${viewport.width}-${viewport.height}-export.png`) })
-      for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
-        const a = boxes[i], b = boxes[j]
-        const overlaps = Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1
-        assert.equal(overlaps, false, `export controls overlap: ${JSON.stringify(boxes)}`)
-      }
     }
     if (!phone) await page.locator('.settings-nav button').filter({ hasText: '配置文档' }).click()
     const docs = page.locator('#settings-documents')
@@ -244,7 +231,7 @@ try {
     }
     await dialog.getByRole('button', { name: '完成', exact: true }).click()
     assert.deepEqual(errors, [])
-    results.push({ ...viewport, cards: phone ? 6 : 1, longNames: true, independentActions: true, fullSkill: true })
+    results.push({ ...viewport, cards: phone ? 5 : 1, retiredSectionFallback: true, longNames: true, independentActions: true, fullSkill: true })
     await context.close()
   }
   empty = true
@@ -252,11 +239,11 @@ try {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
   await page.goto(`${origin}/knowledge/settings`)
   await page.locator('.runtime-card').waitFor()
-  assert.equal(await page.locator('.settings-card').count(), 6)
+  assert.equal(await page.locator('.settings-card').count(), 5)
   assert.match(await page.locator('#settings-documents .knowledge-empty').innerText(), /选择一本书/)
   assert.match(await page.locator('#settings-skills .knowledge-empty').innerText(), /选择一本书/)
   assert.ok(requests.some(request => request.tool === 'get_agent_usage_stats'))
-  assert.ok(requests.some(request => request.tool === 'list_knowledge_backups'))
+  assert.ok(!requests.some(request => /knowledge_backup/.test(request.tool)), 'settings never list, create or restore snapshots')
   await page.close()
   empty = false
   const dark = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce', colorScheme: 'dark' })
@@ -264,7 +251,7 @@ try {
   await dark.goto(`${origin}/knowledge/settings?section=skills`)
   await dark.locator('.skill-card').waitFor()
   await dark.waitForFunction(() => document.querySelector('#settings-skills').getBoundingClientRect().top < innerHeight)
-  assert.equal(await dark.locator('.settings-card').count(), 6)
+  assert.equal(await dark.locator('.settings-card').count(), 5)
   await dark.screenshot({ path: join(screenshots, '390-dark-reduced-motion.png') })
   await dark.getByRole('button', { name: '查看 Skill 内容', exact: true }).click()
   await dark.getByRole('dialog', { name: 'Skill 内容', exact: true }).locator('.skill-file-content').waitFor()
@@ -281,6 +268,7 @@ try {
   await darkDialog.locator('.skill-audit-grid').waitFor()
   await desktopDark.screenshot({ path: join(screenshots, '1440-dark-skill-metadata.png') })
   await desktopDark.close()
+  assert.ok(!requests.some(request => /knowledge_backup/.test(request.tool)), 'all settings interactions avoid retired backup APIs')
   assert.deepEqual(unexpected, [])
   console.log(JSON.stringify({ passed: true, results, emptyLibrary: true, darkReducedMotion: true, requestedSectionLink: true, screenshots }, null, 2))
 } finally {

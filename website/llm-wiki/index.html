@@ -96,7 +96,7 @@
                 <tr><td>Wiki 工作台</td><td>检索主题，阅读正文、论断、引用与历史</td><td>可持续维护的正式知识</td></tr>
                 <tr><td>知识问答</td><td>选择书籍和会话，连续提问并核对来源</td><td>流式回答、会话历史与本轮证据</td></tr>
                 <tr><td>研究任务</td><td>确认简报，启动研究，查看阶段与交付</td><td>完整报告、已保存章节或 PPTX 文件</td></tr>
-                <tr><td>Wiki 配置</td><td>管理供应商、密钥、规则、Skill、用量与备份</td><td>可查看、可调整的执行配置</td></tr>
+                <tr><td>Wiki 配置</td><td>管理运行环境、供应商、密钥、规则、Skill 与用量</td><td>可查看、可调整的执行配置</td></tr>
               </tbody>
             </table>
             <h3>首次使用路径</h3>
@@ -777,7 +777,7 @@ error / cancelled        → 保留已收到的部分内容，明确原因</code
             <h3 class="how">外部研究 — 逐任务授权的窄门</h3>
             <p>外部研究默认关闭。用户在专题研究任务中显式开启、指定授权域名与请求额度后，才提供 <code>book_fetch_external</code>。只接受标准 HTTPS / 443 文本，检查公网 DNS、禁止重定向，限制正文大小和超时；尝试前原子扣额度，失败也计数。外部证据单独标识，不能伪装为书内来源或绕过审核。</p>
             <div class="callout why"><span class="callout-icon">💡</span><span><strong>为什么预算扩展不带来网络能力？</strong>“证据不够”不是访问任意网站或其他书籍的授权。应用只能在既有授权范围内允许更多阅读；超出范围的资料需求应明确交给用户决定。</span></div>
-            <h3 class="how">数据权威、备份与导出</h3>
+            <h3 class="how">数据存储与自动安全备份</h3>
             <table class="info-table">
               <thead><tr><th>数据</th><th>权威位置</th></tr></thead>
               <tbody>
@@ -785,11 +785,11 @@ error / cancelled        → 保留已收到的部分内容，明确原因</code
                 <tr><td>来源版本、结构、知识、引用、对话、任务、审计、配置与 Skill</td><td>SQLite；正文是数据库 Markdown 字段，不是可编辑磁盘 Wiki</td></tr>
                 <tr><td>Agent 工作区</td><td>按 Run 物化的临时文件，不是知识主存储</td></tr>
                 <tr><td>PPTX 等二进制成果</td><td>受管 artifacts 文件 + 数据库哈希、引用、状态与校验元数据</td></tr>
-                <tr><td>Markdown Wiki / JSONL 导出</td><td>单向快照，位于原书之外，不自动反向同步</td></tr>
+                <tr><td>基础设施自动安全快照</td><td>数据库同级 backups 目录，仅包含 SQLite，不包含原书和磁盘成果</td></tr>
               </tbody>
             </table>
-            <p>知识库不是仅凭原书就能恢复的缓存。SQLite Online Backup 创建包含 WAL 最新写入的一致快照，迁移、删库和大变更前自动备份。恢复前检查完整性、外键与迁移版本，并生成操作前安全快照；运行期间不执行恢复，失败可回退。FTS 可重建，但知识、历史和引用需要备份。</p>
-            <div class="callout subtle"><span class="callout-icon">ⓘ</span><span><strong>完整备份：</strong>SQLite 快照不包含 PPTX 等磁盘成果文件。需要保留演示交付物时，还应备份系统数据目录中的 <code>artifacts/</code>；原书目录也应单独备份。只恢复数据库可以恢复成果元数据，不能重新获得已经丢失的 PPTX 文件。</span></div>
+            <p>知识库不是仅凭原书就能恢复的缓存。基础设施使用 SQLite Online Backup 创建包含 WAL 最新写入的一致快照，迁移、删库和大变更前自动执行；Wiki 配置不再提供手动快照、恢复或导出控件。FTS 可重建，但知识、历史和引用不能仅靠重新扫描原书恢复。</p>
+            <div class="callout subtle"><span class="callout-icon">ⓘ</span><span><strong>完整备份：</strong>SQLite 快照不包含 PPTX 或照片。请先退出应用，再复制完整系统数据目录，包括数据库、<code>timeline/images/</code> 原图和 <code>artifacts/</code> 研究成果；原书目录另行备份。自动数据库快照不能找回已经丢失的照片或 PPTX 文件。</span></div>
           </section>
 
           <section id="limits" class="manual-section">
