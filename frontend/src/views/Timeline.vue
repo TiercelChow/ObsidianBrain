@@ -380,11 +380,12 @@
           >
             <template v-if="imageViewer.images.length > 1">
               <div v-for="offset in [-1, 1]" :key="offset" class="viewer-slide" :style="viewerSlideStyle(offset)" aria-hidden="true">
-                <img :src="thumbnailUrl(viewerNeighbor(offset))" class="viewer-preview" alt="" draggable="false" @load="onViewerPreviewLoad" @error="onViewerPreviewError" />
+                <img :key="thumbnailUrl(viewerNeighbor(offset))" :src="thumbnailUrl(viewerNeighbor(offset))" class="viewer-preview" alt="" draggable="false" @load="onViewerPreviewLoad" @error="onViewerPreviewError" />
               </div>
             </template>
             <div class="viewer-slide" :style="viewerSlideStyle(0)">
-              <img :src="thumbnailUrl(imageViewer.images[imageViewer.index])" class="viewer-preview" alt="" draggable="false" @load="onViewerPreviewLoad" @error="onViewerPreviewError" />
+              <!-- A changed src can retain the old decoded bitmap until loading finishes. -->
+              <img :key="thumbnailUrl(imageViewer.images[imageViewer.index])" :src="thumbnailUrl(imageViewer.images[imageViewer.index])" class="viewer-preview" alt="" draggable="false" @load="onViewerPreviewLoad" @error="onViewerPreviewError" />
               <img
                 ref="viewerImgRef"
                 :key="`${imageViewer.images[imageViewer.index]}:${viewerRetry}`"
@@ -578,7 +579,8 @@ function viewerPointer(event: PointerEvent) {
   return { id: event.pointerId, x: event.clientX - (rect?.left || 0), y: event.clientY - (rect?.top || 0), time: event.timeStamp }
 }
 function onViewerPointerDown(event: PointerEvent) {
-  if (event.button !== 0 || (event.target as HTMLElement).closest('button')) return
+  if (event.target instanceof Element && event.target.closest('button')) return
+  if (event.button !== 0) return
   if (viewerMotion.down(viewerPointer(event))) viewerStageRef.value?.setPointerCapture(event.pointerId)
 }
 function onViewerPointerMove(event: PointerEvent) { viewerMotion.move(viewerPointer(event)) }
@@ -588,6 +590,7 @@ function onViewerPointerLost(event: PointerEvent) {
   viewerMotion.cancel(event.pointerId)
 }
 function onViewerClick(event: MouseEvent) {
+  if (event.target instanceof Element && event.target.closest('button')) return
   if (viewerMotion.consumeClick()) { event.preventDefault(); event.stopPropagation() }
 }
 function viewerAnchor(event: MouseEvent) {

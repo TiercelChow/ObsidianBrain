@@ -28,3 +28,23 @@ test('photo swipe/pinch share captured pointers and only adjacent thumbnails are
   assert.match(timeline, /viewerFrame\.scale <= 1\.001/)
   assert.match(timeline, /prefers-reduced-motion: reduce/)
 })
+
+test('every photo preview is keyed by its thumbnail source, never a reused slide slot', async () => {
+  const timeline = await source()
+  const previews = [...timeline.matchAll(/<img\b[^>]*class="viewer-preview"[^>]*>/g)].map(match => match[0])
+  assert.equal(previews.length, 2, 'current and adjacent preview templates')
+  for (const preview of previews) {
+    const src = preview.match(/:src="([^"]+)"/)?.[1]
+    const key = preview.match(/:key="([^"]+)"/)?.[1]
+    assert.ok(src, 'preview has a thumbnail source')
+    assert.equal(key, src, 'changing the thumbnail must replace the img and its retained bitmap')
+  }
+})
+
+test('viewer controls are not captured as photo gestures or suppressed by a previous swipe', async () => {
+  const timeline = await source()
+  for (const name of ['onViewerPointerDown', 'onViewerClick']) {
+    const body = timeline.split(`function ${name}(`)[1]?.split('\n}')[0] || ''
+    assert.match(body, /event\.target instanceof Element && event\.target\.closest\('button'\)/)
+  }
+})
