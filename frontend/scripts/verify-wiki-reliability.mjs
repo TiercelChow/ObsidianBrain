@@ -450,8 +450,9 @@ try {
         assert.equal(dangerPaint.actual, dangerPaint.expected, 'danger action retains readable semantic color')
         await selectSettings('Token 用量')
         await within('.usage-filters .el-select', '.usage-filters')
-        await within('.usage-filters .el-date-editor', '.usage-filters')
-        const dateControl = await page.locator('.usage-filters .el-date-editor').boundingBox()
+        const usageDateSelector = viewport.width <= 768 ? '.usage-filters .mobile-date-trigger' : '.usage-filters .el-date-editor'
+        await within(usageDateSelector, '.usage-filters')
+        const dateControl = await page.locator(usageDateSelector).boundingBox()
         const callerControl = await page.locator('.usage-filters .el-select__wrapper').boundingBox()
         assert.ok(Math.abs(dateControl.height - callerControl.height) < .5, `Token filters share height: ${JSON.stringify({ dateControl, callerControl })}`)
         if (Math.abs(dateControl.y - callerControl.y) < 8) assert.ok(Math.abs(dateControl.y - callerControl.y) < .5, 'inline filters share top edge')
@@ -938,10 +939,13 @@ try {
           await editor.waitFor({ state: 'hidden' })
         }
         if (name === 'usage' && phone) {
-          await page.locator('.usage-filters .el-date-editor input').first().click()
-          await page.locator('.wiki-usage-picker').waitFor()
-          const picker = await page.locator('.wiki-usage-picker').boundingBox()
+          await page.locator('.usage-filters .mobile-date-trigger').click()
+          const dialog = page.getByRole('dialog', { name: 'Token 用量日期范围', exact: true })
+          await dialog.waitFor()
+          await page.waitForFunction(element => !element.closest('.motion-modal').classList.contains('is-settling'), await dialog.elementHandle())
+          const picker = await dialog.boundingBox()
           assert.ok(picker.x >= -1 && picker.x + picker.width <= viewport.width + 1, 'range picker fits phone')
+          assert.equal(await dialog.getByRole('listbox').count(), 3, 'mobile dates use year/month/day wheels')
           await page.keyboard.press('Escape')
         }
         if (name === 'skills') {

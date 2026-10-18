@@ -411,9 +411,10 @@
           </label>
           <label class="field">
             <span>开始日期</span>
-            <el-date-picker
+            <AppDatePicker
               v-model="form.start_date"
               class="task-date-input"
+              aria-label="开始日期"
               type="date"
               format="YYYY/MM/DD"
               value-format="YYYY-MM-DD"
@@ -424,9 +425,10 @@
           </label>
           <label class="field">
             <span>结束日期</span>
-            <el-date-picker
+            <AppDatePicker
               v-model="form.end_date"
               class="task-date-input"
+              aria-label="结束日期"
               type="date"
               format="YYYY/MM/DD"
               value-format="YYYY-MM-DD"
@@ -532,6 +534,7 @@ import { useMediaQuery } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import MotionModal from '@/components/motion/MotionModal.vue'
+import AppDatePicker from '@/components/controls/AppDatePicker.vue'
 import MotionSwap from '@/components/motion/MotionSwap.vue'
 import UiAction from '@/components/motion/UiAction'
 import { freezeCollectionLeave, resetCollectionEnter } from '@/utils/collectionMotion'

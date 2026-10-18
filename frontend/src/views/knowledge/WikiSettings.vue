@@ -88,7 +88,7 @@
           <header class="settings-section-head split usage-head">
             <div><h2 id="settings-usage-title">Token 用量</h2></div>
             <div class="usage-filters">
-              <el-date-picker v-model="usageDateRange" type="daterange" value-format="YYYY-MM-DD" format="YYYY/MM/DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :clearable="false" unlink-panels popper-class="glass-picker wiki-usage-picker" @change="loadUsage" />
+              <AppDatePicker v-model="usageDateRange" type="daterange" aria-label="Token 用量日期范围" value-format="YYYY-MM-DD" format="YYYY/MM/DD" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :clearable="false" unlink-panels popper-class="glass-picker wiki-usage-picker" @change="loadUsage" />
               <el-select v-model="usageCaller" class="knowledge-select is-fluid" placeholder="全部调用方" aria-label="Token 用量调用方" popper-class="system-select-popper system-toolbar-popper" placement="bottom-start" :offset="0" :fit-input-width="true" @change="loadUsage">
                 <el-option label="全部调用方" value="" />
                 <el-option label="知识问答" value="knowledge_qa" />
@@ -344,6 +344,7 @@ import { ArrowDown, Check, Connection, Cpu, DataAnalysis, Delete, Document, Edit
 import UiAction from '@/components/motion/UiAction'
 import MotionSwap from '@/components/motion/MotionSwap.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
+import AppDatePicker from '@/components/controls/AppDatePicker.vue'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import { usePhoneViewport } from '@/composables/usePhoneViewport'
 import { settingsSelectMaxHeight } from '@/utils/wikiSettingsLayout'

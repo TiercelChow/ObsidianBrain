@@ -67,7 +67,7 @@
           </div>
 
           <div class="date-range-picker">
-            <el-date-picker
+            <AppDatePicker
               v-model="customDateRange"
               type="daterange"
               range-separator="→"
@@ -104,8 +104,8 @@
           <button v-for="preset in timePresets" :key="preset.label" type="button" class="chip" :class="{ active: activePreset === preset.label }" :aria-pressed="activePreset === preset.label" @click="applyPreset(preset)">{{ preset.label }}</button>
         </div>
         <div class="filter-sheet-dates">
-          <label><span>开始</span><el-date-picker v-model="mobileStartDate" type="date" aria-label="开始日期" placeholder="选择日期" popper-class="glass-picker" @change="onMobileDateChange" :clearable="true" /></label>
-          <label><span>结束</span><el-date-picker v-model="mobileEndDate" type="date" aria-label="结束日期" placeholder="选择日期" popper-class="glass-picker" @change="onMobileDateChange" :clearable="true" /></label>
+          <label><span>开始</span><AppDatePicker v-model="mobileStartDate" type="date" aria-label="开始日期" placeholder="选择日期" popper-class="glass-picker" @change="onMobileDateChange" :clearable="true" /></label>
+          <label><span>结束</span><AppDatePicker v-model="mobileEndDate" type="date" aria-label="结束日期" placeholder="选择日期" popper-class="glass-picker" @change="onMobileDateChange" :clearable="true" /></label>
         </div>
         <button type="button" class="glass-btn filter-sheet-done" @click="mobileFiltersOpen = false">完成</button>
       </section>
@@ -442,6 +442,7 @@ import { createMemo, browseTimeline, searchMemos, uploadImages, updateMemo, dele
 import { memoImageUrl, memoImageSource, memoLocalDate, memoToolResult, type TimelineMemo } from '@/utils/timelineMemo'
 import TimelineStoragePanel from '@/components/timeline/TimelineStoragePanel.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
+import AppDatePicker from '@/components/controls/AppDatePicker.vue'
 import { freezeCollectionLeave, resetCollectionEnter } from '@/utils/collectionMotion'
 import { pickActiveDate, type SpyHeader } from '@/utils/timelineSpy'
 import { useModalEnvironment } from '@/composables/useModalEnvironment'
@@ -864,7 +865,10 @@ function onCustomDateChange(_val: [Date, Date] | null) {
 function onMobileDateChange() {
   activePreset.value = ''
   if (mobileStartDate.value && mobileEndDate.value) {
-    customDateRange.value = [mobileStartDate.value, mobileEndDate.value]
+    const [start, end] = [mobileStartDate.value, mobileEndDate.value].sort((a, b) => a.getTime() - b.getTime())
+    customDateRange.value = [start, end]
+    mobileStartDate.value = start
+    mobileEndDate.value = end
   } else {
     customDateRange.value = null
   }
@@ -2635,57 +2639,5 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
   .memo-card-body { padding-top: 54px; }
   .memo-time { top: 19px; left: 16px; }
   .memo-action-btn .el-icon { font-size: 20px; }
-}
-</style>
-
-<style>
-/* ── Calendar Popup Responsive ── */
-@media (max-width: 768px) {
-  .glass-picker {
-    max-width: calc(100vw - 16px) !important;
-    left: 8px !important;
-    right: 8px !important;
-    width: auto !important;
-    border-radius: 16px !important;
-  }
-  /* Stack the two calendar panels vertically on mobile */
-  .glass-picker .el-date-range-picker {
-    flex-direction: column !important;
-    width: 100% !important;
-  }
-  .glass-picker .el-date-range-picker__content {
-    width: 100% !important;
-    padding: 4px !important;
-    border-right: none !important;
-  }
-  .glass-picker .el-date-range-picker__content:last-child {
-    border-bottom: none !important;
-  }
-  .glass-picker .el-date-range-picker__header,
-  .glass-picker .el-date-picker__header {
-    margin: 2px 4px !important;
-    font-size: 13px !important;
-  }
-  .glass-picker .el-date-table {
-    font-size: 12px !important;
-  }
-  .glass-picker .el-date-table td .el-date-table-cell {
-    width: 32px !important;
-    height: 32px !important;
-  }
-  .glass-picker .el-date-table th {
-    font-size: 11px !important;
-    padding: 4px 0 !important;
-  }
-  .glass-picker .el-picker-panel__footer {
-    padding: 4px 8px !important;
-  }
-  .glass-picker .el-picker-panel__footer button {
-    font-size: 12px !important;
-    padding: 4px 12px !important;
-  }
-  .glass-picker .el-date-range-picker__time-picker-wrap .el-input {
-    width: 100% !important;
-  }
 }
 </style>
