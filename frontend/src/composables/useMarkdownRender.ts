@@ -3,6 +3,7 @@ import { onScopeDispose, watch } from 'vue'
 import type { MarkdownRenderOptions, RenderedMarkdown } from '@/markdown/renderMarkdown'
 import { useAppStore } from '@/stores/app'
 import { getHorizontalOverflowPosition } from '@/utils/readerOverflow'
+import { renderMermaidSvg } from '@/markdown/mermaidRuntime'
 
 /** Optional per-render hooks that map local image references to servable URLs
  *  (the Reader wires them to /v1/reader/raw). Omitted → hrefs pass through. */
@@ -24,52 +25,13 @@ interface PendingMarkdownRender {
 // ── lazy enhancement dependencies ─────────────────────────────────────
 
 type AppTheme = 'light' | 'dark' | 'eye-care'
-type MermaidApi = typeof import('mermaid')['default']
 type HighlightApi = typeof import('highlight.js/lib/common')['default']
 
-let mermaidPromise: Promise<MermaidApi> | null = null
 let highlightPromise: Promise<HighlightApi> | null = null
-let mermaidQueue = Promise.resolve()
-
-async function getMermaid(theme: AppTheme): Promise<MermaidApi> {
-  mermaidPromise ??= import('mermaid').then((module) => module.default)
-  const mermaid = await mermaidPromise
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: 'strict',
-    forceLegacyMathML: true,
-    suppressErrorRendering: true,
-    theme: theme === 'dark' ? 'dark' : 'default',
-    fontFamily: 'inherit',
-    flowchart: { useMaxWidth: true, htmlLabels: true },
-    sequence: { useMaxWidth: true },
-    gantt: { useMaxWidth: true },
-    journey: { useMaxWidth: true },
-  })
-  return mermaid
-}
 
 async function getHighlighter(): Promise<HighlightApi> {
   highlightPromise ??= import('highlight.js/lib/common').then((module) => module.default)
   return highlightPromise
-}
-
-/** Re-render every mermaid block in a container (used on theme change). */
-async function rerenderMermaid(container: HTMLElement, theme: AppTheme) {
-  const els = Array.from(container.querySelectorAll<HTMLElement>('.mermaid[data-processed]'))
-  if (!els.length) return
-  for (const el of els) {
-    const raw = el.getAttribute('data-raw') || ''
-    el.removeAttribute('data-processed')
-    el.textContent = raw // clears old SVG; mermaid reads textContent
-  }
-  try {
-    const mermaid = await getMermaid(theme)
-    if (!container.isConnected) return
-    await mermaid.run({ nodes: els, suppressErrors: true })
-  } catch (e) {
-    console.error('mermaid 重新渲染失败:', e)
-  }
 }
 
 // ── composable ─────────────────────────────────────────────────────────
@@ -144,6 +106,7 @@ export function useMarkdownRender(
     tableResizeObserver = null
     if (currentContainer) {
       currentContainer.removeEventListener('click', onContainerClick)
+      currentContainer.removeEventListener('keydown', onContainerKeydown)
       currentContainer.removeEventListener('scroll', onContainerScroll, true)
     }
     currentContainer = null
@@ -151,10 +114,11 @@ export function useMarkdownRender(
 
   watch(
     () => appStore.theme,
-    (t) => {
+    () => {
       const container = currentContainer
       if (!container) return
-      mermaidQueue = mermaidQueue.then(() => rerenderMermaid(container, t))
+      enhancementObserver?.disconnect()
+      observeEnhancements(container, enhancementGeneration)
     },
   )
 
@@ -198,6 +162,13 @@ export function useMarkdownRender(
     const target = event.target instanceof Element ? event.target : null
     if (!container || !target || !container.contains(target)) return
 
+    const retry = target.closest<HTMLElement>('[data-mermaid-retry]')
+    if (retry) {
+      const diagram = retry.closest<HTMLElement>('.mermaid')
+      if (diagram) void renderMermaid(diagram, enhancementGeneration)
+      return
+    }
+
     const mermaidEl = target.closest<HTMLElement>('.mermaid-clickable')
     if (mermaidEl && container.contains(mermaidEl)) {
       const svg = mermaidEl.querySelector('svg')
@@ -240,6 +211,16 @@ export function useMarkdownRender(
     element.classList.toggle('is-overflowing', position !== 'none')
   }
 
+  function onContainerKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    const diagram = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('.mermaid-clickable') : null
+    if (!diagram || diagram !== event.target) return
+    const svg = diagram.querySelector('svg')
+    if (!svg) return
+    event.preventDefault()
+    onMermaidClick(svg, diagram.dataset.raw || '')
+  }
+
   function onContainerScroll(event: Event) {
     const target = event.target
     if (!(target instanceof HTMLElement)) return
@@ -258,28 +239,59 @@ export function useMarkdownRender(
   }
 
   async function renderMermaid(el: HTMLElement, generation: number) {
+    const theme: AppTheme = appStore.theme
+    const isCurrent = () => generation === enhancementGeneration && el.isConnected && appStore.theme === theme
+    if (!isCurrent()) return
+    el.dataset.diagramPendingTheme = theme
+    el.setAttribute('aria-busy', 'true')
     try {
-      const mermaid = await getMermaid(appStore.theme)
-      if (generation !== enhancementGeneration || !el.isConnected) return
-      await mermaid.run({ nodes: [el], suppressErrors: true })
-      if (generation !== enhancementGeneration || !el.isConnected) return
-      if (el.querySelector('svg')) el.classList.add('mermaid-clickable')
-      else el.classList.add('mermaid-error')
+      const svg = await renderMermaidSvg(el.dataset.raw || '', { theme, isCurrent })
+      if (!svg || !isCurrent()) return
+      el.innerHTML = svg
+      el.dataset.processed = 'true'
+      el.dataset.diagramTheme = theme
+      el.classList.remove('mermaid-error')
+      el.classList.add('mermaid-clickable')
+      el.setAttribute('role', 'button')
+      el.setAttribute('aria-label', '放大查看图表')
+      el.tabIndex = 0
+      updateOverflowPosition(el)
     } catch (e) {
-      if (generation === enhancementGeneration) console.error('mermaid 渲染失败:', e)
+      if (!isCurrent()) return
+      console.warn('mermaid 渲染失败:', e)
+      // A theme/layout failure must not destroy the last valid diagram.
+      if (el.querySelector('svg')) return
+      el.classList.add('mermaid-error')
+      el.dataset.processed = 'error'
+      el.dataset.diagramTheme = theme
+      const message = document.createElement('span')
+      message.textContent = '图表暂时无法渲染'
+      const retry = document.createElement('button')
+      retry.type = 'button'
+      retry.dataset.mermaidRetry = ''
+      retry.textContent = '重试'
+      const details = document.createElement('details')
+      const summary = document.createElement('summary')
+      summary.textContent = '查看源码'
+      const source = document.createElement('pre')
+      source.textContent = el.dataset.raw || ''
+      details.append(summary, source)
+      el.replaceChildren(message, retry, details)
+    } finally {
+      if (el.dataset.diagramPendingTheme === theme) el.removeAttribute('aria-busy')
     }
   }
 
   function observeEnhancements(container: HTMLElement, generation: number) {
-    const codeEls = Array.from(container.querySelectorAll<HTMLElement>('pre code'))
-    const mermaidEls = Array.from(container.querySelectorAll<HTMLElement>('.mermaid:not([data-processed])'))
+    const codeEls = Array.from(container.querySelectorAll<HTMLElement>('pre code:not(.hljs)'))
+    const mermaidEls = Array.from(container.querySelectorAll<HTMLElement>('.mermaid')).filter(el => el.dataset.diagramTheme !== appStore.theme)
     const targets = [...codeEls, ...mermaidEls]
     if (!targets.length) return
 
     if (typeof IntersectionObserver === 'undefined') {
       codeEls.forEach((el) => { void highlightCode(el, generation) })
       mermaidEls.forEach((el) => {
-        mermaidQueue = mermaidQueue.then(() => renderMermaid(el, generation))
+        void renderMermaid(el, generation)
       })
       return
     }
@@ -291,7 +303,7 @@ export function useMarkdownRender(
           observer.unobserve(entry.target)
           const el = entry.target as HTMLElement
           if (el.classList.contains('mermaid')) {
-            mermaidQueue = mermaidQueue.then(() => renderMermaid(el, generation))
+            void renderMermaid(el, generation)
           } else {
             void highlightCode(el, generation)
           }
@@ -307,6 +319,7 @@ export function useMarkdownRender(
     currentContainer = container
     const generation = enhancementGeneration
     container.addEventListener('click', onContainerClick)
+    container.addEventListener('keydown', onContainerKeydown)
     container.addEventListener('scroll', onContainerScroll, true)
 
     // GFM tables already use the renderer wrapper. Raw HTML tables need the
@@ -323,6 +336,7 @@ export function useMarkdownRender(
       if (generation !== enhancementGeneration || !container.isConnected) return
       container.querySelectorAll<HTMLElement>('.table-scroll, .code-content, .katex-display, .mermaid').forEach((wrapper) => {
         updateOverflowPosition(wrapper)
+        if (wrapper.classList.contains('mermaid-clickable')) return
         if (wrapper.dataset.overflowPosition !== 'none') {
           wrapper.tabIndex = 0
           wrapper.setAttribute('role', 'region')

@@ -921,7 +921,10 @@ function handleMermaidClick(svg: SVGElement, source: string) {
 function handleImageClick(src: string, alt: string) {
   viewerSource.value = alt
   viewerTitle.value = alt || '图片'
-  viewerSvg.value = `<img src="${src}" alt="${alt}" />`
+  const image = document.createElement('img')
+  image.src = src
+  image.alt = alt
+  viewerSvg.value = image.outerHTML
 }
 
 // Anchor to scroll to after a cross-file link opens a new document.
@@ -2491,21 +2494,6 @@ onBeforeRouteLeave(() => { flushProgressNow() })
 }
 .markdown-body [data-footnote-backref] { margin-left: 0.3em; }
 
-/* ── mermaid ── */
-.markdown-body .mermaid {
-  display: flex; justify-content: safe center;
-  width: 100%; max-width: 100%; min-width: 0;
-  margin: 1.2em 0; padding: 20px;
-  background: var(--bg-glass-subtle);
-  border: 1px solid var(--border-faint);
-  border-radius: 12px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-inline: contain;
-  -webkit-overflow-scrolling: touch;
-}
-.markdown-body .mermaid svg { display: block; max-width: 100%; height: auto; flex: 0 0 auto; }
-
 @media (max-width: 768px) {
   .markdown-body th,
   .markdown-body td {
@@ -2516,11 +2504,5 @@ onBeforeRouteLeave(() => { flushProgressNow() })
   .markdown-body ol { padding-left: 1.35em; }
   /* 80% of a phone column is too small for photos — use the full width. */
   .markdown-body img { max-width: 100%; }
-}
-.markdown-body .mermaid-clickable { cursor: zoom-in; transition: box-shadow var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out); }
-.markdown-body .mermaid-clickable:hover { box-shadow: var(--shadow-lg); transform: translateY(-1px); }
-.markdown-body .mermaid-error {
-  color: #f87171; font-size: 13px; justify-content: flex-start;
-  font-family: var(--font-mono);
 }
 </style>

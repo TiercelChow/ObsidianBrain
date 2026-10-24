@@ -1,0 +1,53 @@
+/* Diagram typography is independent of prose, in both Reader and previews. */
+.mermaid[data-raw] {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: safe center;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 1.5em 0;
+  padding: 24px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-content);
+  background: color-mix(in srgb, var(--bg-base) 78%, var(--glass-solid));
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  overflow: hidden;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.mermaid[data-raw] > svg { display: block; flex: none; max-width: 100%; height: auto; }
+.mermaid[data-raw] :is(.nodeLabel, .edgeLabel, .cluster-label) p { margin: 0; padding: 0; }
+.mermaid[data-raw]:not([data-processed]) { min-height: 132px; align-items: center; font-size: 0; color: transparent; }
+.mermaid[data-raw]:not([data-processed])::before {
+  content: '';
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border: 2px solid var(--border-faint);
+  border-top-color: var(--text-muted);
+  border-radius: 50%;
+  animation: diagram-loading 800ms linear infinite;
+}
+.mermaid-clickable { cursor: zoom-in; transition: border-color var(--motion-fast) ease, background-color var(--motion-fast) ease; }
+@media (hover: hover) { .mermaid-clickable:hover { border-color: var(--accent-border); } }
+.mermaid-clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.mermaid-error[data-raw] { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 12px; font-size: 13px; color: var(--text-secondary); }
+.mermaid-error > button { margin-left: auto; border: 0; padding: 0 8px; background: none; color: var(--accent); font: inherit; cursor: pointer; }
+.mermaid-error > details { flex-basis: 100%; min-width: 0; }
+.mermaid-error summary { cursor: pointer; color: var(--text-muted); }
+.mermaid-error pre { overflow: auto; padding: 12px; max-height: 280px; white-space: pre; font: 12px/1.6 var(--font-mono); }
+@keyframes diagram-loading { to { transform: rotate(360deg); } }
+@media (max-width: 768px) {
+  .mermaid[data-raw] { padding: 16px; border-radius: 16px; margin: 1.25em 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mermaid-clickable { transition: none; }
+  .mermaid[data-raw]:not([data-processed])::before { animation: none; }
+}

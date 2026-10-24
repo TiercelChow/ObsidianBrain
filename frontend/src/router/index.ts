@@ -74,6 +74,14 @@ const router = createRouter({
   ],
 })
 
+// The comparison renderer and sample corpus never enter the production bundle.
+if (import.meta.env.DEV) router.addRoute({
+  path: '/dev/mermaid',
+  name: 'MermaidLab',
+  component: () => import('@/views/dev/MermaidLab.vue'),
+  meta: { title: '图表效果对比' },
+})
+
 router.beforeEach(to => getMobileRouteRedirect(to.path, window.innerWidth) ?? true)
 
 export default router
