@@ -18,7 +18,7 @@
       <!-- Toolbar -->
       <div class="toolbar">
         <div class="toolbar-row">
-        <div class="search-box glass-surface" data-glass-rim>
+        <div class="search-box glass-surface" data-glass="search" data-glass-rim>
           <el-icon class="search-icon"><Search /></el-icon>
           <input
             v-model="searchQuery"
@@ -26,7 +26,7 @@
             class="glass-input"
             @input="onSearchInput"
           />
-          <button data-icon-only v-if="searchQuery" type="button" class="clear-btn" aria-label="清除搜索" @click="clearSearch">✕</button>
+          <button data-icon-only v-if="searchQuery" type="button" class="clear-btn" aria-label="清除搜索" @click="clearSearch"><el-icon class="ui-action-icon" :size="16" aria-hidden="true"><Close /></el-icon></button>
         </div>
 
         <button data-icon-only v-if="isMobile" type="button" class="mobile-compose-action" aria-label="写小记" @click="openCreateDialog">
@@ -54,6 +54,7 @@
                 v-for="preset in timePresets"
                 :key="preset.label"
                 class="chip"
+                data-glass-choice
                 :class="{ active: activePreset === preset.label }"
                 role="button"
                 tabindex="0"
@@ -85,7 +86,7 @@
               title="清除筛选"
               aria-label="清除筛选"
             >
-              ✕
+              <el-icon class="ui-action-icon" aria-hidden="true"><Close /></el-icon>
             </button>
           </div>
         </div>
@@ -97,11 +98,11 @@
         <header class="filter-sheet-header">
           <h3>时间范围</h3>
           <button data-icon-only type="button" class="glass-icon-btn" aria-label="图片存储" title="图片存储" @click="mobileFiltersOpen = false; storageOpen = true"><el-icon><FolderOpened /></el-icon></button>
-          <button data-icon-only type="button" class="glass-icon-btn" aria-label="关闭时间筛选" @click="mobileFiltersOpen = false">✕</button>
+          <button data-icon-only type="button" class="glass-icon-btn" aria-label="关闭时间筛选" @click="mobileFiltersOpen = false"><el-icon class="ui-action-icon" aria-hidden="true"><Close /></el-icon></button>
         </header>
         <div class="filter-sheet-presets">
-          <button type="button" class="chip" :class="{ active: !hasActiveFilter }" :aria-pressed="!hasActiveFilter" @click="clearFilter">全部</button>
-          <button v-for="preset in timePresets" :key="preset.label" type="button" class="chip" :class="{ active: activePreset === preset.label }" :aria-pressed="activePreset === preset.label" @click="applyPreset(preset)">{{ preset.label }}</button>
+          <button type="button" class="chip" data-glass-choice :class="{ active: !hasActiveFilter }" :aria-pressed="!hasActiveFilter" @click="clearFilter">全部</button>
+          <button v-for="preset in timePresets" :key="preset.label" type="button" class="chip" data-glass-choice :class="{ active: activePreset === preset.label }" :aria-pressed="activePreset === preset.label" @click="applyPreset(preset)">{{ preset.label }}</button>
         </div>
         <div class="filter-sheet-dates">
           <label><span>开始</span><AppDatePicker v-model="mobileStartDate" type="date" aria-label="开始日期" placeholder="选择日期" popper-class="glass-picker" @change="onMobileDateChange" :clearable="true" /></label>
@@ -175,7 +176,7 @@
                   <div class="memo-time-dot"></div>
                   <div class="memo-time-line"></div>
                 </div>
-                <div class="memo-card-body glass-surface">
+                <div class="memo-card-body glass-surface" data-glass="card">
                   <div class="memo-time">{{ formatTime(memo.timestamp) }}</div>
                   <div class="memo-actions">
                     <button data-icon-only v-if="!isMobile" type="button" class="memo-action-btn" aria-label="编辑小记" title="编辑小记" @click="openEditDialog(memo)"><el-icon><Edit /></el-icon></button>
@@ -230,7 +231,7 @@
 
         <!-- Empty States -->
         <div v-if="filteredMemos.length === 0 && !loading" class="empty-state">
-          <div class="empty-icon">📝</div>
+          <div class="empty-icon"><el-icon aria-hidden="true"><Edit /></el-icon></div>
           <div class="empty-title" v-if="searchQuery">没有找到匹配的小记</div>
           <div class="empty-title" v-else-if="hasActiveFilter">该时间范围内没有小记</div>
           <div class="empty-title" v-else>还没有小记</div>
@@ -249,7 +250,7 @@
       <div class="dialog-content glass-surface-heavy">
           <div class="dialog-header">
             <h3>{{ editedMemo ? '编辑小记' : '写小记' }}</h3>
-            <button data-icon-only type="button" class="glass-icon-btn" aria-label="关闭小记面板" :disabled="creating" @click="closeDraft">✕</button>
+            <button data-icon-only type="button" class="glass-icon-btn" aria-label="关闭小记面板" :disabled="creating" @click="closeDraft"><el-icon class="ui-action-icon" aria-hidden="true"><Close /></el-icon></button>
           </div>
           <div class="create-form">
             <textarea
@@ -269,7 +270,7 @@
                 class="image-preview-item"
               >
                 <img :src="img.preview" class="image-preview-img" />
-                <button data-icon-only type="button" class="image-remove-btn" :aria-label="`移除第 ${idx + 1} 张图片`" :disabled="creating" @click="removePendingImage(idx)">✕</button>
+                <button data-icon-only type="button" class="image-remove-btn" :aria-label="`移除第 ${idx + 1} 张图片`" :disabled="creating" @click="removePendingImage(idx)"><el-icon class="ui-action-icon" :size="16" aria-hidden="true"><Close /></el-icon></button>
                 <div v-if="img.uploading" class="image-upload-overlay">
                   <el-icon class="is-loading"><Loading /></el-icon>
                 </div>
@@ -332,7 +333,7 @@
 
     <MotionModal v-model="actionSheetOpen" aria-label="小记操作">
       <div class="dialog-content glass-surface-heavy memo-action-sheet compact-dialog">
-        <div class="dialog-header"><h3>小记操作</h3><button data-icon-only type="button" class="glass-icon-btn" aria-label="关闭操作" @click="actionMemo = null">✕</button></div>
+        <div class="dialog-header"><h3>小记操作</h3><button data-icon-only type="button" class="glass-icon-btn" aria-label="关闭操作" @click="actionMemo = null"><el-icon class="ui-action-icon" aria-hidden="true"><Close /></el-icon></button></div>
         <button type="button" class="glass-btn" @click="editFromSheet"><el-icon><Edit /></el-icon>编辑</button>
         <button type="button" class="glass-btn danger" @click="deleteFromSheet"><el-icon><Delete /></el-icon>删除小记</button>
       </div>
@@ -352,7 +353,7 @@
 
     <MotionModal v-model="storageOpen" aria-label="时光机图片存储">
       <div class="dialog-content glass-surface-heavy">
-        <div class="dialog-header"><h3>图片存储</h3><button data-icon-only type="button" class="glass-icon-btn" aria-label="关闭图片存储" @click="storageOpen = false">✕</button></div>
+        <div class="dialog-header"><h3>图片存储</h3><button data-icon-only type="button" class="glass-icon-btn" aria-label="关闭图片存储" @click="storageOpen = false"><el-icon class="ui-action-icon" aria-hidden="true"><Close /></el-icon></button></div>
         <div class="create-form"><TimelineStoragePanel @migrated="loadMemos()" /></div>
       </div>
     </MotionModal>
@@ -362,13 +363,23 @@
     <Teleport to="body">
       <Transition name="viewer">
         <div v-if="imageViewer.show" ref="viewerOverlayRef" class="image-viewer-overlay" role="dialog" aria-modal="true" aria-label="小记图片" tabindex="-1" @click.self="closeImageViewer">
-          <button data-icon-only class="viewer-close" aria-label="关闭图片" @click="closeImageViewer">✕</button>
-          <button data-icon-only
+          <div v-glass-lens="'css'" class="viewer-tool-surface viewer-close-surface" data-glass="floating" data-glass-tone="media">
+            <button data-icon-only class="viewer-close" aria-label="关闭图片" @click="closeImageViewer"><el-icon class="ui-action-icon" :size="22" aria-hidden="true"><Close /></el-icon></button>
+          </div>
+          <div
             v-if="imageViewer.images.length > 1"
-            class="viewer-nav viewer-prev"
+            v-glass-lens="'css'"
+            class="viewer-tool-surface viewer-nav-surface viewer-prev"
+            data-glass="floating"
+            data-glass-tone="media"
+          >
+          <button data-icon-only
+            data-direction-button
+            class="viewer-nav"
             aria-label="上一张图片"
             @click="viewerPrev"
           ><el-icon :size="22"><ArrowLeft /></el-icon></button>
+          </div>
           <div
             class="viewer-image-wrap" ref="viewerStageRef"
             :class="{ 'is-zoomed': viewerFrame.scale > 1.01, 'is-dragging': viewerFrame.dragging }"
@@ -410,18 +421,26 @@
             <div v-if="imageViewer.images.length > 1" class="viewer-counter" aria-live="polite">
               {{ imageViewer.index + 1 }} / {{ imageViewer.images.length }}
             </div>
-            <div class="viewer-controls">
+            <div v-glass-lens class="viewer-controls" data-glass="floating" data-glass-tone="media">
               <button data-icon-only class="viewer-zoom-btn" aria-label="缩小" title="缩小" :disabled="viewerStatus !== 'ready' || viewerFrame.scale <= 1.001" @click.stop="viewerZoom(0.8)"><el-icon :size="20"><Minus /></el-icon></button>
               <button data-icon-only class="viewer-zoom-btn" aria-label="放大" title="放大" :disabled="viewerStatus !== 'ready' || viewerFrame.scale >= 7.999" @click.stop="viewerZoom(1.25)"><el-icon :size="20"><Plus /></el-icon></button>
               <button data-icon-only class="viewer-zoom-btn" aria-label="重置" title="重置" :disabled="viewerStatus !== 'ready'" @click.stop="viewerReset"><el-icon :size="20"><Refresh /></el-icon></button>
             </div>
           </footer>
-          <button data-icon-only
+          <div
             v-if="imageViewer.images.length > 1"
-            class="viewer-nav viewer-next"
+            v-glass-lens="'css'"
+            class="viewer-tool-surface viewer-nav-surface viewer-next"
+            data-glass="floating"
+            data-glass-tone="media"
+          >
+          <button data-icon-only
+            data-direction-button
+            class="viewer-nav"
             aria-label="下一张图片"
             @click="viewerNext"
           ><el-icon :size="22"><ArrowRight /></el-icon></button>
+          </div>
         </div>
       </Transition>
     </Teleport>
@@ -434,7 +453,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getMemo } from '@/api'
 import { parseLocalDate } from '@/utils/taskDates'
 import { ElMessage } from 'element-plus'
-import { Plus, Minus, Search, PriceTag, Loading, Picture, Refresh, ArrowLeft, ArrowRight, MoreFilled, Edit, Delete, FolderOpened } from '@element-plus/icons-vue'
+import { Plus, Minus, Close, Search, PriceTag, Loading, Picture, Refresh, ArrowLeft, ArrowRight, MoreFilled, Edit, Delete, FolderOpened } from '@element-plus/icons-vue'
 import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/github-dark.css'
 import { createImageViewerMotion, type PhotoFrame } from '@/utils/imageViewerMotion'
@@ -1821,13 +1840,15 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
   border-color: var(--accent);
 }
 .memo-content :deep(.memo-check-checked::after) {
-  content: '✓';
+  content: '';
   position: absolute;
-  top: -2px;
-  left: 1px;
-  color: var(--accent-contrast);
-  font-size: 12px;
-  font-weight: 700;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 8px;
+  border: solid var(--accent-contrast);
+  border-width: 0 2px 2px 0;
+  transform: translate(-50%, -60%) rotate(45deg);
 }
 .memo-content :deep(.memo-checkbox-checked) {
   color: var(--text-faint);
@@ -2268,10 +2289,17 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
   backdrop-filter: var(--glass-scrim-filter);
   -webkit-backdrop-filter: var(--glass-scrim-filter);
 }
-.viewer-close {
+.viewer-tool-surface {
+  position: absolute;
+  border-radius: 50%;
+  z-index: 10;
+}
+.viewer-close-surface {
   position: absolute;
   top: 20px;
   right: 24px;
+}
+.viewer-close {
   width: 40px;
   height: 40px;
   border-radius: 50%;
@@ -2289,10 +2317,12 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
 .viewer-close:hover {
   background: rgba(255, 255, 255, 0.25);
 }
-.viewer-nav {
+.viewer-nav-surface {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
+}
+.viewer-nav {
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -2349,8 +2379,13 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
 .viewer-spinner { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 30px; pointer-events: none; }
 .viewer-footer { display: flex; flex-direction: column; align-items: center; gap: 12px; min-height: 44px; z-index: 10; }
 .viewer-controls {
+  position: relative;
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--glass-media-edge);
+  border-radius: 999px;
   z-index: 10;
 }
 .viewer-zoom-btn {
@@ -2464,9 +2499,11 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
   .dialog-btns .glass-btn { flex: 1; min-height: var(--tap-target); }
   .dialog-footer { flex-wrap: wrap; gap: 10px; }
   .image-remove-btn { width: 32px; height: 32px; }
-  .viewer-close {
+  .viewer-close-surface {
     top: calc(var(--safe-top) + 10px);
     right: max(10px, var(--safe-right));
+  }
+  .viewer-close {
     width: var(--tap-target);
     height: var(--tap-target);
   }

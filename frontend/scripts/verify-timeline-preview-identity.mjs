@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer, loadConfigFromFile } from 'vite'
+import { verifyIconGeometry } from './helpers/verify-icon-geometry.mjs'
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -48,7 +49,7 @@ const mock = {
   },
 }
 const config = await loadConfigFromFile({ command: 'serve', mode: 'development' }, join(root, 'vite.config.ts'))
-const server = await createServer({ ...config.config, root, configFile: false, logLevel: 'error', plugins: [mock, ...config.config.plugins], server: { host: '127.0.0.1', port: 0, proxy: {} } })
+const server = await createServer({ ...config.config, root, cacheDir: join(screenshots, '.vite-cache'), configFile: false, logLevel: 'error', plugins: [mock, ...config.config.plugins], server: { host: '127.0.0.1', port: 0, proxy: {} } })
 let browser
 const results = []
 try {
@@ -62,13 +63,59 @@ try {
     page.on('pageerror', error => errors.push(error.message))
     await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort())
     await page.goto(`${origin}/timeline`)
-    await page.locator('.memo-image').first().waitFor()
+    await page.locator('.memo-image').first().waitFor({ timeout: 10000 }).catch(async error => {
+      await page.screenshot({ path: join(screenshots, `${viewport.width}-failure.png`) })
+      console.error(JSON.stringify({ errors, unexpected, page: await page.locator('body').innerText() }))
+      throw error
+    })
     await page.waitForFunction(() => [...document.querySelectorAll('.memo-image')].every(image => image.complete && image.naturalWidth > 0))
     await page.locator('.memo-image').first().click()
     const viewer = page.getByRole('dialog', { name: '小记图片', exact: true })
     const current = viewer.locator('.viewer-slide:not([aria-hidden]) .viewer-preview')
     await viewer.locator('.viewer-image-ready').waitFor()
     await current.evaluate(image => image.decode())
+    for (const theme of ['light', 'dark', 'eye-care']) {
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+      for (const selector of ['.viewer-close-surface', '.viewer-nav-surface', '.viewer-controls']) {
+        const material = await viewer.locator(selector).first().evaluate(element => {
+          const host = getComputedStyle(element), optics = element.querySelector(':scope > .glass-optics')
+          const layer = optics && getComputedStyle(optics), button = getComputedStyle(element.querySelector('button'))
+          const rect = element.getBoundingClientRect(), control = element.querySelector('button').getBoundingClientRect()
+          const glyph = element.querySelector('button svg')?.getBoundingClientRect()
+          return { bg: layer?.backgroundColor, filter: layer?.backdropFilter, shadow: host.boxShadow, buttonFill: button.backgroundColor, buttonShadow: button.boxShadow, border: button.borderTopWidth,
+            contains: control.left >= rect.left - 1 && control.right <= rect.right + 1 && control.top >= rect.top - 1 && control.bottom <= rect.bottom + 1,
+            inside: rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight,
+            centered: !glyph || (Math.abs(glyph.x + glyph.width / 2 - control.x - control.width / 2) <= .6 && Math.abs(glyph.y + glyph.height / 2 - control.y - control.height / 2) <= .6) }
+        })
+        assert.ok(material.bg && material.bg !== 'rgba(0, 0, 0, 0)', `${theme}: ${selector} keeps an independent glass fill`)
+        assert.ok(material.filter && material.filter !== 'none', `${selector} samples its background`)
+        assert.notEqual(material.shadow, 'none')
+        assert.equal(material.buttonFill, 'rgba(0, 0, 0, 0)', 'the icon itself stays borderless')
+        assert.equal(material.buttonShadow, 'none')
+        assert.equal(material.border, '0px')
+        assert.equal(material.contains, true, 'button geometry stays anchored inside its glass host')
+        assert.equal(material.inside, true, 'floating glass fits the viewport and safe areas')
+        assert.equal(material.centered, true, 'photo navigation SVG is centered inside its button')
+      }
+      await page.screenshot({ path: join(screenshots, `${viewport.width}-glass-${theme}.png`) })
+      await verifyIconGeometry(page, `${viewport.width}-${theme} photo viewer`)
+    }
+    const client = await context.newCDPSession(page)
+    for (const [name, value] of [['prefers-reduced-transparency', 'reduce'], ['prefers-contrast', 'more'], ['forced-colors', 'active']]) {
+      await client.send('Emulation.setEmulatedMedia', { features: [{ name, value }] })
+      const fallback = await viewer.locator('.viewer-controls').evaluate(element => {
+        const reference = document.createElement('span')
+        reference.style.background = 'var(--glass-media-fill)'
+        document.body.append(reference)
+        const expected = getComputedStyle(reference).backgroundColor
+        reference.remove()
+        return { bg: getComputedStyle(element).backgroundColor, optics: getComputedStyle(element.querySelector('.glass-optics')).display, expected }
+      })
+      assert.equal(fallback.bg, fallback.expected, `${name}: media chrome retains its contrasting solid plane`)
+      assert.equal(fallback.optics, 'none', `${name}: optical enhancement is disabled`)
+    }
+    await client.send('Emulation.setEmulatedMedia', { features: [] })
+    await client.detach()
     const old = await current.elementHandle()
     blocked.add('blue.svg')
     blocked.add('green.svg')

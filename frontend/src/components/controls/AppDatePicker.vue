@@ -15,7 +15,7 @@
           <h3>{{ pickerLabel }}</h3>
           <button type="button" class="date-wheel-confirm" @click="confirm">完成</button>
         </header>
-        <div v-if="isRange" class="date-wheel-range" aria-label="编辑日期范围">
+        <div v-if="isRange" class="date-wheel-range" data-glass="inset" aria-label="编辑日期范围">
           <button v-for="side in endpoints" :key="side.index" type="button" :aria-pressed="endpoint === side.index"
             :class="{ active: endpoint === side.index }" @click="switchEndpoint(side.index)"
           ><span>{{ side.label }}</span><strong>{{ displayDate(draft[side.index]) }}</strong></button>
@@ -136,9 +136,8 @@ watch(isMobile, mobile => { if (!mobile) open.value = false })
 .date-wheel-sheet button:focus-visible { outline:2px solid var(--accent-border); outline-offset:-2px; }
 .date-wheel-header .date-wheel-confirm { color:var(--accent); font-weight:650; }
 .date-wheel-summary { margin:4px 0 0; color:var(--text-muted); font-size:14px; text-align:center; font-variant-numeric:tabular-nums; }
-.date-wheel-range { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; margin:6px 0; padding:3px; border-radius:16px; background:var(--bg-hover); }
+.date-wheel-range { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; margin:6px 0; padding:3px; border-radius:16px; }
 .date-wheel-range button { display:grid; gap:3px; min-width:0; padding:7px; }
-.date-wheel-range button.active { background:var(--bg-glass-strong); box-shadow:var(--shadow-sm); color:var(--text-primary); }
 .date-wheel-range span { font-size:12px; color:var(--text-muted); }
 .date-wheel-range strong { font-size:14px; font-weight:600; font-variant-numeric:tabular-nums; }
 .date-wheels { position:relative; display:grid; grid-template-columns:1.25fr 1fr 1fr; }

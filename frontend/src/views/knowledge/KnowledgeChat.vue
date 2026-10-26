@@ -70,7 +70,7 @@
         </div>
       </aside>
 
-      <section class="chat-panel knowledge-surface">
+      <section class="chat-panel knowledge-surface" data-glass="card">
         <div ref="messageListRef" class="message-list" @scroll="onMessageScroll">
           <div v-if="!messages.length && !historyLoading" class="chat-welcome">
             <div class="welcome-symbol"><el-icon><ChatDotRound /></el-icon></div>
@@ -94,6 +94,7 @@
                 <div v-else-if="message.unsavedAnswer && message.content" class="restored-answer-draft"><strong>回答已生成，但未写入会话</strong><span>这段正文从运行记录找回；引用需在运行检查器核对。补存成功前，后续追问不会自动继承它。</span><KnowledgeAnswerMarkdown :content="message.content" :evidence-count="0" @rendered="followAnswer" /></div>
                 <KnowledgeAnswerMarkdown
                   v-else-if="message.content"
+                  data-glass="subcard"
                   :content="message.content"
                   :evidence-count="message.evidence?.length ?? 0"
                   :streaming="streamingMessageId === message.id"
@@ -953,7 +954,7 @@ onBeforeUnmount(() => {
 .chat-panel { position: relative; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
 .message-list { grid-area: 1 / 1; min-width: 0; max-height: calc(100vh - 210px); min-height: 480px; overflow: auto; padding: 28px clamp(16px, 5vw, 70px) 100px; scroll-padding-bottom: 100px; }
 .chat-welcome { min-height: 390px; display: grid; place-content: center; justify-items: center; gap: 10px; text-align: center; }
-.welcome-symbol { width: 65px; height: 65px; display: grid; place-items: center; margin-bottom: 5px; border-radius: 22px; background: radial-gradient(circle at 32% 24%, color-mix(in srgb, white 42%, transparent), transparent 42%), var(--accent-light); color: var(--accent); font-size: 28px; box-shadow: var(--shadow-md), var(--inset-highlight); }
+.welcome-symbol { width: 65px; height: 65px; display: grid; place-items: center; margin-bottom: 5px; border-radius: 22px; background: var(--glass-action-sheen), var(--glass-control-fill); color: var(--accent); font-size: 28px; box-shadow: var(--glass-inner-edge); }
 .chat-welcome h2 { font-size: 20px; }
 .chat-welcome > p { max-width: 520px; margin-bottom: 10px; color: var(--text-muted); font-size: 13px; line-height: 1.7; }
 .chat-welcome > button { width: min(100%, 380px); min-height: 40px; padding: 8px 14px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer; transition: var(--transition-interactive); }
@@ -964,7 +965,7 @@ onBeforeUnmount(() => {
 .message.user { margin-left: auto; justify-items: end; }
 .message-role { color: var(--text-faint); font-size: 10px; }
 .message > p { padding: 11px 14px; overflow-wrap: anywhere; border-radius: 16px 16px 16px 5px; background: var(--bg-glass-subtle); color: var(--text-secondary); font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
-.message.user p { border-radius: 16px 16px 5px 16px; background: var(--accent); color: white; }
+.message.user p { border-radius: 16px 16px 5px 16px; background: var(--glass-action-sheen), var(--glass-action-fill); color: var(--text-primary); box-shadow: var(--glass-action-shadow); }
 .restored-answer-draft { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); color: var(--text-secondary); line-height: 1.7; overflow-wrap: anywhere; }
 .restored-answer-draft strong { color: var(--text-muted); font-size: 11px; font-weight: 700; }
 .restored-answer-draft p { white-space: pre-wrap; }

@@ -1,5 +1,94 @@
 /* Shared control geometry/state, separate from optical materials and layout.
-   Tint belongs to the parent layer: fields never perform another blur pass. */
+   Ordinary fields use tint; Select background optics live in materials.css. */
+/* All icon-only controls center a real SVG box rather than a font baseline.
+   Keep local hit sizes, large Reader controls and library behavior intact. */
+:root[data-theme] :is([data-direction-button], [data-icon-only], .ui-action, .el-dialog__headerbtn, .el-drawer__close-btn, .el-message-box__headerbtn, .el-picker-panel__icon-btn, .el-pagination .btn-prev, .el-pagination .btn-next) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+}
+.ui-action-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1em;
+  height: 1em;
+  font-size: 20px;
+  line-height: 1;
+  pointer-events: none;
+}
+.ui-action-icon > svg, .ui-action__glyph { display: block; }
+:is([data-icon-only], .ui-action) svg { display: block; pointer-events: none; }
+:root[data-theme] [data-icon-only] > .el-icon { flex: none; line-height: 1; }
+:root[data-theme] .el-button[data-icon-only] > span { display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+/* Element Plus otherwise keeps the slot icon beside its loading spinner. */
+:root[data-theme] .el-button[data-icon-only].is-loading > span { display: none; }
+:root[data-theme] .el-button[data-icon-only].is-loading > .el-icon { margin-inline: 0; }
+.ui-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1em;
+  height: 1em;
+  font-size: 18px;
+  line-height: 1;
+  transform-origin: center;
+  pointer-events: none;
+}
+.ui-chevron > svg { display: block; width: 100%; height: 100%; }
+[data-direction-button] > .el-icon { flex: none; line-height: 1; }
+[data-direction-button] svg { display: block; }
+[data-direction-button][aria-expanded] > .ui-chevron {
+  transition: transform var(--motion-normal) var(--ease-spring-gentle);
+}
+[data-direction-button][aria-expanded="true"] > .ui-chevron { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+  [data-direction-button][aria-expanded] > .ui-chevron { transition: none; }
+}
+/* Timeline and Wiki are the shared search reference. Width/flex belongs to the
+   page; optical weight, hit height, corner, icon and typography do not. */
+:root[data-theme] [data-glass="search"] {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  height: 44px;
+  min-height: 44px;
+  gap: 10px;
+  padding: 0 14px;
+  border: 1px solid var(--material-border);
+  border-radius: 14px;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+}
+:root[data-theme] [data-glass="search"] input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+}
+:root[data-theme] [data-glass="search"] > .el-icon { flex: none; font-size: 16px; color: var(--text-faint); }
+:root[data-theme] [data-glass="search"]:focus-within > .el-icon { color: var(--accent); }
+:root[data-theme] [data-glass="search"] button[data-icon-only] {
+  flex: none;
+  width: 44px;
+  height: 40px;
+  margin-inline: 0 -10px;
+}
+@media (max-width: 768px) {
+  :root[data-theme] [data-glass="search"] { min-width: 0; font-size: 16px; }
+}
 /* ── Glass Calendar Picker ── */
 .glass-picker {
   border-radius: 20px !important;
@@ -50,22 +139,25 @@
 :root[data-theme] :is(.el-input__wrapper, .el-select__wrapper, .el-range-editor, .el-textarea__inner) {
   min-height: var(--control-height);
   border-radius: var(--radius-control) !important;
-  background: var(--glass-field-fill) !important;
-  box-shadow: inset 0 0 0 1px var(--glass-field-edge) !important;
   color: var(--text-primary);
   transition: background-color var(--motion-fast) var(--ease-emphasized), box-shadow var(--motion-fast) var(--ease-emphasized);
 }
-:root[data-theme] :is(.el-input__wrapper, .el-select__wrapper, .el-range-editor, .el-textarea__inner):focus-within,
-:root[data-theme] :is(.el-input__wrapper.is-focus, .el-select__wrapper.is-focused, .el-textarea__inner:focus) {
+:root[data-theme] :is(.el-input__wrapper, .el-range-editor, .el-textarea__inner) {
+  background: var(--glass-field-fill) !important;
+  box-shadow: inset 0 0 0 1px var(--glass-field-edge) !important;
+}
+:root[data-theme] :is(.el-input__wrapper, .el-range-editor, .el-textarea__inner):focus-within,
+:root[data-theme] :is(.el-input__wrapper.is-focus, .el-textarea__inner:focus) {
   box-shadow: inset 0 0 0 1.5px var(--accent-border) !important;
   background: color-mix(in srgb, var(--glass-solid) 78%, transparent) !important;
 }
 :root[data-theme] :is(.el-input__inner, .el-range-input, .el-select__selected-item, .el-textarea__inner) { color: var(--text-primary) !important; }
 :root[data-theme] :is(input, textarea)::placeholder,
 :root[data-theme] :is(.el-select__placeholder.is-transparent, .el-select__input::placeholder) { color: var(--text-faint) !important; }
-:root[data-theme] .el-form-item.is-error :is(.el-input__wrapper, .el-select__wrapper, .el-textarea__inner) {
+:root[data-theme] .el-form-item.is-error :is(.el-input__wrapper, .el-textarea__inner) {
   box-shadow: inset 0 0 0 1.5px var(--glass-danger-label) !important;
 }
+:root[data-theme] .el-form-item.is-error .el-select__wrapper { --glass-control-surface-edge: var(--glass-danger-label); }
 :root[data-theme] .el-button {
   min-height: var(--control-height);
   border-radius: var(--radius-control) !important;
@@ -80,6 +172,15 @@
 :root[data-theme] :is(.el-checkbox, .el-radio) { --el-checkbox-checked-text-color: var(--text-primary); --el-radio-checked-text-color: var(--text-primary); }
 :root[data-theme] .el-checkbox__input.is-checked .el-checkbox__inner,
 :root[data-theme] .el-radio__input.is-checked .el-radio__inner { background: var(--accent); border-color: var(--accent); }
+/* A menu is one rounded surface in either placement. Clip scroll contents and
+   option highlights to its outline without clipping the outer box shadow. */
+:root[data-theme] .el-popper:has(.el-select-dropdown) {
+  border-radius: 14px !important;
+  overflow: hidden;
+}
+:root[data-theme] .el-popper:has(.el-select-dropdown) .el-popper__arrow { display: none !important; }
+:root[data-theme] .el-popper:has(.el-select-dropdown) .el-select-dropdown__list { padding: 5px !important; }
+:root[data-theme] .el-popper:has(.el-select-dropdown) .el-select-dropdown__item { border-radius: 9px; }
 :root[data-theme] .el-select-dropdown__item { color: var(--text-secondary); }
 :root[data-theme] .el-select-dropdown__item.is-selected { color: var(--accent); font-weight: 650; }
 :root[data-theme] .el-select-dropdown__item:hover { background: var(--bg-hover); }
@@ -98,9 +199,9 @@
 :root[data-theme] .el-dialog__body { padding: 12px 24px 24px; color: var(--text-secondary); }
 :root[data-theme] .el-dialog__footer { padding: 0 24px 24px; }
 :root[data-theme] .el-dialog__close { color: var(--text-muted); }
-/* Native editors participate in the same system without painting search text
-   inputs or accidentally turning ranges/checkboxes into text fields. */
-:root[data-theme] :is(.field input:not([type="range"]):not([type="checkbox"]), .field textarea, .glass-textarea, .document-editor textarea) {
+/* Native editors own their surface. Component inputs are transparent text
+   inside a wrapper; painting them again creates an inset box and steals space. */
+:root[data-theme] :is(.field input:not([type="range"]):not([type="checkbox"]):not(.el-input__inner):not(.el-select__input), .field textarea:not(.el-textarea__inner), .glass-textarea, .document-editor textarea) {
   min-width: 0;
   max-width: 100%;
   border: 1px solid var(--glass-field-edge);
@@ -111,7 +212,7 @@
   outline: none;
 }
 :root[data-theme] .document-editor textarea { font-family: var(--font-mono); }
-:root[data-theme] :is(.field input:not([type="range"]):not([type="checkbox"]), .field textarea, .glass-textarea, .document-editor textarea):focus {
+:root[data-theme] :is(.field input:not([type="range"]):not([type="checkbox"]):not(.el-input__inner):not(.el-select__input), .field textarea:not(.el-textarea__inner), .glass-textarea, .document-editor textarea):focus {
   border-color: var(--accent-border);
   box-shadow: inset 0 0 0 .5px var(--accent-border);
 }
@@ -149,7 +250,7 @@
   :root[data-theme] .el-date-table td .el-date-table-cell { min-height: 40px; }
 }
 @media (hover: hover) and (pointer: fine) {
-  :root[data-theme] :is(.el-input__wrapper, .el-select__wrapper, .el-range-editor):not(:focus-within):hover { box-shadow: inset 0 0 0 1px var(--text-faint) !important; }
+  :root[data-theme] :is(.el-input__wrapper, .el-range-editor):not(:focus-within):hover { box-shadow: inset 0 0 0 1px var(--text-faint) !important; }
 }
 @media (prefers-contrast: more), (forced-colors: active) {
   :root[data-theme] :is(.el-input__wrapper, .el-select__wrapper, .el-range-editor, .el-textarea__inner):focus-within { outline: 2px solid var(--text-primary) !important; outline-offset: 2px; }

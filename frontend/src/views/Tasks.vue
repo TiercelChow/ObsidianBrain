@@ -7,15 +7,15 @@
     </header>
 
     <section class="task-toolbar glass-surface" data-glass-rim>
-      <div class="view-switch" aria-label="视图切换">
-        <span class="switch-indicator" :class="viewMode"></span>
+      <div class="view-switch" data-glass="inset" aria-label="视图切换">
+        <span class="switch-indicator" data-glass-indicator :class="viewMode"></span>
         <button type="button" :class="{ active: viewMode === 'tasks' }" @click="changeView('tasks')">任务</button>
         <button type="button" :class="{ active: viewMode === 'calendar' }" @click="changeView('calendar')">日历</button>
       </div>
-      <div class="task-search glass-surface" role="search">
+      <div class="task-search glass-surface" data-glass="search" data-glass-rim role="search">
         <el-icon class="task-search-icon"><Search /></el-icon>
         <input v-model="searchQuery" type="search" aria-label="搜索任务" placeholder="搜索标题或描述" />
-        <button data-icon-only v-if="searchQuery" type="button" class="task-search-clear" aria-label="清除搜索" @click="searchQuery = ''">×</button>
+        <button data-icon-only v-if="searchQuery" type="button" class="task-search-clear" aria-label="清除搜索" @click="searchQuery = ''"><el-icon class="ui-action-icon" :size="16" aria-hidden="true"><Close /></el-icon></button>
       </div>
       <div class="filters">
         <el-select
@@ -47,11 +47,11 @@
 
     <MotionModal v-model="queryPanelOpen" :aria-label="queryPanelMode === 'search' ? '搜索任务' : '筛选任务'">
       <section class="task-query-sheet glass-surface-heavy">
-        <header class="filter-sheet-header"><h3>{{ queryPanelMode === 'search' ? '搜索任务' : '筛选任务' }}</h3><button data-icon-only type="button" class="ui-icon-action" aria-label="关闭任务查询" @click="queryPanelOpen = false">×</button></header>
-        <div class="task-search glass-surface" role="search">
+        <header class="filter-sheet-header"><h3>{{ queryPanelMode === 'search' ? '搜索任务' : '筛选任务' }}</h3><button data-icon-only type="button" class="ui-icon-action" aria-label="关闭任务查询" @click="queryPanelOpen = false"><el-icon class="ui-action-icon" aria-hidden="true"><Close /></el-icon></button></header>
+        <div class="task-search glass-surface" data-glass="search" data-glass-rim role="search">
           <el-icon class="task-search-icon"><Search /></el-icon>
           <input ref="mobileSearchInput" v-model="searchQuery" type="search" aria-label="搜索任务" placeholder="搜索任务" />
-          <button data-icon-only v-if="searchQuery" type="button" class="task-search-clear" aria-label="清除搜索" @click="searchQuery = ''">×</button>
+          <button data-icon-only v-if="searchQuery" type="button" class="task-search-clear" aria-label="清除搜索" @click="searchQuery = ''"><el-icon class="ui-action-icon" :size="16" aria-hidden="true"><Close /></el-icon></button>
         </div>
         <div class="query-filter-fields">
           <label><span>类型</span><el-select v-model="kindFilter" aria-label="任务类型" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option value="all" label="全部类型" /><el-option value="short" label="短期待办" /><el-option value="long" label="长期任务" /></el-select></label>
@@ -78,11 +78,11 @@
             <span>{{ visibleTasks.length }} 项</span>
           </div>
           <div class="panel-heading-actions">
-            <button data-icon-only v-if="detail" type="button" aria-label="收起任务列表" title="收起任务列表" @click="listCollapsed = true">‹</button>
-            <button data-icon-only type="button" aria-label="新建任务" @click="openCreate()">＋</button>
+            <button data-icon-only data-direction-button v-if="detail" type="button" aria-label="收起任务列表" title="收起任务列表" @click="listCollapsed = true"><el-icon class="ui-chevron" aria-hidden="true"><ArrowLeft /></el-icon></button>
+            <button data-icon-only type="button" aria-label="新建任务" @click="openCreate()"><el-icon class="ui-action-icon" aria-hidden="true"><Plus /></el-icon></button>
           </div>
         </div>
-        <div class="focus-filters" aria-label="快速筛选当前列表">
+        <div class="focus-filters" data-glass="inset" aria-label="快速筛选当前列表">
           <button v-for="option in focusOptions" :key="option.value" type="button"
             :class="{ active: focusFilter === option.value }" :aria-pressed="focusFilter === option.value"
             @click="focusFilter = option.value">
@@ -130,22 +130,22 @@
                     <i :style="{ width: `${task.progress_percent}%` }"></i>
                   </span>
                 </span>
-                <span class="card-chevron">›</span>
+                <el-icon class="card-chevron ui-chevron" aria-hidden="true"><ArrowRight /></el-icon>
               </button>
             </TransitionGroup>
           </section>
         </div>
         <div v-else class="empty-list">
-          <div class="empty-orb">✓</div>
+          <div class="empty-orb"><el-icon aria-hidden="true"><Check /></el-icon></div>
           <strong>{{ hasListFilters ? '没有符合条件的任务' : '从一件小事开始' }}</strong>
           <p>{{ hasListFilters ? '试试其他筛选，或清除条件查看未关闭任务。' : '新建短期待办，或拆解一个长期目标。' }}</p>
           <button v-if="hasListFilters" type="button" @click="resetListFilters">重置筛选</button>
-          <button data-icon-only v-else type="button" class="ui-icon-action" aria-label="新建第一个任务" title="新建任务" @click="openCreate()">＋</button>
+          <button data-icon-only v-else type="button" class="ui-icon-action" aria-label="新建第一个任务" title="新建任务" @click="openCreate()"><el-icon class="ui-action-icon" aria-hidden="true"><Plus /></el-icon></button>
         </div>
         </div>
 
         <div class="task-list-rail" aria-label="任务快速导航" :aria-hidden="!listCollapsed" :inert="!listCollapsed ? true : undefined">
-          <button data-icon-only type="button" class="rail-expand" aria-label="展开任务列表" title="展开任务列表" @click="listCollapsed = false">›</button>
+          <button data-icon-only data-direction-button type="button" class="rail-expand" aria-label="展开任务列表" title="展开任务列表" @click="listCollapsed = false"><el-icon class="ui-chevron" aria-hidden="true"><ArrowRight /></el-icon></button>
           <div class="rail-items">
             <button
               v-for="task in visibleTasks"
@@ -161,11 +161,11 @@
               <i :class="`status-${task.status}`"></i>
             </button>
           </div>
-          <button data-icon-only type="button" class="rail-create" aria-label="新建任务" title="新建任务" @click="openCreate()">＋</button>
+          <button data-icon-only type="button" class="rail-create" aria-label="新建任务" title="新建任务" @click="openCreate()"><el-icon class="ui-action-icon" aria-hidden="true"><Plus /></el-icon></button>
         </div>
       </aside>
 
-      <div class="task-detail-zone glass-surface" :class="detail?.root.kind === 'long' ? 'mobile-section-' + detailSection : null" @scroll="onPanelScroll">
+      <div class="task-detail-zone glass-surface" data-glass="card" :class="detail?.root.kind === 'long' ? 'mobile-section-' + detailSection : null" @scroll="onPanelScroll">
         <div v-if="store.detailLoading" class="task-detail-placeholder">
           <div class="detail-loading"><span></span><span></span><span></span></div>
         </div>
@@ -199,8 +199,8 @@
           <p v-if="detail.root.description" class="task-description">{{ detail.root.description }}</p>
           </div>
 
-          <div v-if="detail.root.kind === 'long'" class="detail-switch" role="tablist" aria-label="切换拆解与进展">
-            <span class="detail-switch-indicator" :class="detailSection" aria-hidden="true"></span>
+          <div v-if="detail.root.kind === 'long'" class="detail-switch" data-glass="inset" role="tablist" aria-label="切换拆解与进展">
+            <span class="detail-switch-indicator" data-glass-indicator :class="detailSection" aria-hidden="true"></span>
             <button type="button" role="tab" :aria-selected="detailSection === 'breakdown'" :class="{ active: detailSection === 'breakdown' }" @click="detailSection = 'breakdown'">任务拆解<span>{{ subtaskCount }}</span></button>
             <button type="button" role="tab" :aria-selected="detailSection === 'progress'" :class="{ active: detailSection === 'progress' }" @click="detailSection = 'progress'">进展记录<span>{{ activity.length }}</span></button>
           </div>
@@ -211,7 +211,7 @@
           <section v-if="detail.root.kind === 'long'" v-show="!isPhone || detailSection === 'breakdown'" class="detail-section task-breakdown">
             <div class="column-heading">
               <div><span>任务拆解</span><strong>{{ detail.completed_leaf_count }}/{{ detail.effective_leaf_count }}</strong></div>
-              <button data-icon-only type="button" aria-label="添加子任务" @click="openSubtask(detail.root)">＋</button>
+              <button data-icon-only type="button" aria-label="添加子任务" @click="openSubtask(detail.root)"><el-icon class="ui-action-icon" aria-hidden="true"><Plus /></el-icon></button>
             </div>
             <div class="column-scroll" @scroll="onPanelScroll">
             <TaskTree
@@ -229,7 +229,7 @@
         <aside v-show="!isPhone || detail.root.kind !== 'long' || detailSection === 'progress'" ref="activitySectionRef" class="task-progress-panel">
           <div class="progress-column-header">
             <div><span>进展</span><strong>{{ activity.length }} 条记录</strong></div>
-            <button data-icon-only v-if="detail.root.kind === 'long' && !isTaskClosed(detail.root)" type="button" aria-label="记录进展" @click="openProgress(detail.root)">＋</button>
+            <button data-icon-only v-if="detail.root.kind === 'long' && !isTaskClosed(detail.root)" type="button" aria-label="记录进展" @click="openProgress(detail.root)"><el-icon class="ui-action-icon" aria-hidden="true"><Plus /></el-icon></button>
           </div>
           <div class="progress-body" @scroll="onPanelScroll">
             <div v-if="activity.length" class="activity-list">
@@ -282,7 +282,7 @@
             <div v-if="suggestedTasks.length" class="suggested-tasks">
               <button v-for="task in suggestedTasks" :key="task.id" type="button" @click="openTask(task.id)">
                 <span class="suggestion-copy"><strong>{{ task.title }}</strong><small>{{ taskStatusLabel(task.status) }} · {{ taskImportanceLabel(task.importance) }}</small></span>
-                <span class="suggestion-timing" :class="taskTiming(task, today).tone">{{ taskTiming(task, today).label }} <span aria-hidden="true">↗</span></span>
+                <span class="suggestion-timing" :class="taskTiming(task, today).tone">{{ taskTiming(task, today).label }} <el-icon :size="16" aria-hidden="true"><TopRight /></el-icon></span>
               </button>
             </div>
           </template>
@@ -309,19 +309,21 @@
     <MotionModal v-model="childDetailOpen" aria-label="子任务详情">
       <MotionSwap :view-key="drawerNode?.id || 'empty'" horizontal>
       <section v-if="drawerNode" :key="drawerNode.id" class="child-task-dialog glass-surface-heavy">
-        <header class="child-dialog-header" :class="{ 'has-back': drawerParent?.role === 'subtask' }">
-          <button data-icon-only v-if="drawerParent?.role === 'subtask'" type="button" class="child-back" aria-label="返回上一级" @click="backFromChild">‹</button>
-          <div>
-            <span>{{ drawerParent?.title || detail?.root.title }}</span>
-            <h3>{{ drawerNode.title }}</h3>
-            <div class="detail-pills">
-              <span class="task-pill" :class="`status-${drawerNode.status}`">{{ taskStatusLabel(drawerNode.status) }}</span>
-              <span class="task-pill" :class="`importance-${drawerNode.importance}`">{{ taskImportanceLabel(drawerNode.importance) }}</span>
+        <header class="child-dialog-header">
+          <div class="child-header-toolbar">
+            <div class="child-parent-path">
+              <button data-icon-only data-direction-button v-if="drawerParent?.role === 'subtask'" type="button" class="child-back" aria-label="返回上一级" @click="backFromChild"><el-icon class="ui-chevron" aria-hidden="true"><ArrowLeft /></el-icon></button>
+              <span :title="drawerParent?.title || detail?.root.title">{{ drawerParent?.title || detail?.root.title }}</span>
+            </div>
+            <div class="child-header-actions">
+              <button data-icon-only type="button" class="child-edit" aria-label="编辑任务" @click="openEdit(drawerNode)"><el-icon><EditPen /></el-icon></button>
+              <button data-icon-only type="button" class="child-close" aria-label="关闭子任务详情" @click="closeDrawer"><el-icon class="ui-action-icon" aria-hidden="true"><Close /></el-icon></button>
             </div>
           </div>
-          <div class="child-header-actions">
-            <button data-icon-only type="button" class="child-edit" aria-label="编辑任务" @click="openEdit(drawerNode)"><el-icon><EditPen /></el-icon></button>
-            <button data-icon-only type="button" class="child-close" aria-label="关闭子任务详情" @click="closeDrawer">×</button>
+          <h3 class="child-task-title">{{ drawerNode.title }}</h3>
+          <div class="detail-pills">
+            <span class="task-pill" :class="`status-${drawerNode.status}`">{{ taskStatusLabel(drawerNode.status) }}</span>
+            <span class="task-pill" :class="`importance-${drawerNode.importance}`">{{ taskImportanceLabel(drawerNode.importance) }}</span>
           </div>
         </header>
         <div class="child-dialog-scroll">
@@ -330,19 +332,26 @@
             <span>{{ drawerNode.start_date }} → {{ drawerNode.end_date }}</span>
             <strong :class="taskTiming(drawerNode, today).tone">{{ taskTiming(drawerNode, today).label }}</strong>
           </div>
-          <section v-if="drawerChildren.length" class="child-section">
-            <div class="column-heading"><div><span>子任务</span><strong>{{ drawerChildren.length }}</strong></div></div>
-            <div class="child-list">
-              <button v-for="child in drawerChildren" :key="child.id" type="button" @click="focusTask(child.id)">
-                <span class="child-status" :class="`status-${child.status}`"></span>
+          <section class="child-section" aria-label="子任务">
+            <div class="column-heading">
+              <div><span>子任务</span><strong>{{ drawerChildren.length }}</strong></div>
+              <UiAction v-if="!isTaskClosed(drawerNode)" :icon="Plus" label="添加子任务" @click="openSubtask(drawerNode)" />
+            </div>
+            <div v-if="drawerChildren.length" class="child-list">
+              <button v-for="child in drawerChildren" :key="child.id" type="button" :aria-label="`${child.title}，${taskStatusLabel(child.status)}`" @click="focusTask(child.id)">
+                <TaskStatusMark :status="child.status" />
                 <strong>{{ child.title }}</strong>
                 <span class="task-pill" :class="`importance-${child.importance}`">{{ taskImportanceLabel(child.importance) }}</span>
-                <span>›</span>
+                <el-icon class="ui-chevron" aria-hidden="true"><ArrowRight /></el-icon>
               </button>
             </div>
+            <p v-else class="activity-empty-copy">还没有子任务</p>
           </section>
-          <section class="child-section">
-            <div class="column-heading"><div><span>进展与记录</span><strong>{{ drawerActivity.length }}</strong></div></div>
+          <section class="child-section" aria-label="进展与记录">
+            <div class="column-heading">
+              <div><span>进展与记录</span><strong>{{ drawerActivity.length }}</strong></div>
+              <UiAction v-if="!isTaskClosed(drawerNode)" :icon="Plus" label="记录进展" @click="openProgress(drawerNode)" />
+            </div>
             <div v-if="drawerActivity.length" class="activity-list">
               <article v-for="item in drawerActivity" :key="item.id" class="activity-item" tabindex="0"
                 :aria-label="`查看记录详情：${item.title}`" @click="openActivityDetail(item)" @keydown="onActivityKeydown($event, item)">
@@ -357,10 +366,6 @@
             <p v-else class="activity-empty-copy">暂无进展记录</p>
           </section>
         </div>
-        <footer v-if="!isTaskClosed(drawerNode)" class="child-dialog-actions">
-          <button data-icon-only type="button" aria-label="添加子任务" title="添加子任务" @click="openSubtask(drawerNode)"><el-icon><Plus /></el-icon></button>
-          <UiAction :icon="EditPen" label="记录进展" @click="openProgress(drawerNode)" />
-        </footer>
       </section>
       </MotionSwap>
     </MotionModal>
@@ -372,7 +377,7 @@
             <h3>{{ sheetTitle }}</h3>
             <p v-if="targetNode" class="sheet-target">{{ sheetMode === 'subtask' ? '父任务' : '应用于' }}：{{ targetNode.title }}</p>
           </div>
-          <button data-icon-only type="button" aria-label="关闭" @click="sheetOpen = false">×</button>
+          <button data-icon-only type="button" aria-label="关闭" @click="sheetOpen = false"><el-icon class="ui-action-icon" aria-hidden="true"><Close /></el-icon></button>
         </header>
 
         <div v-if="sheetMode === 'progress'" class="sheet-body">
@@ -396,7 +401,7 @@
         <div v-else class="sheet-body form-grid">
           <label v-if="sheetMode === 'create'" class="field full segmented-field">
             <span>任务类型</span>
-            <span class="kind-segment">
+            <span class="kind-segment" data-glass="inset">
               <button type="button" :class="{ active: form.kind === 'short' }" @click="form.kind = 'short'">短期待办</button>
               <button type="button" :class="{ active: form.kind === 'long' }" @click="form.kind = 'long'">长期任务</button>
             </span>
@@ -529,7 +534,8 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ArrowLeft, EditPen, Filter, FolderChecked, Plus, Search } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Check, Close, EditPen, Filter, FolderChecked, Plus, Search, TopRight } from '@element-plus/icons-vue'
+import TaskStatusMark from '@/components/tasks/TaskStatusMark.vue'
 import { useMediaQuery } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
@@ -999,8 +1005,8 @@ onMounted(async () => {
 .task-workspace-stage { flex: 1 1 auto; min-height: 0; }
 .glass-surface { background: var(--bg-glass); border: 1px solid var(--border-glass); box-shadow: var(--shadow-sm), var(--inset-highlight); backdrop-filter: var(--glass-content-filter); -webkit-backdrop-filter: var(--glass-content-filter); }
 .task-toolbar { min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 8px 10px; margin-bottom: 14px; border-radius: 18px; }
-.view-switch { position: relative; display: grid; grid-template-columns: 1fr 1fr; width: 174px; padding: 3px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 5%, transparent); isolation: isolate; }
-.switch-indicator { position: absolute; inset: 3px auto 3px 3px; width: calc(50% - 3px); border-radius: 10px; background: var(--bg-glass-strong); box-shadow: var(--shadow-sm), var(--inset-highlight); transition: transform var(--motion-normal) var(--ease-spring-gentle); z-index: -1; }
+.view-switch { position: relative; display: grid; grid-template-columns: 1fr 1fr; width: 174px; padding: 3px; border-radius: 13px; isolation: isolate; }
+.switch-indicator { position: absolute; inset: 3px auto 3px 3px; width: calc(50% - 3px); border-radius: 10px; transition: transform var(--motion-normal) var(--ease-spring-gentle); z-index: -1; }
 .switch-indicator.calendar { transform: translateX(100%); }
 .view-switch button { min-height: 36px; border: 0; background: transparent; color: var(--text-muted); font-weight: 570; cursor: pointer; }
 .view-switch button.active { color: var(--text-primary); }
@@ -1045,7 +1051,6 @@ onMounted(async () => {
 .task-list-rail { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 10px 8px; opacity: 0; pointer-events: none; transform: translateX(10px); transition: opacity 140ms ease, transform 320ms var(--ease-spring-gentle); }
 .task-workspace.list-collapsed .task-list-rail { opacity: 1; pointer-events: auto; transform: none; transition-delay: 120ms; }
 .rail-expand, .rail-create, .rail-task { width: 46px; height: 46px; flex: none; display: grid; place-items: center; border: 0; border-radius: 14px; background: transparent; color: var(--text-muted); font: inherit; cursor: pointer; }
-.rail-expand { font-size: 24px; }
 .rail-create { margin-top: auto; color: var(--accent); font-size: 22px; }
 .rail-expand:hover, .rail-create:hover { background: var(--bg-glass-strong); }
 .rail-items { width: 100%; min-height: 0; display: grid; justify-items: center; gap: 8px; overflow-y: auto; scrollbar-width: none; }
@@ -1056,9 +1061,8 @@ onMounted(async () => {
 .rail-task i { position: absolute; right: 5px; bottom: 5px; width: 7px; height: 7px; border: 2px solid var(--bg-glass-strong); border-radius: 50%; background: var(--text-faint); }
 .rail-task i.status-in_progress { background: var(--accent); }.rail-task i.status-blocked { background: #ff9500; }.rail-task i.status-completed { background: #34c759; }
 .panel-heading-actions { display: flex !important; align-items: center !important; gap: 2px !important; }
-.focus-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; padding: 3px; border-radius: 12px; background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+.focus-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; padding: 3px; border-radius: 12px; }
 .focus-filters button { min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 5px; border: 0; border-radius: 9px; background: transparent; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; }
-.focus-filters button.active { background: var(--bg-glass-strong); color: var(--accent); box-shadow: var(--shadow-sm); }
 .focus-filters button span { font-size: 11px; font-variant-numeric: tabular-nums; opacity: .8; }
 .list-order { margin: 10px 5px 12px; color: var(--text-faint); font-size: 11px; }
 .panel-heading { height: 45px; display: flex; align-items: center; justify-content: space-between; padding: 0 7px 6px; }
@@ -1089,7 +1093,7 @@ onMounted(async () => {
 .danger { color: var(--danger); }
 .mini-progress { height: 3px; border-radius: 3px; background: color-mix(in srgb, var(--text-primary) 7%, transparent); overflow: hidden; }
 .mini-progress i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width var(--motion-slow) var(--ease-spring-gentle); }
-.card-chevron { align-self: center; color: var(--text-faint); font-size: 20px; }
+.card-chevron { align-self: center; color: var(--text-faint); }
 .task-card-enter-active, .task-card-leave-active { transition: opacity var(--motion-normal) ease, transform var(--motion-normal) var(--ease-spring-gentle); }
 .task-card-enter-from, .task-card-leave-to { opacity: 0; transform: translateY(7px); }
 .task-skeletons { display: grid; gap: 8px; }
@@ -1142,8 +1146,8 @@ onMounted(async () => {
 .progress-summary span { color: var(--text-muted); font-size: 12px; }
 .progress-summary strong { font-size: 17px; font-variant-numeric: tabular-nums; }
 .progress-overview > small { color: var(--text-faint); font-size: 11px; }
-.detail-switch { position: relative; isolation: isolate; display: none; min-width: 200px; gap: 6px; padding: 4px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
-.detail-switch-indicator { position: absolute; inset: 4px auto 4px 4px; width: calc((100% - 14px) / 2); border-radius: 10px; background: var(--bg-glass-strong); box-shadow: var(--shadow-sm); z-index: -1; transition: transform var(--motion-slow) var(--ease-spring-playful); }
+.detail-switch { position: relative; isolation: isolate; display: none; min-width: 200px; gap: 6px; padding: 4px; border-radius: 13px; }
+.detail-switch-indicator { position: absolute; inset: 4px auto 4px 4px; width: calc((100% - 14px) / 2); border-radius: 10px; z-index: -1; transition: transform var(--motion-slow) var(--ease-spring-playful); }
 .detail-switch-indicator.progress { transform: translateX(calc(100% + 6px)); }
 .detail-switch button { flex: 1; min-height: 40px; padding: 8px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); font: inherit; font-size: 14px; cursor: pointer; }
 .detail-switch button.active { color: var(--text-primary); font-weight: 600; }
@@ -1178,35 +1182,46 @@ onMounted(async () => {
 .activity-dialog time { color: var(--text-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
 .activity-dialog p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 .activity-dialog p.activity-dialog-empty { color: var(--text-faint); }
-.child-task-dialog { width: min(680px, calc(100vw - 40px)); max-height: min(760px, calc(100dvh - 48px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-glass); border-radius: 24px; background: var(--bg-glass-strong); box-shadow: var(--shadow-lg), var(--inset-highlight); }
-.child-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 24px 26px 16px; }
-.child-dialog-header > div { min-width: 0; }
-.child-dialog-header > div > span { display: block; overflow: hidden; color: var(--text-faint); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.child-dialog-header h3 { margin: 5px 0 0; font-size: 22px; line-height: 1.3; letter-spacing: -.015em; overflow-wrap: anywhere; }
+.child-task-dialog { width: 100%; max-height: min(760px, calc(100dvh - 48px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-glass); border-radius: 24px; background: var(--bg-glass-strong); box-shadow: var(--shadow-lg), var(--inset-highlight); }
+.child-dialog-header { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 24px 26px 16px; }
+.child-header-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.child-parent-path { display: flex; align-items: center; min-width: 0; min-height: 44px; gap: 4px; }
+.child-parent-path > span { min-width: 0; overflow: hidden; color: var(--text-faint); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.child-dialog-header h3 { margin: 0; font-size: 22px; line-height: 1.3; letter-spacing: -.015em; overflow-wrap: anywhere; }
+.child-dialog-header .detail-pills { margin: 0; }
 .child-back, .child-edit, .child-close { display: grid; place-items: center; min-width: 40px; width: 40px; min-height: 40px; padding: 0; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-glass); color: var(--text-secondary); font: inherit; font-size: 16px; cursor: pointer; }
-.child-back { flex: none; color: var(--accent); font-size: 25px; }
+.child-back { flex: none; margin-left: -10px; color: var(--accent); }
 .child-close { color: var(--text-muted); font-size: 23px; }
 .child-header-actions { display: flex; flex: none; gap: 7px; }
 .child-dialog-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 26px 20px; }
 .child-description { margin: 0 0 14px; color: var(--text-muted); font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
-.child-facts { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 4%, transparent); color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.child-facts { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 12px 14px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 4%, transparent); color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.child-facts > span, .child-facts > strong { white-space: nowrap; }
+.child-facts > strong { margin-left: auto; }
 .child-section { margin-top: 20px; }
 .child-list { display: grid; gap: 5px; }
-.child-list button { min-height: 48px; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 14px; align-items: center; gap: 9px; padding: 6px 10px; border: 0; border-radius: 12px; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
+.child-list button { min-height: 48px; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 18px; align-items: center; gap: 9px; padding: 6px 10px; border: 0; border-radius: 12px; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
 .child-list button:hover { background: var(--bg-glass); }
 .child-list button strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.child-status { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }.child-status.status-in_progress { background: var(--accent); }.child-status.status-blocked { background: #ff9500; }.child-status.status-completed { background: #34c759; }
-.child-dialog-actions { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 9px; padding: 14px 26px 24px; border-top: 1px solid var(--border-subtle); }
-.child-dialog-actions button { min-height: 44px; border: 1px solid var(--border-subtle); border-radius: 13px; background: var(--bg-glass); color: var(--text-secondary); font: inherit; font-weight: 600; cursor: pointer; }
 .detail-loading { height: 100%; display: flex; align-items: center; justify-content: center; gap: 5px; }.detail-loading span { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite alternate; }.detail-loading span:nth-child(2) { animation-delay: .15s; }.detail-loading span:nth-child(3) { animation-delay: .3s; }
 @keyframes pulse { to { opacity: .25; transform: translateY(-4px); } }
 .task-sheet { max-height: calc(100dvh - 48px); display: flex; flex-direction: column; border-radius: 24px; border: 1px solid var(--border-glass); background: var(--bg-glass-strong); box-shadow: var(--shadow-lg), var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, .03); backdrop-filter: var(--glass-panel-filter); -webkit-backdrop-filter: var(--glass-panel-filter); overflow: hidden; }
 .sheet-header { display: flex; align-items: center; justify-content: space-between; padding: 28px 28px 16px; }.sheet-header span { color: var(--text-faint); font-size: 10px; letter-spacing: .08em; }.sheet-header h3 { margin: 4px 0 0; font-size: 18px; font-weight: 700; }.sheet-target { margin: 3px 0 0; color: var(--text-secondary); font-size: 12px; }.sheet-header button { width: 38px; height: 38px; border: 0; border-radius: 12px; background: var(--bg-glass); color: var(--text-muted); font-size: 23px; cursor: pointer; transition: background var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-instant) ease; }.sheet-header button:hover { background: var(--bg-hover); color: var(--text-primary); }.sheet-header button:active { transform: scale(.94); }
-.sheet-body { overflow-y: auto; padding: 4px 28px 10px; }.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }.field { display: grid; gap: 7px; }.field.full { grid-column: 1 / -1; }.field > span:first-child { color: var(--text-muted); font-size: 11px; font-weight: 570; }.field input { height: 44px; padding: 0 11px; }.field textarea { resize: vertical; padding: 10px 11px; line-height: 1.5; }.field input:focus, .field textarea:focus { border-color: color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: var(--focus-ring); }
+.sheet-body { overflow-y: auto; padding: 4px 28px 10px; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.field { display: grid; min-width: 0; gap: 7px; }
+.field.full { grid-column: 1 / -1; }.field > span:first-child { color: var(--text-muted); font-size: 11px; font-weight: 570; }.field input { height: 44px; padding: 0 11px; }.field textarea { resize: vertical; padding: 10px 11px; line-height: 1.5; }.field input:focus, .field textarea:focus { border-color: color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: var(--focus-ring); }
 .field :deep(.el-select), .field :deep(.el-date-editor) { width: 100%; }
 .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 44px; border-radius: 11px !important; }
-.task-date-input :deep(.el-input__wrapper) { width: 100%; box-sizing: border-box; }
-.kind-segment { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 5%, transparent); }.kind-segment button { height: 38px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); cursor: pointer; }.kind-segment button.active { background: var(--bg-glass-strong); box-shadow: var(--shadow-sm); color: var(--text-primary); font-weight: 600; }
+/* Allocate the full visible height, not Element Plus' smaller default root.
+   Only the wrapper paints glass; the icon and date have separate breathing room. */
+.field :deep(.task-date-input) { width: 100%; min-width: 0; height: 44px; }
+.field :deep(.task-date-input .el-input__wrapper) { width: 100%; height: 100%; box-sizing: border-box; padding: 0 14px; gap: 10px; }
+.field :deep(.task-date-input .el-input__prefix) { flex: none; }
+.field :deep(.task-date-input .el-input__prefix-inner > :last-child) { margin-right: 0; }
+.field :deep(.task-date-input .el-input__inner) { min-width: 0; height: 100%; padding: 0; font-variant-numeric: tabular-nums; }
+.field :deep(.task-date-input .mobile-date-trigger) { height: 100%; box-sizing: border-box; padding: 0 14px; gap: 10px; font-size: 16px; }
+.kind-segment { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 13px; }.kind-segment button { height: 38px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .range-field { display: grid; grid-template-columns: 1fr 48px; align-items: center; gap: 12px; }.range-field input { width: 100%; padding: 0; accent-color: var(--accent); }.range-field output { color: var(--accent); font-weight: 650; text-align: right; }.check-field { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--text-muted); font-size: 12px; cursor: pointer; }.check-field input { appearance: none; -webkit-appearance: none; position: relative; width: 20px; height: 20px; flex: none; margin: 0; border: 1px solid color-mix(in srgb, var(--text-muted) 42%, transparent); border-radius: 6px; background: var(--bg-glass); box-shadow: var(--inset-highlight); cursor: pointer; transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease, transform var(--motion-instant) ease, box-shadow var(--motion-fast) ease; }.check-field input::after { content: ''; position: absolute; left: 6px; top: 3px; width: 5px; height: 9px; border: solid white; border-width: 0 2px 2px 0; opacity: 0; transform: rotate(45deg) scale(.65); transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--ease-spring-gentle); }.check-field input:checked { border-color: var(--accent); background: var(--accent); box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 24%, transparent), var(--inset-highlight); }.check-field input:checked::after { opacity: 1; transform: rotate(45deg) scale(1); }.check-field input:focus-visible { outline: 0; box-shadow: var(--focus-ring); }.check-field:active input { transform: scale(.92); }.sheet-hint { margin: 0; color: var(--text-faint); font-size: 11px; }
 .sheet-footer { display: grid; grid-template-columns: 1fr 1.4fr; gap: 9px; padding: 16px 28px 28px; }.sheet-footer button { height: 44px; border-radius: 13px; font-weight: 620; cursor: pointer; }.sheet-footer .cancel { border: 1px solid var(--border-subtle); background: var(--bg-glass); color: var(--text-secondary); }.sheet-footer .archive-from-edit { border: 1px solid color-mix(in srgb, #ff3b30 24%, var(--border-subtle)); background: color-mix(in srgb, #ff3b30 6%, var(--bg-glass)); color: #ff3b30; }.sheet-footer .confirm { border: 0; }.sheet-footer .confirm:disabled { opacity: .55; }
 
@@ -1238,8 +1253,7 @@ onMounted(async () => {
 .suggestion-copy { min-width: 0; display: grid; gap: 6px; flex: 1; }
 .suggestion-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
 .suggestion-copy small { color: var(--text-faint); font-size: 12px; }
-.suggestion-timing { flex: none; font-size: 12px; }
-.suggestion-timing > span { margin-left: 8px; }
+.suggestion-timing { flex: none; display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
 .task-card:focus-visible, .focus-filters button:focus-visible, .detail-switch button:focus-visible, .detail-actions button:focus-visible, .suggested-tasks button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .empty-list p, .empty-detail p { font-size: 13px; }
 .detail-title-group p { font-size: 14px; line-height: 1.65; }
@@ -1387,18 +1401,17 @@ onMounted(async () => {
   }
   .mobile-context-actions .complete-shortcut { grid-column: 1 / -1; }
   .child-task-dialog { width: 100vw; max-height: min(92dvh, 820px); border-radius: 24px 24px 0 0; border-bottom: 0; }
-  .child-dialog-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; padding: 36px 16px 14px; }
-  .child-dialog-header.has-back { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 8px; }
+  .child-dialog-header { padding: 32px 20px 14px; }
   .child-back, .child-edit, .child-close { width: 44px; min-width: 44px; min-height: 44px; }
   .child-dialog-header h3 { font-size: 21px; }
   .child-dialog-scroll { padding: 0 20px 18px; }
-  .child-dialog-actions { padding: 14px 20px max(20px, env(safe-area-inset-bottom)); }
   .task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }
   .sheet-header { padding: 34px 20px 16px; }
   .sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }
   .form-grid { grid-template-columns: 1fr; }
   .field.full { grid-column: auto; }
   .field input, .field textarea, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; font-size: 16px; }
+  .field :deep(.task-date-input) { height: 48px; }
   .sheet-footer { padding: 16px 20px max(20px, var(--safe-bottom)); }
   .sheet-footer button { min-height: 48px; }
 }

@@ -15,7 +15,7 @@
     <div v-if="loading" class="knowledge-empty knowledge-surface" role="status" aria-label="加载研究任务"><el-icon class="is-loading"><Loading /></el-icon></div>
     <section v-else-if="visibleTasks.length" class="research-task-list">
       <div v-if="runningOnly || attentionOnly" class="task-summary">{{ attentionOnly ? '正在查看失败的研究 / PPT 任务' : '正在查看排队 / 运行中的研究任务' }} <el-button @click="router.replace({query:{...route.query,status:undefined}})">显示全部</el-button></div>
-      <article v-for="(task, index) in visibleTasks" :key="task.id" class="research-task knowledge-surface" :style="{ '--order': index }">
+      <article v-for="(task, index) in visibleTasks" :key="task.id" class="research-task knowledge-surface" data-glass="card" :style="{ '--order': index }">
         <div class="task-kind" :class="`is-${task.task_type}`"><el-icon><component :is="taskIcon(task.task_type)" /></el-icon></div>
         <div class="task-main">
           <div class="task-topline"><span>{{ task.book_name }}</span><span class="knowledge-status" :class="`is-${task.status}`">{{ statusLabel(task.status) }}</span></div>
@@ -121,7 +121,7 @@
           <div class="task-result-heading"><span>{{ activeTask.book_name }} · {{ typeLabel(activeTask.task_type) }}</span><h3>{{ activeTask.title }}</h3></div>
           <span class="knowledge-status" :class="`is-${activeTask.status}`">{{ statusLabel(activeTask.status) }}</span>
         </div>
-        <div class="task-result-tabs" role="group" aria-label="研究任务结果内容">
+        <div class="task-result-tabs" data-glass="inset" role="group" aria-label="研究任务结果内容">
           <button type="button" :aria-pressed="resultTab === 'stages'" :class="{ 'is-active': resultTab === 'stages' }" @click="resultTab = 'stages'">研究阶段</button>
           <button type="button" :aria-pressed="resultTab === 'report'" :class="{ 'is-active': resultTab === 'report' }" @click="openResult(activeTask)">研究报告</button>
           <button type="button" :aria-pressed="resultTab === 'inspector'" :class="{ 'is-active': resultTab === 'inspector' }" @click="openTaskInspection"><el-icon><View /></el-icon>运行检查器</button>
@@ -886,9 +886,8 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
 .task-result-heading { min-width: 0; }
 .task-result-heading > span { color: var(--accent); font-size: 10px; font-weight: 680; }
 .task-result-heading h3 { margin-top: 5px; overflow-wrap: anywhere; }
-.task-result-tabs { flex: none; display: flex; gap: 5px; margin: 0 24px 12px; padding: 4px; border-radius: 12px; background: color-mix(in srgb, var(--text-primary) 5%, transparent); }
+.task-result-tabs { flex: none; display: flex; gap: 5px; margin: 0 24px 12px; padding: 4px; border-radius: 12px; }
 .task-result-tabs button { min-height: 38px; flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 9px; background: transparent; color: var(--text-muted); font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; }
-.task-result-tabs button.is-active { background: var(--bg-glass-strong); color: var(--accent); box-shadow: var(--shadow-sm); }
 .task-result-switch :deep(.motion-swap__panel) { display: flex; flex-direction: column; }
 .task-result-scroll { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; padding: 0 24px 24px; overscroll-behavior: contain; }
 .task-result-scroll > * { min-width: 0; flex: 0 0 auto; }

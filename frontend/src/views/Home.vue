@@ -11,7 +11,7 @@
     <p v-if="error" class="home-notice" role="status">{{ error }} <button @click="loadOverview()">重试</button></p>
     <p v-else-if="systemProblem" class="home-notice" role="alert">本地服务或数据库状态异常，请刷新检查。</p>
     <div class="attention-grid" aria-label="今日关注">
-      <RouterLink v-for="tile in attention" :key="tile.label" class="attention-tile glass-surface" :to="tile.to">
+      <RouterLink v-for="tile in attention" :key="tile.label" class="attention-tile glass-surface" data-glass="card" :to="tile.to">
         <span class="attention-top"><el-icon><component :is="tile.icon" /></el-icon><el-icon class="entry-chevron"><ArrowRight /></el-icon></span>
         <strong>{{ tile.value }}</strong><span>{{ tile.label }}</span><small>{{ tile.hint }}</small>
       </RouterLink>
@@ -70,7 +70,7 @@
       </HomePanel>
       </div>
     </div>
-    <section class="home-system glass-surface" aria-label="系统概况">
+    <section class="home-system glass-surface" data-glass="card" aria-label="系统概况">
       <header><h2>系统概况</h2><span v-if="overview">v{{ overview.system.version }}</span></header>
       <div v-if="overview" class="system-grid">
         <div><span>本地服务 / 数据库</span><strong :class="{'is-warning':systemProblem}">{{ systemProblem ? '状态异常' : '运行正常' }}</strong></div>

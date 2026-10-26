@@ -3,7 +3,7 @@
     <div v-if="loading" class="pdf-state" role="status" aria-label="加载 PDF">
       <el-icon class="is-loading" aria-hidden="true"><Loading /></el-icon>
     </div>
-    <div v-else-if="error" class="pdf-state error">⚠️ {{ error }}</div>
+    <div v-else-if="error" class="pdf-state error"><el-icon aria-hidden="true"><WarningFilled /></el-icon><span>{{ error }}</span></div>
     <div v-else ref="pagesRef" class="pdf-pages">
       <div
         v-for="p in pageMetas"
@@ -22,7 +22,7 @@
 
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Loading } from '@element-plus/icons-vue'
+import { Loading, WarningFilled } from '@element-plus/icons-vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import type { TextItem } from 'pdfjs-dist/types/src/display/api'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'

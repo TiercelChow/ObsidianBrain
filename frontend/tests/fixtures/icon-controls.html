@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>隔离图标状态检查</title></head>
+<body><div id="fixture"></div>
+<script type="module">
+import { createApp, h, nextTick } from 'vue'
+import { ElButton, ElIcon } from 'element-plus'
+import { Close, Plus, Refresh } from '@element-plus/icons-vue'
+import UiAction from '/src/components/motion/UiAction.ts'
+import 'element-plus/dist/index.css'
+import '/src/styles/motion.css'
+import '/src/styles/materials.css'
+import '/src/styles/tokens.css'
+import '/src/styles/controls.css'
+document.documentElement.dataset.theme = localStorage.getItem('theme') || 'light'
+const glyph = icon => h(ElIcon, { 'aria-hidden': 'true' }, () => h(icon))
+createApp({ render() {
+  return h('main', { style: 'display:flex;flex-wrap:wrap;gap:16px;padding:24px' }, [
+    h(ElButton, { 'data-icon-only': '', class: 'ui-icon-action', 'aria-label': '原生加载状态', loading: true }, () => glyph(Refresh)),
+    h(ElButton, { 'data-icon-only': '', class: 'ui-icon-action', 'aria-label': '原生禁用状态', disabled: true }, () => glyph(Plus)),
+    h(ElButton, { 'data-icon-only': '', class: 'ui-icon-action', 'aria-label': '原生关闭状态' }, () => glyph(Close)),
+    h(UiAction, { label: '共享加载状态', icon: Refresh, loading: true }),
+    h(UiAction, { label: '共享禁用状态', icon: Plus, disabled: true }),
+    h(UiAction, { label: '共享关闭状态', icon: Close }),
+  ])
+} }).mount('#fixture')
+await nextTick()
+document.body.dataset.ready = 'true'
+</script>
+</body></html>

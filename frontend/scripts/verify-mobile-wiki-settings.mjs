@@ -86,6 +86,26 @@ try {
     assert.equal(await page.getByRole('button', { name: /数据保护/ }).count(), 0)
     assert.ok(await page.locator('#settings-runtime').isVisible(), 'retired section links fall back to Runtime')
     await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()))
+    if (phone) for (const theme of ['light', 'dark', 'eye-care']) {
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+      const material = await page.locator('.settings-main').evaluate(element => {
+        const shell = getComputedStyle(element)
+        const card = getComputedStyle(element.querySelector('.settings-card'))
+        const reference = document.createElement('span')
+        reference.style.background = 'var(--glass-structural-fill)'
+        document.body.append(reference)
+        const expected = getComputedStyle(reference).backgroundColor
+        reference.remove()
+        return { shell: shell.backgroundColor, shadow: shell.boxShadow, filter: shell.backdropFilter, card: card.backgroundColor, cardFilter: card.backdropFilter, expected }
+      })
+      assert.equal(material.shell, 'rgba(0, 0, 0, 0)', 'a phone feed must not retain a hidden content-colored slab')
+      assert.equal(material.shadow, 'none')
+      assert.equal(material.filter, 'none')
+      assert.equal(material.card, material.expected, `${theme}: only one content material per card`)
+      assert.equal(material.cardFilter, 'blur(5px) saturate(1.15)', 'same single background material as My Tasks')
+      assert.equal(await page.locator('.runtime-card').evaluate(element => getComputedStyle(element).backdropFilter), 'none', 'nested cards never add another blur pass')
+    }
+    await page.evaluate(() => { document.documentElement.dataset.theme = localStorage.getItem('theme') || 'light' })
     if (phone) {
       await page.screenshot({ path: join(screenshots, `${viewport.width}-runtime.png`) })
       await page.locator('.runtime-card input').first().fill('unsaved-local-command')
@@ -110,10 +130,11 @@ try {
       })
       assert.ok(full.fits && full.height > 44 && full.right <= full.viewport, `long option must wrap: ${JSON.stringify(full)}`)
       const popup = await menu.evaluate(element => {
-        const rect = element.closest('.el-popper').getBoundingClientRect()
-        return { top: rect.top, bottom: rect.bottom, viewport: innerHeight }
+        const host = element.closest('.el-popper'), rect = host.getBoundingClientRect(), style = getComputedStyle(host)
+        return { top: rect.top, bottom: rect.bottom, viewport: innerHeight, radius: style.borderRadius, overflow: style.overflow }
       })
       assert.ok(popup.top >= -1 && popup.bottom <= popup.viewport + 1, `entire popper fits: ${JSON.stringify(popup)}`)
+      assert.equal(popup.radius, '14px'); assert.equal(popup.overflow, 'hidden')
       const wrap = page.locator('.wiki-settings-base-popper:visible .el-select-dropdown__wrap')
       await wrap.evaluate(element => { element.scrollTop = element.scrollHeight })
       const last = await menu.getByRole('option').last().boundingBox()

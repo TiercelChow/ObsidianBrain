@@ -21,6 +21,17 @@ test('reader keeps navigation chrome until immersive mode and balances its botto
   assert.match(bookshelf, /defineExpose\(\{ openAdd \}\)/)
 })
 
+test('bookshelf has one shared toolbar add action on both desktop and phone', async () => {
+  const reader = await source('src/views/Reader.vue')
+  const bookshelf = await source('src/components/reader/BookshelfView.vue')
+  assert.equal((reader.match(/aria-label="添加书籍"/g) || []).length, 1)
+  assert.equal((bookshelf.match(/aria-label="添加书籍"/g) || []).length, 0)
+  assert.match(reader, /class="reader-shelf-add ui-icon-action"[^>]*@click="bookshelfRef\?\.openAdd\(\)"/)
+  assert.doesNotMatch(reader, /\.reader-shelf-add\s*\{\s*display:\s*none/)
+  assert.doesNotMatch(bookshelf, /class="shelf-add|\.shelf-add\s*\{/)
+  assert.match(bookshelf, /aria-label="添加第一本书"/)
+})
+
 test('reader mobile toolbar keeps folder and fullscreen on the left with full-height controls', async () => {
   const reader = await source('src/views/Reader.vue')
   const leftGroup = reader.match(/class="mobile-toolbar-side mobile-toolbar-left"([\s\S]*?)<\/div>/)?.[1] ?? ''

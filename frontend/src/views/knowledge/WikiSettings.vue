@@ -9,12 +9,12 @@
         <button :class="{ active: section === 'skills' }" @click="section = 'skills'"><el-icon><MagicStick /></el-icon><span><strong>Skills</strong><small>可配置能力</small></span></button>
       </aside>
 
-      <section class="settings-main knowledge-surface">
+      <section class="settings-main knowledge-surface" :data-glass="isMobile ? 'flat' : 'card'">
         <MotionSwap class="settings-sections" :view-key="isMobile ? 'feed' : section">
-        <section v-if="isMobile || section === 'runtime'" class="settings-card" id="settings-runtime" aria-labelledby="settings-runtime-title">
+        <section v-if="isMobile || section === 'runtime'" class="settings-card" :data-glass="isMobile ? 'card' : 'flat'" id="settings-runtime" aria-labelledby="settings-runtime-title">
           <header class="settings-section-head"><div><h2 id="settings-runtime-title">Agent Runtime</h2></div></header>
           <div v-if="loading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
-          <article v-for="item in runtimeHealth" v-else :key="item.profile.id" class="runtime-card">
+          <article v-for="item in runtimeHealth" v-else :key="item.profile.id" class="runtime-card" data-glass="subcard">
             <div class="runtime-title">
               <div class="runtime-logo">DS</div>
               <div><h3>{{ item.profile.name }}</h3><p>{{ item.profile.runtime === 'deepseek_harness' ? 'ACP stdio sidecar' : item.profile.runtime }}</p></div>
@@ -54,13 +54,13 @@
           </article>
         </section>
 
-        <section v-if="isMobile || section === 'providers'" class="settings-card" id="settings-providers" aria-labelledby="settings-providers-title">
+        <section v-if="isMobile || section === 'providers'" class="settings-card" :data-glass="isMobile ? 'card' : 'flat'" id="settings-providers" aria-labelledby="settings-providers-title">
           <header class="settings-section-head split provider-section-head">
             <div><h2 id="settings-providers-title">模型供应商</h2><p>API Key 写入系统凭据库；环境变量模式使用启动进程提供的密钥。</p></div>
             <el-button data-icon-only type="primary" class="ui-icon-action" :icon="Plus" aria-label="新增供应商" title="新增供应商" @click="openNewProvider" />
           </header>
           <div v-if="loading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
-          <article v-else v-for="provider in modelProviders" :key="provider.provider_id" class="provider-card">
+          <article v-else v-for="provider in modelProviders" :key="provider.provider_id" class="provider-card" data-glass="subcard">
             <div class="provider-head">
               <div><h3>{{ provider.display_name }}</h3><p>{{ provider.provider_id }} · {{ provider.model }}</p></div>
               <span class="knowledge-status" :class="provider.api_key_configured ? 'is-healthy' : 'is-warning'">{{ credentialStatusLabel(provider) }}</span>
@@ -84,7 +84,7 @@
           <p v-if="!loading && !modelProviders.length" class="settings-empty">尚未配置模型供应商</p>
         </section>
 
-        <section v-if="isMobile || section === 'usage'" class="settings-card" id="settings-usage" aria-labelledby="settings-usage-title">
+        <section v-if="isMobile || section === 'usage'" class="settings-card" :data-glass="isMobile ? 'card' : 'flat'" id="settings-usage" aria-labelledby="settings-usage-title">
           <header class="settings-section-head split usage-head">
             <div><h2 id="settings-usage-title">Token 用量</h2></div>
             <div class="usage-filters">
@@ -129,7 +129,7 @@
           </div>
         </section>
 
-        <section v-if="isMobile || section === 'documents'" class="settings-card" id="settings-documents" aria-labelledby="settings-documents-title">
+        <section v-if="isMobile || section === 'documents'" class="settings-card" :data-glass="isMobile ? 'card' : 'flat'" id="settings-documents" aria-labelledby="settings-documents-title">
           <header class="settings-section-head split documents-head"><div><h2 id="settings-documents-title">配置文档</h2></div><el-select v-model="activeBaseId" class="settings-base-select knowledge-select is-compact is-responsive" :popper-class="baseSelectPopperClass" :popper-options="baseSelectPopperOptions" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择知识库" aria-label="配置文档知识库" @change="changeSettingsBase"><el-option v-for="base in bases" :key="base.id" :label="base.book_name" :title="base.book_name" :value="base.id" /></el-select></header>
           <div v-if="!activeBaseId" class="knowledge-empty"><strong>选择一本书</strong><span>查看并调整它的知识建模、问答与任务规则。</span></div>
           <div v-else-if="isMobile && loading" class="settings-loading" role="status" aria-label="加载配置文档"><el-icon class="is-loading"><Loading /></el-icon></div>
@@ -145,7 +145,7 @@
           </div>
         </section>
 
-        <section v-if="isMobile || section === 'skills'" class="settings-card" id="settings-skills" aria-labelledby="settings-skills-title">
+        <section v-if="isMobile || section === 'skills'" class="settings-card" :data-glass="isMobile ? 'card' : 'flat'" id="settings-skills" aria-labelledby="settings-skills-title">
           <header class="settings-section-head split skills-head">
             <div><h2 id="settings-skills-title">Skills</h2><p>启用状态仅作用于当前书籍。</p></div>
             <div class="skills-actions">
@@ -160,7 +160,7 @@
           <div v-if="!activeBaseId" class="knowledge-empty"><strong>选择一本书</strong><span>Skill 的启用状态不会跨知识库共享。</span></div>
           <div v-else-if="skillsLoading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
           <div v-else class="skills-grid">
-            <article v-for="skill in skills" :key="skill.id" class="skill-card">
+            <article v-for="skill in skills" :key="skill.id" class="skill-card" data-glass="subcard">
               <header>
                 <div class="skill-symbol"><el-icon><MagicStick /></el-icon></div>
                 <div><h3>{{ skill.name }}</h3><code>{{ skill.slug }}</code></div>
@@ -1235,7 +1235,7 @@ onMounted(async () => {
 .skill-detail-access small { overflow-wrap: anywhere; color: var(--text-faint); font-size: 10px; line-height: 1.5; }
 .skill-detail-versions button { min-width: 0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; min-height: 40px; padding: 6px 10px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--text-muted); font: inherit; font-size: 11px; cursor: pointer; }
 .skill-detail-versions button > span { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.skill-detail-versions button em { padding: 2px 5px; border-radius: 999px; background: var(--bg-soft); color: var(--text-faint); font-size: 9px; font-style: normal; }
+.skill-detail-versions button em { padding: 2px 5px; border-radius: 999px; background: var(--glass-control-fill); color: var(--text-faint); font-size: 9px; font-style: normal; }
 .skill-detail-versions button em.is-candidate { background: color-mix(in srgb, var(--warning, #d97706) 13%, transparent); color: var(--warning, #b45309); }
 .skill-detail-versions button em.is-published { background: var(--accent-light); color: var(--accent); }
 .skill-detail-versions button:hover, .skill-detail-versions button.active { border-color: var(--accent-border); background: var(--accent-light); color: var(--accent); }
@@ -1268,7 +1268,7 @@ onMounted(async () => {
 .skill-benchmark-error { color: var(--danger, #dc2626) !important; }
 .skill-benchmark-details summary { color: var(--accent); font-size: 11px; cursor: pointer; }
 .skill-benchmark-details > div { max-height: 180px; margin-top: 7px; overflow: auto; display: grid; gap: 6px; }
-.skill-benchmark-details article { display: grid; gap: 3px; padding: 7px; border-radius: 8px; background: var(--bg-soft); }
+.skill-benchmark-details article { display: grid; gap: 3px; padding: 7px; border-radius: 8px; background: var(--glass-control-fill); }
 .skill-benchmark-details article header { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .skill-benchmark-details article header span { overflow-wrap: anywhere; color: var(--text-secondary); font-size: 10px; font-weight: 650; }
 .skill-benchmark-details article header em { color: var(--danger, #dc2626); font-size: 10px; font-style: normal; }

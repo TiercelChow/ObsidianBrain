@@ -14,7 +14,7 @@
 
     <!-- 仓库列表 -->
     <TransitionGroup name="collection-flow" tag="div" class="repo-grid" v-if="repos.length > 0" @before-leave="freezeCollectionLeave" @before-enter="resetCollectionEnter">
-      <div v-for="repo in repos" :key="repo.name" class="repo-card">
+      <div v-for="repo in repos" :key="repo.name" class="repo-card" data-glass="card">
         <div class="repo-header">
           <div class="repo-name">{{ repo.name }}</div>
           <el-tag :type="repo.is_dirty ? 'warning' : 'success'">

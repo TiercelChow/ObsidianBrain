@@ -1,5 +1,5 @@
 <template>
-  <section class="home-panel glass-surface" :aria-busy="loading && !ready" :aria-label="title">
+  <section class="home-panel glass-surface" data-glass="card" :aria-busy="loading && !ready" :aria-label="title">
     <header><div><h2>{{ title }}</h2><p v-if="subtitle">{{ subtitle }}</p></div><RouterLink class="panel-link" :to="to" :aria-label="`查看全部${title}`" :title="`查看全部${title}`"><el-icon><ArrowRight /></el-icon></RouterLink></header>
     <div v-if="loading && !ready" class="home-skeleton" aria-label="加载中"><i v-for="n in 3" :key="n"></i></div>
     <div v-else-if="!ready && error" class="home-empty"><span>{{ error }}</span><button type="button" @click="$emit('retry')">重试</button></div>

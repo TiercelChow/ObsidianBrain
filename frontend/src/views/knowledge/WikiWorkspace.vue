@@ -12,7 +12,7 @@
       <el-select v-model="activeBaseId" class="knowledge-select is-responsive" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true" placeholder="选择一本书" @change="onBaseChanged">
         <el-option v-for="base in bases" :key="base.id" :label="base.book_name" :value="base.id" />
       </el-select>
-      <label class="knowledge-search">
+      <label class="knowledge-search" data-glass="search" data-glass-rim>
         <el-icon><Search /></el-icon>
         <input v-model="query" placeholder="搜索标题、摘要与正文" @input="scheduleSearch" />
       </label>
@@ -73,7 +73,7 @@
         </div>
       </aside>
 
-      <article ref="entryDetailRef" class="entry-detail knowledge-surface">
+      <article ref="entryDetailRef" class="entry-detail knowledge-surface" data-glass="card">
         <MotionSwap :view-key="selectedEntry?.id || 'empty'">
         <template v-if="selectedEntry">
           <UiAction class="mobile-back" :icon="ArrowLeft" label="返回实体列表" @click="returnToEntryList" />
@@ -211,7 +211,7 @@
     <MotionModal v-model="editVisible" aria-label="调整知识实体" size="wide">
       <div class="knowledge-modal-card entry-edit-modal">
         <div class="knowledge-modal-head"><div><h3>调整知识实体</h3><p>{{ structureModeHint }}</p></div><span class="knowledge-status is-warning">审核后生效</span></div>
-        <nav class="structure-mode-switch" aria-label="实体调整方式">
+        <nav class="structure-mode-switch" data-glass="inset" aria-label="实体调整方式">
           <button v-for="mode in structureModes" :key="mode.value" type="button" :class="{ active: editMode === mode.value }" @click="setEditMode(mode.value)">{{ mode.label }}</button>
         </nav>
         <template v-if="editMode === 'edit' || editMode === 'merge'">
@@ -233,7 +233,7 @@
               <label><span>Markdown 正文</span><el-input v-model="part.contentMd" type="textarea" :rows="5" :maxlength="30000" /></label>
             </article>
           </div>
-          <button data-icon-only v-if="splitParts.length < 12" class="add-split-part ui-icon-action" type="button" aria-label="添加拆分实体" title="添加拆分实体" @click="addSplitPart">＋</button>
+          <button data-icon-only v-if="splitParts.length < 12" class="add-split-part ui-icon-action" type="button" aria-label="添加拆分实体" title="添加拆分实体" @click="addSplitPart"><el-icon class="ui-action-icon" aria-hidden="true"><Plus /></el-icon></button>
         </template>
         <div class="knowledge-modal-actions"><el-button @click="editVisible = false">取消</el-button><el-button type="primary" :loading="savingEdit" @click="submitStructureChange">生成审核候选</el-button></div>
       </div>
@@ -276,7 +276,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, Checked, Connection, DataAnalysis, Document, Edit, Loading, MoreFilled, Refresh, Search, Tickets } from '@element-plus/icons-vue'
+import { ArrowLeft, Checked, Connection, DataAnalysis, Document, Edit, Loading, MoreFilled, Plus, Refresh, Search, Tickets } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import KnowledgeGraphCanvas from '@/components/knowledge/KnowledgeGraphCanvas.vue'
@@ -963,7 +963,6 @@ onBeforeUnmount(() => {
 .entry-edit-modal > label { display: grid; gap: 6px; color: var(--text-muted); font-size: 11px; }
 .structure-mode-switch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; border: 1px solid var(--border-faint); border-radius: 13px; background: var(--bg-glass-subtle); }
 .structure-mode-switch button { min-height: 34px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); cursor: pointer; transition: var(--transition-interactive); }
-.structure-mode-switch button.active { background: var(--bg-surface); color: var(--accent); box-shadow: var(--shadow-xs); font-weight: 650; }
 .split-note { padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, #ff9f0a 8%, var(--bg-glass-subtle)); color: var(--text-muted); font-size: 10px; line-height: 1.55; }
 .split-parts { display: grid; gap: 9px; }
 .split-parts article { display: grid; gap: 9px; padding: 12px; border: 1px solid var(--border-faint); border-radius: 14px; background: var(--bg-glass-subtle); }

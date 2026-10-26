@@ -10,7 +10,7 @@
       <button data-icon-only type="button" class="ui-icon-action" :disabled="loading" aria-label="刷新书籍知识库" title="刷新" @click="loadCards()"><el-icon :class="{ 'is-loading': loading }"><Refresh /></el-icon></button>
     </div>
 
-    <section v-if="cards.length" class="overview-strip knowledge-surface">
+    <section v-if="cards.length" class="overview-strip knowledge-surface" data-glass="card">
       <div><strong>{{ cards.length }}</strong><span>书架藏书</span></div>
       <div><strong>{{ initializedCount }}</strong><span>已建知识库</span></div>
       <div><strong>{{ entryCount }}</strong><span>数据库实体</span></div>
@@ -26,6 +26,7 @@
         v-for="(card, index) in visibleCards"
         :key="card.book.id"
         class="book-wiki-card knowledge-surface"
+        data-glass="card"
         :style="{ '--order': index }"
       >
         <div class="book-cover">

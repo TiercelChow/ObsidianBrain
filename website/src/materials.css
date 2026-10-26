@@ -70,6 +70,17 @@ html[data-theme] .knowledge-demo-question {
   box-shadow: var(--glass-action-shadow);
 }
 
+/* The automatic feature tour previews the same readable glass source sheet
+   as the application, rather than an opaque mock window. */
+html[data-theme] .demo-evidence {
+  background: var(--glass-panel-sheen), var(--glass-panel-fill);
+  border-color: var(--glass-panel-edge);
+  box-shadow: var(--glass-panel-shadow);
+  backdrop-filter: var(--glass-panel-filter);
+  -webkit-backdrop-filter: var(--glass-panel-filter);
+  --text-muted: var(--text-secondary);
+}
+
 html[data-theme] .docs-sidebar {
   padding: .75rem;
   border: 1px solid var(--glass-edge-soft);

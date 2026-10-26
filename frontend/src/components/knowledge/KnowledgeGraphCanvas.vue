@@ -5,10 +5,10 @@
         <strong>关系画布</strong>
         <span>{{ snapshot.entries.length }} / {{ snapshot.total_entries }} 个实体 · {{ snapshot.relations.length }} 条可见关系</span>
       </div>
-      <div class="canvas-controls">
-        <button data-icon-only type="button" aria-label="缩小图谱" @click="zoomBy(-0.18)">−</button>
+      <div class="canvas-controls" data-glass="group">
+        <button data-icon-only type="button" aria-label="缩小图谱" @click="zoomBy(-0.18)"><el-icon class="ui-action-icon" aria-hidden="true"><Minus /></el-icon></button>
         <button type="button" aria-label="重置图谱视角" @click="resetView">{{ Math.round(view.scale * 100) }}%</button>
-        <button data-icon-only type="button" aria-label="放大图谱" @click="zoomBy(0.18)">＋</button>
+        <button data-icon-only type="button" aria-label="放大图谱" @click="zoomBy(0.18)"><el-icon class="ui-action-icon" aria-hidden="true"><Plus /></el-icon></button>
       </div>
     </header>
     <div
@@ -71,6 +71,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
+import { Minus, Plus } from '@element-plus/icons-vue'
 import type { KnowledgeEntrySummary, KnowledgeGraphSnapshot } from '@/api/knowledge'
 
 const props = withDefaults(defineProps<{
@@ -201,7 +202,7 @@ function endPan(event: PointerEvent) {
 .graph-canvas-shell > header > div:first-child { display: grid; gap: 2px; }
 .graph-canvas-shell strong { font-size: 13px; }
 .graph-canvas-shell header span { color: var(--text-faint); font-size: 10px; }
-.canvas-controls { display: flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid var(--border-faint); border-radius: 11px; background: var(--bg-glass-subtle); }
+.canvas-controls { display: flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid var(--border-faint); border-radius: 999px; }
 .canvas-controls button { min-width: 31px; height: 29px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .canvas-controls button:nth-child(2) { min-width: 48px; color: var(--text-faint); font-size: 9px; }
 .canvas-controls button:hover { background: var(--bg-hover); color: var(--accent); }
@@ -212,13 +213,13 @@ line { stroke: url(#knowledge-graph-edge); stroke-width: 1.4; transition: stroke
 line.is-highlighted { stroke: var(--accent); stroke-width: 3.5; filter: url(#knowledge-graph-glow); }
 .graph-node { color: var(--text-primary); cursor: pointer; outline: none; }
 .node-halo { fill: color-mix(in srgb, var(--accent) 7%, transparent); opacity: 0; transition: opacity var(--motion-fast) ease; }
-.node-core { fill: color-mix(in srgb, var(--bg-surface) 92%, var(--accent)); stroke: color-mix(in srgb, var(--accent) 36%, var(--border-subtle)); stroke-width: 1.5; transition: transform var(--motion-fast) var(--ease-spring-gentle), fill var(--motion-fast) ease, stroke-width var(--motion-fast) ease; }
+.node-core { fill: color-mix(in srgb, var(--glass-solid) 92%, var(--accent)); stroke: color-mix(in srgb, var(--accent) 36%, var(--border-subtle)); stroke-width: 1.5; transition: transform var(--motion-fast) var(--ease-spring-gentle), fill var(--motion-fast) ease, stroke-width var(--motion-fast) ease; }
 .graph-node text { max-width: 80px; fill: currentColor; font-size: 10px; font-weight: 650; pointer-events: none; }
 .graph-node:hover .node-halo, .graph-node:focus-visible .node-halo, .graph-node.is-selected .node-halo, .graph-node.is-on-path .node-halo { opacity: 1; }
 .graph-node:hover .node-core, .graph-node:focus-visible .node-core { transform: scale(1.08); transform-box: fill-box; transform-origin: center; }
 .graph-node.is-selected .node-core, .graph-node.is-on-path .node-core { fill: var(--accent); stroke: color-mix(in srgb, var(--accent) 60%, white); stroke-width: 2.5; filter: url(#knowledge-graph-glow); }
-.graph-node.is-selected, .graph-node.is-on-path { color: white; }
-.canvas-notice, .canvas-hint { position: absolute; bottom: 11px; padding: 6px 9px; border: 1px solid var(--border-faint); border-radius: 9px; background: color-mix(in srgb, var(--bg-surface) 82%, transparent); backdrop-filter: var(--glass-floating-filter); color: var(--text-faint); font-size: 9px; pointer-events: none; }
+.graph-node.is-selected, .graph-node.is-on-path { color: var(--accent-contrast); }
+.canvas-notice, .canvas-hint { position: absolute; bottom: 11px; padding: 6px 9px; border: 1px solid var(--border-faint); border-radius: 9px; background: color-mix(in srgb, var(--glass-solid) 82%, transparent); backdrop-filter: var(--glass-floating-filter); color: var(--text-faint); font-size: 9px; pointer-events: none; }
 .canvas-notice { left: 11px; color: var(--accent); }
 .canvas-hint { right: 11px; }
 @media (max-width: 768px) { .graph-canvas-shell { display: none; } }

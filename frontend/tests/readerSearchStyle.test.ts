@@ -27,12 +27,12 @@ test('reader search field owns shared geometry, typography and clear affordance'
   assert.doesNotMatch(reader, /\.pt-path \{[^}]*font-size|\.shelf-search:focus-within \{|\.path-trigger:hover/)
 })
 
-test('reader search fields share the same nested control material and focus state', async () => {
+test('reader search fields share the same optical control material and focus state', async () => {
   const css = await source('styles/materials.css')
-  const material = css.match(/:root\[data-theme\] :is\(\.task-toolbar \.task-search, \.reader-search-field\) \{([^}]+)\}/)?.[1] ?? ''
-  assert.match(material, /--material-fill: var\(--glass-control-fill\)/)
-  assert.match(material, /--material-filter: none/)
-  assert.match(css, /:root\[data-theme\] \.reader-search-field \{ --material-sheen: none; \}/)
+  const material = css.match(/:root\[data-theme\] \[data-glass="search"\] \{([^}]+)\}/)?.[1] ?? ''
+  assert.match(material, /--material-fill: var\(--glass-floating-fill\)/)
+  assert.match(material, /--material-filter: var\(--glass-floating-filter\)/)
+  assert.match(material, /--material-sheen: var\(--glass-sheen\)/)
   assert.match(css, /:is\([^)]*\.reader-search-field[^)]*\):focus-within \{\s*--material-border: var\(--accent-border\)/)
 })
 

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>隔离下拉菜单圆角检查</title></head>
+<body><div id="fixture"></div>
+<script type="module">
+import { createApp, h, ref } from 'vue'
+import { ElOption, ElSelect } from 'element-plus'
+import 'element-plus/dist/index.css'
+import '/src/styles/motion.css'
+import '/src/styles/tokens.css'
+import '/src/styles/materials.css'
+import '/src/styles/controls.css'
+
+const params = new URLSearchParams(location.search)
+const kind = params.get('kind') || 'system'
+const up = params.get('placement') === 'top'
+document.documentElement.dataset.theme = localStorage.getItem('theme') || 'light'
+document.body.style.cssText = 'margin:0;background:var(--bg-base);color:var(--text-primary);font-family:system-ui,sans-serif'
+const value = ref(kind === 'multiple' ? ['选项 1'] : '选项 1')
+createApp({ render() {
+  return h('main', { style: `position:fixed;left:24px;width:min(320px,calc(100vw - 48px));${up ? 'bottom:24px' : 'top:60px'}` }, [
+    h('p', { style: 'font-size:14px' }, '下拉菜单圆角与滚动检查'),
+    h(ElSelect, {
+      modelValue: value.value, 'onUpdate:modelValue': next => { value.value = next },
+      'aria-label': '隔离选择框', placeholder: '选择一项', style: 'width:100%',
+      popperClass: kind === 'generic' ? 'fixture-generic' : 'system-select-popper',
+      placement: up ? 'top-start' : 'bottom-start', offset: 0,
+      filterable: kind === 'search', multiple: kind === 'multiple',
+      teleported: true,
+    }, () => kind === 'empty' ? [] : Array.from({ length: 30 }, (_, index) => h(ElOption, {
+      key: index, value: `选项 ${index + 1}`, label: `选项 ${index + 1}`,
+    }))),
+    h('output', { id: 'selected-value', style: 'display:block;margin-top:8px' }, JSON.stringify(value.value)),
+  ])
+} }).mount('#fixture')
+</script>
+</body></html>

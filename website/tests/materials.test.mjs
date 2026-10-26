@@ -51,3 +51,9 @@ test('website navigation uses the shared bounded lens and releases it during hot
   assert.doesNotMatch(main, /cloneNode|html2canvas|captureStream/)
   assert.match(await read('src/materials.css'), /@media print[\s\S]+?\.glass-optics\s*\{\s*display:\s*none/)
 })
+
+test('the feature tour source preview uses the application panel instead of an opaque mock', async () => {
+  const css = await read('src/materials.css')
+  assert.match(css, /\.demo-evidence\s*\{[^}]*background:\s*var\(--glass-panel-sheen\), var\(--glass-panel-fill\)/)
+  assert.match(css, /\.demo-evidence\s*\{[^}]*backdrop-filter:\s*var\(--glass-panel-filter\)/)
+})

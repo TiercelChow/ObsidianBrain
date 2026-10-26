@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer, loadConfigFromFile } from 'vite'
+import { verifyIconGeometry } from './helpers/verify-icon-geometry.mjs'
 import { mermaidSamples } from '../src/dev/mermaidSamples.ts'
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
@@ -33,7 +34,7 @@ const mock = { name: 'isolated-mermaid-verification', configureServer(server) {
     response.end(JSON.stringify({ status: 'success', result: fixtures[tool]() }))
   })
 } }
-const server = await createServer({ ...config.config, root, configFile: false, logLevel: 'error', plugins: [mock, ...config.config.plugins], server: { host: '127.0.0.1', port: 0, proxy: {} } })
+const server = await createServer({ ...config.config, root, cacheDir: join(screenshots, '.vite-cache'), configFile: false, logLevel: 'error', plugins: [mock, ...config.config.plugins], server: { host: '127.0.0.1', port: 0, proxy: {} } })
 let browser
 const results = []
 try {
@@ -146,6 +147,7 @@ try {
   await viewer.getByRole('button', { name: '可读尺寸', exact: true }).click()
   assert.ok(parseInt(await getScale()) > fitScale)
   await mobile.screenshot({ path: join(screenshots, 'mobile-viewer.png') })
+  await verifyIconGeometry(mobile, 'Mermaid close and zoom controls')
   const stage = await viewer.locator('.mv-stage').boundingBox()
   const client = await mobileContext.newCDPSession(mobile)
   const point = { x: stage.x + stage.width / 2, y: stage.y + stage.height / 2 }

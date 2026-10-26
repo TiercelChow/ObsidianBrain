@@ -7,16 +7,17 @@
           :key="c"
           type="button"
           class="shelf-chip"
+          data-glass-choice
           :class="{ active: activeCategory === c }"
+          :aria-pressed="activeCategory === c"
           @click="activeCategory = c"
         >
           {{ c }}
         </button>
       </div>
-      <el-button data-icon-only type="primary" class="shelf-add ui-icon-action" aria-label="添加书籍" title="添加书籍" @click="openAdd"><el-icon><Plus /></el-icon></el-button>
     </div>
 
-    <div v-if="loadError" class="shelf-state error">⚠️ {{ loadError }}</div>
+    <div v-if="loadError" class="shelf-state error"><el-icon aria-hidden="true"><WarningFilled /></el-icon><span>{{ loadError }}</span></div>
     <div v-else-if="!books.length" class="shelf-state">
       <el-icon class="ss-icon"><Collection /></el-icon>
       <p>书架还是空的</p>
@@ -114,7 +115,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Collection, Delete, Document, EditPen, FolderOpened, MoreFilled, Plus } from '@element-plus/icons-vue'
+import { Collection, Delete, Document, EditPen, FolderOpened, MoreFilled, Plus, WarningFilled } from '@element-plus/icons-vue'
 import { statLocalPath, type PathStat, type ReaderBook } from '@/api/reader'
 import { useBookshelf } from '@/composables/useBookshelf'
 import PathPickerModal from './PathPickerModal.vue'
@@ -623,9 +624,6 @@ async function confirmRemove(b: ReaderBook) {
     margin-top: 44px;
     line-height: 1.4;
     -webkit-line-clamp: 3;
-  }
-  .shelf-add {
-    display: none;
   }
 }
 </style>

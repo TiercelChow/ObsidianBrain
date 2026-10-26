@@ -1,14 +1,14 @@
 <template>
-  <section class="task-calendar glass-panel" aria-label="任务日历">
+  <section class="task-calendar glass-panel" data-glass="card" aria-label="任务日历">
     <header class="calendar-header">
       <div class="calendar-heading">
         <h2>{{ monthTitle(anchor) }}</h2>
         <span>{{ currentMonthTaskCount }} 项安排</span>
       </div>
-      <div class="calendar-nav">
-        <button data-icon-only type="button" aria-label="上个月" @click="requestMonthShift(-1)">‹</button>
+      <div class="calendar-nav" data-glass="group">
+        <button data-icon-only data-direction-button type="button" aria-label="上个月" @click="requestMonthShift(-1)"><el-icon class="ui-chevron" aria-hidden="true"><ArrowLeft /></el-icon></button>
         <button type="button" class="today-button" @click="$emit('today')">今天</button>
-        <button data-icon-only type="button" aria-label="下个月" @click="requestMonthShift(1)">›</button>
+        <button data-icon-only data-direction-button type="button" aria-label="下个月" @click="requestMonthShift(1)"><el-icon class="ui-chevron" aria-hidden="true"><ArrowRight /></el-icon></button>
       </div>
     </header>
 
@@ -74,13 +74,13 @@
         </div>
       </div>
 
-      <aside class="agenda" aria-label="当日日程">
+      <aside class="agenda" data-glass="subcard" aria-label="当日日程">
         <div class="agenda-header">
           <div>
             <strong>{{ selectedDateLabel }}</strong>
             <span>{{ selectedRootCount ? `${selectedRootCount} 项任务` : '暂无安排' }}</span>
           </div>
-          <button data-icon-only type="button" class="ui-icon-action" aria-label="新建任务" title="新建任务" @click="$emit('create', selectedDate)">＋</button>
+          <button data-icon-only type="button" class="ui-icon-action" aria-label="新建任务" title="新建任务" @click="$emit('create', selectedDate)"><el-icon class="ui-action-icon" aria-hidden="true"><Plus /></el-icon></button>
         </div>
         <div class="agenda-body">
           <TransitionGroup name="agenda-item" tag="div" class="agenda-list">
@@ -88,6 +88,7 @@
               v-for="entry in selectedEntries"
               :key="entry.task.id"
               class="agenda-card"
+              data-glass="subcard"
               :class="{ subtask: entry.depth > 0 }"
               :style="{ '--agenda-depth': entry.depth }"
             >
@@ -100,6 +101,7 @@
               </button>
               <span class="agenda-progress">{{ entry.task.progress_percent }}%</span>
               <button data-icon-only
+                data-direction-button
                 v-if="entry.depth === 0 && entry.hasChildren"
                 type="button"
                 class="agenda-expand"
@@ -107,8 +109,8 @@
                 :aria-expanded="expandedAgendaIds.has(entry.task.id)"
                 :aria-label="expandedAgendaIds.has(entry.task.id) ? `收起 ${entry.task.title} 的子任务` : `展开 ${entry.task.title} 的子任务`"
                 @click="toggleAgenda(entry.task.id)"
-              >›</button>
-              <span v-else class="agenda-arrow" aria-hidden="true">›</span>
+              ><el-icon class="ui-chevron" aria-hidden="true"><ArrowRight /></el-icon></button>
+              <span v-else class="agenda-arrow" aria-hidden="true"><el-icon class="ui-chevron"><ArrowRight /></el-icon></span>
             </article>
           </TransitionGroup>
           <button v-if="selectedEntries.length === 0" type="button" class="agenda-empty" @click="$emit('create', selectedDate)">
@@ -122,6 +124,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { ArrowLeft, ArrowRight, Plus } from '@element-plus/icons-vue'
 import type { TaskSummary } from '@/api/tasks'
 import {
   buildMonthGrid,
@@ -331,8 +334,8 @@ onUnmounted(() => {
 .calendar-header { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .calendar-heading h2 { margin: 0; color: var(--text-primary); font-size: 22px; letter-spacing: var(--tracking-tight); }
 .calendar-heading span { display: block; margin-top: 3px; color: var(--text-faint); font-size: 12px; }
-.calendar-nav { display: flex; align-items: center; gap: 5px; padding: 4px; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-glass); }
-.calendar-nav button { min-width: 38px; height: 36px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); font-size: 22px; cursor: pointer; transition: background var(--motion-fast) ease, transform var(--motion-instant) ease; }
+.calendar-nav { display: flex; align-items: center; gap: 5px; padding: 4px; border: 1px solid var(--border-subtle); border-radius: 999px; }
+.calendar-nav button { min-width: 38px; height: 36px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); cursor: pointer; transition: background var(--motion-fast) ease, transform var(--motion-instant) ease; }
 .calendar-nav button:hover { color: var(--text-primary); background: var(--bg-glass-strong); }
 .calendar-nav button:active { transform: scale(.94); }
 .calendar-nav .today-button { width: auto; padding: 0 11px; font-size: 13px; font-weight: 600; }
@@ -398,10 +401,10 @@ onUnmounted(() => {
 .agenda-copy { min-width: 0; display: grid; gap: 4px; }
 .agenda-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .agenda-copy span, .agenda-progress { color: var(--text-faint); font-size: 12px; }
-.agenda-expand, .agenda-arrow { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; color: var(--text-faint); font-size: 20px; }
-.agenda-expand { border: 0; background: transparent; cursor: pointer; transition: color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-normal) var(--ease-spring-gentle); }
+.agenda-expand, .agenda-arrow { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; color: var(--text-faint); }
+.agenda-expand { border: 0; background: transparent; cursor: pointer; transition: color var(--motion-fast) ease, background var(--motion-fast) ease; }
 .agenda-expand:hover { background: color-mix(in srgb, var(--text-primary) 6%, transparent); color: var(--text-primary); }
-.agenda-expand.expanded { color: var(--accent); transform: rotate(90deg); }
+.agenda-expand.expanded { color: var(--accent); }
 .agenda-empty { flex: 1; min-height: 58px; border: 1px dashed var(--border-subtle); border-radius: 14px; background: transparent; color: var(--text-faint); cursor: pointer; }
 .agenda-item-enter-active, .agenda-item-leave-active { transition: opacity var(--motion-normal) ease, transform var(--motion-normal) var(--ease-spring-gentle); }
 .agenda-item-enter-from, .agenda-item-leave-to { opacity: 0; transform: translateY(6px); }

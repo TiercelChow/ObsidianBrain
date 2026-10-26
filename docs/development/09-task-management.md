@@ -649,7 +649,23 @@ eachDayOfInterval(start: string, end: string): string[]
 
 内部以 `{year, month, day}` 或 Temporal polyfill 表示日历日期；只有显示 RFC 3339 时间戳时才转换为 `Date`。
 
+#### 编辑表单日期布局（2026-10-26）
+
+- 新增、编辑及添加子任务共用的日期字段：桌面两列等宽，手机单列。网格列采用 `minmax(0, 1fr)`，字段允许收缩；日期组件根节点必须占满可见控件高度（桌面 44px、手机 48px），保留与下一行的 14px 间距。
+- 仅日期组件外壳承载输入框材质，普通原生字段规则不匹配 Element Plus 的内部 input/textarea。图标距离边缘 14px，图标与日期文字相隔 10px，不叠加内层边框或底色。
+- `AppDatePicker` 的桌面/手机根节点来自条件分支，任务页样式应从稳定的 `.field` 通过 `:deep(.task-date-input …)` 定位，不能假设组件根节点带有任务页的 scoped 属性。
+- 隔离验收脚本 `frontend/scripts/verify-task-editor-layout.mjs` 覆盖 6 个尺寸 × 三主题 × 新增/编辑/子任务共 54 个表单场景，检查日期完整显示、边缘/图标间距、等宽和下一行留白，并核对日历/滚轮关闭后编辑器与日期值保留；不写入真实任务。
+
 ### 11.3 详情交互与子任务抽屉
+
+#### 现行子任务弹窗布局（2026-10-26，优先于以下历史抽屉说明）
+
+- 子任务详情仍为单个 `MotionModal`，下钻只切换 `drawerNodeId`，不叠加多层详情弹窗。头部第一行为上级路径、按需显示的返回按钮，以及唯一的编辑/关闭操作；任务标题独占下一行，任何层级都与正文共用左侧基准，不因返回按钮出现而向右缩进。弹窗内容宽度服从公共模态框，不再超出模态框宽度。
+- 删除弹窗底部操作栏。“子任务”和“进展与记录”的标题旁各有独立加号，分别复用 `openSubtask(drawerNode)` / `openProgress(drawerNode)`；无子任务时也保留栏目和入口。已完成/取消任务仍不提供新增入口，通过顶部编辑更改状态。
+- `TaskStatusMark.vue` 统一任务树与弹窗子项的状态符号，完成态使用 22px 实心圆勾 SVG，取消态为横线，其余状态维持环形提示；语义名称保留于操作按钮，状态不只依赖颜色。树中状态编辑按钮为 44px 点击区域，标记本身不独立接收事件。
+- 先写布局/入口/状态组件失败回归，再实现。隔离浏览器覆盖三级子任务往返、长标题、空子项、关闭状态和两个表单的正确目标；仅打开并取消表单，不写入正式任务。
+
+#### 历史交互与数据流
 
 - 详情面板恒渲染根任务（总览、拆解树、聚合活动流）；`Tasks.vue` 以 `drawerNodeId` ref 驱动子任务抽屉，不再有整面板切换。
 - `utils/taskActivity.ts` 的 `buildTaskActivity(nodes, progress, audit, scopeTaskId?)` 负责全树聚合（省略 scope）与单任务过滤（传入 scope，供抽屉）；条目 `title` 为名词式类型标签（进展/状态变更/移动…），`detail` 携带具体变化（完成度 X%、状态 A → B），`taskTitle` 归因；`taskStatusLabel`/`taskImportanceLabel`/`formatTimestamp` 一并从视图层下沉到 utils。活动条目头行为 类型胶囊 + 任务名 + 时间（抽屉专属流省略任务名），明细/备注单行省略；点击条目（抽屉经 emit `inspect`）由 `Tasks.vue` 的 MotionModal 详情弹窗展示全文。
@@ -676,7 +692,7 @@ eachDayOfInterval(start: string, end: string): string[]
 - 列表面板改为固定筛选区 + 独立滚动列表。搜索、类型、状态继续请求服务端；快捷筛选只作用于已加载摘要，数量不是全库统计。
 - 桌面详情区为单容器（`.task-detail-zone`）：顶部 `.detail-summary` 全宽放置任务信息（标题/状态/日期/描述/进度概览/移动端切换条），下方 `.detail-columns` 为 拆解|进展 双列、同高、各自独立滚动，中间以 `.task-progress-panel` 的 `border-left` 竖线分隔，竖线不延伸到顶部信息区；短期待办无拆解、进展占满下方。仅 ≤768px 列堆叠时启用 `detailSection` + `.detail-switch` 切换条对“拆解/进展”互斥（在 `.task-detail-zone` 上挂 `mobile-section-*` 类用 CSS 隐藏对侧，非 v-show，桌面不受影响），堆叠时改用 `border-top` 横线分隔。切换根任务回到拆解，记录根任务进展成功后切到记录区。短期待办直接显示状态历史。
 - 原有独立日期卡收为一行，描述直接展示（不再折叠）；主要操作在详情头部，归档仍复用 MotionModal。手机详情隐藏列表工具栏及重复页头，返回行保持可见。
-- `TaskTree` 标题为可键盘激活的按钮，手机不再挤入行内操作，缩进上限 45px；原 `SubtaskDrawer` 组件已移除，子任务详情改由 `Tasks.vue` 内联的 `child-task-dialog` MotionModal 承载，底部固定 `progress` / `add` 操作复用父页面写入表单。
+- `TaskTree` 标题为可键盘激活的按钮，手机不再挤入行内操作，缩进上限 45px；原 `SubtaskDrawer` 组件已移除，子任务详情改由 `Tasks.vue` 内联的 `child-task-dialog` MotionModal 承载，新增子任务/进展入口位于各栏目标题旁（2026-10-26 调整），复用父页面写入表单。
 - `clearSelection()` 使待完成详情请求失效，防止手机返回后旧响应把详情重新打开；`openTask()` 仅为仍被选中的响应更新路由。
 
 以下桌面/手机结构说明以本节信息层级调整为准，日历与存储模型不变。

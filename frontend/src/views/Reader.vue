@@ -21,15 +21,15 @@
     <!-- Compact trigger bar — always visible; the view switch leads it like
          the Tasks toolbar, reading controls join in read view. -->
     <div v-glass-lens="'css'" class="reader-topbar glass-surface" data-glass="scroll-edge">
-      <div class="view-switch" aria-label="视图切换">
-        <span class="switch-indicator" :class="{ read: viewMode === 'read' }"></span>
+      <div class="view-switch" data-glass="inset" aria-label="视图切换">
+        <span class="switch-indicator" data-glass-indicator :class="{ read: viewMode === 'read' }"></span>
         <button type="button" :class="{ active: viewMode === 'shelf' }" @click="changeView('shelf')">书架</button>
         <button type="button" :class="{ active: viewMode === 'read' }" @click="changeView('read')">阅读</button>
       </div>
-      <div v-show="viewMode === 'shelf'" class="shelf-search glass-surface reader-search-field" role="search">
+      <div v-show="viewMode === 'shelf'" class="shelf-search glass-surface reader-search-field" data-glass="search" data-glass-rim role="search">
         <el-icon class="shelf-search-icon"><Search /></el-icon>
         <input v-model="shelfQuery" type="search" aria-label="搜索书籍" placeholder="搜索书名、描述或类别" />
-        <button data-icon-only v-if="shelfQuery" type="button" class="shelf-search-clear" aria-label="清除搜索" @click="shelfQuery = ''">×</button>
+        <button data-icon-only v-if="shelfQuery" type="button" class="shelf-search-clear" aria-label="清除搜索" @click="shelfQuery = ''"><el-icon class="ui-action-icon" :size="16" aria-hidden="true"><Close /></el-icon></button>
       </div>
       <button data-icon-only v-show="viewMode === 'shelf'" type="button" class="reader-shelf-add ui-icon-action" aria-label="添加书籍" title="添加书籍" @click="bookshelfRef?.openAdd()">
         <el-icon><Plus /></el-icon>
@@ -37,6 +37,8 @@
       <button
         v-show="viewMode === 'read'"
         class="path-trigger reader-file-search-trigger reader-search-field"
+        data-glass="search"
+        data-glass-rim
         :aria-label="rootPath ? '搜索当前目录文件' : '返回书架选择书籍'"
         @click="openFileSearch"
       >
@@ -83,9 +85,9 @@
                   <div class="pane-title">搜索文件</div>
                   <small :title="rootPath">{{ rootPath }}</small>
                 </div>
-                <button data-icon-only type="button" class="reader-search-close" aria-label="关闭文件搜索" @click="fileSearchOpen = false">×</button>
+                <button data-icon-only type="button" class="reader-search-close" aria-label="关闭文件搜索" @click="fileSearchOpen = false"><el-icon class="ui-action-icon" aria-hidden="true"><Close /></el-icon></button>
               </div>
-              <label class="reader-file-search glass-surface reader-search-field">
+              <label class="reader-file-search glass-surface reader-search-field" data-glass="search" data-glass-rim>
                 <el-icon><Search /></el-icon>
                 <input
                   ref="fileSearchInputRef"
@@ -97,7 +99,7 @@
                   placeholder="输入文件名或路径"
                   @keydown.escape="fileSearchOpen = false"
                 />
-                <button data-icon-only v-if="fileSearchQuery" type="button" aria-label="清除文件搜索" @click="fileSearchQuery = ''">×</button>
+                <button data-icon-only v-if="fileSearchQuery" type="button" aria-label="清除文件搜索" @click="fileSearchQuery = ''"><el-icon class="ui-action-icon" :size="16" aria-hidden="true"><Close /></el-icon></button>
               </label>
               <p v-if="fileSearchQuery" class="reader-search-count">找到 {{ fileSearchResults.length }} 个可阅读文件</p>
               <ul v-if="fileSearchResults.length" class="reader-search-results">
@@ -147,6 +149,7 @@
       <main
         ref="contentRef"
         class="pane pane-center"
+        data-glass="card"
         @scroll="onContentScroll"
         @touchmove.passive="revealMobileToolbar"
         @click="fileKind === 'pdf' && revealMobileToolbar()"
@@ -183,7 +186,7 @@
         <!-- top loading bar; old content stays visible underneath while loading -->
         <div v-if="fileLoading" class="loadbar"><span></span></div>
         <!-- error banner (old content remains behind) -->
-        <div v-if="error" class="error-banner">⚠️ {{ error }}</div>
+        <div v-if="error" class="error-banner"><el-icon aria-hidden="true"><WarningFilled /></el-icon><span>{{ error }}</span></div>
       </main>
 
       <!-- Right: TOC -->
@@ -313,9 +316,11 @@
     </MotionDrawer>
     <!-- Floating fullscreen UI (auto-hides) -->
     <div v-if="isImmersive" class="fs-ui" :class="{ hidden: isFullscreen && !showFsUI }">
+      <div v-glass-lens="'css'" class="fs-tool-surface" data-glass="floating">
       <button data-icon-only class="fs-fab" :title="isFullscreen ? '退出全屏 (Esc)' : '退出沉浸阅读'" @click="toggleFullscreen">
         <el-icon :size="20"><FullScreen /></el-icon>
       </button>
+      </div>
     </div>
 
     <!-- In-page toast (works inside fullscreen) -->
@@ -348,7 +353,7 @@ import { nextPdfZoomRatio } from '@/components/reader/pdfRenderPolicy'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  FolderOpened, Menu, Document, FullScreen, Refresh, Minus, Plus, Search,
+  FolderOpened, Menu, Document, FullScreen, Refresh, Minus, Plus, Search, Close, WarningFilled,
 } from '@element-plus/icons-vue'
 import {
   listLocalDir, readLocalFile,
@@ -1449,7 +1454,6 @@ onBeforeRouteLeave(() => { flushProgressNow() })
   width: 174px;
   padding: 3px;
   border-radius: 13px;
-  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
   isolation: isolate;
   flex-shrink: 0;
 }
@@ -1458,8 +1462,6 @@ onBeforeRouteLeave(() => { flushProgressNow() })
   inset: 3px auto 3px 3px;
   width: calc(50% - 3px);
   border-radius: 10px;
-  background: var(--bg-glass-strong);
-  box-shadow: var(--shadow-sm), var(--inset-highlight);
   transition: transform var(--motion-normal) var(--ease-spring-gentle);
   z-index: -1;
 }
@@ -1579,6 +1581,7 @@ onBeforeRouteLeave(() => { flushProgressNow() })
   animation: fs-ui-materialize var(--motion-fast) var(--ease-emphasized) backwards;
 }
 .fs-ui.hidden { opacity: 0; pointer-events: none; }
+.fs-tool-surface { position: relative; border-radius: 50%; }
 .fs-fab {
   width: 42px; height: 42px; border-radius: 50%;
   border: 1px solid var(--border-glass);
@@ -1619,7 +1622,7 @@ onBeforeRouteLeave(() => { flushProgressNow() })
   padding: 8px 10px;
   border-radius: 18px;
 }
-.reader-shelf-add { display: none; }
+.reader-shelf-add { flex: none; }
 /* Shelf, reading trigger and dialog use one nested search control. */
 .reader-search-field {
   min-width: 0;

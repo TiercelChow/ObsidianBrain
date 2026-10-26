@@ -14,18 +14,18 @@ test('one material entry owns all three themes and distinct surface weights', as
     }
   }
   assert.match(css, /--glass-floating-filter:\s*blur\(3px\)/)
-  assert.match(css, /--glass-panel-filter:\s*blur\(16px\)/)
+  assert.match(css, /--glass-panel-filter:\s*blur\(12px\)/)
   assert.match(css, /--bg-primary:\s*var\(--glass-solid\)/)
 })
 
-test('floating controls and overlays share optics while content and nested fields do not blur', async () => {
+test('floating controls, content cards and overlays share semantic optics while nested fields do not blur', async () => {
   const css = await source('styles/materials.css')
   for (const consumer of ['.dock-glass', '.reader-mobile-toolbar', '.fs-fab', '.chat-composer', '.sidebar', '.knowledge-modal-card', '.system-select-popper', '.el-dialog']) {
     assert.ok(css.includes(consumer), `${consumer} participates in shared materials`)
   }
-  assert.match(css, /\/\* Content[\s\S]+?--material-filter:\s*none/)
+  assert.match(css, /\[data-glass="card"\][^{}]*\[data-glass="structural"\][^{]*\{[^}]*--material-filter:\s*var\(--glass-structural-filter\)/)
   assert.match(css, /\/\* Nested[\s\S]+?\.el-input__wrapper[\s\S]+?backdrop-filter:\s*none\s*!important/)
-  assert.match(css, /\.task-toolbar\s+\.task-search[\s\S]+?--material-filter:\s*none/)
+  assert.match(css, /\[data-glass="search"\]\s*\{[^}]*--material-filter:\s*var\(--glass-floating-filter\)/)
 })
 
 test('rim highlights stay pointer-transparent and filter-free beside the independent optical layer', async () => {

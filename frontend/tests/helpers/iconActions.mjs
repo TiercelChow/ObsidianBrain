@@ -14,12 +14,14 @@ export function iconActions(source) {
   function inspect(node) {
     if (node.type === 1 && ['button', 'el-button', 'a'].includes(node.tag) && !classes(node).split(/\s+/).includes('status-orb')) {
       let icons = node.props.some(prop => (prop.type === 6 && prop.name === 'icon') || (prop.type === 7 && prop.name === 'bind' && prop.arg?.content === 'icon')) ? 1 : 0
+      const textGlyphs = []
       function onlyIcons(child) {
         if (child.type === 3) return true
         if (child.type === 2) {
           if (!child.content.trim()) return true
           if (!symbols.test(child.content.trim())) return false
           icons += 1
+          textGlyphs.push(child.content.trim())
           return true
         }
         if (child.type !== 1) return false
@@ -34,6 +36,7 @@ export function iconActions(source) {
         actions.push({
           tag: node.tag, classes: classes(node), line: node.loc.start.line,
           offset: node.loc.start.offset, // SFC template AST offsets already refer to the whole source.
+          textGlyphs,
           marked: node.props.some(prop => prop.type === 6 && prop.name === 'data-icon-only'),
           named: node.props.some(prop => ['aria-label', 'title'].includes(prop.name) || (prop.type === 7 && prop.name === 'bind' && ['aria-label', 'title'].includes(prop.arg?.content))),
         })

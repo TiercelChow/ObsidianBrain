@@ -8,7 +8,7 @@
     </header>
 
     <nav class="knowledge-tabs" aria-label="书籍知识功能">
-      <router-link v-for="item in tabs" :key="item.path" :to="item.path">
+      <router-link v-for="item in tabs" :key="item.path" :to="item.path" data-glass-choice>
         <el-icon><component :is="item.icon" /></el-icon>
         <span>{{ item.label }}</span>
       </router-link>

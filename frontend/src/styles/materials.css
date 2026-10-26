@@ -10,7 +10,7 @@
   --glass-reader-toolbar-sheen: linear-gradient(165deg, color-mix(in srgb, var(--glass-rim-light) 14%, transparent), transparent 18% 82%, color-mix(in srgb, var(--glass-rim-shadow) 14%, transparent));
   --glass-scroll-edge-filter: blur(12px) saturate(110%);
   --glass-scroll-edge-fade: 36px;
-  --glass-panel-filter: blur(16px) saturate(120%);
+  --glass-panel-filter: blur(12px) saturate(120%);
   --glass-structural-filter: blur(5px) saturate(115%);
   --glass-content-filter: none;
   --glass-control-filter: none;
@@ -21,7 +21,10 @@
   --glass-media-edge: rgba(255, 255, 255, .24);
   --glass-inner-edge: inset 0 1px 0 var(--glass-rim-light), inset 1px 0 0 var(--glass-rim-side), inset 0 -1px 0 var(--glass-rim-bottom), inset -1px 0 0 var(--glass-rim-shadow);
   --glass-floating-shadow: var(--glass-inner-edge), 0 0 0 .5px var(--glass-outer-edge), inset 0 2px 5px var(--glass-inner-light), inset 0 -2px 5px var(--glass-contact-shadow), 0 6px 18px var(--glass-shadow), 0 1px 3px var(--glass-contact-shadow);
-  --glass-panel-shadow: var(--glass-inner-edge), 0 20px 56px var(--glass-shadow), 0 4px 12px var(--glass-contact-shadow);
+  --glass-panel-inner-edge: inset 0 1px 0 color-mix(in srgb, var(--glass-rim-light) 54%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--glass-rim-shadow) 28%, transparent);
+  --glass-panel-sheen: linear-gradient(162deg, color-mix(in srgb, var(--glass-rim-light) 9%, transparent), transparent 17% 83%, color-mix(in srgb, var(--glass-rim-side) 5%, transparent));
+  --glass-panel-edge: color-mix(in srgb, var(--glass-rim-light) 20%, var(--glass-edge-soft));
+  --glass-panel-shadow: var(--glass-panel-inner-edge), 0 18px 48px var(--glass-shadow), 0 3px 10px var(--glass-contact-shadow);
   --glass-content-shadow: inset 0 1px 0 var(--glass-content-edge), 0 2px 6px var(--glass-contact-shadow);
   --glass-label: var(--text-secondary);
   --glass-action-fill: color-mix(in srgb, var(--text-primary) 9%, var(--glass-floating-fill));
@@ -30,9 +33,16 @@
   --glass-field-fill: color-mix(in srgb, var(--glass-solid) 55%, transparent);
   --glass-field-edge: color-mix(in srgb, var(--text-primary) 13%, transparent);
   --glass-action-sheen: linear-gradient(155deg, color-mix(in srgb, var(--glass-rim-light) 16%, transparent), transparent 36% 74%, color-mix(in srgb, var(--glass-rim-shadow) 18%, transparent));
-  --glass-action-edge: color-mix(in srgb, var(--text-primary) 16%, var(--glass-edge));
-  --glass-action-shadow: var(--glass-inner-edge), 0 3px 10px var(--glass-contact-shadow);
+  --glass-action-edge: color-mix(in srgb, var(--glass-rim-light) 30%, var(--glass-edge-soft));
+  --glass-control-inner-edge: inset 0 1px 0 color-mix(in srgb, var(--glass-rim-light) 50%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--glass-rim-shadow) 25%, transparent);
+  --glass-action-shadow: var(--glass-control-inner-edge), 0 3px 10px var(--glass-contact-shadow);
   --glass-action-label: var(--text-primary);
+  --glass-selection-fill: color-mix(in srgb, var(--glass-solid) 72%, transparent);
+  --glass-selection-edge: color-mix(in srgb, var(--glass-rim-light) 38%, var(--glass-field-edge));
+  --glass-selection-shadow: inset 0 1px 0 color-mix(in srgb, var(--glass-rim-light) 45%, transparent), 0 2px 5px var(--glass-contact-shadow);
+  --glass-control-surface-fill: color-mix(in srgb, var(--glass-solid) 28%, var(--glass-floating-fill));
+  --glass-control-surface-edge: var(--glass-edge);
+  --glass-menu-fill: color-mix(in srgb, var(--glass-solid) 72%, transparent);
   /* Public compatibility tokens; bg-primary was previously undefined. */
   --bg-glass: var(--glass-floating-fill);
   --bg-glass-strong: var(--glass-panel-fill);
@@ -48,7 +58,7 @@
 :root,
 :root[data-theme="light"] {
   --glass-floating-fill: rgba(255, 255, 255, .12);
-  --glass-panel-fill: rgba(248, 250, 253, .85);
+  --glass-panel-fill: rgba(248, 250, 253, .78);
   --glass-structural-fill: rgba(226, 231, 238, .24);
   --glass-content-fill: rgba(255, 255, 255, .82);
   --glass-control-fill: rgba(255, 255, 255, .25);
@@ -72,7 +82,7 @@
 }
 :root[data-theme="dark"] {
   --glass-floating-fill: rgba(36, 38, 42, .26);
-  --glass-panel-fill: rgba(27, 34, 46, .89);
+  --glass-panel-fill: rgba(27, 34, 46, .76);
   --glass-structural-fill: rgba(31, 35, 43, .32);
   --glass-content-fill: rgba(28, 34, 45, .90);
   --glass-control-fill: rgba(255, 255, 255, .04);
@@ -96,7 +106,7 @@
 }
 :root[data-theme="eye-care"] {
   --glass-floating-fill: rgba(243, 251, 232, .14);
-  --glass-panel-fill: rgba(231, 240, 218, .87);
+  --glass-panel-fill: rgba(231, 240, 218, .80);
   --glass-structural-fill: rgba(208, 219, 197, .25);
   --glass-content-fill: rgba(241, 246, 233, .82);
   --glass-control-fill: rgba(247, 254, 236, .24);
@@ -119,7 +129,7 @@
   --glass-success-label: #275e32;
 }
 
-/* Content is a calm reading plane, never a stack of filtered glass cards. */
+/* Shared paint bridge; semantic roles below select the actual material weight. */
 :root[data-theme] :is(
   .liquid-glass, [data-glass], .glass-surface, .glass-surface-heavy, .glass-panel, .knowledge-surface,
   .el-card, .stat-card, .module-card, .status-card, .tool-card, .stat-chip,
@@ -146,7 +156,17 @@
   border-color: var(--material-border) !important;
   box-shadow: var(--material-shadow) !important;
 }
-/* Floating chrome: transparent center, curved bright rim and contact shadow. */
+/* The My Tasks panel is the reference for every primary content card. Legacy
+   surface classes also participate so empty/loading/lazy panels cannot miss it.
+   No separate dashboard recipe or per-card lens/observer is required. */
+:root[data-theme] :is(.glass-surface, .knowledge-surface, .glass-panel, .el-card, .repo-card, .pane) {
+  --material-fill: var(--glass-structural-fill);
+  --material-sheen: var(--glass-sheen);
+  --material-filter: var(--glass-structural-filter);
+  --material-shadow: var(--glass-inner-edge);
+  --material-border: var(--glass-edge-soft);
+}
+/* Floating chrome overrides card adapters, never the other way around. */
 :root[data-theme] :is(
   [data-glass="floating"], .dock-glass, .reader-mobile-toolbar, .fs-fab,
   .path-trigger, .reader-toast, .error-banner, .undo-snackbar, .published-notice,
@@ -161,12 +181,43 @@
   --material-shadow: var(--glass-floating-shadow);
   --material-border: var(--glass-edge);
 }
-/* Structural layers are heavier, with no bright spot across their body. */
-:root[data-theme] :is([data-glass="structural"], .sidebar) {
+:root[data-theme] :is([data-glass="card"], [data-glass="structural"], .sidebar) {
   --material-fill: var(--glass-structural-fill);
   --material-sheen: var(--glass-sheen);
   --material-filter: var(--glass-structural-filter);
   --material-shadow: var(--glass-inner-edge);
+  --material-border: var(--glass-edge-soft);
+}
+/* Nested information is another visible face of the same object, not another
+   backdrop root. Preserve local size/scroll/animation and semantic accents. */
+:root[data-theme] :is(
+  .structure-card, .citation-card, .review-change, .artifact-card,
+  .usage-metrics > article, .usage-chart-card, .run-inspector-section,
+  .adaptive-metrics > div, .adaptive-coverage article,
+  .research-scope, .selected-stage, .stage-raw-output, .findings article,
+  .context-book, .chat-welcome > button, .evidence-grid > button, .restored-answer-draft
+) {
+  background: var(--glass-action-sheen), var(--glass-control-fill) !important;
+  border-color: var(--glass-edge-soft) !important;
+  box-shadow: var(--glass-control-inner-edge) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+@media (hover: hover) {
+  :root[data-theme] :is(.chat-welcome > button, .evidence-grid > button, .structure-card.relation-card):hover {
+    border-color: var(--accent-border) !important;
+    box-shadow: var(--glass-action-shadow) !important;
+  }
+}
+:root[data-theme] [data-glass="subcard"] {
+  --material-fill: var(--glass-control-fill);
+  --material-sheen: var(--glass-action-sheen);
+  --material-filter: none;
+  --material-shadow: var(--glass-control-inner-edge);
+  --material-border: var(--glass-edge-soft);
+}
+:root[data-theme] :is([data-glass="card"] [data-glass="card"], .knowledge-modal-card [data-glass="card"]) {
+  --material-filter: none;
 }
 /* Panels and attached menus prioritize readable text over transparency. */
 :root[data-theme] :is(
@@ -176,9 +227,135 @@
   .system-select-popper, .glass-picker, .el-message
 ) {
   --material-fill: var(--glass-panel-fill);
+  --material-sheen: var(--glass-panel-sheen);
   --material-filter: var(--glass-panel-filter);
   --material-shadow: var(--glass-panel-shadow);
+  --material-border: var(--glass-panel-edge);
+  /* Vibrant secondary text must survive the lighter panel, not fade into the
+     sampled content. This changes labels, never filters their foreground. */
+  --text-muted: var(--text-secondary);
+  --text-faint: var(--text-secondary);
+  --el-text-color-placeholder: var(--text-secondary);
+}
+/* Explicit roles win over legacy class adapters. Flat is a layout shell, not
+   another card behind a feed. Inset/group paint never changes size or motion. */
+:root[data-theme] [data-glass="flat"] {
+  --material-fill: transparent;
+  --material-sheen: none;
+  --material-filter: none;
+  --material-shadow: none;
+  --material-border: transparent;
+}
+:root[data-theme] [data-glass="inset"] {
+  --material-fill: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  --material-sheen: none;
+  --material-filter: none;
+  --material-shadow: inset 0 1px 2px var(--glass-contact-shadow);
+  --material-border: transparent;
+}
+:root[data-theme] [data-glass="group"] {
+  --material-fill: var(--glass-floating-fill);
+  --material-sheen: var(--glass-action-sheen);
+  --material-filter: var(--glass-floating-filter);
+  --material-shadow: var(--glass-action-shadow);
+  --material-border: var(--glass-edge-soft);
+}
+:root[data-theme] :is(.knowledge-modal-card, .glass-surface-heavy, .task-toolbar, [data-glass="card"]) [data-glass="group"] {
+  --material-filter: none;
+}
+/* Search appearance is identical to Timeline/Wiki: one clear surface and rim,
+   not the extra lens previously added only to Reader/Tasks. */
+:root[data-theme] [data-glass="search"] {
+  --material-fill: var(--glass-floating-fill);
+  --material-sheen: var(--glass-sheen);
+  --material-filter: var(--glass-floating-filter);
+  --material-shadow: var(--glass-floating-shadow);
   --material-border: var(--glass-edge);
+}
+/* All Selects use the same optical shell, including teleported/custom-class
+   dropdowns. No component wrappers, global DOM observers or foreground blur. */
+:root[data-theme] :is(.el-select__wrapper, .el-popper:has(.el-select-dropdown)) {
+  isolation: isolate;
+  background: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+:root[data-theme] .el-select__wrapper { position: relative; }
+:root[data-theme] .el-popper:has(.el-select-dropdown) {
+  --glass-control-surface-fill: var(--glass-menu-fill);
+  --glass-select-optics-shadow: var(--glass-inner-edge);
+  --text-muted: var(--text-primary);
+  --text-faint: var(--text-primary);
+  box-shadow: var(--glass-floating-shadow) !important;
+}
+:root[data-theme] :is(.el-select__wrapper, .el-popper:has(.el-select-dropdown))::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--glass-action-sheen), var(--glass-control-surface-fill);
+  box-shadow: var(--glass-select-optics-shadow, var(--glass-floating-shadow)), inset 0 0 0 .75px var(--glass-control-surface-edge);
+  backdrop-filter: var(--glass-floating-filter);
+  -webkit-backdrop-filter: var(--glass-floating-filter);
+}
+@supports ((mask-composite: exclude) or (-webkit-mask-composite: xor)) {
+  :root[data-theme] :is(.el-select__wrapper, .el-popper:has(.el-select-dropdown))::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    padding: 1px;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(135deg, var(--glass-rim-light), var(--glass-control-surface-edge) 22%, transparent 42% 56%, var(--glass-rim-side) 78%, var(--glass-rim-shadow));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+  }
+}
+:root[data-theme] .el-select__wrapper:is(.is-focused, :focus-within) { --glass-control-surface-edge: var(--accent-border); }
+:root[data-theme] .el-select__wrapper.is-disabled { opacity: .5; }
+:root[data-theme] .el-popper:has(.el-select-dropdown) .el-select-dropdown__item { color: var(--text-primary); }
+:root[data-theme] .el-popper:has(.el-select-dropdown) .el-select-dropdown__item.is-selected {
+  background: var(--glass-action-sheen), var(--glass-selection-fill) !important;
+  color: var(--text-primary);
+  box-shadow: var(--glass-selection-shadow);
+  font-weight: 650;
+}
+:root[data-theme] .el-popper:has(.el-select-dropdown) .el-select-dropdown__item.is-disabled { color: var(--text-faint); opacity: .5; }
+/* Stationary choices and sliding indicators use the same curved highlight.
+   An existing indicator keeps sole ownership of selection motion. */
+:root[data-theme] :is([data-glass="inset"] > button, [data-glass-choice]) {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: var(--text-muted);
+  transition: background-color var(--motion-fast) var(--ease-emphasized), color var(--motion-fast) var(--ease-emphasized), box-shadow var(--motion-fast) var(--ease-emphasized), transform var(--motion-instant) var(--ease-emphasized);
+}
+:root[data-theme] :is([data-glass-indicator], [data-glass="inset"] > button:is(.active, .is-active, [aria-pressed="true"], [aria-selected="true"]), [data-glass-choice]:is(.active, [aria-pressed="true"], [aria-current="page"])) {
+  background: var(--glass-action-sheen), var(--glass-selection-fill) !important;
+  border-color: var(--glass-selection-edge) !important;
+  box-shadow: var(--glass-selection-shadow) !important;
+  color: var(--text-primary);
+  font-weight: 650;
+}
+:root[data-theme] [data-glass="inset"]:has(> [data-glass-indicator]) > button {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+:root[data-theme] [data-glass="inset"]:has(> [data-glass-indicator]) > button.active { color: var(--text-primary); }
+@media (hover: hover) {
+  :root[data-theme] :is([data-glass="inset"] > button, [data-glass-choice]):not(:disabled):hover { color: var(--text-primary); }
+}
+:root[data-theme] :is([data-glass="inset"] > button, [data-glass-choice]):focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+:root[data-theme] :is([data-glass="inset"] > button, [data-glass-choice]):disabled { opacity: .45; cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme] :is([data-glass="inset"] > button, [data-glass-choice]) { transition: none; transform: none !important; }
 }
 /* Nested controls use tint, not a second backdrop sampling pass. */
 :root[data-theme] :is(
@@ -202,7 +379,7 @@
   --control-sheen: var(--glass-sheen);
   --control-label: var(--text-secondary);
   --control-border: var(--glass-edge-soft);
-  --control-shadow: var(--glass-inner-edge);
+  --control-shadow: var(--glass-control-inner-edge);
 }
 /* Keep legacy paint bridged strongly; keep defaults weak so variants can win. */
 :root[data-theme] :is(
@@ -316,13 +493,6 @@
   --material-filter: none;
   --material-shadow: var(--glass-inner-edge);
 }
-:root[data-theme] :is(.task-toolbar .task-search, .reader-search-field) {
-  --material-fill: var(--glass-control-fill);
-  --material-filter: none;
-  --material-shadow: inset 0 1px 0 var(--glass-content-edge);
-  --material-border: var(--glass-edge-soft);
-}
-:root[data-theme] .reader-search-field { --material-sheen: none; }
 /* Media overlays always have a dark control plane, even in a light theme. */
 :root[data-theme] :is(.viewer-close, .viewer-nav, .viewer-zoom-btn, .viewer-counter) {
   --material-fill: var(--glass-media-fill);
@@ -332,6 +502,12 @@
   --material-border: var(--glass-media-edge);
   color: var(--glass-media-label);
 }
+:root[data-theme] [data-glass-tone="media"] {
+  --material-fill: var(--glass-media-fill);
+  --material-border: var(--glass-media-edge);
+  color: var(--glass-media-label);
+}
+:root[data-theme] [data-glass-tone="media"] button { color: inherit; }
 /* A scrim dims the page; it is not another bright glass surface. */
 :root[data-theme] :is(.el-overlay, .motion-drawer__scrim, .path-overlay, .ppm-overlay) {
   background: var(--glass-scrim-fill) !important;
@@ -381,6 +557,8 @@
 :root[data-theme] .reader-page:fullscreen .pane-center {
   background: transparent !important;
   box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 /* Opt-in only: hosts are positioned and do not already own ::before.
    Rim and background optics never intercept input or filter foreground labels. */
@@ -418,7 +596,7 @@
   overflow: hidden;
   border-radius: inherit;
   pointer-events: none;
-  background: var(--glass-sheen), var(--glass-floating-fill);
+  background: var(--material-sheen, var(--glass-sheen)), var(--material-fill, var(--glass-floating-fill));
   backdrop-filter: var(--glass-lens-filter, var(--glass-floating-filter));
   -webkit-backdrop-filter: var(--glass-lens-filter, var(--glass-floating-filter));
 }
@@ -514,6 +692,9 @@
     --glass-structural-filter: none;
     --glass-scrim-filter: none;
     --glass-media-fill: #202127;
+    --glass-selection-fill: var(--glass-solid);
+    --glass-control-surface-fill: var(--glass-solid);
+    --glass-menu-fill: var(--glass-solid);
   }
   :root[data-theme] [data-glass="scroll-edge"] { background: var(--glass-solid) !important; }
   [data-glass="scroll-edge"] > .glass-optics { display: none; }
@@ -534,16 +715,22 @@
     --glass-structural-filter: none;
     --glass-scrim-filter: none;
     --glass-media-fill: #202127;
+    --glass-selection-fill: var(--glass-solid);
+    --glass-control-surface-fill: var(--glass-solid);
+    --glass-menu-fill: var(--glass-solid);
     --glass-sheen: linear-gradient(transparent, transparent);
     --glass-action-sheen: linear-gradient(transparent, transparent);
+    --glass-panel-sheen: linear-gradient(transparent, transparent);
   }
   [data-glass-rim]::before { display: none; }
   :root[data-theme] [data-glass-lens] { background: var(--glass-solid) !important; }
+  :root[data-theme] [data-glass-lens][data-glass-tone="media"] { background: var(--glass-media-fill) !important; }
   :root[data-theme] [data-glass="scroll-edge"] { background: var(--glass-solid) !important; }
   .glass-optics { display: none; }
+  :root[data-theme] :is(.el-select__wrapper, .el-popper:has(.el-select-dropdown))::after { display: none; }
 }
 @media (prefers-contrast: more) {
-  :root[data-theme] { --glass-edge: var(--text-muted); --glass-edge-soft: var(--text-muted); --glass-field-edge: var(--text-muted); }
+  :root[data-theme] { --glass-edge: var(--text-muted); --glass-edge-soft: var(--text-muted); --glass-field-edge: var(--text-muted); --glass-panel-edge: var(--text-muted); --glass-selection-edge: var(--text-muted); }
 }
 @media (forced-colors: active) {
   :root[data-theme] {
@@ -575,9 +762,18 @@
     --glass-danger-label: ButtonText;
     --glass-warning-label: ButtonText;
     --glass-success-label: ButtonText;
+    --glass-selection-fill: Highlight;
+    --glass-selection-edge: Highlight;
+    --glass-panel-sheen: linear-gradient(transparent, transparent);
+    --glass-panel-edge: CanvasText;
+    --glass-control-surface-fill: Canvas;
+    --glass-menu-fill: Canvas;
   }
   [data-glass-rim]::before { display: none; }
   :root[data-theme] [data-glass-lens] { background: Canvas !important; }
   :root[data-theme] [data-glass="scroll-edge"] { background: Canvas !important; }
   .glass-optics { display: none; }
+  :root[data-theme] :is(.el-select__wrapper, .el-popper:has(.el-select-dropdown)) { outline: 1px solid CanvasText; outline-offset: -1px; }
+  :root[data-theme] :is(.el-select__wrapper, .el-popper:has(.el-select-dropdown))::after { display: none; }
+  :root[data-theme] :is([data-glass="inset"] > button:is(.active, .is-active, [aria-pressed="true"], [aria-selected="true"]), [data-glass-choice]:is(.active, [aria-pressed="true"], [aria-current="page"])) { color: HighlightText; }
 }

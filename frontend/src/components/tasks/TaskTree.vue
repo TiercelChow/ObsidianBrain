@@ -21,25 +21,25 @@
       @drop.prevent="dropOn(item.node.id)"
     >
       <button data-icon-only
+        data-direction-button
         v-if="item.hasChildren"
         type="button"
         class="disclosure"
         :aria-label="expanded.has(item.node.id) ? '收起子任务' : '展开子任务'"
+        :aria-expanded="expanded.has(item.node.id)"
         @click.stop="toggle(item.node.id)"
       >
-        <span :class="{ expanded: expanded.has(item.node.id) }">›</span>
+        <el-icon class="ui-chevron" aria-hidden="true"><ArrowRight /></el-icon>
       </button>
       <span v-else class="disclosure-spacer"></span>
 
       <button
         type="button"
         class="status-orb"
-        :class="`status-${item.node.status}`"
         :aria-label="`${item.node.title}，${statusLabel(item.node.status)}`"
         @click.stop="$emit('edit', item.node)"
       >
-        <span v-if="item.node.status === 'completed'">✓</span>
-        <span v-else-if="item.node.status === 'cancelled'">—</span>
+        <TaskStatusMark :status="item.node.status" />
       </button>
 
       <button type="button" class="tree-copy" :aria-label="`查看子任务：${item.node.title}`" :title="item.node.title" @click.stop="$emit('select', item.node.id)">
@@ -64,6 +64,8 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { ArrowRight } from '@element-plus/icons-vue'
+import TaskStatusMark from './TaskStatusMark.vue'
 import type { TaskImportance, TaskNode, TaskStatus } from '@/api/tasks'
 import { flattenVisibleSubtasks } from '@/utils/taskHierarchy'
 import { formatTaskDateRangeCompact } from '@/utils/taskDates'
@@ -143,7 +145,7 @@ function importanceLabel(importance: TaskImportance) {
   --indent: calc(var(--tree-depth) * 22px);
   min-height: 54px;
   display: grid;
-  grid-template-columns: 26px 28px minmax(0, 1fr);
+  grid-template-columns: 26px 44px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
   padding: 7px 8px 7px calc(8px + var(--indent));
@@ -164,26 +166,20 @@ function importanceLabel(importance: TaskImportance) {
   color: var(--text-muted);
   cursor: pointer;
 }
-.disclosure { width: 26px; height: 36px; border-radius: 10px; font-size: 25px; line-height: 1; }
+.disclosure { width: 26px; height: 36px; border-radius: 10px; }
 .disclosure:hover { background: var(--bg-glass-strong); }
-.disclosure span { display: inline-block; transform: rotate(0); transition: transform var(--motion-normal) var(--ease-spring-gentle); }
-.disclosure span.expanded { transform: rotate(90deg); }
 .disclosure-spacer { width: 26px; }
 .status-orb {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 1.5px solid var(--border-subtle);
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 12px;
   display: grid;
   place-items: center;
-  font-size: 13px;
   transition: transform var(--motion-fast) var(--ease-spring), background var(--motion-fast) ease;
 }
-.status-orb:hover { transform: scale(1.08); }
-.status-completed { background: color-mix(in srgb, var(--success) 17%, transparent); border-color: var(--success); color: var(--success); }
-.status-cancelled { background: color-mix(in srgb, var(--text-faint) 12%, transparent); }
-.status-in_progress { border-color: var(--accent); box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent); }
-.status-blocked { border-color: #ff9500; }
+.status-orb:hover { background: var(--bg-glass); transform: scale(1.04); }
+.status-orb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tree-copy { min-width: 0; min-height: 44px; padding: 0; border: 0; background: transparent; text-align: left; font: inherit; cursor: pointer; border-radius: 6px; }
 .tree-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .tree-title { display: block; color: var(--text-primary); font-size: 15px; font-weight: 580; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -207,6 +203,6 @@ function importanceLabel(importance: TaskImportance) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tree-row, .disclosure span, .status-orb { transition-duration: 1ms !important; }
+  .tree-row, .status-orb { transition-duration: 1ms !important; }
 }
 </style>

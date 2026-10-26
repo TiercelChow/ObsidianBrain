@@ -18,7 +18,7 @@
         <div v-if="workspace.baselines?.length" class="baseline-list"><h4>已冻结的核验／刷新基线</h4><p>旧版待核验输入，不是当前证据。模型可通过原生工具分页对照当前知识和原文。</p><article v-for="baseline in workspace.baselines" :key="`${baseline.question_id}-${baseline.entry_id}`"><b>{{ baseline.title }}</b><span>版本 {{ baseline.revision }} · {{ baseline.claim_count }} 条具体主张 · {{ baseline.content_characters.toLocaleString() }} 字符</span></article></div>
       </details>
       <details class="research-stage-directory" :open="!isMobile || stageDirectoryOpen" @toggle="stageDirectoryOpen = ($event.target as HTMLDetailsElement).open">
-        <summary>研究阶段 <span>{{ selected?.stage.title || (workspace.stages.length ? `${workspace.stages.length} 个阶段` : '尚未生成阶段') }}</span></summary>
+        <summary>研究阶段 <span>{{ selected?.stage.title || (workspace.stages.length ? `${workspace.stages.length} 个阶段` : '尚未生成阶段') }}</span><el-icon class="ui-chevron stage-directory-icon" aria-hidden="true"><ArrowRight /></el-icon></summary>
       <ol class="research-stages">
         <li v-for="stage in workspace.stages" :key="stage.stage_key">
           <button type="button" :class="{ 'is-selected': selected?.stage.stage_key === stage.stage_key }" :aria-pressed="selected?.stage.stage_key === stage.stage_key" @click="loadStage(stage)">
@@ -66,7 +66,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
-import { View } from '@element-plus/icons-vue'
+import { ArrowRight, View } from '@element-plus/icons-vue'
 import UiAction from '@/components/motion/UiAction'
 import MotionSwap from '@/components/motion/MotionSwap.vue'
 import { getKnowledgeResearchWorkspace, getKnowledgeResearchStage, getKnowledgeResearchUnpublishedOutput, type ResearchWorkspace, type ResearchStageContent, type ResearchStageSummary, type ResearchUnpublishedOutput } from '@/api/knowledge'
@@ -229,10 +229,11 @@ onBeforeUnmount(() => { alive = false; stop(); ++workspaceRequest; ++stageReques
 @media (max-width: 768px) {
   .research-stage-directory > summary { min-height: 48px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 8px 12px; border: 1px solid var(--border-faint); border-radius: 12px; background: var(--bg-glass-subtle); color: var(--text-primary); cursor: pointer; list-style: none; }
   .research-stage-directory > summary::-webkit-details-marker { display: none; }
-  .research-stage-directory > summary::after { content: '+'; margin-left: auto; color: var(--accent); }
-  .research-stage-directory[open] > summary::after { content: '−'; }
+  .stage-directory-icon { margin-left: auto; color: var(--accent); transition: transform var(--motion-normal) var(--ease-spring-gentle); }
+  .research-stage-directory[open] .stage-directory-icon { transform: rotate(90deg); }
   .research-stage-directory > summary span { min-width: 0; color: var(--text-muted); overflow-wrap: anywhere; font-size: 12px; }
   .research-stage-directory[open] .research-stages { margin-top: 8px; }
   .selected-stage { padding: 0; border: 0; background: transparent; }
 }
+@media (prefers-reduced-motion: reduce) { .stage-directory-icon { transition: none; } }
 </style>

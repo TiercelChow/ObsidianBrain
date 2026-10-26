@@ -21,7 +21,7 @@
         <div v-if="loading" class="ppm-state" role="status" aria-label="加载预览">
           <el-icon class="is-loading" aria-hidden="true"><Loading /></el-icon>
         </div>
-        <div v-else-if="error" class="ppm-state error">⚠️ {{ error }}</div>
+        <div v-else-if="error" class="ppm-state error"><el-icon aria-hidden="true"><WarningFilled /></el-icon><span>{{ error }}</span></div>
         <div v-else-if="kind === 'notfound'" class="ppm-state">路径不存在</div>
         <div v-else-if="kind === 'folder'" class="ppm-folder">
           <FileTree :entries="entries" :active-path="''" @select="onTreeSelect" />
@@ -31,7 +31,7 @@
           <pre class="code-gutter">{{ codeGutter }}</pre>
           <pre class="code-content"><code ref="codeRef" :class="codeClass">{{ codeContent }}</code></pre>
         </div>
-        <div v-else-if="kind === 'image'" class="ppm-state">🖼️ 暂不支持图片预览</div>
+        <div v-else-if="kind === 'image'" class="ppm-state"><el-icon aria-hidden="true"><Picture /></el-icon><span>暂不支持图片预览</span></div>
         <div v-else-if="kind === 'pdf'" class="ppm-state">
           <el-icon><Document /></el-icon><span>PDF 预览请点击右上「阅读器」按钮打开</span>
         </div>
@@ -50,7 +50,7 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, computed } from 'vue'
-import { Document, Close, Loading, FullScreen } from '@element-plus/icons-vue'
+import { Document, Close, Loading, FullScreen, Picture, WarningFilled } from '@element-plus/icons-vue'
 import hljs from 'highlight.js/lib/common'
 import {
   statLocalPath, listLocalDir, readLocalFile,
