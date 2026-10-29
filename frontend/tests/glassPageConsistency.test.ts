@@ -52,10 +52,23 @@ test('configuration feed and nested cards have explicit weights without adding b
   const settings = await source('views/knowledge/WikiSettings.vue')
   assert.match(settings, /:data-glass="isMobile \? 'flat' : 'card'"/)
   assert.equal((settings.match(/:data-glass="isMobile \? 'card' : 'flat'"/g) || []).length, 5)
-  for (const cls of ['runtime-card', 'provider-card', 'skill-card']) assert.match(settings, new RegExp(`class="${cls}"[^>]*data-glass="subcard"`))
+  assert.match(settings, /class="runtime-card"[^>]*data-glass="flat"/)
+  for (const cls of ['provider-card', 'skill-card']) assert.match(settings, new RegExp(`class="${cls}"[^>]*data-glass="subcard"`))
   const css = await source('styles/materials.css')
   assert.match(css, /\[data-glass="subcard"\]\s*\{[^}]*--material-filter:\s*none/)
   assert.match(css, /\[data-glass="card"\] \[data-glass="card"\][^{]*\{[^}]*--material-filter:\s*none/)
+})
+
+test('runtime settings reuse their section surface instead of nesting another framed card', async () => {
+  const settings = await source('views/knowledge/WikiSettings.vue')
+  const runtime = settings.match(/\.runtime-card\s*\{([^}]+)\}/)?.[1] ?? ''
+  assert.match(runtime, /padding:\s*0;/)
+  assert.match(runtime, /border:\s*0;/)
+  assert.doesNotMatch(runtime, /border-radius:|background:|box-shadow:/)
+  assert.doesNotMatch(settings, /\.runtime-card, \.provider-card\s*\{[^}]*padding:/)
+  assert.match(settings, /v-model="item.profile.executable"/)
+  assert.match(settings, /v-model="item.profile.provider_id"/)
+  assert.match(settings, /@click="saveRuntime\(item.profile\)"/)
 })
 
 test('Wiki details, citations, reports, usage metrics and conversation surfaces share nested glass', async () => {

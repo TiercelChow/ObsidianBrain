@@ -14,7 +14,7 @@
         <section v-if="isMobile || section === 'runtime'" class="settings-card" :data-glass="isMobile ? 'card' : 'flat'" id="settings-runtime" aria-labelledby="settings-runtime-title">
           <header class="settings-section-head"><div><h2 id="settings-runtime-title">Agent Runtime</h2></div></header>
           <div v-if="loading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
-          <article v-for="item in runtimeHealth" v-else :key="item.profile.id" class="runtime-card" data-glass="subcard">
+          <article v-for="item in runtimeHealth" v-else :key="item.profile.id" class="runtime-card" data-glass="flat">
             <div class="runtime-title">
               <div class="runtime-logo">DS</div>
               <div><h3>{{ item.profile.name }}</h3><p>{{ item.profile.runtime === 'deepseek_harness' ? 'ACP stdio sidecar' : item.profile.runtime }}</p></div>
@@ -1117,7 +1117,7 @@ onMounted(async () => {
 .settings-section-head h2 { margin: 5px 0 4px; font-size: 20px; font-weight: 680; }
 .settings-section-head p { color: var(--text-muted); font-size: 12px; }
 .settings-loading { min-height: 260px; display: grid; place-content: center; color: var(--accent); }
-.runtime-card { min-width: 0; display: grid; gap: 15px; padding: 18px; border: 1px solid var(--border-faint); border-radius: 17px; background: var(--bg-glass-subtle); }
+.runtime-card { min-width: 0; display: grid; gap: 15px; padding: 0; border: 0; }
 .runtime-title { display: flex; align-items: center; gap: 11px; }
 .runtime-logo { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 14px; background: linear-gradient(145deg, var(--accent), #3c3fae); color: white; font-size: 12px; font-weight: 760; box-shadow: 0 8px 18px color-mix(in srgb, var(--accent) 22%, transparent); }
 .runtime-title > div:nth-child(2) { min-width: 0; flex: 1; }
@@ -1344,8 +1344,8 @@ onMounted(async () => {
   .settings-section-head { margin-bottom: 14px; padding-bottom: 0; border-bottom: 0; }
   .settings-section-head h2 { font-size: 19px; }
   .settings-section-head p { font-size: 13px; line-height: 1.6; }
-  .runtime-card, .provider-card { gap: 12px; padding: 12px; }
-  .runtime-card { padding: 0; border: 0; background: none; }
+  .runtime-card { gap: 12px; }
+  .provider-card { gap: 12px; padding: 12px; }
   .provider-card + .provider-card, .runtime-card + .runtime-card { margin-top: 12px; }
   .runtime-title { gap: 8px; }
   .runtime-logo { width: 36px; height: 36px; border-radius: 11px; flex: none; }

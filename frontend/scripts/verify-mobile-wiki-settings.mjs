@@ -86,6 +86,14 @@ try {
     assert.equal(await page.getByRole('button', { name: /数据保护/ }).count(), 0)
     assert.ok(await page.locator('#settings-runtime').isVisible(), 'retired section links fall back to Runtime')
     await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()))
+    for (const theme of ['light', 'dark', 'eye-care']) {
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+      const runtimeSurface = await page.locator('.runtime-card').evaluate(element => {
+        const style = getComputedStyle(element)
+        return { fill: style.backgroundColor, shadow: style.boxShadow, filter: style.backdropFilter, border: style.borderWidth, padding: style.padding }
+      })
+      assert.deepEqual(runtimeSurface, { fill: 'rgba(0, 0, 0, 0)', shadow: 'none', filter: 'none', border: '0px', padding: '0px' }, `${viewport.width}px ${theme}: Runtime shares its section surface, not a second card`)
+    }
     if (phone) for (const theme of ['light', 'dark', 'eye-care']) {
       await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
       const material = await page.locator('.settings-main').evaluate(element => {
