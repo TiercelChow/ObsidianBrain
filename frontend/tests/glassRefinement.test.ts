@@ -39,7 +39,7 @@ test('graph and Skill surfaces no longer reference missing legacy material token
     assert.doesNotMatch(await source(file), /var\(--(?:bg-surface|bg-soft|shadow-xs)\)/, file)
   }
   assert.match(await source('components/knowledge/KnowledgeGraphCanvas.vue'), /class="canvas-controls"[^>]*data-glass="group"/)
-  assert.match(await source('components/tasks/TaskCalendar.vue'), /class="calendar-nav"[^>]*data-glass="group"/)
+  assert.match(await source('components/tasks/TaskCalendar.vue'), /class="calendar-nav"[^>]*:data-glass="compact \? 'flat' : 'group'"/)
 })
 
 test('panels use a distinct softer rim and optics consume the host material rather than forcing floating tint', async () => {

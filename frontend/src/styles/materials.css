@@ -443,12 +443,13 @@
   font-weight: 650;
 }
 /* Borderless icon actions: explicit template markers keep text controls and
-   their enclosing glass surfaces out of this rule. Geometry is unchanged. */
+   their enclosing glass surfaces out of this rule. Dock items (including icons)
+   own their shared navigation geometry instead of becoming stretched circles. */
 :root[data-theme] :is(
   [data-icon-only], .ui-icon-action, .ui-action--quiet, .glass-icon-btn,
   .el-dialog__headerbtn, .el-drawer__close-btn, .el-message-box__headerbtn, .el-picker-panel__icon-btn,
   .el-pagination .btn-prev, .el-pagination .btn-next,
-  .mobile-sub-dock-item.is-icon, .sidebar.collapsed .collapse-btn
+  .sidebar.collapsed .collapse-btn
 ) {
   border: 0 !important;
   border-radius: 50%;
@@ -662,13 +663,27 @@
   -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, .85) 35%, transparent 75%);
   mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, .85) 35%, transparent 75%);
 }
-.mobile-global-header[data-glass="scroll-edge"] > .glass-optics {
+/* Bottom toolbars use the same open edge, mirrored toward the content above. */
+[data-glass="scroll-edge"][data-glass-edge="bottom"] > .glass-optics {
+  top: calc(var(--glass-scroll-edge-fade) * -1);
+  bottom: 0;
+  -webkit-mask-image: linear-gradient(to top, #000 0, #000 calc(100% - var(--glass-scroll-edge-fade) - 8px), rgba(0, 0, 0, .72) calc(100% - 28px), rgba(0, 0, 0, .24) calc(100% - 12px), transparent 100%);
+  mask-image: linear-gradient(to top, #000 0, #000 calc(100% - var(--glass-scroll-edge-fade) - 8px), rgba(0, 0, 0, .72) calc(100% - 28px), rgba(0, 0, 0, .24) calc(100% - 12px), transparent 100%);
+}
+[data-glass="scroll-edge"][data-glass-edge="bottom"] .glass-optics__edge {
+  -webkit-mask-image: linear-gradient(to top, #000 0%, rgba(0, 0, 0, .85) 35%, transparent 75%);
+  mask-image: linear-gradient(to top, #000 0%, rgba(0, 0, 0, .85) 35%, transparent 75%);
+}
+.mobile-global-header[data-glass="scroll-edge"] > .glass-optics,
+.mobile-task-detail-nav[data-glass="scroll-edge"] > .glass-optics {
   opacity: 0;
   transition: opacity var(--motion-normal) var(--ease-emphasized);
 }
-.mobile-global-header.header-scrolled[data-glass="scroll-edge"] > .glass-optics { opacity: 1; }
+.mobile-global-header.header-scrolled[data-glass="scroll-edge"] > .glass-optics,
+.mobile-task-detail-nav.header-scrolled[data-glass="scroll-edge"] > .glass-optics { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
-  .mobile-global-header[data-glass="scroll-edge"] > .glass-optics { transition: none; }
+  .mobile-global-header[data-glass="scroll-edge"] > .glass-optics,
+  .mobile-task-detail-nav[data-glass="scroll-edge"] > .glass-optics { transition: none; }
 }
 .chat-composer :is(textarea, button), .reader-document-label {
   text-shadow: 0 1px 2px color-mix(in srgb, var(--bg-base) 85%, transparent);

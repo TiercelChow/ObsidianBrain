@@ -9,6 +9,9 @@
   --mobile-dock-height: 62px;
   --mobile-sub-dock-height: 50px;
   --mobile-navigation-height: var(--mobile-dock-height);
+  --mobile-page-action-size: 56px;
+  --mobile-page-action-gap: 12px;
+  --mobile-page-action-clearance: calc(var(--mobile-page-action-size) + var(--mobile-page-action-gap));
   --tap-target: 44px;
   --page-gutter: clamp(20px, 3vw, 32px);
   --radius-control: 12px;

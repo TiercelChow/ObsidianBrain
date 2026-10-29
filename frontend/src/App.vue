@@ -2,7 +2,7 @@
   <div
     ref="appShellRef"
     class="app-shell"
-    :class="{ 'mobile-focus': isMobile && mobileFocusMode, 'has-mobile-subnav': !!mobileSubnav?.items.length }"
+    :class="{ 'mobile-focus': isMobile && mobileFocusMode, 'has-mobile-subnav': !!mobileSubnav?.items.length, 'mobile-keyboard-open': dockKeyboardOpen }"
     :style="mobileChatDockStyle"
   >
     <!-- Mobile root header: one title. Page-level actions occupy the right slot. -->
@@ -26,6 +26,7 @@
           'mobile-full': isMobile,
           'mobile-focus': isMobile && mobileFocusMode,
           'reader-scroll-locked': lockMobileReaderOuterScroll,
+          'task-scroll-locked': lockMobileTaskOuterScroll,
         }"
         @scroll="onMainScroll"
       >
@@ -44,6 +45,7 @@
       :progress="dockProgress"
       :section="mobileNavSection"
       :subnav="mobileSubnav"
+      :action="mobilePageAction"
       @expand="expandDock"
     />
   </div>
@@ -55,10 +57,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from './stores/app'
 import Sidebar from './components/Sidebar.vue'
 import MobileDock from './components/MobileDock.vue'
-import { shouldLockMobileReaderOuterScroll } from './utils/mobileLayoutPolicy'
+import { shouldLockMobileReaderOuterScroll, shouldLockMobileTaskOuterScroll } from './utils/mobileLayoutPolicy'
 import { getMobileNavSection, getMobileRouteRedirect, isMobileFocusRoute } from './utils/mobileNavigationPolicy'
 import { usePhoneViewport } from './composables/usePhoneViewport'
 import { provideMobileSubnav } from './composables/useMobileSubnav'
+import { provideMobilePageAction } from './composables/useMobilePageAction'
 import { useMobileDockMotion } from './composables/useMobileDockMotion'
 import { dockGeometry } from './utils/mobileDockMotion'
 
@@ -79,6 +82,7 @@ const isCollapsed = computed(() => appStore.sidebarCollapsed)
 const currentTitle = computed(() => (route.meta?.title as string) || '')
 const appShellRef = ref<HTMLElement | null>(null)
 const mobileSubnav = provideMobileSubnav()
+const mobilePageAction = provideMobilePageAction()
 
 // Mobile detection
 const { width: windowWidth, isMobile } = usePhoneViewport()
@@ -110,6 +114,7 @@ const mobileChatDockStyle = computed(() => {
 const lockMobileReaderOuterScroll = computed(() => (
   shouldLockMobileReaderOuterScroll(windowWidth.value, route.path)
 ))
+const lockMobileTaskOuterScroll = computed(() => shouldLockMobileTaskOuterScroll(windowWidth.value, route.path, route.query.view))
 
 function disableLeavingPage(element: Element) {
   // Fixed descendants can override pointer-events:none; inert also removes
@@ -511,6 +516,7 @@ code, pre, .code-block { font-family: var(--font-mono); }
 }
 
 .has-mobile-subnav { --mobile-navigation-height: calc(var(--mobile-dock-height) + var(--mobile-sub-dock-height) + 8px); }
+.mobile-keyboard-open :deep(.mobile-page-action) { visibility: hidden; pointer-events: none; }
 
 @media (min-width: 769px) and (prefers-reduced-motion: reduce) {
   .app-aside { transition-property: box-shadow; }
@@ -539,6 +545,8 @@ code, pre, .code-block { font-family: var(--font-mono); }
   min-height: 0;
   height: 100%;
 }
+.app-main.mobile-full.task-scroll-locked { overflow-y:hidden; overscroll-behavior-y:none; }
+.app-main.mobile-full.task-scroll-locked .route-stage { min-height:0; height:100%; }
 
 @media (max-width: 768px) {
   .app-shell { touch-action: auto; }

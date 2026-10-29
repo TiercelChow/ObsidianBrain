@@ -72,3 +72,14 @@ test('CSS scroll chrome requires no geometry maps, observers or preference liste
   cleanup()
   assert.equal(host.children.length, 0, 'stale disposer is harmless')
 })
+
+test('bottom scroll chrome mirrors only the background fade and task headers share the home reveal', async () => {
+  const css = await source('styles/materials.css')
+  const plane = css.match(/\[data-glass="scroll-edge"\]\[data-glass-edge="bottom"\] > \.glass-optics\s*\{([^}]+)\}/)?.[1] || ''
+  assert.match(plane, /top:\s*calc\(var\(--glass-scroll-edge-fade\) \* -1\)/)
+  assert.match(plane, /bottom:\s*0/)
+  assert.match(plane, /mask-image:\s*linear-gradient\(to top/)
+  assert.doesNotMatch(plane, /transform|filter:\s*blur/)
+  assert.match(css, /\[data-glass-edge="bottom"\] \.glass-optics__edge\s*\{[^}]*mask-image:\s*linear-gradient\(to top/)
+  assert.match(css, /\.mobile-task-detail-nav\.header-scrolled\[data-glass="scroll-edge"\] > \.glass-optics\s*\{\s*opacity:\s*1/)
+})

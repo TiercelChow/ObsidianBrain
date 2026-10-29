@@ -31,7 +31,7 @@
         <input v-model="shelfQuery" type="search" aria-label="搜索书籍" placeholder="搜索书名、描述或类别" />
         <button data-icon-only v-if="shelfQuery" type="button" class="shelf-search-clear" aria-label="清除搜索" @click="shelfQuery = ''"><el-icon class="ui-action-icon" :size="16" aria-hidden="true"><Close /></el-icon></button>
       </div>
-      <button data-icon-only v-show="viewMode === 'shelf'" type="button" class="reader-shelf-add ui-icon-action" aria-label="添加书籍" title="添加书籍" @click="bookshelfRef?.openAdd()">
+      <button data-icon-only v-if="!isMobile" v-show="viewMode === 'shelf'" type="button" class="reader-shelf-add ui-icon-action" aria-label="添加书籍" title="添加书籍" @click="bookshelfRef?.openAdd()">
         <el-icon><Plus /></el-icon>
       </button>
       <button
@@ -55,6 +55,13 @@
         <el-icon><FullScreen /></el-icon>
       </el-button>
     </div>
+
+    <MobilePageAction
+      v-if="isMobile && viewMode === 'shelf'"
+      :icon="Plus"
+      label="添加书籍"
+      @click="bookshelfRef?.openAdd()"
+    />
 
     <p v-if="progressSyncError" class="reader-progress-notice" role="status">
       {{ progressSyncError }}
@@ -376,6 +383,8 @@ import { useAppStore } from '@/stores/app'
 import FileTree from '@/components/reader/FileTree.vue'
 import MotionDrawer from '@/components/motion/MotionDrawer.vue'
 import BookshelfView from '@/components/reader/BookshelfView.vue'
+import MobilePageAction from '@/components/MobilePageAction.vue'
+import { usePhoneViewport } from '@/composables/usePhoneViewport'
 import { freezeCollectionLeave, resetCollectionEnter } from '@/utils/collectionMotion'
 import { getMobileReaderToolbarState, isPhoneViewport } from '@/utils/mobileLayoutPolicy'
 import { useModalEnvironment } from '@/composables/useModalEnvironment'
@@ -389,6 +398,7 @@ const PathPreviewModal = defineAsyncComponent(() => import('@/components/reader/
 const PdfViewer = defineAsyncComponent(() => import('@/components/reader/PdfViewer.vue'))
 
 const appStore = useAppStore()
+const { isMobile } = usePhoneViewport()
 
 interface TocItem { id: string; text: string; level: number; page?: number; html?: string }
 
@@ -1913,7 +1923,8 @@ onBeforeRouteLeave(() => { flushProgressNow() })
   .reader-selection-menu { right: 10px; left: 10px !important; top: auto !important; bottom: calc(82px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: 1fr 1fr; }
   .reader-selection-menu button { min-height: 42px; font-size: 12px; }
   .reader-page {
-    height: calc(100dvh - var(--mobile-header-height) - var(--safe-top) - 40px);
+    height: 100%;
+    min-height: 0;
     gap: 6px;
   }
   .reader-page.is-read-view {
@@ -1930,22 +1941,7 @@ onBeforeRouteLeave(() => { flushProgressNow() })
   .view-switch button { min-height: 34px; }
   .shelf-search { order: 2; min-width: 0; flex: 1; min-height: 44px; }
   .reader-search-field { font-size: 16px; }
-  .reader-shelf-add {
-    order: 2;
-    min-width: 44px;
-    min-height: var(--tap-target);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    padding: 0 12px;
-    border: 0;
-    border-radius: 13px;
-    font: inherit;
-    font-size: 14px;
-    font-weight: 650;
-  }
-  .reader-shelf-add:active { transform: scale(.96); }
+  .bookshelf-root { padding-bottom: var(--mobile-page-action-clearance); }
   .reader-file-search-trigger,
   .reader-fullscreen-btn { display: none !important; }
   .reader-pdf-controls { display: none !important; }

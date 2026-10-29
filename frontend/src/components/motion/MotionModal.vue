@@ -44,9 +44,11 @@ const props = withDefaults(defineProps<{
   modelValue: boolean
   ariaLabel?: string
   size?: 'regular' | 'wide'
+  dismissible?: boolean
 }>(), {
   ariaLabel: '对话框',
   size: 'regular',
+  dismissible: true,
 })
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 const panelRef = ref<HTMLElement | null>(null)
@@ -67,7 +69,10 @@ const overlayStyle = computed(() => ({
 }))
 
 function isMobile() { return window.matchMedia('(max-width: 768px)').matches }
-function close() { emit('update:modelValue', false) }
+function close() {
+  if (!props.dismissible) { settle(0); return }
+  emit('update:modelValue', false)
+}
 
 function updateVisualViewport() {
   visualHeight.value = window.visualViewport?.height ?? window.innerHeight
@@ -76,7 +81,7 @@ function updateVisualViewport() {
 
 function onPointerDown(event: PointerEvent) {
   if (!isMobile() || (event.pointerType === 'mouse' && event.button !== 0)) return
-  if (!props.modelValue) return
+  if (!props.modelValue || !props.dismissible) return
   grab()
   grabY = dragY.value
   pointerId = event.pointerId

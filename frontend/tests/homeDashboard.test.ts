@@ -42,11 +42,12 @@ test('phone dashboard neither displays code repository stats nor requests their 
   assert.match(home, /grid-template-areas:'tasks' 'reading' 'wiki' 'memos'/)
 })
 
-test('appearance remains visible in the left phone header slot without competing with refresh', async () => {
+test('phone appearance is a floating action while refresh and desktop controls stay out of the phone header', async () => {
   const home = await source('views/Home.vue')
   assert.match(home, /class="home-theme-action(?: [^"]*)?"/)
-  assert.match(home, /@media \(max-width: 768px\)[\s\S]*\.home-page \.header-actions \.home-theme-action\s*\{[^}]*display: inline-flex;[^}]*position: fixed;[^}]*left: max\(12px, var\(--safe-left\)\)/)
-  assert.match(home, /\.home-theme-action\s*\{[^}]*width: var\(--tap-target\)/)
+  assert.match(home, /<div v-if="!isMobile" class="header-actions">[\s\S]*?aria-label="刷新工作台"[\s\S]*?<\/div>/)
+  assert.match(home, /<MobilePageAction\s+v-if="isMobile"\s+:icon="themeIcon"\s+:label="`切换主题，当前\$\{themeName\}`"\s+@click="appStore.toggleTheme\(\)"/)
+  assert.doesNotMatch(home, /\.home-page \.header-actions \.home-theme-action/)
 })
 
 test('desktop dashboard stretches both columns without imposing fixed card heights on phones', async () => {

@@ -47,17 +47,34 @@ test('scroll observation requires a user gesture and filters overlays', async ()
 test('sub-navigation ownership cleans up without erasing a successor route', async () => {
   const [nav, tasks, knowledge] = await Promise.all([source('composables/useMobileSubnav.ts'), source('views/Tasks.vue'), source('components/knowledge/KnowledgePageShell.vue')])
   assert.match(nav, /current\.value\?\.owner === owner/)
-  assert.match(tasks, /select: \(\) => changeView\(mode\)/)
+  assert.match(tasks, /select: \(\) => changeView\(viewMode\.value === 'tasks' \? 'calendar' : 'tasks'\)/)
   assert.match(knowledge, /useMobileSubnav\(/)
   assert.match(knowledge, /active: route\.path === item\.path/)
+})
+
+test('icon-only task dock distributes actions evenly without changing the shared motion geometry', async () => {
+  const [tasks, dock] = await Promise.all([source('views/Tasks.vue'), source('components/MobileDock.vue')])
+  assert.match(tasks, /layout: 'icons'/)
+  assert.match(dock, /'icon-layout': displayedSubnav\?\.layout === 'icons'/)
+  assert.match(dock, /\.mobile-sub-dock\.icon-layout \.mobile-sub-dock-item\s*\{\s*flex: 1 1 0; min-width: 44px;/)
+})
+
+test('task icon feedback keeps the same rounded rectangle as Wiki navigation, not a stretched circle', async () => {
+  const [dock, materials] = await Promise.all([source('components/MobileDock.vue'), source('styles/materials.css')])
+  const quietActions = materials.slice(materials.indexOf('/* Borderless icon actions:'), materials.indexOf(':root[data-theme] .image-viewer-overlay'))
+  assert.doesNotMatch(quietActions, /\.mobile-sub-dock-item/)
+  assert.match(dock, /\.mobile-sub-dock-item\s*\{[^}]*min-height:\s*44px;[^}]*border:\s*0;[^}]*border-radius:\s*14px;/)
+  assert.match(dock, /\.mobile-sub-dock-item:active\s*\{[^}]*background:\s*color-mix/)
+  assert.doesNotMatch(dock, /\.mobile-sub-dock-item\.is-icon\s*\{[^}]*border-radius/)
 })
 
 test('compact dock and orb keep the original bottom dock height and footprint', async () => {
   const dock = await source('components/MobileDock.vue')
   assert.match(dock, /--dock-orb-size:\s*var\(--mobile-dock-height\)/)
   assert.match(dock, /\.mobile-dock\s*\{[^}]*height:\s*var\(--mobile-dock-height\)/)
-  assert.match(dock, /\.mobile-sub-dock\s*\{[^}]*bottom:\s*0;/)
-  assert.match(dock, /--mobile-dock-height\) - var\(--mobile-sub-dock-height\)\) \* var\(--dock-settle-progress\)/)
+  assert.match(dock, /\.mobile-auxiliary-surface\s*\{[^}]*bottom:\s*0;/)
+  const layout = await source('utils/dockAuxiliaryMotion.ts')
+  assert.match(layout, /height: 50 \+ 12 \* geometry.sink/)
 })
 
 test('scroll retargets the running spring instead of jumping to the gesture position', async () => {

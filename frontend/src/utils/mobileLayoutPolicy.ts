@@ -9,6 +9,10 @@ export function shouldLockMobileReaderOuterScroll(width: number, routePath: stri
   return isPhoneViewport(width) && routePath === '/reader'
 }
 
+export function shouldLockMobileTaskOuterScroll(width: number, routePath: string, view: unknown): boolean {
+  return isPhoneViewport(width) && routePath === '/tasks' && view !== 'calendar'
+}
+
 export interface MobileReaderToolbarState {
   rendered: boolean
   pinned: boolean

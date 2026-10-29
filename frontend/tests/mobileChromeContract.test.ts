@@ -21,15 +21,17 @@ test('reader keeps navigation chrome until immersive mode and balances its botto
   assert.match(bookshelf, /defineExpose\(\{ openAdd \}\)/)
 })
 
-test('bookshelf has one shared toolbar add action on both desktop and phone', async () => {
+test('bookshelf moves phone creation above the dock and retains its desktop toolbar action', async () => {
   const reader = await source('src/views/Reader.vue')
   const bookshelf = await source('src/components/reader/BookshelfView.vue')
   assert.equal((reader.match(/aria-label="添加书籍"/g) || []).length, 1)
   assert.equal((bookshelf.match(/aria-label="添加书籍"/g) || []).length, 0)
   assert.match(reader, /class="reader-shelf-add ui-icon-action"[^>]*@click="bookshelfRef\?\.openAdd\(\)"/)
-  assert.doesNotMatch(reader, /\.reader-shelf-add\s*\{\s*display:\s*none/)
+  assert.match(reader, /<button[^>]*v-if="!isMobile"[^>]*class="reader-shelf-add ui-icon-action"/)
+  assert.match(reader, /<MobilePageAction\s+v-if="isMobile && viewMode === 'shelf'"[\s\S]*?label="添加书籍"[\s\S]*?@click="bookshelfRef\?\.openAdd\(\)"/)
   assert.doesNotMatch(bookshelf, /class="shelf-add|\.shelf-add\s*\{/)
   assert.match(bookshelf, /aria-label="添加第一本书"/)
+  assert.match(bookshelf, /@media \(max-width: 768px\)[\s\S]*?\.shelf-empty-add\s*\{\s*display:\s*none/)
 })
 
 test('reader mobile toolbar keeps folder and fullscreen on the left with full-height controls', async () => {
@@ -68,26 +70,31 @@ test('reader routes folder changes through the shelf and keeps read controls foc
   assert.match(reader, /@media \(max-width: 768px\)[\s\S]*?\.reader-file-search-trigger,[\s\S]*?\.reader-fullscreen-btn \{ display: none !important; \}/)
 })
 
-test('timeline composes from an icon beside mobile search', async () => {
+test('timeline composes from its floating phone action and gives search the freed width', async () => {
   const timeline = await source('src/views/Timeline.vue')
   const searchAt = timeline.indexOf('class="search-box glass-surface"')
-  const composeAt = timeline.indexOf('class="mobile-compose-action"')
   const filterAt = timeline.indexOf('class="mobile-filter-summary glass-surface"')
 
-  assert.match(timeline, /class="mobile-compose-action"/)
+  assert.doesNotMatch(timeline, /mobile-compose-action/)
+  assert.match(timeline, /<MobilePageAction v-if="isMobile" :icon="Plus" label="写小记" @click="openCreateDialog"/)
   assert.match(timeline, /aria-label="写小记"/)
-  assert.ok(searchAt >= 0 && searchAt < composeAt && composeAt < filterAt)
+  assert.ok(searchAt >= 0 && searchAt < filterAt)
+  assert.match(timeline, /grid-template-columns: minmax\(0, 1fr\) var\(--tap-target\);/)
+  assert.doesNotMatch(timeline, /grid-template-columns: minmax\(0, 1fr\) var\(--tap-target\) var\(--tap-target\)/)
+  assert.match(timeline, /\.mobile-filter-summary\s*\{\s*grid-column: 2;/)
   assert.match(timeline, /class="mobile-filter-summary glass-surface"[\s\S]*?<MoreFilled \/>/)
   assert.match(timeline, /\.memo-time \{ position: absolute; top: 14px; left: 16px; right: auto;/)
 })
 
 test('task detail owns a fixed action row and child detail omits redundant root return', async () => {
   const tasks = await source('src/views/Tasks.vue')
+  const mobile = await source('src/components/tasks/MobileTaskDetail.vue')
 
-  assert.match(tasks, /class="mobile-detail-scroll"/)
-  const childDialog = tasks.match(/<MotionModal v-model="childDetailOpen"[\s\S]*?<\/MotionModal>/)?.[0] || ''
+  assert.match(mobile, /class="mobile-task-detail-scroll"/)
+  assert.match(mobile, /class="mobile-detail-context" aria-label="详情栏目与新增"/)
+  const childDialog = tasks.match(/<MotionModal v-if="!isPhone" v-model="childDetailOpen"[\s\S]*?<\/MotionModal>/)?.[0] || ''
   assert.doesNotMatch(childDialog, /返回任务/)
-  assert.match(tasks, /label="返回任务列表"/)
+  assert.match(mobile, /'返回任务列表'/)
   assert.doesNotMatch(tasks, /class="page-create"/)
 })
 

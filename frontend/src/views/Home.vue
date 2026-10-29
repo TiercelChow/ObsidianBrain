@@ -2,11 +2,17 @@
   <div ref="pageRef" class="home-page">
     <header class="page-header">
       <div><h1 class="page-title">首页</h1><p class="page-subtitle">{{ dateLabel }}</p></div>
-      <div class="header-actions">
+      <div v-if="!isMobile" class="header-actions">
         <el-button data-icon-only class="home-theme-action ui-icon-action" @click="appStore.toggleTheme()" :title="`切换主题，当前${themeName}`" :aria-label="`切换主题，当前${themeName}`"><el-icon><component :is="themeIcon" /></el-icon></el-button>
         <el-button data-icon-only class="ui-icon-action" @click="loadOverview()" :loading="loading" aria-label="刷新工作台" title="刷新工作台"><el-icon v-if="!loading"><Refresh /></el-icon></el-button>
       </div>
     </header>
+    <MobilePageAction
+      v-if="isMobile"
+      :icon="themeIcon"
+      :label="`切换主题，当前${themeName}`"
+      @click="appStore.toggleTheme()"
+    />
     <div class="workbench-heading"><span>今日关注</span><small v-if="overview">{{ error ? '更新失败 · 显示上次结果' : `更新于 ${updatedLabel}` }}</small></div>
     <p v-if="error" class="home-notice" role="status">{{ error }} <button @click="loadOverview()">重试</button></p>
     <p v-else-if="systemProblem" class="home-notice" role="alert">本地服务或数据库状态异常，请刷新检查。</p>
@@ -89,6 +95,7 @@ import { onBeforeRouteLeave } from 'vue-router'
 import { ArrowRight, Refresh, Sunny, Moon, View, Calendar, Warning, Collection, EditPen, Flag, CircleCheck, Reading, Document, DataAnalysis } from '@element-plus/icons-vue'
 import { getHomeOverview, type HomeOverview } from '@/api/home'
 import HomePanel from '@/components/home/HomePanel.vue'
+import MobilePageAction from '@/components/MobilePageAction.vue'
 import { useAppStore } from '@/stores/app'
 import { usePhoneViewport } from '@/composables/usePhoneViewport'
 import { todayLocal } from '@/utils/taskDates'
@@ -228,7 +235,7 @@ onBeforeUnmount(() => { active = false; ++request; controller?.abort(); clearTim
 .system-unavailable { font-size:13px; color:var(--text-muted); }
 @media(max-width:1080px) { .workbench-grid { grid-template-columns:minmax(0,1.2fr) minmax(0,1fr); } .system-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width: 768px) {
-  .home-page .header-actions .home-theme-action { display: inline-flex; position: fixed; left: max(12px, var(--safe-left)); top:calc(var(--safe-top) + (var(--mobile-header-height) - var(--tap-target)) / 2); width: var(--tap-target); padding:0; }
+  .home-page { padding-bottom: var(--mobile-page-action-clearance); }
   .workbench-heading { font-size:14px; margin-bottom:10px; } .workbench-heading small { font-size:11px; }
   .attention-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:14px; }
   .attention-tile { padding:14px; border-radius:16px; } .attention-tile strong { font-size:27px; } .attention-tile small { font-size:10px; }

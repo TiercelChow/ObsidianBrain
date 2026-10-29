@@ -174,9 +174,11 @@ try {
     await page.keyboard.press('Escape')
 
     await page.goto(origin + '/tasks')
-    const reference = await glass(page.locator('.task-list-panel'), 'glass-structural-fill')
-    assert.equal(reference.filter, 'blur(5px) saturate(1.15)')
-    if (width > 768) assert.equal((await glass(page.locator('.task-detail-zone'), 'glass-structural-fill')).shadow, reference.shadow)
+    if (width > 768) {
+      const reference = await glass(page.locator('.task-list-panel'), 'glass-structural-fill')
+      assert.equal(reference.filter, 'blur(5px) saturate(1.15)')
+      assert.equal((await glass(page.locator('.task-detail-zone'), 'glass-structural-fill')).shadow, reference.shadow)
+    } else await page.locator('.mobile-task-row').first().waitFor()
     if (width <= 768) await page.getByRole('button', { name: '搜索任务', exact: true }).click()
     assert.deepEqual(await glass(page.locator('.task-search:visible').first(), 'glass-floating-fill'), searchReference, 'Reader and Tasks use the identical search material and geometry')
     await page.getByRole('searchbox', { name: '搜索任务', exact: true }).filter({ visible: true }).fill('学习')
@@ -201,13 +203,16 @@ try {
 
     // Real detail content, not just the empty task placeholder.
     await page.goto(origin + '/tasks?task=' + task.id)
-    await page.locator('.detail-header h2').waitFor()
-    await page.waitForFunction(() => document.querySelectorAll('.task-detail-zone').length === 1)
-    await glass(page.locator('.task-detail-zone'), 'glass-structural-fill')
+    await page.locator(width > 768 ? '.detail-header h2' : '.mobile-task-hero h2').waitFor()
+    if (width > 768) {
+      await page.waitForFunction(() => document.querySelectorAll('.task-detail-zone').length === 1)
+      await glass(page.locator('.task-detail-zone'), 'glass-structural-fill')
+    } else assert.equal(await page.locator('.mobile-task-detail').count(), 1)
     await page.screenshot({ path: join(screenshots, `${width}-${theme}-task-detail.png`) })
     await page.goto(origin + '/tasks?view=calendar')
     await page.locator('.task-calendar').waitFor()
-    await glass(page.locator('.task-calendar'), 'glass-structural-fill')
+    if (width > 768) await glass(page.locator('.task-calendar'), 'glass-structural-fill')
+    else assert.equal(await page.locator('.task-calendar').getAttribute('data-glass'), 'flat')
     assert.equal(await page.locator('.agenda').evaluate(element => getComputedStyle(element).backdropFilter), 'none')
     await page.screenshot({ path: join(screenshots, `${width}-${theme}-calendar.png`) })
 

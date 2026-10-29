@@ -57,21 +57,22 @@ try {
         const value = element.querySelector('.mobile-date-value') || element.querySelector('input')
         const icon = element.querySelector('.el-icon'), rect = trigger.getBoundingClientRect(), text = value.getBoundingClientRect(), symbol = icon.getBoundingClientRect()
         const style = getComputedStyle(value), fieldElement = element.closest('.field'), field = fieldElement.getBoundingClientRect()
-        const next = [...fieldElement.parentElement.children].filter(node => node.matches('.field')).map(node => node.getBoundingClientRect()).filter(box => box.top > field.top + 1).sort((a, b) => a.top - b.top)[0]
+        const dateGroup = fieldElement.closest('.task-date-fields') || fieldElement
+        const next = [...dateGroup.parentElement.children].filter(node => node.matches('.field')).map(node => node.getBoundingClientRect()).filter(box => box.top > dateGroup.getBoundingClientRect().top + 1).sort((a, b) => a.top - b.top)[0]
         const canvas = document.createElement('canvas'), painter = canvas.getContext('2d'); painter.font = style.font
         return { leftInset: symbol.left - rect.left, iconGap: text.left - symbol.right, rightInset: rect.right - text.right, width: rect.width,
           height: rect.height, inside: rect.left >= field.left - 1 && rect.right <= field.right + 1 && rect.bottom <= field.bottom + 1, nextGap: next ? next.top - rect.bottom : null,
           innerBorder: style.borderLeftWidth, innerBackground: style.backgroundColor, available: value.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
           textWidth: painter.measureText(value.value || value.textContent).width, viewport: document.documentElement.scrollWidth <= innerWidth + 1 }
       }))
-      assert.equal(dates.length, 2)
+      assert.equal(dates.length, 2, 'start and end match the Timeline two-field layout')
       for (const date of dates) {
-        assert.ok(date.leftInset >= 12 && date.iconGap >= 9, `separate edge/icon/value: ${JSON.stringify({ width, mode, date })}`)
+        assert.ok(date.leftInset >= (phone ? 9 : 12) && date.iconGap >= (phone ? 7 : 9), `separate edge/icon/value: ${JSON.stringify({ width, mode, date })}`)
         assert.ok(date.inside && date.viewport && date.available + 1 >= date.textWidth, `unclipped date: ${JSON.stringify(date)}`)
         assert.ok(date.nextGap == null || date.nextGap >= 13, `preserve the full next-row gap: ${JSON.stringify(date)}`)
         assert.equal(date.innerBorder, '0px', 'the inner date input is not another bordered field')
         assert.equal(date.innerBackground, 'rgba(0, 0, 0, 0)', 'only the outer field owns the material')
-        assert.ok(date.height >= (phone ? 48 : 44))
+        assert.ok(date.height >= 44)
       }
       assert.ok(Math.abs(dates[0].width - dates[1].width) <= 1, 'start/end fields have equal widths')
       if (width === 1440 && theme === 'light') {

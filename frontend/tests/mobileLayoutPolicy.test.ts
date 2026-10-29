@@ -6,12 +6,21 @@ import {
   getMobileReaderToolbarState,
   isPhoneViewport,
   shouldLockMobileReaderOuterScroll,
+  shouldLockMobileTaskOuterScroll,
 } from '../src/utils/mobileLayoutPolicy.ts'
 
 test('isPhoneViewport treats the shared 768px breakpoint as phone layout', () => {
   assert.equal(isPhoneViewport(320), true)
   assert.equal(isPhoneViewport(768), true)
   assert.equal(isPhoneViewport(769), false)
+})
+
+test('phone task lists/details own their scrolling, but the month calendar remains page-scrollable', () => {
+  assert.equal(shouldLockMobileTaskOuterScroll(390, '/tasks', undefined), true)
+  assert.equal(shouldLockMobileTaskOuterScroll(768, '/tasks', 'tasks'), true)
+  assert.equal(shouldLockMobileTaskOuterScroll(390, '/tasks', 'calendar'), false)
+  assert.equal(shouldLockMobileTaskOuterScroll(769, '/tasks', 'tasks'), false)
+  assert.equal(shouldLockMobileTaskOuterScroll(390, '/timeline', 'tasks'), false)
 })
 
 test('getPdfRenderPolicy reduces mobile pre-render work', () => {

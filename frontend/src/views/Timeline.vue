@@ -5,7 +5,7 @@
       <div>
         <h1 class="page-title">时光机</h1>
       </div>
-      <div class="header-actions">
+      <div v-if="!isMobile" class="header-actions">
         <el-button data-icon-only class="desktop-sync-action ui-icon-action" aria-label="图片存储" title="图片存储" @click="storageOpen = true">
           <el-icon><FolderOpened /></el-icon>
         </el-button>
@@ -14,6 +14,8 @@
         </el-button>
       </div>
     </header>
+
+    <MobilePageAction v-if="isMobile" :icon="Plus" label="写小记" @click="openCreateDialog" />
 
       <!-- Toolbar -->
       <div class="toolbar">
@@ -28,10 +30,6 @@
           />
           <button data-icon-only v-if="searchQuery" type="button" class="clear-btn" aria-label="清除搜索" @click="clearSearch"><el-icon class="ui-action-icon" :size="16" aria-hidden="true"><Close /></el-icon></button>
         </div>
-
-        <button data-icon-only v-if="isMobile" type="button" class="mobile-compose-action" aria-label="写小记" @click="openCreateDialog">
-          <el-icon><Plus /></el-icon>
-        </button>
 
         <button data-icon-only
           v-if="isMobile"
@@ -461,6 +459,7 @@ import { createMemo, browseTimeline, searchMemos, uploadImages, updateMemo, dele
 import { memoImageUrl, memoImageSource, memoLocalDate, memoToolResult, type TimelineMemo } from '@/utils/timelineMemo'
 import TimelineStoragePanel from '@/components/timeline/TimelineStoragePanel.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
+import MobilePageAction from '@/components/MobilePageAction.vue'
 import AppDatePicker from '@/components/controls/AppDatePicker.vue'
 import { freezeCollectionLeave, resetCollectionEnter } from '@/utils/collectionMotion'
 import { pickActiveDate, type SpyHeader } from '@/utils/timelineSpy'
@@ -2421,7 +2420,6 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
 
 /* Mobile-only controls stay out of the desktop hierarchy. */
 .mobile-filter-summary,
-.mobile-compose-action,
 .published-notice { display: none; }
 .timeline-filter-sheet { border-radius: 24px 24px 0 0; padding: 32px 20px max(18px, var(--safe-bottom)); max-height: inherit; overflow-y: auto; }
 .filter-sheet-header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
@@ -2454,6 +2452,7 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
     display: block;
     overflow-x: hidden;
     overflow-y: visible;
+    padding-bottom: var(--mobile-page-action-clearance);
   }
   .timeline-page > .page-header,
   .timeline-page > .toolbar { flex: initial; }
@@ -2521,13 +2520,13 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
     width: 100% !important;
   }
 
-  /* One compact action row: search remains primary, range expands in place. */
+  /* Search and time range share the row; writing stays in thumb reach above Dock. */
   .timeline-page > .page-header { display: none; }
   .desktop-sync-action { display: none; }
   .toolbar { margin-bottom: 14px; padding-top: 0; }
   .toolbar-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) var(--tap-target) var(--tap-target);
+    grid-template-columns: minmax(0, 1fr) var(--tap-target);
     align-items: start;
     gap: 10px;
     padding: 0;
@@ -2540,21 +2539,8 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
   .search-box { height: var(--tap-target); }
   .glass-input { font-size: 16px; }
   .clear-btn { width: 30px; height: 30px; }
-  .mobile-compose-action {
-    grid-column: 2;
-    grid-row: 1;
-    width: var(--tap-target);
-    height: var(--tap-target);
-    display: grid;
-    place-items: center;
-    padding: 0;
-    border: 0;
-    border-radius: 13px;
-    font-size: 20px;
-  }
-  .mobile-compose-action:active { transform: scale(.94); }
   .mobile-filter-summary {
-    grid-column: 3;
+    grid-column: 2;
     grid-row: 1;
     width: var(--tap-target);
     height: var(--tap-target);
@@ -2641,7 +2627,7 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
 }
 
 @media (max-width: 360px) {
-  .toolbar-row { grid-template-columns: minmax(0, 1fr) var(--tap-target) var(--tap-target); gap: 8px; }
+  .toolbar-row { grid-template-columns: minmax(0, 1fr) var(--tap-target); gap: 8px; }
   .memo-card-left { display: none; }
   .memo-card { display: block; }
 }

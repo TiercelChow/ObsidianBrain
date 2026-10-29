@@ -22,7 +22,7 @@
       <el-icon class="ss-icon"><Collection /></el-icon>
       <p>书架还是空的</p>
       <p class="ss-hint">添加文件夹或 PDF，继续上次阅读</p>
-      <el-button data-icon-only type="primary" class="ui-icon-action" aria-label="添加第一本书" title="添加书籍" @click="openAdd"><el-icon><Plus /></el-icon></el-button>
+      <el-button data-icon-only type="primary" class="shelf-empty-add ui-icon-action" aria-label="添加第一本书" title="添加书籍" @click="openAdd"><el-icon><Plus /></el-icon></el-button>
     </div>
     <div v-else-if="!visibleBooks.length" class="shelf-state">
       <p>没有匹配的书籍</p>
@@ -314,6 +314,9 @@ async function confirmRemove(b: ReaderBook) {
 </script>
 
 <style scoped>
+@media (max-width: 768px) {
+  .shelf-empty-add { display: none; }
+}
 .bookshelf {
   min-height: 100%;
   display: flex;

@@ -48,12 +48,12 @@
     <MotionModal v-model="queryPanelOpen" :aria-label="queryPanelMode === 'search' ? '搜索任务' : '筛选任务'">
       <section class="task-query-sheet glass-surface-heavy">
         <header class="filter-sheet-header"><h3>{{ queryPanelMode === 'search' ? '搜索任务' : '筛选任务' }}</h3><button data-icon-only type="button" class="ui-icon-action" aria-label="关闭任务查询" @click="queryPanelOpen = false"><el-icon class="ui-action-icon" aria-hidden="true"><Close /></el-icon></button></header>
-        <div class="task-search glass-surface" data-glass="search" data-glass-rim role="search">
+        <div v-if="queryPanelMode === 'search'" class="task-search glass-surface" data-glass="search" data-glass-rim role="search">
           <el-icon class="task-search-icon"><Search /></el-icon>
           <input ref="mobileSearchInput" v-model="searchQuery" type="search" aria-label="搜索任务" placeholder="搜索任务" />
           <button data-icon-only v-if="searchQuery" type="button" class="task-search-clear" aria-label="清除搜索" @click="searchQuery = ''"><el-icon class="ui-action-icon" :size="16" aria-hidden="true"><Close /></el-icon></button>
         </div>
-        <div class="query-filter-fields">
+        <div v-else class="query-filter-fields">
           <label><span>类型</span><el-select v-model="kindFilter" aria-label="任务类型" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option value="all" label="全部类型" /><el-option value="short" label="短期待办" /><el-option value="long" label="长期任务" /></el-select></label>
           <label><span>状态</span><el-select v-model="statusFilter" aria-label="任务状态" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option value="active" label="未关闭" /><el-option value="all" label="全部状态" /><el-option v-for="option in statusOptions" :key="option.value" :value="option.value" :label="option.label" /></el-select></label>
         </div>
@@ -69,7 +69,19 @@
     </Transition>
 
     <MotionSwap v-if="viewMode === 'tasks'" class="task-workspace-stage" :view-key="isPhone ? (store.selectedTaskId ? 'detail' : 'list') : 'desktop'" :horizontal="isPhone" :direction="store.selectedTaskId ? 1 : -1" contained>
-    <div class="task-workspace" :class="{ 'detail-open': !!store.selectedTaskId, 'list-collapsed': !!detail && listCollapsed }">
+    <template v-if="isPhone">
+      <MobileTaskList v-if="!store.selectedTaskId" :tasks="visibleTasks" :counts="focusCounts" :focus="focusFilter" :today="today" :loading="store.loading" :filtered="hasListFilters" :scroll-top="mobileListScrollTop" :restore-ready="!route.query.task"
+        @focus="focusFilter = $event" @open="openTask" @reset="resetListFilters" @scroll="onMobileListScroll" />
+      <MobileTaskDetail v-else-if="detail && !store.detailLoading" v-model:section="detailSection" :node="detail.root" :tasks="detail.tasks" :entries="activity" :today="today"
+        :progress-percent="detail.progress_percent" :completed-leaves="detail.completed_leaf_count" :effective-leaves="detail.effective_leaf_count"
+        @back="closeMobileDetail" @edit="openEdit" @complete="openCompleteShort" @select="focusTask" @inspect="openActivityDetail" @add-child="openSubtask" @add-progress="openProgress" @scroll="onPanelScroll" />
+      <div v-else class="mobile-detail-pending">
+        <UiAction :icon="ArrowLeft" label="返回任务列表" @click="closeMobileDetail" />
+        <p v-if="store.detailLoading" role="status">正在加载任务…</p>
+        <template v-else><p>任务详情暂未加载</p><button type="button" @click="openTask(store.selectedTaskId)">重新加载</button></template>
+      </div>
+    </template>
+    <div v-else class="task-workspace" :class="{ 'detail-open': !!store.selectedTaskId, 'list-collapsed': !!detail && listCollapsed }">
       <aside class="task-list-panel glass-surface" data-glass="structural">
         <div class="list-controls" :aria-hidden="listCollapsed" :inert="listCollapsed ? true : undefined">
         <div class="panel-heading">
@@ -293,6 +305,7 @@
 
     <TaskCalendar
       v-else
+      :compact="isPhone"
       :anchor="calendarAnchor"
       :selected-date="selectedDate"
       :tasks="store.calendarTasks"
@@ -306,7 +319,7 @@
       @update-expanded="calendarExpandedTaskIds = $event"
     />
 
-    <MotionModal v-model="childDetailOpen" aria-label="子任务详情">
+    <MotionModal v-if="!isPhone" v-model="childDetailOpen" aria-label="子任务详情">
       <MotionSwap :view-key="drawerNode?.id || 'empty'" horizontal>
       <section v-if="drawerNode" :key="drawerNode.id" class="child-task-dialog glass-surface-heavy">
         <header class="child-dialog-header">
@@ -370,17 +383,23 @@
       </MotionSwap>
     </MotionModal>
 
-    <MotionModal v-model="sheetOpen" :aria-label="sheetTitle">
-      <form class="task-sheet glass-surface-heavy" @submit.prevent="submitSheet">
+    <MotionModal v-model="taskSurfaceOpen" :dismissible="!sheetSubmitting" :aria-label="sheetOpen ? sheetTitle : '子任务详情'">
+      <MotionSwap :view-key="sheetOpen ? 'editor-' + sheetMode : drawerNode?.id || 'empty'" horizontal :direction="sheetOpen ? 1 : -1">
+      <MobileTaskDetail v-if="isPhone && !sheetOpen && drawerNode" v-model:section="childSection" :key="drawerNode.id" class="glass-surface-heavy" child :parent-title="drawerParent?.title || detail?.root.title"
+        :node="drawerNode" :tasks="detail?.tasks || []" :entries="drawerActivity" :today="today"
+        @back="backFromChild" @close="closeDrawer" @edit="openEdit" @select="focusTask" @inspect="openActivityDetail" @add-child="openSubtask" @add-progress="openProgress" />
+      <form v-else-if="sheetOpen" class="task-sheet glass-surface-heavy" :class="{ 'child-editor': isPhone && !!drawerNode }" :aria-busy="sheetSubmitting" @submit.prevent="submitSheet">
         <header class="sheet-header">
           <div>
             <h3>{{ sheetTitle }}</h3>
             <p v-if="targetNode" class="sheet-target">{{ sheetMode === 'subtask' ? '父任务' : '应用于' }}：{{ targetNode.title }}</p>
           </div>
-          <button data-icon-only type="button" aria-label="关闭" @click="sheetOpen = false"><el-icon class="ui-action-icon" aria-hidden="true"><Close /></el-icon></button>
+          <button data-icon-only type="button" :aria-label="isPhone && drawerNode ? '返回子任务详情' : '关闭'" :disabled="sheetSubmitting" @click="sheetOpen = false"><el-icon class="ui-action-icon" aria-hidden="true"><ArrowLeft v-if="isPhone && drawerNode" /><Close v-else /></el-icon></button>
         </header>
 
-        <div v-if="sheetMode === 'progress'" class="sheet-body">
+        <p v-if="store.error" class="sheet-error" role="alert">{{ store.error }}</p>
+
+        <div v-if="sheetMode === 'progress'" class="sheet-body" :inert="sheetSubmitting ? true : undefined">
           <label class="field full">
             <span>进展说明</span>
             <textarea v-model="progressForm.note" rows="5" required placeholder="记录发生了什么、下一步是什么…"></textarea>
@@ -398,54 +417,62 @@
           </label>
         </div>
 
-        <div v-else class="sheet-body form-grid">
-          <label v-if="sheetMode === 'create'" class="field full segmented-field">
+        <div v-else class="sheet-body form-grid" :inert="sheetSubmitting ? true : undefined">
+          <div v-if="sheetMode === 'create'" class="field full segmented-field">
             <span>任务类型</span>
-            <span class="kind-segment" data-glass="inset">
-              <button type="button" :class="{ active: form.kind === 'short' }" @click="form.kind = 'short'">短期待办</button>
-              <button type="button" :class="{ active: form.kind === 'long' }" @click="form.kind = 'long'">长期任务</button>
+            <span class="kind-segment" data-glass="inset" role="group" aria-label="任务类型">
+              <button type="button" :class="{ active: form.kind === 'short' }" :aria-pressed="form.kind === 'short'" @click="form.kind = 'short'">短期待办</button>
+              <button type="button" :class="{ active: form.kind === 'long' }" :aria-pressed="form.kind === 'long'" @click="form.kind = 'long'">长期任务</button>
             </span>
-          </label>
+          </div>
           <label class="field full">
             <span>标题</span>
             <input v-model.trim="form.title" maxlength="200" required autofocus placeholder="清晰描述要完成的事" />
           </label>
-          <label class="field full">
+          <button v-if="isPhone && !descriptionExpanded && !form.description" type="button" class="description-toggle" @click="descriptionExpanded = true"><el-icon aria-hidden="true"><Plus /></el-icon>添加描述</button>
+          <label v-if="!isPhone || descriptionExpanded || form.description" class="field full">
             <span>描述</span>
-            <textarea v-model="form.description" rows="4" maxlength="10000" placeholder="补充背景、目标或完成标准…"></textarea>
+            <textarea v-model="form.description" :rows="isPhone ? 3 : 4" maxlength="10000" placeholder="补充背景、目标或完成标准…"></textarea>
           </label>
-          <label class="field">
-            <span>开始日期</span>
-            <AppDatePicker
-              v-model="form.start_date"
-              class="task-date-input"
-              aria-label="开始日期"
-              type="date"
-              format="YYYY/MM/DD"
-              value-format="YYYY-MM-DD"
-              popper-class="glass-picker task-date-popper"
-              placement="bottom-start"
-              :clearable="false"
-            />
-          </label>
-          <label class="field">
-            <span>结束日期</span>
-            <AppDatePicker
-              v-model="form.end_date"
-              class="task-date-input"
-              aria-label="结束日期"
-              type="date"
-              format="YYYY/MM/DD"
-              value-format="YYYY-MM-DD"
-              popper-class="glass-picker task-date-popper"
-              placement="bottom-start"
-              :clearable="false"
-            />
-          </label>
-          <label class="field full">
+          <div class="task-date-fields field full" role="group" aria-label="任务日期">
+            <label class="field">
+              <span>开始日期</span>
+              <AppDatePicker
+                v-model="form.start_date"
+                class="task-date-input"
+                aria-label="开始日期"
+                type="date"
+                format="YYYY/MM/DD"
+                value-format="YYYY-MM-DD"
+                popper-class="glass-picker task-date-popper"
+                placement="bottom-start"
+                :clearable="false"
+              />
+            </label>
+            <label class="field">
+              <span>结束日期</span>
+              <AppDatePicker
+                v-model="form.end_date"
+                class="task-date-input"
+                aria-label="结束日期"
+                type="date"
+                format="YYYY/MM/DD"
+                value-format="YYYY-MM-DD"
+                popper-class="glass-picker task-date-popper"
+                placement="bottom-start"
+                :clearable="false"
+              />
+            </label>
+          </div>
+          <div class="field full">
             <span>重要程度</span>
+            <span v-if="isPhone" class="importance-segment" role="group" aria-label="重要程度">
+              <button v-for="option in importanceOptions" :key="option.value" type="button" :class="{ active: form.importance === option.value }" :aria-pressed="form.importance === option.value" @click="form.importance = option.value">{{ option.label }}</button>
+            </span>
             <el-select
+              v-else
               v-model="form.importance"
+              aria-label="重要程度"
               popper-class="system-select-popper"
               placement="bottom-start"
               :offset="0"
@@ -453,7 +480,7 @@
             >
               <el-option v-for="option in importanceOptions" :key="option.value" :value="option.value" :label="option.label" />
             </el-select>
-          </label>
+          </div>
           <label v-if="sheetMode === 'edit'" class="field full">
             <span>状态</span>
             <el-select
@@ -483,18 +510,19 @@
               <el-option v-for="candidate in moveCandidates" :key="candidate.id" :value="candidate.id" :label="candidate.title" />
             </el-select>
           </label>
-          <label v-if="sheetMode === 'edit' && targetNode?.role === 'root' && isTerminalStatus" class="check-field">
+          <label v-if="sheetMode === 'edit' && targetNode?.kind === 'long' && targetNode.role === 'root' && isTerminalStatus" class="check-field">
             <input v-model="statusForm.cascade" type="checkbox" aria-label="同时关闭所有未完成的子任务" />
             <span>同时关闭所有未完成的子任务</span>
           </label>
         </div>
 
         <footer class="sheet-footer">
-          <button v-if="sheetMode === 'edit' && targetNode?.role === 'root'" type="button" class="archive-from-edit" @click="openArchiveFromEditor">归档任务</button>
-          <button v-else type="button" class="cancel" @click="sheetOpen = false">取消</button>
-          <button type="submit" class="confirm" :disabled="store.saving">{{ store.saving ? '保存中…' : sheetAction }}</button>
+          <button v-if="sheetMode === 'edit' && targetNode?.role === 'root'" type="button" class="archive-from-edit" :disabled="sheetSubmitting" @click="openArchiveFromEditor">归档任务</button>
+          <button v-else type="button" class="cancel" :disabled="sheetSubmitting" @click="sheetOpen = false">取消</button>
+          <button type="submit" class="confirm" :disabled="sheetSubmitting">{{ sheetSubmitting ? '保存中…' : sheetAction }}</button>
         </footer>
       </form>
+      </MotionSwap>
     </MotionModal>
 
     <MotionModal v-model="archiveConfirmOpen" aria-label="归档任务">
@@ -534,7 +562,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ArrowLeft, ArrowRight, Check, Close, EditPen, Filter, FolderChecked, Plus, Search, TopRight } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Calendar, Check, Close, EditPen, Filter, FolderChecked, List, Plus, Search, TopRight } from '@element-plus/icons-vue'
 import TaskStatusMark from '@/components/tasks/TaskStatusMark.vue'
 import { useMediaQuery } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
@@ -546,6 +574,8 @@ import UiAction from '@/components/motion/UiAction'
 import { freezeCollectionLeave, resetCollectionEnter } from '@/utils/collectionMotion'
 import TaskCalendar from '@/components/tasks/TaskCalendar.vue'
 import TaskTree from '@/components/tasks/TaskTree.vue'
+import MobileTaskList from '@/components/tasks/MobileTaskList.vue'
+import MobileTaskDetail from '@/components/tasks/MobileTaskDetail.vue'
 import {
   type TaskFields,
   type TaskImportance,
@@ -578,11 +608,12 @@ const appStore = useAppStore()
 const viewMode = ref<ViewMode>(route.query.view === 'calendar' ? 'calendar' : 'tasks')
 useMobileSubnav(() => ({
   label: '任务视图与查询',
-  items: [...(['tasks', 'calendar'] as const).map(mode => ({
-    id: mode, label: mode === 'tasks' ? '任务' : '日历', active: viewMode.value === mode, select: () => changeView(mode),
-  })),
+  layout: 'icons',
+  items: [
+    { id: 'view', label: viewMode.value === 'tasks' ? '切换到日历视图' : '切换到任务视图', icon: viewMode.value === 'tasks' ? Calendar : List, active: false, select: () => changeView(viewMode.value === 'tasks' ? 'calendar' : 'tasks') },
     { id: 'search', label: '搜索任务', icon: Search, active: !!searchQuery.value || (queryPanelOpen.value && queryPanelMode.value === 'search'), select: () => openQueryPanel('search') },
     { id: 'filter', label: '筛选任务', icon: Filter, active: hasAdvancedFilters.value || (queryPanelOpen.value && queryPanelMode.value === 'filter'), select: () => openQueryPanel('filter') },
+    { id: 'create', label: '新建任务', icon: Plus, active: sheetOpen.value && sheetMode.value === 'create', select: () => openCreate(viewMode.value === 'calendar' ? selectedDate.value : today) },
   ],
 }))
 const searchQuery = ref('')
@@ -593,7 +624,9 @@ const queryPanelOpen = ref(false)
 const queryPanelMode = ref<'search' | 'filter'>('search')
 const mobileSearchInput = ref<HTMLInputElement | null>(null)
 const listCollapsed = ref(false)
+const mobileListScrollTop = ref(0)
 const detailSection = ref<'breakdown' | 'progress'>('breakdown')
+const childSection = ref<'breakdown' | 'progress'>('breakdown')
 const focusOptions: Array<{ value: TaskFocus; label: string }> = [
   { value: 'all', label: '全部' }, { value: 'overdue', label: '逾期' },
   { value: 'today', label: '今日' }, { value: 'blocked', label: '受阻' },
@@ -606,6 +639,18 @@ const drawerNodeId = ref<string | null>(null)
 const detailHeaderRef = ref<HTMLElement | null>(null)
 const activitySectionRef = ref<HTMLElement | null>(null)
 const sheetOpen = ref(false)
+const sheetSubmitting = ref(false)
+const descriptionExpanded = ref(false)
+// Phone child detail and its editor stay in one physical sheet. Closing an
+// editor returns to its node; dismissing the surface closes the entire sheet.
+const taskSurfaceOpen = computed({
+  get: () => sheetOpen.value || (isPhone.value && drawerNodeId.value !== null),
+  set: (open: boolean) => {
+    if (open || sheetSubmitting.value) return
+    sheetOpen.value = false
+    if (isPhone.value) closeDrawer()
+  },
+})
 const archiveConfirmOpen = ref(false)
 const activityDetail = ref<TaskActivityEntry | null>(null)
 const activityDetailOpen = computed({
@@ -768,6 +813,7 @@ function changeView(mode: ViewMode) {
 // Root Dock links and browser navigation can change query without remounting.
 watch(() => route.query.view, view => applyView(view === 'calendar' ? 'calendar' : 'tasks'))
 watch(focusFilter, focus => {
+  mobileListScrollTop.value = 0
   void router.replace({query:{...route.query,focus:focus === 'all' ? undefined : focus}})
   void loadList()
 })
@@ -803,6 +849,8 @@ function resetForm(date = today) {
 }
 
 function openCreate(date = today) {
+  store.clearError()
+  descriptionExpanded.value = false
   sheetMode.value = 'create'
   targetNode.value = null
   resetForm(date)
@@ -823,6 +871,8 @@ function onActivityKeydown(event: KeyboardEvent, item: TaskActivityEntry) {
 }
 
 function openEdit(task: TaskNode) {
+  store.clearError()
+  descriptionExpanded.value = !!task.description
   sheetMode.value = 'edit'
   targetNode.value = task
   form.value = { kind: task.kind, title: task.title, description: task.description, start_date: task.start_date, end_date: task.end_date, importance: task.importance }
@@ -837,6 +887,8 @@ function openCompleteShort(task: TaskNode) {
 }
 
 function openSubtask(parent: TaskNode) {
+  store.clearError()
+  descriptionExpanded.value = false
   sheetMode.value = 'subtask'
   targetNode.value = parent
   form.value = { kind: 'long', title: '', description: '', start_date: parent.start_date, end_date: parent.end_date, importance: parent.importance }
@@ -857,6 +909,7 @@ function focusTask(id: string) {
     closeDrawer()
     return
   }
+  childSection.value = 'breakdown'
   drawerNodeId.value = id
 }
 
@@ -869,6 +922,7 @@ function closeDrawer() {
 }
 
 function backFromChild() {
+  childSection.value = 'breakdown'
   if (drawerParent.value?.role === 'subtask') drawerNodeId.value = drawerParent.value.id
   else closeDrawer()
 }
@@ -879,6 +933,13 @@ function onPanelScroll(event: Event) {
   const el = event.target as HTMLElement
   appStore.handleScroll(el.scrollTop)
 }
+function onMobileListScroll(event: Event) {
+  // An outgoing list can emit scroll while its viewport is being frozen.
+  // Only the active list may replace the user's saved return position.
+  if (store.selectedTaskId || route.query.task) return
+  mobileListScrollTop.value = Math.max(0, (event.target as HTMLElement).scrollTop)
+  onPanelScroll(event)
+}
 
 // Switching to another task in the list must not keep a stale drawer open.
 watch(() => store.selectedDetail?.root.id, () => {
@@ -887,6 +948,7 @@ watch(() => store.selectedDetail?.root.id, () => {
 })
 
 function openProgress(task: TaskNode) {
+  store.clearError()
   sheetMode.value = 'progress'
   targetNode.value = task
   progressForm.value = { note: '', percent: task.status === 'completed' ? 100 : detail.value?.progress_percent || 0, includePercent: false }
@@ -894,8 +956,10 @@ function openProgress(task: TaskNode) {
 }
 
 async function submitSheet() {
+  if (sheetSubmitting.value) return
+  sheetSubmitting.value = true
   try {
-    if (form.value.end_date < form.value.start_date) {
+    if (sheetMode.value !== 'progress' && form.value.end_date < form.value.start_date) {
       ElMessage.warning('结束日期不能早于开始日期')
       return
     }
@@ -921,16 +985,19 @@ async function submitSheet() {
     drawerNodeId.value = writeTarget && writeTarget.role === 'subtask' ? writeTarget.id : null
     await refreshCurrent()
     if (mode === 'progress' && writeTarget?.role === 'root') detailSection.value = 'progress'
+    if (mode === 'progress' && writeTarget?.role === 'subtask') childSection.value = 'progress'
     ElMessage.success(`${sheetAction.value}成功`)
     // Show the user what changed: progress writes reveal the new entry (in the
     // drawer when one is open, otherwise the panel's activity section); other
     // writes reveal the refreshed header when no drawer is open.
-    if (!drawerNodeId.value) {
+    if (!isPhone.value && !drawerNodeId.value) {
       await nextTick()
       await revealDetailEl(mode === 'progress' ? activitySectionRef.value : detailHeaderRef.value)
     }
   } catch {
     // The store exposes the actionable error in the page banner.
+  } finally {
+    sheetSubmitting.value = false
   }
 }
 
@@ -974,6 +1041,7 @@ function descendantIds(id: string, tasks: TaskNode[]) {
 
 let filterTimer: number | undefined
 watch([searchQuery, kindFilter, statusFilter], () => {
+  mobileListScrollTop.value = 0
   focusFilter.value = 'all'
   window.clearTimeout(filterTimer)
   filterTimer = window.setTimeout(() => {
@@ -1023,6 +1091,12 @@ onMounted(async () => {
 .filter-sheet-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
 .filter-sheet-header h3 { flex: 1; margin: 0; font-size: 19px; }
 .task-query-sheet .task-search { min-width: 0; height: 44px; }
+.task-query-sheet .query-sheet-actions { margin-top:20px; }
+.sheet-error { margin:0 20px 10px; padding:10px 12px; border-radius:12px; background:color-mix(in srgb,var(--danger) 10%,transparent); color:var(--danger); font-size:13px; line-height:1.6; overflow-wrap:anywhere; }
+.description-toggle { display:flex; align-items:center; gap:6px; min-height:44px; padding:0; border:0; background:transparent; color:var(--text-muted); font:inherit; font-size:13px; cursor:pointer; }
+.importance-segment { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; }
+.importance-segment button { min-height:44px; padding:6px 4px; border:0; border-radius:12px; background:var(--bg-hover); color:var(--text-muted); font:inherit; font-size:14px; cursor:pointer; }
+.importance-segment button.active { background:var(--accent-light); color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent-border); font-weight:600; }
 .query-filter-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
 .query-filter-fields label { display: flex; flex-direction: column; gap: 8px; min-width: 0; color: var(--text-secondary); font-size: 13px; }
 .query-filter-fields :deep(.el-select) { width: 100%; min-width: 0; }
@@ -1211,16 +1285,21 @@ onMounted(async () => {
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .field { display: grid; min-width: 0; gap: 7px; }
 .field.full { grid-column: 1 / -1; }.field > span:first-child { color: var(--text-muted); font-size: 11px; font-weight: 570; }.field input { height: 44px; padding: 0 11px; }.field textarea { resize: vertical; padding: 10px 11px; line-height: 1.5; }.field input:focus, .field textarea:focus { border-color: color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: var(--focus-ring); }
+.task-date-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.task-date-fields > .field { gap: 8px; }
+.task-date-fields > .field > span:first-child { color:var(--text-secondary); font-size:13px; }
 .field :deep(.el-select), .field :deep(.el-date-editor) { width: 100%; }
 .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 44px; border-radius: 11px !important; }
 /* Allocate the full visible height, not Element Plus' smaller default root.
    Only the wrapper paints glass; the icon and date have separate breathing room. */
 .field :deep(.task-date-input) { width: 100%; min-width: 0; height: 44px; }
-.field :deep(.task-date-input .el-input__wrapper) { width: 100%; height: 100%; box-sizing: border-box; padding: 0 14px; gap: 10px; }
+.field :deep(.task-date-input .el-input__wrapper) { width: 100%; height: 100%; box-sizing: border-box; padding: 0 14px; gap: 10px; border-radius:14px !important; }
 .field :deep(.task-date-input .el-input__prefix) { flex: none; }
 .field :deep(.task-date-input .el-input__prefix-inner > :last-child) { margin-right: 0; }
-.field :deep(.task-date-input .el-input__inner) { min-width: 0; height: 100%; padding: 0; font-variant-numeric: tabular-nums; }
-.field :deep(.task-date-input .mobile-date-trigger) { height: 100%; box-sizing: border-box; padding: 0 14px; gap: 10px; font-size: 16px; }
+.field :deep(.task-date-input .el-input__inner) { min-width: 0; height: 100%; padding: 0; font-size:14px; font-variant-numeric: tabular-nums; }
+/* The phone trigger keeps AppDatePicker's Timeline appearance: 44px, 14px
+   text, 10px edge inset and an 8px icon gap. No task-only second paint layer. */
+.field :deep(.task-date-input .mobile-date-trigger) { height: 100%; }
 .kind-segment { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 13px; }.kind-segment button { height: 38px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .range-field { display: grid; grid-template-columns: 1fr 48px; align-items: center; gap: 12px; }.range-field input { width: 100%; padding: 0; accent-color: var(--accent); }.range-field output { color: var(--accent); font-weight: 650; text-align: right; }.check-field { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--text-muted); font-size: 12px; cursor: pointer; }.check-field input { appearance: none; -webkit-appearance: none; position: relative; width: 20px; height: 20px; flex: none; margin: 0; border: 1px solid color-mix(in srgb, var(--text-muted) 42%, transparent); border-radius: 6px; background: var(--bg-glass); box-shadow: var(--inset-highlight); cursor: pointer; transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease, transform var(--motion-instant) ease, box-shadow var(--motion-fast) ease; }.check-field input::after { content: ''; position: absolute; left: 6px; top: 3px; width: 5px; height: 9px; border: solid white; border-width: 0 2px 2px 0; opacity: 0; transform: rotate(45deg) scale(.65); transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--ease-spring-gentle); }.check-field input:checked { border-color: var(--accent); background: var(--accent); box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 24%, transparent), var(--inset-highlight); }.check-field input:checked::after { opacity: 1; transform: rotate(45deg) scale(1); }.check-field input:focus-visible { outline: 0; box-shadow: var(--focus-ring); }.check-field:active input { transform: scale(.92); }.sheet-hint { margin: 0; color: var(--text-faint); font-size: 11px; }
 .sheet-footer { display: grid; grid-template-columns: 1fr 1.4fr; gap: 9px; padding: 16px 28px 28px; }.sheet-footer button { height: 44px; border-radius: 13px; font-weight: 620; cursor: pointer; }.sheet-footer .cancel { border: 1px solid var(--border-subtle); background: var(--bg-glass); color: var(--text-secondary); }.sheet-footer .archive-from-edit { border: 1px solid color-mix(in srgb, #ff3b30 24%, var(--border-subtle)); background: color-mix(in srgb, #ff3b30 6%, var(--bg-glass)); color: #ff3b30; }.sheet-footer .confirm { border: 0; }.sheet-footer .confirm:disabled { opacity: .55; }
@@ -1305,11 +1384,14 @@ onMounted(async () => {
 
 @media (max-width: 768px) {
   .tasks-page.view-tasks {
-    height: calc(100dvh - var(--mobile-header-height) - var(--mobile-navigation-height) - var(--safe-top) - max(8px, var(--safe-bottom)) - 20px);
+    height:100%; min-height:0;
   }
   .tasks-page.mobile-focused {
-    height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 16px);
+    height:100%; min-height:0;
   }
+  .mobile-detail-pending { display:flex; flex-direction:column; align-items:flex-start; min-height:0; height:100%; }
+  .mobile-detail-pending p { align-self:center; margin:auto; color:var(--text-muted); font-size:14px; }
+  .mobile-detail-pending > button:last-child:not(.ui-action) { min-height:44px; padding:8px 16px; border:0; border-radius:12px; background:var(--bg-hover); color:var(--text-primary); font:inherit; }
   .task-toolbar { display: none; }
   .task-search {
     grid-column: 1 / -1;
@@ -1406,12 +1488,12 @@ onMounted(async () => {
   .child-dialog-header h3 { font-size: 21px; }
   .child-dialog-scroll { padding: 0 20px 18px; }
   .task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }
+  .task-sheet.child-editor { height:min(80dvh,720px); max-height:inherit; }
   .sheet-header { padding: 34px 20px 16px; }
   .sheet-body { padding: 4px 20px 10px; overscroll-behavior: contain; }
   .form-grid { grid-template-columns: 1fr; }
   .field.full { grid-column: auto; }
   .field input, .field textarea, .field :deep(.el-select__wrapper), .field :deep(.el-input__wrapper) { min-height: 48px; font-size: 16px; }
-  .field :deep(.task-date-input) { height: 48px; }
   .sheet-footer { padding: 16px 20px max(20px, var(--safe-bottom)); }
   .sheet-footer button { min-height: 48px; }
 }

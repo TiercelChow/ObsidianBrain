@@ -50,39 +50,44 @@ async function centered(locator, phone, verticalOnly = false) {
   if (phone && !verticalOnly) assert.ok(box.width >= 32 && box.height >= 32)
 }
 async function settledChild(page, dialog, title, expectedLeft) {
-  await dialog.locator('h3').filter({ hasText: title }).waitFor()
-  await page.waitForFunction(() => document.querySelectorAll('.child-task-dialog').length === 1)
-  await dialog.locator('.child-task-title').evaluate(async element => {
+  const phone = await dialog.locator('.mobile-task-detail').count() > 0
+  const shell = phone ? '.mobile-task-detail.is-child' : '.child-task-dialog'
+  await dialog.locator(phone ? 'h2' : 'h3').filter({ hasText: title }).waitFor()
+  await page.waitForFunction(shell => document.querySelectorAll(shell).length === 1, shell)
+  await dialog.locator(phone ? 'h2' : '.child-task-title').evaluate(async element => {
     await Promise.all(element.closest('.motion-swap').getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {})))
   })
-  const geometry = await dialog.locator('.child-task-dialog').evaluate(element => {
-    const box = element.getBoundingClientRect(), heading = element.querySelector('h3').getBoundingClientRect()
+  const geometry = await dialog.locator(shell).evaluate(element => {
+    const box = element.getBoundingClientRect(), heading = element.querySelector('h2, h3').getBoundingClientRect()
     return { left: heading.left - box.left, headingRight: heading.right - box.left, width: box.width,
       leftGap: box.left, rightGap: innerWidth - box.right,
       overflowing: element.scrollWidth > element.clientWidth + 1,
-      scroll: element.querySelector('.child-dialog-scroll').getBoundingClientRect().height }
+      scroll: element.querySelector('.child-dialog-scroll, .mobile-task-detail-scroll').getBoundingClientRect().height }
   })
   assert.ok(!geometry.overflowing && geometry.headingRight < geometry.width && geometry.scroll > 30, JSON.stringify(geometry))
   assert.ok(Math.abs(geometry.leftGap - geometry.rightGap) < 1, 'the content fits and centers within the modal shell')
   if (expectedLeft != null) assert.ok(Math.abs(geometry.left - expectedLeft) <= .75, `nested headings share the same left inset: ${JSON.stringify(geometry)}`)
-  assert.equal(await dialog.locator('footer').count(), 0)
+  assert.equal(await dialog.locator('footer').count(), phone ? 1 : 0)
   assert.equal(await dialog.getByRole('button', { name: '编辑任务', exact: true }).count(), 1)
   await verifyIconGeometry(page, `nested task ${title}`)
   return geometry.left
 }
 async function sectionActions(page, dialog, title) {
+  const phone = await dialog.locator('.mobile-task-detail').count() > 0
   for (const [region, label, targetLabel] of [['子任务', '添加子任务', '父任务'], ['进展与记录', '记录进展', '应用于']]) {
-    const section = dialog.getByRole('region', { name: region, exact: true })
+    if (phone) await dialog.getByRole('tab', { name: region === '子任务' ? /^子任务/ : /^进展/ }).click()
+    const section = phone ? dialog : dialog.getByRole('region', { name: region, exact: true })
     const button = section.getByRole('button', { name: label, exact: true })
     await centered(button, true)
     await button.click()
     const editor = page.getByRole('dialog', { name: label, exact: true })
     await editor.waitFor()
     assert.equal(await editor.locator('.sheet-target').innerText(), `${targetLabel}：${title}`, 'the action targets the current nested task')
-    await editor.getByRole('button', { name: '关闭', exact: true }).click()
+    await editor.getByRole('button', { name: phone ? '返回子任务详情' : '关闭', exact: true }).click()
     await editor.waitFor({ state: 'hidden' })
     assert.ok(await dialog.isVisible(), 'closing the form preserves child task context')
   }
+  if (phone) await dialog.getByRole('tab', { name: /^子任务/ }).click()
 }
 async function calendarShift(page, button) {
   const loaded = page.waitForResponse(response => response.url().endsWith('/v1/tools/call') && response.request().postDataJSON()?.tool === 'get_task_calendar')
@@ -108,10 +113,10 @@ try {
     await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort())
     page = await context.newPage(); const errors = []; page.on('pageerror', error => { errors.push(error.message); runtimeErrors.push(error.stack) })
     await page.goto(origin + '/tasks')
-    await centered(page.locator('.task-card').first(), phone, true)
-    await page.locator('.task-card').first().click()
-    await page.locator('.detail-header h2').waitFor()
-    await page.waitForFunction(() => document.querySelectorAll('.task-detail-zone').length === 1)
+    const row = page.locator(phone ? '.mobile-task-row' : '.task-card').first()
+    await centered(row, phone, true)
+    await row.click()
+    await page.locator(phone ? '.mobile-task-hero h2' : '.detail-header h2').waitFor()
     if (!phone) {
       const expand = page.getByRole('button', { name: '展开任务列表', exact: true })
       if (await expand.isVisible()) { await centered(expand, phone); await expand.click() }
@@ -121,33 +126,35 @@ try {
       // Restore the selected-task layout before testing the two detail columns.
       await collapse.click()
     }
-    const disclosure = page.locator('.disclosure').first()
-    await centered(disclosure, phone)
-    await disclosure.click(); assert.equal(await disclosure.getAttribute('aria-expanded'), 'false')
-    await centered(disclosure, phone)
-    await disclosure.click(); assert.equal(await disclosure.getAttribute('aria-expanded'), 'true')
-    await centered(disclosure, phone)
+    if (!phone) {
+      const disclosure = page.locator('.disclosure').first()
+      await centered(disclosure, phone)
+      await disclosure.click(); assert.equal(await disclosure.getAttribute('aria-expanded'), 'false')
+      await centered(disclosure, phone)
+      await disclosure.click(); assert.equal(await disclosure.getAttribute('aria-expanded'), 'true')
+      await centered(disclosure, phone)
+    }
     await page.screenshot({ path: join(screenshots, `${width}-${theme}-tree.png`) })
-    await page.getByRole('button', { name: '查看子任务：章节安排', exact: true }).click()
+    await page.getByRole('button', { name: phone ? '章节安排，已计划' : '查看子任务：章节安排', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: '子任务详情', exact: true })
     const titleLeft = await settledChild(page, dialog, '章节安排')
     await sectionActions(page, dialog, '章节安排')
     assert.equal(await dialog.locator('.task-status-mark.is-completed svg').count(), 1)
     await page.screenshot({ path: join(screenshots, `${width}-${theme}-child.png`) })
-    await centered(dialog.locator('.child-list button').first(), phone, true)
-    await dialog.locator('.child-list button').first().click()
+    const childRows = () => dialog.locator(phone ? '.mobile-child-row' : '.child-list button')
+    await centered(childRows().first(), phone, true)
+    await childRows().first().click()
     await settledChild(page, dialog, '校对资料', titleLeft)
-    await dialog.locator('.child-list button').first().click()
+    await childRows().first().click()
     await settledChild(page, dialog, longTitle, titleLeft)
-    assert.equal(await dialog.getByRole('region', { name: '子任务', exact: true }).locator('.child-list').count(), 0)
+    assert.equal(await childRows().count(), 0)
     await sectionActions(page, dialog, longTitle)
     await page.screenshot({ path: join(screenshots, `${width}-${theme}-grandchild.png`) })
     const back = dialog.getByRole('button', { name: '返回上一级', exact: true })
     await centered(back, phone); await back.click()
     await settledChild(page, dialog, '校对资料', titleLeft)
     await back.click()
-    await dialog.locator('.child-dialog-header h3').filter({ hasText: '章节安排' }).waitFor()
-    await page.waitForFunction(() => document.querySelectorAll('.child-dialog-header').length === 1)
+    await dialog.locator(phone ? 'h2' : '.child-dialog-header h3').filter({ hasText: '章节安排' }).waitFor()
     await settledChild(page, dialog, '章节安排', titleLeft)
     await dialog.getByRole('button', { name: '已完成的校对', exact: false }).click()
     await settledChild(page, dialog, '已完成的校对', titleLeft)

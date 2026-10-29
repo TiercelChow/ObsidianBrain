@@ -1,11 +1,10 @@
 <template>
-  <section class="task-calendar glass-panel" data-glass="card" aria-label="任务日历">
+  <section class="task-calendar glass-panel" :class="{ 'is-compact': compact }" :data-glass="compact ? 'flat' : 'card'" aria-label="任务日历">
     <header class="calendar-header">
       <div class="calendar-heading">
         <h2>{{ monthTitle(anchor) }}</h2>
-        <span>{{ currentMonthTaskCount }} 项安排</span>
       </div>
-      <div class="calendar-nav" data-glass="group">
+      <div class="calendar-nav" :data-glass="compact ? 'flat' : 'group'">
         <button data-icon-only data-direction-button type="button" aria-label="上个月" @click="requestMonthShift(-1)"><el-icon class="ui-chevron" aria-hidden="true"><ArrowLeft /></el-icon></button>
         <button type="button" class="today-button" @click="$emit('today')">今天</button>
         <button data-icon-only data-direction-button type="button" aria-label="下个月" @click="requestMonthShift(1)"><el-icon class="ui-chevron" aria-hidden="true"><ArrowRight /></el-icon></button>
@@ -52,7 +51,7 @@
                 :class="`importance-${task.importance}`"
               ></i>
             </span>
-            <span v-else class="mobile-count" aria-hidden="true">{{ topLevelEventsFor(day.date).length }}</span>
+            <span v-else class="mobile-count" aria-hidden="true">{{ topLevelEventsFor(day.date).length > 99 ? '99+' : topLevelEventsFor(day.date).length }}</span>
             <span class="day-events">
               <span
                 v-for="task in topLevelEventsFor(day.date).slice(0, 3)"
@@ -74,13 +73,13 @@
         </div>
       </div>
 
-      <aside class="agenda" data-glass="subcard" aria-label="当日日程">
+      <aside class="agenda" :data-glass="compact ? 'flat' : 'subcard'" aria-label="当日日程">
         <div class="agenda-header">
           <div>
             <strong>{{ selectedDateLabel }}</strong>
             <span>{{ selectedRootCount ? `${selectedRootCount} 项任务` : '暂无安排' }}</span>
           </div>
-          <button data-icon-only type="button" class="ui-icon-action" aria-label="新建任务" title="新建任务" @click="$emit('create', selectedDate)"><el-icon class="ui-action-icon" aria-hidden="true"><Plus /></el-icon></button>
+          <button v-if="!compact" data-icon-only type="button" class="ui-icon-action" aria-label="新建任务" title="新建任务" @click="$emit('create', selectedDate)"><el-icon class="ui-action-icon" aria-hidden="true"><Plus /></el-icon></button>
         </div>
         <div class="agenda-body">
           <TransitionGroup name="agenda-item" tag="div" class="agenda-list">
@@ -113,7 +112,8 @@
               <span v-else class="agenda-arrow" aria-hidden="true"><el-icon class="ui-chevron"><ArrowRight /></el-icon></span>
             </article>
           </TransitionGroup>
-          <button v-if="selectedEntries.length === 0" type="button" class="agenda-empty" @click="$emit('create', selectedDate)">
+          <p v-if="compact && selectedEntries.length === 0" class="agenda-empty-copy">点击下方 +，为这一天安排任务。</p>
+          <button v-else-if="selectedEntries.length === 0" type="button" class="agenda-empty" @click="$emit('create', selectedDate)">
             这一天还很空，安排一项任务
           </button>
         </div>
@@ -144,6 +144,7 @@ const props = defineProps<{
   tasks: TaskSummary[]
   loading?: boolean
   expandedTaskIds?: string[]
+  compact?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -158,13 +159,6 @@ const emit = defineEmits<{
 const weekdays = ['一', '二', '三', '四', '五', '六', '日']
 const days = computed(() => buildMonthGrid(props.anchor))
 const topLevelTasks = computed(() => calendarTopLevelTasks(props.tasks))
-const currentMonthTaskCount = computed(() => {
-  const currentDays = days.value.filter(day => day.inCurrentMonth)
-  const first = currentDays[0]?.date
-  const last = currentDays[currentDays.length - 1]?.date
-  if (!first || !last) return 0
-  return topLevelTasks.value.filter(task => task.start_date <= last && task.end_date >= first).length
-})
 const expandedAgendaIds = ref<Set<string>>(new Set(props.expandedTaskIds ?? []))
 const selectedEntries = computed(() => calendarAgendaEntries(props.tasks, props.selectedDate, expandedAgendaIds.value))
 const selectedRootCount = computed(() => selectedEntries.value.filter(entry => entry.depth === 0).length)
@@ -332,8 +326,7 @@ onUnmounted(() => {
 }
 .task-calendar { border-radius: 24px; padding: 20px; overflow: hidden; display: flex; flex-direction: column; height: calc(100dvh - 208px); }
 .calendar-header { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
-.calendar-heading h2 { margin: 0; color: var(--text-primary); font-size: 22px; letter-spacing: var(--tracking-tight); }
-.calendar-heading span { display: block; margin-top: 3px; color: var(--text-faint); font-size: 12px; }
+.calendar-heading h2 { margin: 0; color: var(--text-primary); font-size: 26px; font-weight: 700; line-height: 1.25; letter-spacing: var(--tracking-tight); }
 .calendar-nav { display: flex; align-items: center; gap: 5px; padding: 4px; border: 1px solid var(--border-subtle); border-radius: 999px; }
 .calendar-nav button { min-width: 38px; height: 36px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); cursor: pointer; transition: background var(--motion-fast) ease, transform var(--motion-instant) ease; }
 .calendar-nav button:hover { color: var(--text-primary); background: var(--bg-glass-strong); }
@@ -416,7 +409,7 @@ onUnmounted(() => {
 @media (max-width: 768px) {
   .task-calendar { height: auto; min-height: calc(100dvh - 234px); padding: 12px 10px; border-radius: 20px; }
   .calendar-header { margin-bottom: 10px; }
-  .calendar-heading h2 { font-size: 18px; }
+  .calendar-heading h2 { font-size: 22px; }
   .calendar-nav button { min-width: 44px; height: 44px; }
   .calendar-body { flex-direction: column; gap: 0; }
   .calendar-month { overflow: hidden; touch-action: pan-y; }
@@ -442,6 +435,21 @@ onUnmounted(() => {
   .agenda-header button { min-height: 44px; }
   .agenda-body { overflow-y: visible; overscroll-behavior: auto; }
   .agenda-card { min-height: 64px; }
+  .task-calendar.is-compact { padding:4px 0 12px; border:0; border-radius:0; background:transparent; box-shadow:none; backdrop-filter:none; -webkit-backdrop-filter:none; }
+  .is-compact .calendar-header { margin:0 0 6px; }
+  .is-compact .calendar-nav { padding:0; border:0; background:transparent; box-shadow:none; }
+  .is-compact .calendar-day { aspect-ratio:auto; min-height:52px; }
+  .is-compact .date-badge { top:2px; width:min(40px,calc(100% - 4px)); transform:translateX(-50%); }
+  .is-compact .mobile-count { right:0; bottom:0; min-width:12px; height:12px; padding-inline:2px; font-size:8px; }
+  .is-compact .mobile-dots { right:0; bottom:1px; }
+  .is-compact .agenda { margin-top:16px; padding:0; border-radius:0; background:transparent; box-shadow:none; backdrop-filter:none; }
+  .is-compact .agenda-header { margin-bottom:6px; padding:4px 2px; }
+  .is-compact .agenda-header > div { flex-direction:row; align-items:baseline; gap:8px; }
+  .is-compact .agenda-header strong { font-size:14px; }
+  .is-compact .agenda-header span { font-size:11px; }
+  .is-compact .agenda-card { grid-template-columns:3px minmax(0,1fr) auto 40px; min-height:68px; }
+  .is-compact .agenda-expand { width:40px; min-height:44px; }
+  .agenda-empty-copy { margin:10px 2px; color:var(--text-muted); font-size:13px; line-height:1.7; }
 }
 
 @media (max-width: 360px) {
@@ -449,7 +457,6 @@ onUnmounted(() => {
   .calendar-grid { gap: 0; }
   .calendar-nav { gap: 1px; padding: 2px; }
   .calendar-nav .today-button { padding-inline: 8px; }
-  .calendar-heading span { display: none; }
   .date-badge { width: min(42px, calc(100% - 2px)); }
 }
 

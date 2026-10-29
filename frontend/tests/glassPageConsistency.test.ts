@@ -34,7 +34,6 @@ test('each product page explicitly marks its principal content surfaces', async 
     ['views/Reader.vue', ['pane pane-center']],
     ['views/Timeline.vue', ['memo-card-body glass-surface']],
     ['views/Tasks.vue', ['task-detail-zone glass-surface']],
-    ['components/tasks/TaskCalendar.vue', ['task-calendar glass-panel']],
     ['views/CodeRepo.vue', ['repo-card']],
     ['views/knowledge/KnowledgeBases.vue', ['overview-strip knowledge-surface', 'book-wiki-card knowledge-surface']],
     ['views/knowledge/WikiWorkspace.vue', ['entry-detail knowledge-surface']],
@@ -44,6 +43,9 @@ test('each product page explicitly marks its principal content surfaces', async 
     const template = (await source(file)).split('<script')[0]
     for (const cls of classes) assert.match(template, new RegExp(`class="${cls}"[^>]*data-glass="card"`), `${file}: ${cls}`)
   }
+  const calendar = await source('components/tasks/TaskCalendar.vue')
+  assert.match(calendar, /class="task-calendar glass-panel"[^>]*:data-glass="compact \? 'flat' : 'card'"/)
+  assert.match(calendar, /class="agenda"[^>]*:data-glass="compact \? 'flat' : 'subcard'"/)
 })
 
 test('configuration feed and nested cards have explicit weights without adding background observers', async () => {

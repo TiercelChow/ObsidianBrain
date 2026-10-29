@@ -15,17 +15,40 @@
     :data-settled="effectiveProgress === 0 || effectiveProgress === 100"
     :data-rebound="rebound"
   >
-    <nav v-if="subnav?.items.length" v-glass-lens class="mobile-sub-dock dock-glass" data-glass-rim :aria-label="subnav.label">
-      <template v-for="item in subnav.items" :key="item.id">
-        <router-link v-if="item.to" :to="item.to" class="mobile-sub-dock-item" :class="{ active: item.active }" :aria-current="item.active ? 'page' : undefined" :aria-label="item.label">
-          {{ item.compactLabel || item.label }}
-        </router-link>
-        <button v-else type="button" class="mobile-sub-dock-item" :class="{ active: item.active, 'is-icon': !!item.icon }" :aria-label="item.label" :title="item.label" :aria-pressed="item.active" @click="item.select?.()">
-          <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
-          <template v-else>{{ item.compactLabel || item.label }}</template>
-        </button>
-      </template>
-    </nav>
+    <div
+      v-show="!!presentation"
+      v-glass-lens="'css'"
+      class="mobile-auxiliary-surface dock-glass"
+      data-glass="floating"
+      data-glass-rim
+      :class="{ 'mobile-sub-dock': !!subnav?.items.length, 'icon-layout': displayedSubnav?.layout === 'icons', 'is-page-action': !subnav?.items.length }"
+      :style="auxiliaryStyle"
+      :data-mode="subnav?.items.length ? 'subnav' : 'action'"
+      :data-morphing="morphing"
+    >
+      <nav v-if="displayedSubnav" class="mobile-sub-dock-content" :style="subnavContentStyle" :aria-label="displayedSubnav.label" :aria-hidden="!subnav?.items.length ? 'true' : undefined" :inert="!subnav?.items.length ? true : undefined">
+        <template v-for="item in displayedSubnav.items" :key="item.id">
+          <router-link v-if="item.to" :to="item.to" class="mobile-sub-dock-item" :class="{ active: item.active }" :aria-current="item.active ? 'page' : undefined" :aria-label="item.label">
+            {{ item.compactLabel || item.label }}
+          </router-link>
+          <button v-else type="button" class="mobile-sub-dock-item" :class="{ active: item.active, 'is-icon': !!item.icon }" :aria-label="item.label" :title="item.label" :aria-pressed="item.active" @click="item.select?.()">
+            <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
+            <template v-else>{{ item.compactLabel || item.label }}</template>
+          </button>
+        </template>
+      </nav>
+      <button
+        v-if="displayedAction"
+        type="button"
+        class="mobile-page-action"
+        :style="{ opacity: presentation?.actionOpacity }"
+        :aria-label="displayedAction.label"
+        :title="displayedAction.label"
+        :aria-hidden="!action || subnav?.items.length ? 'true' : undefined"
+        :inert="!action || subnav?.items.length ? true : undefined"
+        @click="action?.select($event)"
+      ><component :is="displayedAction.icon" class="mobile-page-action-glyph" aria-hidden="true" /></button>
+    </div>
 
     <div v-glass-lens class="mobile-dock dock-glass" data-glass-rim>
       <nav id="mobile-main-navigation" class="mobile-dock-links" aria-label="主要导航" :aria-hidden="compact ? 'true' : undefined" :inert="compact ? true : undefined">
@@ -54,16 +77,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onScopeDispose, ref, shallowRef, watch } from 'vue'
 import { Calendar, Files, Finished, House, Notebook } from '@element-plus/icons-vue'
 import type { MobileNavSection } from '@/utils/mobileNavigationPolicy'
 import type { MobileSubnav } from '@/composables/useMobileSubnav'
+import type { MobilePageAction } from '@/composables/useMobilePageAction'
+import { useDockAuxiliaryMotion } from '@/composables/useDockAuxiliaryMotion'
+import { auxiliaryDockLayout } from '@/utils/dockAuxiliaryMotion'
 import { dockGeometry, dockRebound } from '@/utils/mobileDockMotion'
 
 const props = defineProps<{
   progress: number
   section: MobileNavSection
   subnav: MobileSubnav | null
+  action: MobilePageAction | null
 }>()
 const emit = defineEmits<{ expand: [] }>()
 // Single-layer navigation always retains all five destinations, even during
@@ -75,6 +102,31 @@ const compact = computed(() => geometry.value.sink > .12)
 const orbIcon = computed(() => ({ home: House, reader: Files, timeline: Calendar, tasks: Finished, wiki: Notebook })[props.section])
 const dockRef = ref<HTMLElement | null>(null)
 const width = ref(Math.max(0, window.innerWidth - 16))
+const actionInset = ref(8)
+const actionSize = ref(56), actionGap = ref(12)
+const barLayout = computed(() => auxiliaryDockLayout(width.value, 'subnav', effectiveProgress.value))
+const { presentation, moving: morphing } = useDockAuxiliaryMotion(() => {
+  if (props.subnav?.items.length) return { mode: 'subnav', frame: barLayout.value }
+  if (props.action) return { mode: 'action', frame: auxiliaryDockLayout(width.value, 'action', 0, { actionInset: actionInset.value, actionSize: actionSize.value, actionGap: actionGap.value }) }
+  return null
+})
+const displayedSubnav = shallowRef<MobileSubnav | null>(null)
+const displayedAction = shallowRef<MobilePageAction | null>(null)
+watch([() => props.subnav, () => props.action, morphing], ([subnav, action, moving]) => {
+  if (subnav?.items.length) displayedSubnav.value = subnav
+  else if (!moving && presentation.value?.barOpacity === 0) displayedSubnav.value = null
+  if (action) displayedAction.value = action
+  else if (!moving && presentation.value?.actionOpacity === 0) displayedAction.value = null
+}, { immediate: true, flush: 'post' })
+const auxiliaryStyle = computed(() => presentation.value ? {
+  left: `${presentation.value.x}px`, width: `${presentation.value.width}px`, height: `${presentation.value.height}px`,
+  transform: `translate3d(0, ${presentation.value.y}px, 0)`,
+} : undefined)
+const subnavContentStyle = computed(() => ({
+  width: `${barLayout.value.width - 2}px`, height: `${barLayout.value.height - 2}px`,
+  opacity: presentation.value?.barOpacity ?? 0,
+  padding: `${2 + 2 * geometry.value.sink}px`,
+}))
 let observer: ResizeObserver | undefined
 let returnKeyboardFocus = false
 function expand(event: MouseEvent) {
@@ -92,7 +144,14 @@ watch(() => props.progress, async (value) => {
 })
 onMounted(() => {
   observer = new ResizeObserver(([entry]) => {
-    if (entry) width.value = entry.contentRect.width
+    if (entry) {
+      width.value = entry.contentRect.width
+      const edge = dockRef.value?.getBoundingClientRect().right ?? window.innerWidth - 8
+      actionInset.value = Math.max(0, 16 - (window.innerWidth - edge))
+      const tokens = getComputedStyle(document.documentElement)
+      actionSize.value = parseFloat(tokens.getPropertyValue('--mobile-page-action-size')) || 56
+      actionGap.value = parseFloat(tokens.getPropertyValue('--mobile-page-action-gap')) || 12
+    }
   })
   if (dockRef.value) observer.observe(dockRef.value)
 })
@@ -187,18 +246,43 @@ onScopeDispose(() => observer?.disconnect())
 .is-compact .mobile-dock-orb { pointer-events: auto; }
 .mobile-dock-orb .el-icon { font-size: 24px; }
 .dock-orb-hint { position: absolute; bottom: 7px; width: 12px; height: 2px; border-radius: 2px; background: currentColor; opacity: .45; }
-.mobile-sub-dock {
+.mobile-auxiliary-surface {
   position: absolute;
   bottom: 0;
-  left: calc(12px * (1 - var(--dock-travel-x)));
-  right: calc(12px + (var(--dock-orb-size) + var(--dock-gap) - 12px) * var(--dock-travel-x));
-  height: calc(var(--mobile-sub-dock-height) + (var(--mobile-dock-height) - var(--mobile-sub-dock-height)) * var(--dock-settle-progress));
+  overflow: hidden;
+  pointer-events: none;
+}
+.mobile-sub-dock-content {
+  position: absolute;
+  left: 0;
+  top: 0;
   display: flex;
-  padding: calc(2px + 2px * var(--dock-settle-progress));
-  /* A continuous clearing arc follows the retracting capsule; hit areas don't scale. */
-  transform: translate3d(0, calc(-1 * (var(--mobile-dock-height) + var(--dock-gap)) + (var(--mobile-dock-height) + var(--mobile-sub-dock-height) + 2 * var(--dock-gap)) / 2 * var(--dock-travel-y) + (var(--mobile-dock-height) - var(--mobile-sub-dock-height)) / 2 * var(--dock-settle-progress) - 4px * var(--dock-rebound)), 0);
   pointer-events: auto;
 }
+.mobile-sub-dock-content[inert] { pointer-events: none; }
+.mobile-page-action {
+  position: absolute;
+  right: -1px;
+  top: calc((100% - var(--mobile-page-action-size)) / 2);
+  width: var(--mobile-page-action-size);
+  height: var(--mobile-page-action-size);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--motion-normal) var(--ease-spring-gentle);
+}
+.mobile-page-action[inert] { pointer-events: none; }
+.mobile-page-action-glyph { width: 25px; height: 25px; }
+.mobile-page-action:active { transform: scale(.94); transition-duration: 70ms; }
+.mobile-page-action:focus-visible { outline: 2px solid var(--accent); outline-offset: -5px; }
+html.motion-overlay-open .mobile-auxiliary-surface.is-page-action { visibility: hidden; }
 .mobile-sub-dock-item {
   flex: 1 1 0;
   min-width: 0;
@@ -220,6 +304,7 @@ onScopeDispose(() => observer?.disconnect())
 }
 .mobile-sub-dock-item.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .mobile-sub-dock-item.is-icon { flex: 0 0 44px; }
+.mobile-sub-dock.icon-layout .mobile-sub-dock-item { flex: 1 1 0; min-width: 44px; }
 .mobile-sub-dock-item .el-icon { font-size: 21px; }
 .mobile-sub-dock-item:active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 @media (prefers-reduced-transparency: reduce) {
@@ -232,5 +317,6 @@ onScopeDispose(() => observer?.disconnect())
 @media (prefers-reduced-motion: reduce) {
   .mobile-navigation { --dock-rebound: 0 !important; }
   .mobile-dock-item, .mobile-dock-orb, .mobile-sub-dock-item { transition: none; }
+  .mobile-page-action, .mobile-page-action:active { transform: none; transition: none; }
 }
 </style>

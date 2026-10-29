@@ -16,7 +16,7 @@ test('nested task headings have a stable full-width row, independent of the pare
 
 test('subtask and progress creation live beside their own section headings, including an empty child list', async () => {
   const tasks = await source('views/Tasks.vue')
-  const dialog = tasks.slice(tasks.indexOf('class="child-task-dialog'), tasks.indexOf('<MotionModal v-model="sheetOpen"'))
+  const dialog = tasks.slice(tasks.indexOf('class="child-task-dialog'), tasks.indexOf('<MotionModal v-model="taskSurfaceOpen"'))
   assert.doesNotMatch(dialog, /<footer|<section v-if="drawerChildren.length"/)
   for (const [section, label, action] of [['子任务', '添加子任务', 'openSubtask'], ['进展与记录', '记录进展', 'openProgress']]) {
     const content = dialog.match(new RegExp(`<section class="child-section" aria-label="${section}">([\\s\\S]*?)</section>`))?.[1] || ''

@@ -31,7 +31,7 @@ test('floating controls, content cards and overlays share semantic optics while 
 test('rim highlights stay pointer-transparent and filter-free beside the independent optical layer', async () => {
   const [css, dock] = await Promise.all([source('styles/materials.css'), source('components/MobileDock.vue')])
   assert.match(dock, /class="mobile-dock dock-glass"\s+data-glass-rim/)
-  assert.match(dock, /class="mobile-sub-dock dock-glass"\s+data-glass-rim/)
+  assert.match(dock, /class="mobile-auxiliary-surface dock-glass"\s+data-glass="floating"\s+data-glass-rim/)
   const rim = css.match(/\[data-glass-rim\]::before\s*\{([^}]+)\}/)?.[1] || ''
   assert.match(rim, /pointer-events:\s*none/)
   assert.match(rim, /border-radius:\s*inherit/)

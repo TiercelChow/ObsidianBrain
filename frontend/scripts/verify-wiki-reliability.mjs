@@ -484,10 +484,18 @@ try {
         assert.equal(await page.locator('#settings-protection, .protection-actions').count(), 0, 'retired data protection controls are absent')
         await page.goto(`${origin}/timeline`)
         await page.locator('.timeline-page').waitFor()
-        if (phone) await neutralAction(page.locator('.mobile-compose-action'))
+        if (phone) {
+          const action = page.getByRole('button', { name: '写小记', exact: true })
+          assert.equal(await action.evaluate(element => element.closest('.mobile-auxiliary-surface')?.getAttribute('data-glass')), 'floating')
+          assert.notEqual(await action.evaluate(element => getComputedStyle(element.closest('.mobile-auxiliary-surface').querySelector('.glass-optics')).backdropFilter), 'none')
+        }
         await page.goto(`${origin}/reader`)
         await page.locator('.reader-page').waitFor()
-        if (phone) await neutralAction(page.locator('.reader-shelf-add'))
+        if (phone) {
+          const action = page.getByRole('button', { name: '添加书籍', exact: true })
+          assert.equal(await action.evaluate(element => element.closest('.mobile-auxiliary-surface')?.getAttribute('data-glass')), 'floating')
+          assert.notEqual(await action.evaluate(element => getComputedStyle(element.closest('.mobile-auxiliary-surface').querySelector('.glass-optics')).backdropFilter), 'none')
+        }
         await page.goto(`${origin}/knowledge/chat`)
         await page.locator('.chat-composer').waitFor()
         await page.mouse.move(1, 1)
