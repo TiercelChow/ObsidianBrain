@@ -6,6 +6,7 @@ pub mod knowledge_backup;
 pub mod knowledge_chat;
 pub mod knowledge_export;
 pub mod knowledge_skill;
+pub mod offline;
 pub mod reader_file;
 #[cfg(test)]
 mod timeline_tests;

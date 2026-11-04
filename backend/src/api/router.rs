@@ -70,10 +70,14 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
             get(download_book_wiki_export),
         )
         .route("/knowledge/skills/import", post(upload_wiki_skill_archive))
-        .with_state(ctx);
+        .with_state(ctx.clone());
 
     // Compose the main router with middleware.
     let app = Router::new()
+        .nest(
+            "/v1/offline",
+            crate::api::handlers::offline::router(ctx.clone()),
+        )
         .nest("/v1", api_routes)
         .layer(cors)
         .layer(TraceLayer::new_for_http());

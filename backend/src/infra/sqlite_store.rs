@@ -1172,6 +1172,9 @@ impl SqliteStore {
         let restoration = (|| {
             self.replace_database_from_path(source_path)?;
             self.run_migrations()?;
+            // A restored database is a new synchronization generation even when
+            // it carries the same dataset UUID as an older phone snapshot.
+            self.set_state("offline_generation", &uuid::Uuid::new_v4().to_string())?;
             let report = Self::validate_database_file(&self.db_path)?;
             if !report.integrity_ok || report.foreign_key_violations > 0 {
                 return Err(BrainError::Internal(format!(
