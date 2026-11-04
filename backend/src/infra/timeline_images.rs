@@ -139,9 +139,21 @@ impl TimelineImages {
     }
 
     pub async fn thumbnail(&self, path: &str) -> Result<(Vec<u8>, String), BrainError> {
+        self.thumbnail_with_fallback(path, true).await
+    }
+
+    pub async fn offline_thumbnail(&self, path: &str) -> Result<(Vec<u8>, String), BrainError> {
+        self.thumbnail_with_fallback(path, false).await
+    }
+
+    async fn thumbnail_with_fallback(
+        &self,
+        path: &str,
+        allow_original: bool,
+    ) -> Result<(Vec<u8>, String), BrainError> {
         let _guard = self.mutation.lock().await;
         let (file, mime) = self.asset(path)?;
-        match self.cache_get(path).await {
+        match self.cache_get(path, allow_original).await {
             Ok(Some(bytes)) => return Ok((bytes, "image/jpeg".into())),
             Ok(None) => {}
             Err(error) => tracing::warn!(%error, "缓存不可用，从原图生成缩略图"),
@@ -162,15 +174,20 @@ impl TimelineImages {
         .map_err(|e| BrainError::Internal(e.to_string()))?;
         match generated {
             Ok(bytes) => {
-                if let Err(error) = self.cache_put(path, &bytes).await {
-                    tracing::warn!(%error, "缩略图缓存写入失败，仍返回图片");
+                // Offline export already has a frozen cache; do not mutate the
+                // desktop cache counters and invalidate the just-exported home view.
+                if allow_original {
+                    if let Err(error) = self.cache_put(path, &bytes).await {
+                        tracing::warn!(%error, "缩略图缓存写入失败，仍返回图片");
+                    }
                 }
                 Ok((bytes, "image/jpeg".into()))
             }
-            Err(error) => {
+            Err(error) if allow_original => {
                 tracing::warn!(%error, "缩略图生成失败，返回原图");
                 Ok((tokio::fs::read(self.asset(path)?.0).await?, mime))
             }
+            Err(error) => Err(error),
         }
     }
 
@@ -180,7 +197,7 @@ impl TimelineImages {
             .join(hex::encode(Sha256::digest(key.as_bytes())))
     }
 
-    async fn cache_get(&self, key: &str) -> Result<Option<Vec<u8>>, BrainError> {
+    async fn cache_get(&self, key: &str, touch: bool) -> Result<Option<Vec<u8>>, BrainError> {
         let _guard = self.cache_lock.lock().await;
         let file = self.cache_file(key);
         let expected = self.db.with_connection(|conn| {
@@ -200,6 +217,9 @@ impl TimelineImages {
                     || m.len() > self.budget.load(Ordering::Relaxed)
             })
         {
+            if !touch {
+                return Ok(None);
+            }
             if metadata.is_some() {
                 remove_if_present(&file).await?;
             }
@@ -211,17 +231,21 @@ impl TimelineImages {
         }
         match tokio::fs::read(file).await {
             Ok(bytes) => {
-                self.db.with_connection(|conn| {
-                    conn.execute("UPDATE timeline_image_cache SET last_used=(SELECT COALESCE(MAX(last_used),0)+1 FROM timeline_image_cache) WHERE key=?1", [key])?;
-                    Ok(())
-                })?;
+                if touch {
+                    self.db.with_connection(|conn| {
+                        conn.execute("UPDATE timeline_image_cache SET last_used=(SELECT COALESCE(MAX(last_used),0)+1 FROM timeline_image_cache) WHERE key=?1", [key])?;
+                        Ok(())
+                    })?;
+                }
                 Ok(Some(bytes))
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                self.db.with_connection(|conn| {
-                    conn.execute("DELETE FROM timeline_image_cache WHERE key=?1", [key])?;
-                    Ok(())
-                })?;
+                if touch {
+                    self.db.with_connection(|conn| {
+                        conn.execute("DELETE FROM timeline_image_cache WHERE key=?1", [key])?;
+                        Ok(())
+                    })?;
+                }
                 Ok(None)
             }
             Err(e) => Err(e.into()),
@@ -650,12 +674,12 @@ mod tests {
         let (store, _dir) = store(8);
         store.cache_put("a", b"1234").await.unwrap();
         store.cache_put("b", b"5678").await.unwrap();
-        assert!(store.cache_get("a").await.unwrap().is_some());
+        assert!(store.cache_get("a", true).await.unwrap().is_some());
         store.cache_put("c", b"abcd").await.unwrap();
-        assert!(store.cache_get("b").await.unwrap().is_none());
-        assert!(store.cache_get("a").await.unwrap().is_some());
+        assert!(store.cache_get("b", true).await.unwrap().is_none());
+        assert!(store.cache_get("a", true).await.unwrap().is_some());
         store.cache_put("oversize", b"123456789").await.unwrap();
-        assert!(store.cache_get("oversize").await.unwrap().is_none());
+        assert!(store.cache_get("oversize", true).await.unwrap().is_none());
         let path = store.upload(&png()).await.unwrap();
         store.thumbnail(&path).await.unwrap();
         assert_eq!(store.original(&path).await.unwrap().0, png());
@@ -735,11 +759,11 @@ mod tests {
     async fn test_cache_rejects_unregistered_and_oversized_files() {
         let (store, _dir) = store(8);
         std::fs::write(store.cache_file("orphan"), b"1234").unwrap();
-        assert!(store.cache_get("orphan").await.unwrap().is_none());
+        assert!(store.cache_get("orphan", true).await.unwrap().is_none());
         assert!(!store.cache_file("orphan").exists());
         store.cache_put("changed", b"1234").await.unwrap();
         std::fs::write(store.cache_file("changed"), b"123456789").unwrap();
-        assert!(store.cache_get("changed").await.unwrap().is_none());
+        assert!(store.cache_get("changed", true).await.unwrap().is_none());
         assert_eq!(store.stats().await.unwrap().cache_bytes, 0);
     }
 

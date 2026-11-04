@@ -11,6 +11,7 @@ use crate::{
         book_wiki_store::BookWikiStore, deepseek_harness::DeepSeekHarnessRuntime,
         sqlite_store::SqliteStore, task_index_store::SqliteTaskIndexStore,
     },
+    models::book_wiki::ReaderBook,
     AppContext,
 };
 use axum::{
@@ -27,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io::{Read, Write},
     path::{Path as FsPath, PathBuf},
     sync::{Arc, Mutex},
@@ -86,6 +87,9 @@ struct Snapshot {
     coverage: Vec<OfflineCoverage>,
     created_at: String,
     expires: SystemTime,
+    mode: &'static str,
+    versions: BTreeMap<String, String>,
+    unchanged_scopes: Vec<String>,
 }
 #[derive(Clone, Serialize)]
 struct OfflineResource {
@@ -105,7 +109,42 @@ struct FrozenResource {
     meta: OfflineResource,
     file: NamedTempFile,
     expires: SystemTime,
+    source_stamp: Option<SourceStamp>,
+    thumbnail_only: bool,
 }
+
+#[derive(PartialEq, Eq)]
+struct SourceStamp {
+    path: PathBuf,
+    device: u64,
+    inode: u64,
+    length: u64,
+    modified: (i64, i64),
+    changed: (i64, i64),
+}
+
+fn source_stamp(path: &FsPath) -> Option<SourceStamp> {
+    metadata_stamp(path, &std::fs::metadata(path).ok()?)
+}
+
+#[cfg(unix)]
+fn metadata_stamp(path: &FsPath, metadata: &std::fs::Metadata) -> Option<SourceStamp> {
+    use std::os::unix::fs::MetadataExt;
+    metadata.is_file().then(|| SourceStamp {
+        path: path.into(),
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        length: metadata.len(),
+        modified: (metadata.mtime(), metadata.mtime_nsec()),
+        changed: (metadata.ctime(), metadata.ctime_nsec()),
+    })
+}
+
+#[cfg(not(unix))]
+fn metadata_stamp(_path: &FsPath, _metadata: &std::fs::Metadata) -> Option<SourceStamp> {
+    None
+}
+
 #[derive(Clone, Serialize)]
 struct OfflineCoverage {
     scope: String,
@@ -119,6 +158,27 @@ struct SnapshotOptions {
     book_ids: Vec<String>,
     #[serde(default)]
     include_resources: bool,
+    #[serde(default)]
+    profile: SnapshotProfile,
+    #[serde(default)]
+    known_versions: BTreeMap<String, String>,
+    #[serde(default)]
+    reader_files: Vec<ReaderFile>,
+}
+
+#[derive(Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum SnapshotProfile {
+    #[default]
+    Legacy,
+    Mobile,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReaderFile {
+    book_id: String,
+    path: PathBuf,
 }
 #[derive(Deserialize, Default)]
 struct PageQuery {
@@ -200,6 +260,7 @@ fn identity_for(db: &SqliteStore) -> Result<OfflineIdentity, BrainError> {
             "resource_manifest".into(),
             "full_replacement".into(),
             "chunked_records".into(),
+            "mobile_incremental".into(),
         ],
     })
 }
@@ -282,6 +343,13 @@ struct ExportBuilder {
     records: Vec<PathBuf>,
     coverage: BTreeMap<String, OfflineCoverage>,
     bytes: usize,
+    group: Option<PendingGroup>,
+}
+
+#[derive(Default)]
+struct PendingGroup {
+    records: Vec<Vec<u8>>,
+    bytes: usize,
 }
 impl ExportBuilder {
     fn error(&mut self, scope: &str, message: impl ToString) {
@@ -324,19 +392,35 @@ impl ExportBuilder {
             };
             let bytes =
                 serde_json::to_vec(&value).map_err(|e| BrainError::Internal(e.to_string()))?;
-            if self.bytes + bytes.len() > MAX_TEXT_BYTES || self.records.len() >= MAX_OBJECTS {
+            let (pending_count, pending_bytes) = self
+                .group
+                .as_ref()
+                .map_or((0, 0), |group| (group.records.len(), group.bytes));
+            if self.bytes + pending_bytes + bytes.len() > MAX_TEXT_BYTES
+                || self.records.len() + pending_count >= MAX_OBJECTS
+            {
                 return Err(BrainError::Internal(
                     "离线文本导出超过容量上限，请缩小范围".into(),
                 ));
             }
-            let path = self
-                .root
-                .path()
-                .join(format!("record-{}.json", self.records.len()));
-            std::fs::write(&path, &bytes)?;
-            self.bytes += bytes.len();
-            self.records.push(path);
+            if let Some(group) = &mut self.group {
+                group.bytes += bytes.len();
+                group.records.push(bytes);
+            } else {
+                self.persist_record(&bytes)?;
+            }
         }
+        Ok(())
+    }
+
+    fn persist_record(&mut self, bytes: &[u8]) -> Result<(), BrainError> {
+        let path = self
+            .root
+            .path()
+            .join(format!("record-{}.json", self.records.len()));
+        std::fs::write(&path, bytes)?;
+        self.bytes += bytes.len();
+        self.records.push(path);
         Ok(())
     }
     async fn call(&mut self, scope: &str, tool: &str, args: Value) -> Option<Value> {
@@ -547,8 +631,21 @@ async fn create_snapshot(
         .build
         .try_acquire()
         .map_err(|_| failure(StatusCode::TOO_MANY_REQUESTS, "已有离线导出正在准备"))?;
-    if options.book_ids.len() > 100 {
-        return Err(failure(StatusCode::BAD_REQUEST, "一次最多选择100本文集"));
+    let mobile = options.profile == SnapshotProfile::Mobile;
+    let reader_pack = !options.book_ids.is_empty() || !options.reader_files.is_empty();
+    if options.book_ids.len() + options.reader_files.len() > 100 {
+        return Err(failure(
+            StatusCode::BAD_REQUEST,
+            "一次最多选择100项阅读内容",
+        ));
+    }
+    if (!mobile && !options.reader_files.is_empty())
+        || (mobile && options.include_resources != reader_pack)
+    {
+        return Err(failure(
+            StatusCode::BAD_REQUEST,
+            "离线保存范围与资源选项不一致",
+        ));
     }
     let original = ctx.clone();
     let export_root = exports.root.clone();
@@ -569,20 +666,45 @@ async fn create_snapshot(
         records: vec![],
         coverage: BTreeMap::new(),
         bytes: 0,
+        group: None,
     };
-    export_text(&mut builder).await.map_err(internal)?;
     let mut resources = Vec::new();
-    export_reader(
-        &mut builder,
-        &original,
-        &exports,
-        &options.book_ids,
-        &mut resources,
-    )
-    .await;
-    if options.include_resources && options.book_ids.is_empty() {
-        export_attachments(&mut builder, &original, &exports, &mut resources).await;
-    }
+    let mut versions = BTreeMap::new();
+    let mut unchanged_scopes = Vec::new();
+    let mode = if mobile && reader_pack {
+        export_mobile_reader(
+            &mut builder,
+            &original,
+            &exports,
+            &options,
+            &mut resources,
+            &mut versions,
+            &mut unchanged_scopes,
+        )
+        .await
+        .map_err(internal)?;
+        "mobile_reader"
+    } else if mobile {
+        export_mobile(
+            &mut builder,
+            &original,
+            &exports,
+            &options,
+            &mut resources,
+            &mut versions,
+            &mut unchanged_scopes,
+        )
+        .await
+        .map_err(internal)?;
+        "mobile_incremental"
+    } else {
+        export_text(&mut builder).await.map_err(internal)?;
+        export_reader(&mut builder, &original, &exports, &options, &mut resources).await;
+        if options.include_resources && options.book_ids.is_empty() {
+            export_attachments(&mut builder, &original, &exports, &mut resources).await;
+        }
+        "full_replacement"
+    };
     // A restore during export invalidates the generation, never publish mixed identity.
     if identity != identity_for(&original.db).map_err(internal)? {
         return Err(failure(
@@ -601,6 +723,9 @@ async fn create_snapshot(
         resources,
         created_at: created_at.clone(),
         expires,
+        mode,
+        versions,
+        unchanged_scopes,
     });
     let response = snapshot_summary(&id, &snapshot);
     let mut store = exports.snapshots.lock().map_err(internal)?;
@@ -615,7 +740,7 @@ async fn create_snapshot(
     Ok(Json(response))
 }
 fn snapshot_summary(id: &str, snapshot: &Snapshot) -> Value {
-    json!({"snapshot_id":id,"identity":snapshot.identity,"created_at":snapshot.created_at,"expires_at":chrono::DateTime::<Utc>::from(snapshot.expires).to_rfc3339(),"record_count":snapshot.records.len(),"resource_count":snapshot.resources.len(),"coverage":snapshot.coverage,"mode":"full_replacement"})
+    json!({"snapshot_id":id,"identity":snapshot.identity,"created_at":snapshot.created_at,"expires_at":chrono::DateTime::<Utc>::from(snapshot.expires).to_rfc3339(),"record_count":snapshot.records.len(),"resource_count":snapshot.resources.len(),"coverage":snapshot.coverage,"mode":snapshot.mode,"versions":snapshot.versions,"unchanged_scopes":snapshot.unchanged_scopes})
 }
 fn find_snapshot(exports: &Exports, id: &str) -> OfflineResult<Arc<Snapshot>> {
     let mut store = exports.snapshots.lock().map_err(internal)?;
@@ -677,7 +802,10 @@ async fn snapshot_resources(
     ))
 }
 
-async fn export_text(builder: &mut ExportBuilder) -> Result<(), BrainError> {
+async fn export_home_and_shelf(
+    builder: &mut ExportBuilder,
+    mobile: bool,
+) -> Result<(), BrainError> {
     builder.call("reader", "get_reader_books", json!({})).await;
     builder
         .call("reader", "get_reader_history", json!({}))
@@ -688,6 +816,10 @@ async fn export_text(builder: &mut ExportBuilder) -> Result<(), BrainError> {
         Ok(home) => {
             let mut result =
                 serde_json::to_value(home).map_err(|e| BrainError::Internal(e.to_string()))?;
+            if mobile {
+                // Exclude wall-clock jitter while still updating on a new local day.
+                result["generated_at"] = json!(format!("{today}T00:00:00Z"));
+            }
             result["system"] = json!({"version":env!("CARGO_PKG_VERSION"),"uptime_seconds":0,"components":{"server":"snapshot","sqlite":"snapshot"}});
             builder.record(
                 "home",
@@ -698,18 +830,32 @@ async fn export_text(builder: &mut ExportBuilder) -> Result<(), BrainError> {
         }
         Err(error) => builder.error("home", error),
     }
+    Ok(())
+}
+
+fn export_memos(builder: &mut ExportBuilder) -> Result<BTreeSet<String>, BrainError> {
+    let mut images = BTreeSet::new();
     let memo_ids = builder.ids("SELECT id FROM memos ORDER BY timestamp DESC,id")?;
     for id in memo_ids {
         match builder.ctx.memo_manager.get_memo(&id) {
-            Ok(memo) => builder.record(
-                "timeline",
-                "get_memo",
-                json!({"memo_id":id}),
-                serde_json::to_value(memo).map_err(|e| BrainError::Internal(e.to_string()))?,
-            )?,
+            Ok(memo) => {
+                images.extend(memo.images.iter().cloned());
+                builder.record(
+                    "timeline",
+                    "get_memo",
+                    json!({"memo_id":id}),
+                    serde_json::to_value(memo).map_err(|e| BrainError::Internal(e.to_string()))?,
+                )?;
+            }
             Err(error) => builder.error("timeline", error),
         }
     }
+    Ok(images)
+}
+
+async fn export_text(builder: &mut ExportBuilder) -> Result<(), BrainError> {
+    export_home_and_shelf(builder, false).await?;
+    export_memos(builder)?;
     let mut offset = 0;
     loop {
         let result = builder
@@ -729,29 +875,7 @@ async fn export_text(builder: &mut ExportBuilder) -> Result<(), BrainError> {
             break;
         }
     }
-    let ids = builder.ids("SELECT id FROM task_nodes WHERE role='root' ORDER BY id")?;
-    for id in ids {
-        builder
-            .call("tasks", "get_task", json!({"task_id":id}))
-            .await;
-    }
-    let mut cursor: Option<String> = None;
-    loop {
-        let mut args = json!({"limit":100,"include_archived":true,"include_subtasks":true});
-        if let Some(ref value) = cursor {
-            args["cursor"] = json!(value);
-        }
-        let result = builder.call("tasks", "list_tasks", args).await;
-        let next = result.and_then(|r| r["next_cursor"].as_str().map(str::to_owned));
-        if next.is_none() || next == cursor {
-            break;
-        }
-        cursor = next;
-        if builder.records.len() >= MAX_OBJECTS {
-            builder.error("tasks", "任务分页超过上限");
-            break;
-        }
-    }
+    export_tasks(builder).await?;
     builder
         .call("wiki", "list_book_knowledge_bases", json!({}))
         .await;
@@ -886,11 +1010,190 @@ async fn export_text(builder: &mut ExportBuilder) -> Result<(), BrainError> {
     Ok(())
 }
 
+async fn export_tasks(builder: &mut ExportBuilder) -> Result<(), BrainError> {
+    let ids = builder.ids("SELECT id FROM task_nodes WHERE role='root' ORDER BY id")?;
+    for id in ids {
+        builder
+            .call("tasks", "get_task", json!({"task_id":id}))
+            .await;
+    }
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut args = json!({"limit":100,"include_archived":true,"include_subtasks":true});
+        if let Some(ref value) = cursor {
+            args["cursor"] = json!(value);
+        }
+        let result = builder.call("tasks", "list_tasks", args).await;
+        let next = result.and_then(|r| r["next_cursor"].as_str().map(str::to_owned));
+        if next.is_none() {
+            break;
+        }
+        if next == cursor {
+            builder.error("tasks", "任务分页没有前进");
+            break;
+        }
+        cursor = next;
+        if builder.records.len()
+            + builder
+                .group
+                .as_ref()
+                .map_or(0, |group| group.records.len())
+            >= MAX_OBJECTS
+        {
+            builder.error("tasks", "任务分页超过上限");
+            break;
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_mobile_group(
+    builder: &mut ExportBuilder,
+    name: &str,
+    complete: bool,
+    known_versions: &BTreeMap<String, String>,
+    versions: &mut BTreeMap<String, String>,
+    unchanged_scopes: &mut Vec<String>,
+    resources: &[OfflineResource],
+    selection: Option<&[u8]>,
+) -> Result<bool, BrainError> {
+    let group = builder
+        .group
+        .take()
+        .ok_or_else(|| BrainError::Internal("离线分组不存在".into()))?;
+    if complete {
+        let mut digest = Sha256::new();
+        digest.update(b"mobile-v1");
+        digest.update(name.as_bytes());
+        if let Some(selection) = selection {
+            digest.update((selection.len() as u64).to_le_bytes());
+            digest.update(selection);
+        }
+        for record in &group.records {
+            digest.update((record.len() as u64).to_le_bytes());
+            digest.update(record);
+        }
+        let mut resource_order: Vec<_> = resources.iter().collect();
+        resource_order.sort_by_key(|r| &r.request_path);
+        for resource in resource_order {
+            digest.update((resource.request_path.len() as u64).to_le_bytes());
+            digest.update(resource.request_path.as_bytes());
+            digest.update(resource.sha256.as_bytes());
+        }
+        let version = hex::encode(digest.finalize());
+        let unchanged = known_versions.get(name) == Some(&version);
+        versions.insert(name.into(), version);
+        if unchanged {
+            unchanged_scopes.push(name.into());
+            return Ok(true);
+        }
+    }
+    for record in group.records {
+        builder.persist_record(&record)?;
+    }
+    Ok(false)
+}
+
+async fn export_mobile(
+    builder: &mut ExportBuilder,
+    original: &Arc<AppContext>,
+    exports: &Arc<Exports>,
+    options: &SnapshotOptions,
+    resources: &mut Vec<OfflineResource>,
+    versions: &mut BTreeMap<String, String>,
+    unchanged_scopes: &mut Vec<String>,
+) -> Result<(), BrainError> {
+    builder.group = Some(PendingGroup::default());
+    export_home_and_shelf(builder, true).await?;
+    builder
+        .call("wiki", "list_book_knowledge_bases", json!({}))
+        .await;
+    builder
+        .call("wiki", "list_knowledge_tasks", json!({}))
+        .await;
+    export_reader(builder, original, exports, options, resources).await;
+    finish_mobile_group(
+        builder,
+        "overview",
+        ["home", "reader", "wiki"].iter().all(|scope| {
+            builder
+                .coverage
+                .get(*scope)
+                .is_none_or(|item| item.complete)
+        }),
+        &options.known_versions,
+        versions,
+        unchanged_scopes,
+        &[],
+        None,
+    )?;
+
+    builder.group = Some(PendingGroup::default());
+    let images = export_memos(builder)?;
+    for path in images {
+        let request = format!(
+            "/v1/timeline/thumbnails/{}",
+            path.split('/')
+                .map(|part| urlencoding::encode(part).into_owned())
+                .collect::<Vec<_>>()
+                .join("/")
+        );
+        match freeze_resource_with_policy(original.clone(), exports.clone(), request, true).await {
+            Ok(resource) => resources.push(resource.meta.clone()),
+            Err((_, error)) => builder.error("timeline_assets", error.0),
+        }
+    }
+    let timeline_complete = builder
+        .coverage
+        .get("timeline")
+        .is_none_or(|item| item.complete);
+    if finish_mobile_group(
+        builder,
+        "timeline",
+        timeline_complete,
+        &options.known_versions,
+        versions,
+        unchanged_scopes,
+        resources,
+        None,
+    )? {
+        resources.clear();
+    }
+
+    builder.group = Some(PendingGroup::default());
+    export_tasks(builder).await?;
+    finish_mobile_group(
+        builder,
+        "tasks",
+        builder
+            .coverage
+            .get("tasks")
+            .is_none_or(|item| item.complete),
+        &options.known_versions,
+        versions,
+        unchanged_scopes,
+        &[],
+        None,
+    )?;
+    for name in ["home", "reader", "timeline", "tasks", "wiki"] {
+        builder
+            .coverage
+            .entry(name.into())
+            .or_insert_with(|| OfflineCoverage {
+                scope: name.into(),
+                complete: true,
+                errors: vec![],
+            });
+    }
+    Ok(())
+}
+
 async fn export_reader(
     builder: &mut ExportBuilder,
     original: &Arc<AppContext>,
     exports: &Arc<Exports>,
-    selected: &[String],
+    options: &SnapshotOptions,
     resources: &mut Vec<OfflineResource>,
 ) {
     let books = match builder.ctx.book_wiki_service.store().list_reader_books() {
@@ -900,173 +1203,373 @@ async fn export_reader(
             return;
         }
     };
-    for id in selected {
+    for id in &options.book_ids {
         if !books.iter().any(|book| &book.id == id) {
             builder.error(&format!("reader:{id}"), "文集不在当前书架中");
         }
     }
+    let mobile = options.profile == SnapshotProfile::Mobile;
     for book in books {
-        let scope = format!("reader_metadata:{}", book.id);
-        let is_selected = selected.contains(&book.id);
-        let available = match book.kind {
-            crate::models::book_wiki::BookKind::Folder => FsPath::new(&book.path).is_dir(),
-            crate::models::book_wiki::BookKind::Pdf => FsPath::new(&book.path).is_file(),
+        export_reader_book(
+            builder,
+            original,
+            exports,
+            &book,
+            options.book_ids.contains(&book.id),
+            &[],
+            resources,
+            mobile,
+        )
+        .await;
+    }
+}
+
+async fn export_mobile_reader(
+    builder: &mut ExportBuilder,
+    original: &Arc<AppContext>,
+    exports: &Arc<Exports>,
+    options: &SnapshotOptions,
+    resources: &mut Vec<OfflineResource>,
+    versions: &mut BTreeMap<String, String>,
+    unchanged_scopes: &mut Vec<String>,
+) -> Result<(), BrainError> {
+    let books = builder.ctx.book_wiki_service.store().list_reader_books()?;
+    let mut selection: BTreeMap<&str, (bool, BTreeSet<&FsPath>)> = BTreeMap::new();
+    for id in &options.book_ids {
+        selection.entry(id.as_str()).or_default().0 = true;
+    }
+    for file in &options.reader_files {
+        selection
+            .entry(file.book_id.as_str())
+            .or_default()
+            .1
+            .insert(&file.path);
+    }
+    let mut changed_books = Vec::new();
+    for (id, (whole_book, paths)) in selection {
+        let scope = format!("reader:{id}");
+        let Some(book) = books.iter().find(|book| book.id == id) else {
+            builder.error(&scope, "文集不在当前书架中");
+            continue;
         };
-        if !available {
-            builder.error(&scope, "文集路径不可用或文件类型已改变");
-            if is_selected {
-                builder.error(
-                    &format!("reader:{}", book.id),
-                    "文集路径不可用或文件类型已改变",
-                );
-            }
-            continue;
-        }
-        let mut files = Vec::new();
-        if FsPath::new(&book.path).is_dir() {
-            let path = book.path.clone();
-            let enumerated =
-                tokio::task::spawn_blocking(move || reader_tree(FsPath::new(&path), 0)).await;
-            match enumerated {
-                Ok(Ok((entries, listed))) => {
-                    if is_selected {
-                        if let Err(error) =
-                            directory_records(builder, &scope, FsPath::new(&book.path), &entries)
-                        {
-                            builder.error(&scope, error);
-                        }
-                    }
-                    if !is_selected {
-                        if let Err(error) = builder.record(
-                            &scope,
-                            "list_local_dir",
-                            json!({"path":book.path,"depth":10}),
-                            json!({"root":book.path,"total":entries.len(),"entries":entries}),
-                        ) {
-                            builder.error(&scope, error);
-                        }
-                    }
-                    files = listed;
-                }
-                Ok(Err(error)) => builder.error(&scope, error),
-                Err(error) => builder.error(&scope, error),
-            }
-        } else {
-            files.push(PathBuf::from(&book.path));
-        }
-        if !is_selected {
-            continue;
-        }
-        let metadata_complete = builder
+        let paths: Vec<_> = paths.into_iter().collect();
+        let mut stable_book = book.clone();
+        // Reading position belongs to shelf sync and must not invalidate files.
+        stable_book.progress = None;
+        let selection_key = serde_json::to_vec(&(stable_book, whole_book, &paths))
+            .map_err(|error| BrainError::Internal(error.to_string()))?;
+        builder.group = Some(PendingGroup::default());
+        let mut book_resources = Vec::new();
+        export_reader_book(
+            builder,
+            original,
+            exports,
+            book,
+            whole_book,
+            &paths,
+            &mut book_resources,
+            true,
+        )
+        .await;
+        let complete = builder
             .coverage
             .get(&scope)
-            .is_none_or(|coverage| coverage.complete);
-        let scope = format!("reader:{}", book.id);
+            .is_some_and(|item| item.complete);
+        if !finish_mobile_group(
+            builder,
+            &scope,
+            complete,
+            &options.known_versions,
+            versions,
+            unchanged_scopes,
+            &book_resources,
+            Some(&selection_key),
+        )? {
+            changed_books.push(book);
+            resources.extend(book_resources);
+        }
+    }
+    if !changed_books.is_empty() {
+        builder.record(
+            "reader",
+            "get_reader_books",
+            json!({}),
+            json!({"books":changed_books}),
+        )?;
+    }
+    resources.sort_by(|a, b| a.request_path.cmp(&b.request_path));
+    resources.dedup_by(|a, b| a.request_path == b.request_path && a.sha256 == b.sha256);
+    if resources
+        .windows(2)
+        .any(|pair| pair[0].request_path == pair[1].request_path)
+    {
+        return Err(BrainError::Internal(
+            "共享阅读文件在导出期间改变，请重新下载".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn export_reader_book(
+    builder: &mut ExportBuilder,
+    original: &Arc<AppContext>,
+    exports: &Arc<Exports>,
+    book: &ReaderBook,
+    is_selected: bool,
+    chosen_files: &[&FsPath],
+    resources: &mut Vec<OfflineResource>,
+    mobile: bool,
+) {
+    let scope = format!("reader_metadata:{}", book.id);
+    let available = match book.kind {
+        crate::models::book_wiki::BookKind::Folder => FsPath::new(&book.path).is_dir(),
+        crate::models::book_wiki::BookKind::Pdf => FsPath::new(&book.path).is_file(),
+    };
+    if !available {
+        builder.error(&scope, "文集路径不可用或文件类型已改变");
+        if is_selected || !chosen_files.is_empty() {
+            builder.error(
+                &format!("reader:{}", book.id),
+                "文集路径不可用或文件类型已改变",
+            );
+        }
+        return;
+    }
+    if !chosen_files.is_empty() {
+        let file_scope = format!("reader:{}", book.id);
         builder
             .coverage
-            .entry(scope.clone())
+            .entry(file_scope.clone())
             .or_insert_with(|| OfflineCoverage {
-                scope: scope.clone(),
+                scope: file_scope.clone(),
                 complete: true,
                 errors: vec![],
             });
-        if !metadata_complete {
-            builder.error(&scope, "文集目录尚未完整读取，请恢复访问后重试");
-            continue;
-        }
-        for path in files {
-            let ext = path
-                .extension()
-                .and_then(|v| v.to_str())
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            if ![
-                "md", "markdown", "pdf", "png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp",
-                "ico",
-            ]
-            .contains(&ext.as_str())
-            {
-                continue;
+        for file in chosen_files {
+            match selected_reader_path(FsPath::new(&book.path), file) {
+                Ok(()) if !is_selected => {
+                    export_reader_file(
+                        builder,
+                        original,
+                        exports,
+                        &file_scope,
+                        file,
+                        resources,
+                        mobile,
+                    )
+                    .await;
+                }
+                Ok(()) => {}
+                Err(error) => builder.error(&file_scope, error),
             }
-            let logical = format!(
-                "/v1/reader/raw?path={}",
-                urlencoding::encode(&path.to_string_lossy())
-            );
-            match freeze_resource(original.clone(), exports.clone(), logical).await {
-                Ok(resource) => {
+        }
+        if !is_selected {
+            return;
+        }
+    }
+    let mut files = Vec::new();
+    if FsPath::new(&book.path).is_dir() {
+        let path = book.path.clone();
+        let enumerated =
+            tokio::task::spawn_blocking(move || reader_tree(FsPath::new(&path), 0)).await;
+        match enumerated {
+            Ok(Ok((entries, listed))) => {
+                if is_selected {
                     if let Err(error) =
-                        file_stat_record(builder, &scope, &path, resource.meta.size, false)
+                        directory_records(builder, &scope, FsPath::new(&book.path), &entries)
                     {
                         builder.error(&scope, error);
                     }
-                    if ext == "md" || ext == "markdown" {
-                        if resource.meta.size > MAX_MARKDOWN_BYTES {
-                            builder.error(&scope, "单篇 Markdown 超过 4 MiB 离线保存上限");
-                            continue;
-                        }
-                        match std::fs::read_to_string(resource.file.path()) {
-                            Ok(content) => {
-                                for dependency in markdown_images(&content) {
-                                    if dependency.starts_with("data:")
-                                        || dependency.starts_with('#')
-                                    {
-                                        continue;
-                                    }
-                                    if dependency.contains("://") || dependency.starts_with("//") {
-                                        // The pack covers local dependencies; external sites remain links.
-                                        continue;
-                                    }
-                                    let without_fragment =
-                                        dependency.split(['#', '?']).next().unwrap_or("");
-                                    let decoded = match urlencoding::decode(without_fragment) {
-                                        Ok(decoded) => decoded.into_owned(),
-                                        Err(error) => {
-                                            builder.error(&scope, error);
-                                            continue;
-                                        }
-                                    };
-                                    let dependency_path =
-                                        path.parent().unwrap_or(FsPath::new("/")).join(decoded);
-                                    match normalized_existing_path(&dependency_path) {
-                                        Ok(canonical) => {
-                                            let request = format!(
-                                                "/v1/reader/raw?path={}",
-                                                urlencoding::encode(&canonical.to_string_lossy())
-                                            );
-                                            if !resources.iter().any(|r| r.request_path == request)
-                                            {
-                                                match freeze_resource(
-                                                    original.clone(),
-                                                    exports.clone(),
-                                                    request,
-                                                )
-                                                .await
-                                                {
-                                                    Ok(resource) => {
-                                                        resources.push(resource.meta.clone())
-                                                    }
-                                                    Err((_, error)) => {
-                                                        builder.error(&scope, error.0)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        Err(error) => builder
-                                            .error(&scope, format!("图片依赖不可用: {error}")),
-                                    }
-                                }
-                                if let Err(error) = builder.record(&scope,"read_local_file",json!({"path":path.to_string_lossy()}),json!({"path":path.to_string_lossy(),"name":path.file_name().map(|s|s.to_string_lossy()),"size":resource.meta.size,"content":content})) { builder.error(&scope,error); }
-                            }
-                            Err(error) => builder.error(&scope, error),
-                        }
-                    }
-                    resources.push(resource.meta.clone());
                 }
-                Err((_, error)) => builder.error(&scope, error.0),
+                if !is_selected {
+                    if let Err(error) = builder.record(
+                        &scope,
+                        "list_local_dir",
+                        json!({"path":book.path,"depth":10}),
+                        json!({"root":book.path,"total":entries.len(),"entries":entries}),
+                    ) {
+                        builder.error(&scope, error);
+                    }
+                }
+                files = listed;
+            }
+            Ok(Err(error)) => builder.error(&scope, error),
+            Err(error) => builder.error(&scope, error),
+        }
+    } else {
+        let path = FsPath::new(&book.path);
+        if mobile && !is_selected {
+            match std::fs::metadata(path) {
+                Ok(meta) => {
+                    if let Err(error) = file_stat_record(builder, &scope, path, meta.len(), false) {
+                        builder.error(&scope, error);
+                    }
+                }
+                Err(error) => builder.error(&scope, error),
             }
         }
+        files.push(path.to_path_buf());
+    }
+    if !is_selected {
+        return;
+    }
+    let metadata_complete = builder
+        .coverage
+        .get(&scope)
+        .is_none_or(|coverage| coverage.complete);
+    let scope = format!("reader:{}", book.id);
+    builder
+        .coverage
+        .entry(scope.clone())
+        .or_insert_with(|| OfflineCoverage {
+            scope: scope.clone(),
+            complete: true,
+            errors: vec![],
+        });
+    if !metadata_complete {
+        builder.error(&scope, "文集目录尚未完整读取，请恢复访问后重试");
+        return;
+    }
+    files.sort();
+    for path in files {
+        export_reader_file(builder, original, exports, &scope, &path, resources, mobile).await;
     }
 }
+
+fn selected_reader_path(root: &FsPath, file: &FsPath) -> Result<(), BrainError> {
+    if !file.is_absolute()
+        || !matches!(
+            file.extension()
+                .and_then(|ext| ext.to_str())
+                .map(str::to_ascii_lowercase)
+                .as_deref(),
+            Some("md" | "markdown" | "pdf")
+        )
+    {
+        return Err(BrainError::Internal(
+            "单文件离线下载仅支持文集内的 Markdown 和 PDF".into(),
+        ));
+    }
+    let relative = file
+        .strip_prefix(root)
+        .map_err(|_| BrainError::Internal("所选文件不在对应文集内".into()))?;
+    let mut checked = root.to_path_buf();
+    if std::fs::symlink_metadata(&checked)?.is_symlink() {
+        return Err(BrainError::Internal("离线保存不支持符号链接".into()));
+    }
+    for component in relative.components() {
+        let std::path::Component::Normal(name) = component else {
+            return Err(BrainError::Internal("所选文件不在对应文集内".into()));
+        };
+        checked.push(name);
+        if std::fs::symlink_metadata(&checked)?.is_symlink() {
+            return Err(BrainError::Internal("离线保存不支持符号链接".into()));
+        }
+    }
+    if !checked.is_file() {
+        return Err(BrainError::Internal("所选路径不是普通文件".into()));
+    }
+    Ok(())
+}
+
+async fn export_reader_file(
+    builder: &mut ExportBuilder,
+    original: &Arc<AppContext>,
+    exports: &Arc<Exports>,
+    scope: &str,
+    path: &FsPath,
+    resources: &mut Vec<OfflineResource>,
+    mobile: bool,
+) {
+    let ext = path
+        .extension()
+        .and_then(|v| v.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ![
+        "md", "markdown", "pdf", "png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico",
+    ]
+    .contains(&ext.as_str())
+    {
+        return;
+    }
+    let logical = format!(
+        "/v1/reader/raw?path={}",
+        urlencoding::encode(&path.to_string_lossy())
+    );
+    match freeze_resource(original.clone(), exports.clone(), logical).await {
+        Ok(resource) => {
+            if let Err(error) = file_stat_record(builder, scope, path, resource.meta.size, false) {
+                builder.error(scope, error);
+            }
+            if ext == "md" || ext == "markdown" {
+                if resource.meta.size > MAX_MARKDOWN_BYTES {
+                    builder.error(scope, "单篇 Markdown 超过 4 MiB 离线保存上限");
+                    return;
+                }
+                match std::fs::read_to_string(resource.file.path()) {
+                    Ok(content) => {
+                        for dependency in markdown_images(&content) {
+                            if dependency.starts_with("data:") || dependency.starts_with('#') {
+                                continue;
+                            }
+                            if dependency.contains("://") || dependency.starts_with("//") {
+                                // The pack covers local dependencies; external sites remain links.
+                                continue;
+                            }
+                            let without_fragment =
+                                dependency.split(['#', '?']).next().unwrap_or("");
+                            let decoded = match urlencoding::decode(without_fragment) {
+                                Ok(decoded) => decoded.into_owned(),
+                                Err(error) => {
+                                    builder.error(scope, error);
+                                    continue;
+                                }
+                            };
+                            let dependency_path =
+                                path.parent().unwrap_or(FsPath::new("/")).join(decoded);
+                            match normalized_existing_path(&dependency_path) {
+                                Ok(canonical) => {
+                                    let request = format!(
+                                        "/v1/reader/raw?path={}",
+                                        urlencoding::encode(&canonical.to_string_lossy())
+                                    );
+                                    if !resources.iter().any(|r| r.request_path == request) {
+                                        match freeze_resource(
+                                            original.clone(),
+                                            exports.clone(),
+                                            request,
+                                        )
+                                        .await
+                                        {
+                                            Ok(resource) => resources.push(resource.meta.clone()),
+                                            Err((_, error)) => builder.error(scope, error.0),
+                                        }
+                                    }
+                                }
+                                Err(error) => {
+                                    builder.error(scope, format!("图片依赖不可用: {error}"))
+                                }
+                            }
+                        }
+                        if let Err(error) = builder.record(scope,"read_local_file",json!({"path":path.to_string_lossy()}),json!({"path":path.to_string_lossy(),"name":path.file_name().map(|s|s.to_string_lossy()),"size":resource.meta.size,"content":content})) { builder.error(scope,error); }
+                    }
+                    Err(error) => builder.error(scope, error),
+                }
+            }
+            if !(mobile && (ext == "md" || ext == "markdown"))
+                && !resources
+                    .iter()
+                    .any(|item| item.request_path == resource.meta.request_path)
+            {
+                resources.push(resource.meta.clone());
+            }
+        }
+        Err((_, error)) => builder.error(scope, error.0),
+    }
+}
+
 fn reader_tree(path: &FsPath, depth: usize) -> Result<(Vec<Value>, Vec<PathBuf>), BrainError> {
     if depth > 10 {
         return Err(BrainError::Internal("文集目录超过10层，请分批保存".into()));
@@ -1121,6 +1624,7 @@ fn reader_tree(path: &FsPath, depth: usize) -> Result<(Vec<Value>, Vec<PathBuf>)
         (
             value["is_dir"] != true,
             value["name"].as_str().unwrap_or("").to_lowercase(),
+            value["path"].as_str().unwrap_or("").to_owned(),
         )
     });
     Ok((entries, files))
@@ -1227,30 +1731,35 @@ async fn freeze_resource(
     exports: Arc<Exports>,
     request_path: String,
 ) -> OfflineResult<Arc<FrozenResource>> {
+    freeze_resource_with_policy(ctx, exports, request_path, false).await
+}
+
+async fn freeze_resource_with_policy(
+    ctx: Arc<AppContext>,
+    exports: Arc<Exports>,
+    request_path: String,
+    thumbnail_only: bool,
+) -> OfflineResult<Arc<FrozenResource>> {
     if request_path.len() > 8192 || !request_path.starts_with("/v1/") {
         return Err(failure(StatusCode::BAD_REQUEST, "资源路径无效"));
     }
-    prepare_exports(&exports).map_err(internal)?;
     let identity = identity_for(&ctx.db).map_err(internal)?;
     let url = reqwest::Url::parse(&format!("http://offline{request_path}"))
         .map_err(|_| failure(StatusCode::BAD_REQUEST, "资源路径无效"))?;
     let path = url.path();
-    let thumbnail_prefix = "/v1/timeline/thumbnails/";
-    // Generating a thumbnail only affects the derived image cache, never memos.
-    let thumbnail = if let Some(raw) = path.strip_prefix(thumbnail_prefix) {
-        let logical = urlencoding::decode(raw).map_err(internal)?.into_owned();
+    let thumbnail_logical = path
+        .strip_prefix("/v1/timeline/thumbnails/")
+        .map(urlencoding::decode)
+        .transpose()
+        .map_err(internal)?
+        .map(|path| path.into_owned());
+    let source = if let Some(logical) = &thumbnail_logical {
         Some(
             ctx.memo_manager
                 .images
-                .thumbnail(&logical)
-                .await
-                .map_err(|e| failure(StatusCode::NOT_FOUND, e))?,
+                .asset(logical)
+                .map_err(|error| failure(StatusCode::NOT_FOUND, error))?,
         )
-    } else {
-        None
-    };
-    let source = if thumbnail.is_some() {
-        None
     } else if path == "/v1/reader/raw" {
         let raw = url
             .query_pairs()
@@ -1301,6 +1810,31 @@ async fn freeze_resource(
     } else {
         return Err(failure(StatusCode::BAD_REQUEST, "不支持的离线资源地址"));
     };
+    let stamp = source.as_ref().and_then(|(path, _)| source_stamp(path));
+    if let Some(current) = &stamp {
+        let store = exports.resources.lock().map_err(internal)?;
+        if let Some(existing) = store.values().find(|item| {
+            item.meta.request_path == request_path
+                && item.meta.identity == identity
+                && item.thumbnail_only == thumbnail_only
+                && item.expires > SystemTime::now() + Duration::from_secs(60)
+                && item.source_stamp.as_ref() == Some(current)
+        }) {
+            return Ok(existing.clone());
+        }
+    }
+    prepare_exports(&exports).map_err(internal)?;
+    // Strict mobile exports never substitute original photo bytes.
+    let thumbnail = if let Some(logical) = thumbnail_logical {
+        let image = if thumbnail_only {
+            ctx.memo_manager.images.offline_thumbnail(&logical).await
+        } else {
+            ctx.memo_manager.images.thumbnail(&logical).await
+        };
+        Some(image.map_err(|error| failure(StatusCode::NOT_FOUND, error))?)
+    } else {
+        None
+    };
     let captured_identity = identity.clone();
     let source_ctx = ctx.clone();
     tokio::task::spawn_blocking(move || -> OfflineResult<Arc<FrozenResource>> {
@@ -1340,6 +1874,15 @@ async fn freeze_resource(
                 source.ok_or_else(|| failure(StatusCode::BAD_REQUEST, "资源不存在"))?;
             let mut input =
                 std::fs::File::open(&file).map_err(|e| failure(StatusCode::NOT_FOUND, e))?;
+            if let Some(before) = &stamp {
+                let opened = input.metadata().map_err(internal)?;
+                if metadata_stamp(&file, &opened).as_ref() != Some(before) {
+                    return Err(failure(
+                        StatusCode::CONFLICT,
+                        "文件在打开期间改变，请重新下载",
+                    ));
+                }
+            }
             let mut buffer = [0u8; 64 * 1024];
             loop {
                 let count = input.read(&mut buffer).map_err(internal)?;
@@ -1356,33 +1899,53 @@ async fn freeze_resource(
                 hash.update(&buffer[..count]);
                 output.write_all(&buffer[..count]).map_err(internal)?;
             }
-            let expected = hash.clone().finalize();
-            let mut second = std::fs::File::open(file).map_err(internal)?;
-            let mut check = Sha256::new();
-            let mut checked = 0u64;
-            loop {
-                let count = second.read(&mut buffer).map_err(internal)?;
-                if count == 0 {
-                    break;
-                }
-                checked += count as u64;
-                if checked > MAX_RESOURCE_BYTES {
+            if let Some(before) = &stamp {
+                let after = input.metadata().map_err(internal)?;
+                if metadata_stamp(&file, &after).as_ref() != Some(before) {
                     return Err(failure(
                         StatusCode::CONFLICT,
-                        "文件在校验期间增大，请重新下载",
+                        "文件在保存期间改变，请重新下载",
                     ));
                 }
-                check.update(&buffer[..count]);
+            } else {
+                // Without inode/mtime/ctime, confirm the source with a second pass.
+                let expected = hash.clone().finalize();
+                let mut second = std::fs::File::open(file).map_err(internal)?;
+                let mut check = Sha256::new();
+                let mut checked = 0u64;
+                loop {
+                    let count = second.read(&mut buffer).map_err(internal)?;
+                    if count == 0 {
+                        break;
+                    }
+                    checked += count as u64;
+                    if checked > MAX_RESOURCE_BYTES {
+                        return Err(failure(
+                            StatusCode::CONFLICT,
+                            "文件在校验期间增大，请重新下载",
+                        ));
+                    }
+                    check.update(&buffer[..count]);
+                }
+                if expected != check.finalize() {
+                    return Err(failure(
+                        StatusCode::CONFLICT,
+                        "文件在保存期间改变，请重新下载",
+                    ));
+                }
             }
-            if expected != check.finalize() {
+            mime
+        };
+        if let Some(before) = &stamp {
+            if source_stamp(&before.path).as_ref() != Some(before) {
                 return Err(failure(
                     StatusCode::CONFLICT,
                     "文件在保存期间改变，请重新下载",
                 ));
             }
-            mime
-        };
-        output.as_file().sync_all().map_err(internal)?;
+        }
+        // The immutable download is a temporary file, not a crash-recovery copy.
+        // File writes are unbuffered and are readable once the manifest is published.
         if identity_for(&source_ctx.db).map_err(internal)? != captured_identity {
             return Err(failure(StatusCode::CONFLICT, "数据集已改变，请重新下载"));
         }
@@ -1391,6 +1954,9 @@ async fn freeze_resource(
             item.meta.request_path == request_path
                 && item.meta.sha256 == digest
                 && item.meta.identity == identity
+                && item.thumbnail_only == thumbnail_only
+                && item.source_stamp == stamp
+                && item.expires > SystemTime::now() + Duration::from_secs(60)
         }) {
             return Ok(existing.clone());
         }
@@ -1412,6 +1978,8 @@ async fn freeze_resource(
             },
             file: output,
             expires,
+            source_stamp: stamp,
+            thumbnail_only,
         });
         store.insert(id, resource.clone());
         Ok(resource)
@@ -1521,6 +2089,7 @@ mod tests {
             records: vec![],
             coverage: Default::default(),
             bytes: 0,
+            group: None,
         };
         let text = "离线内容与公式".repeat(50_000);
         builder
@@ -1689,6 +2258,193 @@ mod tests {
         assert_eq!(released["released"], true);
         let (status, _) = request(app, "GET", &path, json!({})).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    async fn mobile_snapshot(app: &axum::Router, mut options: Value) -> Value {
+        options["profile"] = json!("mobile");
+        let (status, snapshot) =
+            request(app.clone(), "POST", "/v1/offline/snapshots", options).await;
+        assert_eq!(status, StatusCode::OK, "{snapshot}");
+        snapshot
+    }
+
+    async fn snapshot_contents(app: &axum::Router, snapshot: &Value) -> (Value, Value) {
+        let id = snapshot["snapshot_id"].as_str().unwrap();
+        let path = format!("/v1/offline/snapshots/{id}");
+        let (_, page) = request(app.clone(), "GET", &format!("{path}?limit=100"), json!({})).await;
+        let (_, assets) = request(
+            app.clone(),
+            "GET",
+            &format!("{path}/resources?limit=100"),
+            json!({}),
+        )
+        .await;
+        let (_, released) =
+            request(app.clone(), "POST", &format!("{path}/release"), json!({})).await;
+        assert_eq!(page["complete"], true);
+        assert_eq!(assets["complete"], true);
+        assert_eq!(released["released"], true);
+        (page["records"].clone(), assets["resources"].clone())
+    }
+
+    #[tokio::test]
+    async fn test_mobile_snapshot_sends_only_changed_scopes_and_available_thumbnails() {
+        let (ctx, _dir, _) = AppContext::for_test();
+        crate::tools::handlers::register_all_tools(&ctx.tool_registry, ctx.clone()).await;
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(10, 10)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let photo = ctx
+            .memo_manager
+            .images
+            .upload(&png.into_inner())
+            .await
+            .unwrap();
+        let images = json!([photo, "Timeline/images/missing.png"]).to_string();
+        let original_content = "A".repeat(250);
+        // A previously imported memo can have an unavailable original attachment.
+        ctx.db.with_connection(|conn| {
+            conn.execute(
+                "INSERT INTO memos (id, content, timestamp, date, file_path, images) VALUES ('memo', ?1, '2026-01-01T00:00:00Z', '2026-01-01', '', ?2)",
+                [&original_content, &images],
+            )?;
+            Ok(())
+        }).unwrap();
+        let app = crate::api::router::create_router(ctx.clone());
+        let first = mobile_snapshot(&app, json!({})).await;
+        let (records, assets) = snapshot_contents(&app, &first).await;
+        assert_eq!(first["mode"], "mobile_incremental");
+        assert_eq!(first["versions"].as_object().unwrap().len(), 3, "{first}");
+        assert_eq!(assets.as_array().unwrap().len(), 1, "{assets}");
+        assert!(assets[0]["request_path"]
+            .as_str()
+            .unwrap()
+            .starts_with("/v1/timeline/thumbnails/"));
+        assert_eq!(assets[0]["mime_type"], "image/jpeg");
+        assert!(records.as_array().unwrap().iter().all(|r| {
+            [
+                "home_overview",
+                "get_reader_books",
+                "get_reader_history",
+                "list_tasks",
+                "list_book_knowledge_bases",
+                "list_knowledge_tasks",
+                "get_memo",
+            ]
+            .iter()
+            .any(|tool| r["tool"] == *tool)
+        }));
+
+        let unchanged = mobile_snapshot(&app, json!({"known_versions":first["versions"]})).await;
+        assert_eq!(
+            unchanged["unchanged_scopes"],
+            json!(["overview", "timeline", "tasks"])
+        );
+        assert_eq!(unchanged["record_count"], 0);
+        assert_eq!(unchanged["resource_count"], 0);
+        snapshot_contents(&app, &unchanged).await;
+
+        let updated_content = format!("{original_content} 完整的小记正文");
+        ctx.db
+            .with_connection(|conn| {
+                // Editing beyond the dashboard excerpt must only invalidate the timeline.
+                conn.execute(
+                    "UPDATE memos SET content=?1, revision=revision+1 WHERE id='memo'",
+                    [&updated_content],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let changed = mobile_snapshot(&app, json!({"known_versions":first["versions"]})).await;
+        let (records, assets) = snapshot_contents(&app, &changed).await;
+        assert_eq!(changed["unchanged_scopes"], json!(["overview", "tasks"]));
+        assert!(changed["versions"]["timeline"].is_string(), "{changed}");
+        assert_ne!(
+            changed["versions"]["timeline"],
+            first["versions"]["timeline"]
+        );
+        assert_eq!(records.as_array().unwrap().len(), 1, "{records}");
+        assert_eq!(records[0]["tool"], "get_memo");
+        assert_eq!(records[0]["result"]["content"], updated_content);
+        assert_eq!(assets.as_array().unwrap().len(), 1, "{assets}");
+        assert!(assets[0]["request_path"]
+            .as_str()
+            .unwrap()
+            .starts_with("/v1/timeline/thumbnails/"));
+        assert_eq!(assets[0]["mime_type"], "image/jpeg");
+        assert!(changed["coverage"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|scope| scope["scope"] == "timeline_assets" && scope["complete"] == false));
+        let still_missing =
+            mobile_snapshot(&app, json!({"known_versions":changed["versions"]})).await;
+        assert_eq!(still_missing["record_count"], 0);
+        assert_eq!(
+            still_missing["unchanged_scopes"],
+            json!(["overview", "timeline", "tasks"])
+        );
+        snapshot_contents(&app, &still_missing).await;
+    }
+
+    #[tokio::test]
+    async fn test_mobile_reader_selection_versions_include_bodies_and_dependencies() {
+        let (ctx, dir, _) = AppContext::for_test();
+        crate::tools::handlers::register_all_tools(&ctx.tool_registry, ctx.clone()).await;
+        let folder = dir.path().join("folder");
+        std::fs::create_dir(&folder).unwrap();
+        let chapter = folder.join("chapter.md");
+        let image = folder.join("picture.png");
+        std::fs::write(&chapter, "# Selected\n![picture](picture.png)").unwrap();
+        std::fs::write(&image, b"first").unwrap();
+        std::fs::write(folder.join("another.pdf"), b"not selected").unwrap();
+        ctx.db.with_connection(|conn| {
+            conn.execute("INSERT INTO reader_books(id,path,kind,name,added_at) VALUES('folder',?1,'folder','Book',1)", [folder.to_str().unwrap()])?;
+            Ok(())
+        }).unwrap();
+        let app = crate::api::router::create_router(ctx);
+        let mut options =
+            json!({"include_resources":true,"reader_files":[{"book_id":"folder","path":chapter}]});
+        let first = mobile_snapshot(&app, options.clone()).await;
+        let (records, assets) = snapshot_contents(&app, &first).await;
+        assert_eq!(first["mode"], "mobile_reader");
+        assert!(first["versions"]["reader:folder"].is_string(), "{first}");
+        assert!(records
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["tool"] == "read_local_file" && r["arguments"]["path"] == json!(chapter)));
+        assert_eq!(assets.as_array().unwrap().len(), 1, "{assets}");
+        assert!(assets[0]["request_path"]
+            .as_str()
+            .unwrap()
+            .ends_with("picture.png"));
+
+        options["known_versions"] = first["versions"].clone();
+        let unchanged = mobile_snapshot(&app, options.clone()).await;
+        assert_eq!(unchanged["unchanged_scopes"], json!(["reader:folder"]));
+        assert_eq!(unchanged["record_count"], 0);
+        assert_eq!(unchanged["resource_count"], 0);
+        snapshot_contents(&app, &unchanged).await;
+
+        std::fs::write(&image, b"other").unwrap();
+        let changed = mobile_snapshot(&app, options.clone()).await;
+        let (_, new_assets) = snapshot_contents(&app, &changed).await;
+        assert_ne!(
+            changed["versions"]["reader:folder"],
+            first["versions"]["reader:folder"]
+        );
+        assert_ne!(assets[0]["sha256"], new_assets[0]["sha256"]);
+        std::fs::remove_file(&image).unwrap();
+        let incomplete = mobile_snapshot(&app, options).await;
+        assert_eq!(incomplete["versions"], json!({}));
+        assert_eq!(incomplete["unchanged_scopes"], json!([]));
+        assert!(incomplete["coverage"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["scope"] == "reader:folder" && c["complete"] == false));
     }
 
     #[tokio::test]
