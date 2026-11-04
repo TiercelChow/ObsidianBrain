@@ -23,6 +23,7 @@ use axum::{
     Extension, Json, Router,
 };
 use chrono::Utc;
+use futures::StreamExt;
 use rusqlite::{DatabaseName, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -34,7 +35,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, SystemTime},
 };
-use tempfile::{NamedTempFile, TempDir};
+use tempfile::{NamedTempFile, TempDir, TempPath};
 use tokio::sync::Semaphore;
 use tokio_util::io::ReaderStream;
 
@@ -42,6 +43,8 @@ const TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_RECORD_BYTES: usize = 256 * 1024;
 const MAX_TEXT_BYTES: usize = 128 * 1024 * 1024;
 const MAX_MARKDOWN_BYTES: u64 = 4 * 1024 * 1024;
+const LEGACY_DIRECTORY_DEPTH: usize = 10;
+const MOBILE_DIRECTORY_DEPTH: usize = 15; // Matches the online list_local_dir limit.
 const MAX_RESOURCE_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_EXPORT_BYTES: u64 = 2 * MAX_RESOURCE_BYTES;
 const MAX_OBJECTS: usize = 100_000;
@@ -65,14 +68,19 @@ struct OfflineIdentity {
 
 struct Exports {
     root: PathBuf,
+    resource_prefix: String,
+    snapshot_prefix: String,
     build: Semaphore,
     snapshots: Mutex<BTreeMap<String, Arc<Snapshot>>>,
     resources: Mutex<BTreeMap<String, Arc<FrozenResource>>>,
 }
 impl Exports {
     fn new(db: &SqliteStore) -> Self {
+        let session = uuid::Uuid::new_v4();
         Self {
             root: db.database_path().with_extension("offline-exports"),
+            resource_prefix: format!("resource-{session}-"),
+            snapshot_prefix: format!("snapshot-{session}-"),
             build: Semaphore::new(1),
             snapshots: Mutex::new(BTreeMap::new()),
             resources: Mutex::new(BTreeMap::new()),
@@ -107,7 +115,8 @@ struct OfflineResource {
 }
 struct FrozenResource {
     meta: OfflineResource,
-    file: NamedTempFile,
+    // Keep ownership of the pathname, without an open descriptor per cached asset.
+    file: TempPath,
     expires: SystemTime,
     source_stamp: Option<SourceStamp>,
     thumbnail_only: bool,
@@ -164,6 +173,19 @@ struct SnapshotOptions {
     known_versions: BTreeMap<String, String>,
     #[serde(default)]
     reader_files: Vec<ReaderFile>,
+    reader_depth: Option<usize>,
+}
+
+impl SnapshotOptions {
+    fn directory_depth(&self) -> usize {
+        if self.profile == SnapshotProfile::Mobile {
+            self.reader_depth
+                .unwrap_or(LEGACY_DIRECTORY_DEPTH)
+                .clamp(LEGACY_DIRECTORY_DEPTH, MOBILE_DIRECTORY_DEPTH)
+        } else {
+            LEGACY_DIRECTORY_DEPTH
+        }
+    }
 }
 
 #[derive(Deserialize, Default, PartialEq, Eq)]
@@ -261,6 +283,7 @@ fn identity_for(db: &SqliteStore) -> Result<OfflineIdentity, BrainError> {
             "full_replacement".into(),
             "chunked_records".into(),
             "mobile_incremental".into(),
+            "mobile_reader_depth".into(),
         ],
     })
 }
@@ -530,14 +553,6 @@ fn split_utf8(text: &str, cap: usize) -> Vec<&str> {
 
 fn prepare_exports(exports: &Exports) -> Result<(), BrainError> {
     std::fs::create_dir_all(&exports.root)?;
-    let protected: Vec<PathBuf> = exports
-        .snapshots
-        .lock()
-        .map_err(|_| BrainError::Internal("离线快照锁不可用".into()))?
-        .values()
-        .filter(|snapshot| snapshot.expires > SystemTime::now())
-        .map(|snapshot| snapshot._root.path().to_owned())
-        .collect();
     for entry in std::fs::read_dir(&exports.root)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().to_string();
@@ -546,16 +561,18 @@ fn prepare_exports(exports: &Exports) -> Result<(), BrainError> {
         if !old {
             continue;
         }
-        // Only remove our own exports. Aborted-process resources are included in
-        // disk quota until expiration, rather than becoming invisible orphans.
-        if name.starts_with("resource-") && meta.is_file() {
+        // Registered exports own their paths through RAII. Sweep only old
+        // process leftovers, never an export currently owned by this process.
+        if name.starts_with("resource-")
+            && !name.starts_with(&exports.resource_prefix)
+            && meta.is_file()
+        {
             if let Err(error) = std::fs::remove_file(entry.path()) {
                 tracing::warn!(%error,"清理过期离线资源失败");
             }
         } else if name.starts_with("snapshot-")
+            && !name.starts_with(&exports.snapshot_prefix)
             && meta.is_dir()
-            && exports.build.available_permits() > 0
-            && !protected.contains(&entry.path())
         {
             if let Err(error) = std::fs::remove_dir_all(entry.path()) {
                 tracing::warn!(%error,"清理过期离线快照失败");
@@ -616,17 +633,8 @@ async fn create_snapshot(
             ));
         }
     }
-    let directories = std::fs::read_dir(&exports.root)
-        .map_err(internal)?
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with("snapshot-"))
-        .count();
-    if directories >= 3 {
-        return Err(failure(
-            StatusCode::TOO_MANY_REQUESTS,
-            "已有离线快照尚未过期，请稍后重试",
-        ));
-    }
+    // Only registered snapshots occupy a slot. A failed or interrupted
+    // export can leave a directory without a snapshot to release.
     let _permit = exports
         .build
         .try_acquire()
@@ -649,10 +657,11 @@ async fn create_snapshot(
     }
     let original = ctx.clone();
     let export_root = exports.root.clone();
+    let snapshot_prefix = exports.snapshot_prefix.clone();
     let (identity, root, copy) = tokio::task::spawn_blocking(move || -> Result<_, BrainError> {
         let identity = identity_for(&ctx.db)?;
         let root = tempfile::Builder::new()
-            .prefix("snapshot-")
+            .prefix(&snapshot_prefix)
             .tempdir_in(&export_root)?;
         let copy = clone_snapshot_context(&ctx, root.path())?;
         Ok((identity, root, copy))
@@ -1208,7 +1217,6 @@ async fn export_reader(
             builder.error(&format!("reader:{id}"), "文集不在当前书架中");
         }
     }
-    let mobile = options.profile == SnapshotProfile::Mobile;
     for book in books {
         export_reader_book(
             builder,
@@ -1218,7 +1226,7 @@ async fn export_reader(
             options.book_ids.contains(&book.id),
             &[],
             resources,
-            mobile,
+            options,
         )
         .await;
     }
@@ -1268,7 +1276,7 @@ async fn export_mobile_reader(
             whole_book,
             &paths,
             &mut book_resources,
-            true,
+            options,
         )
         .await;
         let complete = builder
@@ -1319,8 +1327,9 @@ async fn export_reader_book(
     is_selected: bool,
     chosen_files: &[&FsPath],
     resources: &mut Vec<OfflineResource>,
-    mobile: bool,
+    options: &SnapshotOptions,
 ) {
+    let mobile = options.profile == SnapshotProfile::Mobile;
     let scope = format!("reader_metadata:{}", book.id);
     let available = match book.kind {
         crate::models::book_wiki::BookKind::Folder => FsPath::new(&book.path).is_dir(),
@@ -1370,27 +1379,25 @@ async fn export_reader_book(
     }
     let mut files = Vec::new();
     if FsPath::new(&book.path).is_dir() {
+        let max_depth = options.directory_depth();
         let path = book.path.clone();
         let enumerated =
-            tokio::task::spawn_blocking(move || reader_tree(FsPath::new(&path), 0)).await;
+            tokio::task::spawn_blocking(move || reader_tree(FsPath::new(&path), 0, max_depth))
+                .await;
         match enumerated {
             Ok(Ok((entries, listed))) => {
-                if is_selected {
-                    if let Err(error) =
-                        directory_records(builder, &scope, FsPath::new(&book.path), &entries)
-                    {
-                        builder.error(&scope, error);
+                let root = FsPath::new(&book.path);
+                let result = match (is_selected, mobile) {
+                    (true, false) => directory_records(builder, &scope, root, &entries),
+                    (true, true) => {
+                        file_stat_record(builder, &scope, root, 0, true).and_then(|()| {
+                            directory_record(builder, &scope, root, &entries, max_depth)
+                        })
                     }
-                }
-                if !is_selected {
-                    if let Err(error) = builder.record(
-                        &scope,
-                        "list_local_dir",
-                        json!({"path":book.path,"depth":10}),
-                        json!({"root":book.path,"total":entries.len(),"entries":entries}),
-                    ) {
-                        builder.error(&scope, error);
-                    }
+                    (false, _) => directory_record(builder, &scope, root, &entries, max_depth),
+                };
+                if let Err(error) = result {
+                    builder.error(&scope, error);
                 }
                 files = listed;
             }
@@ -1494,21 +1501,33 @@ async fn export_reader_file(
     {
         return;
     }
+    let assets_scope = scope
+        .strip_prefix("reader:")
+        .filter(|_| mobile)
+        .map(|book_id| format!("reader_assets:{book_id}"));
+    let assets_scope = assets_scope.as_deref().unwrap_or(scope);
+    let primary_scope = if ["md", "markdown", "pdf"].contains(&ext.as_str()) {
+        scope
+    } else {
+        assets_scope
+    };
     let logical = format!(
         "/v1/reader/raw?path={}",
         urlencoding::encode(&path.to_string_lossy())
     );
     match freeze_resource(original.clone(), exports.clone(), logical).await {
         Ok(resource) => {
-            if let Err(error) = file_stat_record(builder, scope, path, resource.meta.size, false) {
-                builder.error(scope, error);
+            if let Err(error) =
+                file_stat_record(builder, primary_scope, path, resource.meta.size, false)
+            {
+                builder.error(primary_scope, error);
             }
             if ext == "md" || ext == "markdown" {
                 if resource.meta.size > MAX_MARKDOWN_BYTES {
                     builder.error(scope, "单篇 Markdown 超过 4 MiB 离线保存上限");
                     return;
                 }
-                match std::fs::read_to_string(resource.file.path()) {
+                match std::fs::read_to_string(&resource.file) {
                     Ok(content) => {
                         for dependency in markdown_images(&content) {
                             if dependency.starts_with("data:") || dependency.starts_with('#') {
@@ -1523,7 +1542,7 @@ async fn export_reader_file(
                             let decoded = match urlencoding::decode(without_fragment) {
                                 Ok(decoded) => decoded.into_owned(),
                                 Err(error) => {
-                                    builder.error(scope, error);
+                                    builder.error(assets_scope, error);
                                     continue;
                                 }
                             };
@@ -1544,12 +1563,12 @@ async fn export_reader_file(
                                         .await
                                         {
                                             Ok(resource) => resources.push(resource.meta.clone()),
-                                            Err((_, error)) => builder.error(scope, error.0),
+                                            Err((_, error)) => builder.error(assets_scope, error.0),
                                         }
                                     }
                                 }
                                 Err(error) => {
-                                    builder.error(scope, format!("图片依赖不可用: {error}"))
+                                    builder.error(assets_scope, format!("图片依赖不可用: {error}"))
                                 }
                             }
                         }
@@ -1566,13 +1585,19 @@ async fn export_reader_file(
                 resources.push(resource.meta.clone());
             }
         }
-        Err((_, error)) => builder.error(scope, error.0),
+        Err((_, error)) => builder.error(primary_scope, error.0),
     }
 }
 
-fn reader_tree(path: &FsPath, depth: usize) -> Result<(Vec<Value>, Vec<PathBuf>), BrainError> {
-    if depth > 10 {
-        return Err(BrainError::Internal("文集目录超过10层，请分批保存".into()));
+fn reader_tree(
+    path: &FsPath,
+    depth: usize,
+    max_depth: usize,
+) -> Result<(Vec<Value>, Vec<PathBuf>), BrainError> {
+    if depth > max_depth {
+        return Err(BrainError::Internal(format!(
+            "文集目录超过{max_depth}层，请分批保存"
+        )));
     }
     let mut entries = vec![];
     let mut files = vec![];
@@ -1609,7 +1634,7 @@ fn reader_tree(path: &FsPath, depth: usize) -> Result<(Vec<Value>, Vec<PathBuf>)
             .to_ascii_lowercase();
         let mut entry = json!({"name":name,"path":path.to_string_lossy(),"is_dir":kind.is_dir(),"is_markdown":(["md","markdown"].contains(&ext.as_str())),"is_pdf":ext=="pdf"});
         if kind.is_dir() {
-            let (children, listed) = reader_tree(&path, depth + 1)?;
+            let (children, listed) = reader_tree(&path, depth + 1, max_depth)?;
             entry["children"] = json!(children);
             files.extend(listed);
         } else {
@@ -1639,6 +1664,21 @@ fn file_stat_record(
 ) -> Result<(), BrainError> {
     builder.record(scope,"stat_local_path",json!({"path":path.to_string_lossy()}),json!({"exists":true,"is_dir":directory,"is_file":!directory,"path":path.to_string_lossy(),"name":path.file_name().map(|s|s.to_string_lossy()).unwrap_or_default(),"size":size,"ext":path.extension().map(|s|s.to_string_lossy()).unwrap_or_default()}))
 }
+fn directory_record(
+    builder: &mut ExportBuilder,
+    scope: &str,
+    path: &FsPath,
+    entries: &[Value],
+    max_depth: usize,
+) -> Result<(), BrainError> {
+    builder.record(
+        scope,
+        "list_local_dir",
+        json!({"path":path.to_string_lossy(),"depth":max_depth}),
+        json!({"root":path.to_string_lossy(),"total":entries.len(),"entries":entries}),
+    )
+}
+
 fn directory_records(
     builder: &mut ExportBuilder,
     scope: &str,
@@ -1646,12 +1686,7 @@ fn directory_records(
     entries: &[Value],
 ) -> Result<(), BrainError> {
     file_stat_record(builder, scope, path, 0, true)?;
-    builder.record(
-        scope,
-        "list_local_dir",
-        json!({"path":path.to_string_lossy(),"depth":10}),
-        json!({"root":path.to_string_lossy(),"total":entries.len(),"entries":entries}),
-    )?;
+    directory_record(builder, scope, path, entries, LEGACY_DIRECTORY_DEPTH)?;
     for entry in entries {
         if entry["is_dir"] == true {
             if let (Some(path), Some(children)) =
@@ -1853,7 +1888,7 @@ async fn freeze_resource_with_policy(
             ));
         }
         let mut output = tempfile::Builder::new()
-            .prefix("resource-")
+            .prefix(&exports.resource_prefix)
             .tempfile_in(&exports.root)
             .map_err(internal)?;
         let mut hash = Sha256::new();
@@ -1976,7 +2011,7 @@ async fn freeze_resource_with_policy(
                 identity,
                 expires_at: chrono::DateTime::<Utc>::from(expires).to_rfc3339(),
             },
-            file: output,
+            file: output.into_temp_path(),
             expires,
             source_stamp: stamp,
             thumbnail_only,
@@ -1999,11 +2034,18 @@ async fn resource_download(
             .cloned()
             .ok_or_else(|| failure(StatusCode::NOT_FOUND, "离线资源已过期，请重新获取清单"))?
     };
-    let file = tokio::fs::File::open(resource.file.path())
+    // The resource stays owned until the stream opens the path. Expiry
+    // removes it from the registry, never out from under an active open.
+    let file = tokio::fs::File::open(&resource.file)
         .await
         .map_err(internal)?;
-    // The file handle remains valid through the stream even if expiry removes its pathname.
-    let mut response = Body::from_stream(ReaderStream::new(file)).into_response();
+    // Hold the path until the body drops its read handle, including on Windows.
+    let lease = resource.clone();
+    let stream = ReaderStream::new(file).map(move |chunk| {
+        let _lease = &lease;
+        chunk
+    });
+    let mut response = Body::from_stream(stream).into_response();
     response.headers_mut().insert(
         header::CONTENT_TYPE,
         resource.meta.mime_type.parse().map_err(internal)?,
@@ -2078,6 +2120,79 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
         let (status, _) = request(app, "GET", "/v1/offline/resources/expired", json!({})).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_offline_freezes_many_resources_under_low_descriptor_limit() {
+        const CHILD_MARKER: &str = "OBRAIN_TEST_OFFLINE_LOW_DESCRIPTOR_LIMIT";
+        if std::env::var_os(CHILD_MARKER).is_none() {
+            // The soft limit must only affect this child; changing it in the
+            // main harness would also affect unrelated concurrently running tests.
+            let output = std::process::Command::new("/bin/sh")
+                .args([
+                    "-c",
+                    "ulimit -n 64 && exec \"$@\"",
+                    "offline-low-descriptor-test",
+                ])
+                .arg(std::env::current_exe().unwrap())
+                .args([
+                    "test_offline_freezes_many_resources_under_low_descriptor_limit",
+                    "--nocapture",
+                ])
+                .env(CHILD_MARKER, "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success()
+                    && String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
+        let (ctx, dir, _) = AppContext::for_test();
+        let app = crate::api::router::create_router(ctx);
+        let mut first = None;
+        for index in 0..80 {
+            let path = dir.path().join(format!("chapter-{index}.pdf"));
+            std::fs::write(&path, format!("chapter {index}")).unwrap();
+            let source = format!(
+                "/v1/reader/raw?path={}",
+                urlencoding::encode(&path.to_string_lossy())
+            );
+            let url = format!("/v1/offline/resource?path={}", urlencoding::encode(&source));
+            let (status, manifest) = request(app.clone(), "GET", &url, json!({})).await;
+            assert_eq!(status, StatusCode::OK, "asset {index}: {manifest}");
+            if first.is_none() {
+                first = manifest["download_path"].as_str().map(str::to_owned);
+            }
+        }
+        let response = app
+            .oneshot(Request::get(first.unwrap()).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(response.into_body(), 1024).await.unwrap(),
+            &b"chapter 0"[..]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_offline_abandoned_snapshot_directories_do_not_block_new_exports() {
+        let (ctx, _dir, _) = AppContext::for_test();
+        crate::tools::handlers::register_all_tools(&ctx.tool_registry, ctx.clone()).await;
+        let export_root = ctx.db.database_path().with_extension("offline-exports");
+        for index in 0..3 {
+            std::fs::create_dir_all(export_root.join(format!("snapshot-abandoned-{index}")))
+                .unwrap();
+        }
+        let app = crate::api::router::create_router(ctx);
+        let snapshot = mobile_snapshot(&app, json!({})).await;
+        assert!(snapshot["versions"]["overview"].is_string(), "{snapshot}");
     }
 
     #[test]
@@ -2178,6 +2293,10 @@ mod tests {
         .await;
         assert_eq!(first, second);
         assert_eq!(first["protocol"], 1);
+        assert!(first["capabilities"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("mobile_reader_depth")));
         assert!(!first["instance_id"].as_str().unwrap().is_empty());
         let (other, _other_dir, _) = AppContext::for_test();
         let (_, identity) = request(
@@ -2389,6 +2508,109 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_mobile_reader_exports_one_complete_tree_through_fifteen_levels() {
+        let (ctx, dir, _) = AppContext::for_test();
+        crate::tools::handlers::register_all_tools(&ctx.tool_registry, ctx.clone()).await;
+        let folder = dir.path().join("deep-book");
+        let shallow = (1..=10).fold(folder.clone(), |path, level| {
+            path.join(format!("part-{level}"))
+        });
+        std::fs::create_dir_all(&shallow).unwrap();
+        std::fs::write(shallow.join("shallow.md"), "# Existing mobile article").unwrap();
+        ctx.db.with_connection(|conn| {
+            conn.execute("INSERT INTO reader_books(id,path,kind,name,added_at) VALUES('deep',?1,'folder','Deep book',1)", [folder.to_str().unwrap()])?;
+            Ok(())
+        }).unwrap();
+        let app = crate::api::router::create_router(ctx);
+
+        let old_mobile = mobile_snapshot(&app, json!({})).await;
+        let (records, _) = snapshot_contents(&app, &old_mobile).await;
+        assert!(records
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["tool"] == "list_local_dir"
+                && r["arguments"] == json!({"path":folder,"depth":10})));
+
+        let deepest = (11..=15).fold(shallow, |path, level| path.join(format!("part-{level}")));
+        std::fs::create_dir_all(&deepest).unwrap();
+        let article = deepest.join("article.md");
+        std::fs::write(&article, "# Deep article").unwrap();
+
+        let overview = mobile_snapshot(&app, json!({"reader_depth":15})).await;
+        let (records, _) = snapshot_contents(&app, &overview).await;
+        let directory = records
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["tool"] == "list_local_dir" && r["arguments"]["path"] == json!(folder))
+            .expect("automatic snapshot contains the deep book directory");
+        assert_eq!(directory["arguments"]["depth"], 15);
+        let mut entries = &directory["result"]["entries"];
+        for _ in 0..15 {
+            entries = &entries[0]["children"];
+        }
+        assert_eq!(entries[0]["path"], json!(article));
+
+        let selection = json!({"include_resources":true,"book_ids":["deep"],"reader_depth":15});
+        let selected = mobile_snapshot(&app, selection.clone()).await;
+        let (records, _) = snapshot_contents(&app, &selected).await;
+        assert!(
+            selected["versions"]["reader:deep"].is_string(),
+            "{selected}"
+        );
+        let directories: Vec<_> = records
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|r| r["tool"] == "list_local_dir")
+            .collect();
+        assert_eq!(directories, vec![directory]);
+        assert!(records
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["tool"] == "read_local_file" && r["arguments"]["path"] == json!(article)));
+
+        let (_, legacy) = request(
+            app.clone(),
+            "POST",
+            "/v1/offline/snapshots",
+            json!({"book_ids":["deep"]}),
+        )
+        .await;
+        assert!(legacy["coverage"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["scope"] == "reader_metadata:deep"
+                && c["errors"][0]
+                    .as_str()
+                    .is_some_and(|message| message.contains("10层"))));
+        snapshot_contents(&app, &legacy).await;
+
+        std::fs::create_dir(deepest.join("part-16")).unwrap();
+        let over_limit = mobile_snapshot(&app, selection).await;
+        assert!(
+            over_limit["versions"]["reader:deep"].is_null(),
+            "{over_limit}"
+        );
+        assert!(over_limit["coverage"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["scope"] == "reader_metadata:deep"
+                && c["errors"][0]
+                    .as_str()
+                    .is_some_and(|message| message.contains("15层"))));
+        assert!(over_limit["coverage"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["scope"] == "reader:deep" && c["complete"] == false));
+    }
+
+    #[tokio::test]
     async fn test_mobile_reader_selection_versions_include_bodies_and_dependencies() {
         let (ctx, dir, _) = AppContext::for_test();
         crate::tools::handlers::register_all_tools(&ctx.tool_registry, ctx.clone()).await;
@@ -2437,10 +2659,59 @@ mod tests {
         );
         assert_ne!(assets[0]["sha256"], new_assets[0]["sha256"]);
         std::fs::remove_file(&image).unwrap();
-        let incomplete = mobile_snapshot(&app, options).await;
-        assert_eq!(incomplete["versions"], json!({}));
-        assert_eq!(incomplete["unchanged_scopes"], json!([]));
-        assert!(incomplete["coverage"]
+        let missing_image = mobile_snapshot(&app, options.clone()).await;
+        let (records, assets) = snapshot_contents(&app, &missing_image).await;
+        assert_eq!(assets, json!([]));
+        assert!(records
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["tool"] == "read_local_file" && r["arguments"]["path"] == json!(chapter)));
+        assert_ne!(
+            missing_image["versions"]["reader:folder"],
+            changed["versions"]["reader:folder"]
+        );
+        assert!(
+            missing_image["versions"]["reader:folder"].is_string(),
+            "{missing_image}"
+        );
+        assert!(missing_image["coverage"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["scope"] == "reader_assets:folder" && c["complete"] == false));
+        assert!(missing_image["coverage"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["scope"] == "reader:folder" && c["complete"] == true));
+
+        options["known_versions"] = missing_image["versions"].clone();
+        let unchanged_missing = mobile_snapshot(&app, options.clone()).await;
+        assert_eq!(
+            unchanged_missing["unchanged_scopes"],
+            json!(["reader:folder"])
+        );
+        assert!(unchanged_missing["coverage"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["scope"] == "reader_assets:folder" && c["complete"] == false));
+        snapshot_contents(&app, &unchanged_missing).await;
+
+        std::fs::write(&image, b"other").unwrap();
+        let repaired = mobile_snapshot(&app, options.clone()).await;
+        let (_, repaired_assets) = snapshot_contents(&app, &repaired).await;
+        assert_eq!(repaired_assets[0]["sha256"], new_assets[0]["sha256"]);
+        assert_ne!(
+            repaired["versions"]["reader:folder"],
+            missing_image["versions"]["reader:folder"]
+        );
+
+        std::fs::remove_file(&chapter).unwrap();
+        let missing_body = mobile_snapshot(&app, options).await;
+        assert_eq!(missing_body["versions"], json!({}));
+        assert!(missing_body["coverage"]
             .as_array()
             .unwrap()
             .iter()
