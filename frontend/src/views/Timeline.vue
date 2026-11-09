@@ -453,7 +453,6 @@ import { parseLocalDate } from '@/utils/taskDates'
 import { ElMessage } from 'element-plus'
 import { Plus, Minus, Close, Search, PriceTag, Loading, Picture, Refresh, ArrowLeft, ArrowRight, MoreFilled, Edit, Delete, FolderOpened } from '@element-plus/icons-vue'
 import hljs from 'highlight.js/lib/common'
-import 'highlight.js/styles/github-dark.css'
 import { createImageViewerMotion, type PhotoFrame } from '@/utils/imageViewerMotion'
 import { createMemo, browseTimeline, searchMemos, uploadImages, updateMemo, deleteMemo, discardMemoImages } from '@/api'
 import { memoImageUrl, memoImageSource, memoLocalDate, memoToolResult, type TimelineMemo } from '@/utils/timelineMemo'
@@ -1740,9 +1739,9 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
   color: var(--text-faint);
 }
 
-/* Code blocks — dark background with syntax highlighting */
+/* Code surfaces share the Reader's light, dark and eye-care syntax palettes. */
 .memo-content :deep(.memo-code) {
-  background: #1e1e2e;
+  background: var(--syntax-bg);
   padding: 14px 16px;
   border-radius: 10px;
   font-size: 13px;
@@ -1760,7 +1759,7 @@ onMounted(() => { applyHomepageContext(); if (route.query.storage === '1') stora
   background: none;
   padding: 0;
   font-size: inherit;
-  color: #cdd6f4;
+  color: var(--syntax-text);
 }
 .memo-content :deep(.memo-code code.hljs) {
   background: none;

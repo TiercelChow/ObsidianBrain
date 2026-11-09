@@ -1,0 +1,163 @@
+/* Shared by Reader, path previews and memos. Opaque, quiet code surfaces keep
+   small colored text readable without adding another optical/blur layer. */
+:root,
+:root[data-theme="light"] {
+  --syntax-bg: #f3f5f9;
+  --syntax-text: #253247;
+  --syntax-comment: #626c7b;
+  --syntax-keyword: #9347a8;
+  --syntax-string: #216443;
+  --syntax-number: #995015;
+  --syntax-function: #225da5;
+  --syntax-type: #6d50a5;
+  --syntax-variable: #835019;
+  --syntax-tag: #a83e52;
+  --syntax-meta: #73551f;
+  --syntax-operator: #42567d;
+  --syntax-punctuation: #566377;
+  --syntax-addition: #216443;
+  --syntax-deletion: #a83e52;
+}
+:root[data-theme="dark"] {
+  --syntax-bg: #161d29;
+  --syntax-text: #d8e2f2;
+  --syntax-comment: #95a3b8;
+  --syntax-keyword: #c5a3ed;
+  --syntax-string: #a7d8b0;
+  --syntax-number: #efc18d;
+  --syntax-function: #96c4f5;
+  --syntax-type: #d2b7f5;
+  --syntax-variable: #e7c299;
+  --syntax-tag: #f3a8b3;
+  --syntax-meta: #d9cb94;
+  --syntax-operator: #a9bfeb;
+  --syntax-punctuation: #a8b5c9;
+  --syntax-addition: #a7d8b0;
+  --syntax-deletion: #f3a8b3;
+}
+:root[data-theme="eye-care"] {
+  --syntax-bg: #e5eadc;
+  --syntax-text: #2e3b2e;
+  --syntax-comment: #5b6953;
+  --syntax-keyword: #705186;
+  --syntax-string: #38623c;
+  --syntax-number: #875026;
+  --syntax-function: #3c5e82;
+  --syntax-type: #75537b;
+  --syntax-variable: #7b5829;
+  --syntax-tag: #875144;
+  --syntax-meta: #6f612c;
+  --syntax-operator: #4a6159;
+  --syntax-punctuation: #596451;
+  --syntax-addition: #38623c;
+  --syntax-deletion: #875144;
+}
+
+/* Global geometry is also available when a code preview opens before Reader. */
+.code-block {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0 0 1em;
+  background: var(--syntax-bg);
+  border: 1px solid var(--border-faint);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.code-block .code-gutter,
+.code-block .code-content {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.code-block .code-gutter {
+  flex-shrink: 0;
+  padding: 16px 12px;
+  text-align: right;
+  color: var(--syntax-comment);
+  user-select: none;
+  white-space: pre;
+  border-right: 1px solid var(--border-faint);
+  overflow: hidden;
+}
+.code-block .code-content {
+  flex: 1;
+  min-width: 0;
+  padding: 16px 18px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+  background: transparent;
+  border: none;
+}
+.code-block .code-content code,
+.code-block .code-content code.hljs {
+  background: transparent;
+  color: var(--syntax-text);
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  font-family: var(--font-mono);
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+/* Scope token rules to code surfaces: never recolor inline code, diagram
+   labels, math or unrelated third-party highlighters. */
+:is(.code-block, .memo-code) .hljs-comment,
+:is(.code-block, .memo-code) .hljs-quote {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+:is(.code-block, .memo-code) .hljs-keyword,
+:is(.code-block, .memo-code) .hljs-selector-tag,
+:is(.code-block, .memo-code) .hljs-literal { color: var(--syntax-keyword); }
+:is(.code-block, .memo-code) .hljs-string,
+:is(.code-block, .memo-code) .hljs-regexp,
+:is(.code-block, .memo-code) .hljs-template-tag { color: var(--syntax-string); }
+:is(.code-block, .memo-code) .hljs-number,
+:is(.code-block, .memo-code) .hljs-symbol,
+:is(.code-block, .memo-code) .hljs-bullet { color: var(--syntax-number); }
+:is(.code-block, .memo-code) .hljs-title,
+:is(.code-block, .memo-code) .hljs-title.function_ { color: var(--syntax-function); }
+:is(.code-block, .memo-code) .hljs-built_in,
+:is(.code-block, .memo-code) .hljs-type,
+:is(.code-block, .memo-code) .hljs-title.class_ { color: var(--syntax-type); }
+:is(.code-block, .memo-code) .hljs-variable,
+:is(.code-block, .memo-code) .hljs-template-variable,
+:is(.code-block, .memo-code) .hljs-attr,
+:is(.code-block, .memo-code) .hljs-property,
+:is(.code-block, .memo-code) .hljs-attribute { color: var(--syntax-variable); }
+:is(.code-block, .memo-code) .hljs-name,
+:is(.code-block, .memo-code) .hljs-tag,
+:is(.code-block, .memo-code) .hljs-selector-id,
+:is(.code-block, .memo-code) .hljs-selector-class,
+:is(.code-block, .memo-code) .hljs-selector-attr,
+:is(.code-block, .memo-code) .hljs-selector-pseudo { color: var(--syntax-tag); }
+:is(.code-block, .memo-code) .hljs-meta,
+:is(.code-block, .memo-code) .hljs-doctag { color: var(--syntax-meta); }
+:is(.code-block, .memo-code) .hljs-meta .hljs-keyword { color: var(--syntax-keyword); }
+:is(.code-block, .memo-code) .hljs-meta .hljs-string { color: var(--syntax-string); }
+:is(.code-block, .memo-code) .hljs-operator { color: var(--syntax-operator); }
+:is(.code-block, .memo-code) .hljs-punctuation { color: var(--syntax-punctuation); }
+:is(.code-block, .memo-code) .hljs-params,
+:is(.code-block, .memo-code) .hljs-subst { color: var(--syntax-text); }
+:is(.code-block, .memo-code) .hljs-addition {
+  color: var(--syntax-addition);
+  background: color-mix(in srgb, var(--syntax-addition) 8%, var(--syntax-bg));
+}
+:is(.code-block, .memo-code) .hljs-deletion {
+  color: var(--syntax-deletion);
+  background: color-mix(in srgb, var(--syntax-deletion) 8%, var(--syntax-bg));
+}
+:is(.code-block, .memo-code) .hljs-section { color: var(--syntax-function); font-weight: 650; }
+:is(.code-block, .memo-code) .hljs-link { color: var(--syntax-function); text-decoration: underline; }
+:is(.code-block, .memo-code) .hljs-emphasis { font-style: italic; }
+:is(.code-block, .memo-code) .hljs-strong { font-weight: 700; }
+
+@media (forced-colors: active) {
+  :is(.code-block, .memo-code) [class*="hljs-"] { color: CanvasText; background: Canvas; }
+}

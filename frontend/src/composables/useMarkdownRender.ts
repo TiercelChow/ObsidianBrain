@@ -231,8 +231,11 @@ export function useMarkdownRender(
   async function highlightCode(el: HTMLElement, generation: number) {
     try {
       const hljs = await getHighlighter()
-      if (generation !== enhancementGeneration || !el.isConnected) return
+      if (generation !== enhancementGeneration || !el.isConnected || el.dataset.highlighted) return
       hljs.highlightElement(el)
+      // Explicit plaintext/no-highlight or unsupported languages are terminal
+      // too: theme changes must not repeatedly parse or warn about them.
+      el.dataset.highlighted ??= 'skipped'
     } catch (e) {
       console.warn('hljs 高亮失败:', e)
     }
@@ -283,7 +286,9 @@ export function useMarkdownRender(
   }
 
   function observeEnhancements(container: HTMLElement, generation: number) {
-    const codeEls = Array.from(container.querySelectorAll<HTMLElement>('pre code:not(.hljs)'))
+    // The parser adds .hljs for presentation before tokenization. Only the
+    // library's completion marker means a block has actually been highlighted.
+    const codeEls = Array.from(container.querySelectorAll<HTMLElement>('pre code:not([data-highlighted])'))
     const mermaidEls = Array.from(container.querySelectorAll<HTMLElement>('.mermaid')).filter(el => el.dataset.diagramTheme !== appStore.theme)
     const targets = [...codeEls, ...mermaidEls]
     if (!targets.length) return

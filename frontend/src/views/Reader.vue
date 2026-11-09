@@ -2085,41 +2085,6 @@ onBeforeRouteLeave(() => { flushProgressNow() })
 
 <!-- Global (non-scoped): markdown body + mermaid styling, themed via CSS variables -->
 <style>
-/* ── syntax-highlight token colors (theme-aware; no hljs theme CSS) ── */
-:root[data-theme="light"] {
-  --tk-text: #24292e;
-  --tk-keyword: #d73a49;
-  --tk-string: #032f62;
-  --tk-number: #005cc5;
-  --tk-comment: #6a737d;
-  --tk-function: #6f42c1;
-  --tk-builtin: #005cc5;
-  --tk-variable: #e36209;
-  --tk-tag: #22863a;
-}
-:root[data-theme="dark"] {
-  --tk-text: #c9d1d9;
-  --tk-keyword: #ff7b72;
-  --tk-string: #a5d6ff;
-  --tk-number: #79c0ff;
-  --tk-comment: #8b949e;
-  --tk-function: #d2a8ff;
-  --tk-builtin: #79c0ff;
-  --tk-variable: #ffa657;
-  --tk-tag: #7ee787;
-}
-:root[data-theme="eye-care"] {
-  --tk-text: #152618;
-  --tk-keyword: #1b5e20;
-  --tk-string: #33691e;
-  --tk-number: #0d47a1;
-  --tk-comment: #558b2f;
-  --tk-function: #6a1b9a;
-  --tk-builtin: #0d47a1;
-  --tk-variable: #bf360c;
-  --tk-tag: #2e7d32;
-}
-
 /* Reader drawers are mobile-only and teleported to body; drop the default 20px
    body padding so .drawer-inner controls the (compact) spacing. */
 .el-drawer__body { padding: 0; }
@@ -2271,55 +2236,6 @@ onBeforeRouteLeave(() => { flushProgressNow() })
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-/* code block with line numbers (shared by reader + preview modal) */
-.code-block {
-  display: flex;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  margin: 0 0 1em;
-  background: var(--code-bg);
-  border: 1px solid var(--border-faint);
-  border-radius: 12px;
-  overflow: hidden;
-}
-.code-block .code-gutter,
-.code-block .code-content {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.6;
-}
-.code-block .code-gutter {
-  flex-shrink: 0;
-  padding: 16px 12px;
-  text-align: right;
-  color: var(--text-faint);
-  user-select: none;
-  white-space: pre;
-  border-right: 1px solid var(--border-faint);
-  overflow: hidden;
-}
-.code-block .code-content {
-  flex: 1;
-  min-width: 0;
-  padding: 16px 18px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  touch-action: pan-x pan-y;
-  background: transparent;
-  border: none;
-}
-.code-block .code-content code,
-.code-block .code-content code.hljs {
-  background: transparent; color: var(--tk-text);
-  padding: 0; font-size: 13px; line-height: 1.6;
-  font-family: var(--font-mono);
-  white-space: pre;
-  overflow-wrap: normal;
-  word-break: normal;
-}
-
 /* Raw HTML <pre> blocks do not pass through the fenced-code renderer. */
 .markdown-body pre:not(.code-gutter):not(.code-content) {
   width: 100%;
@@ -2339,38 +2255,6 @@ onBeforeRouteLeave(() => { flushProgressNow() })
   overflow-wrap: normal;
   word-break: normal;
 }
-/* hljs token colors — themed via --tk-* variables (global: reader + modal) */
-.hljs-comment,
-.hljs-quote { color: var(--tk-comment); font-style: italic; }
-.hljs-keyword,
-.hljs-selector-tag,
-.hljs-literal,
-.hljs-section,
-.hljs-link,
-.hljs-deletion { color: var(--tk-keyword); }
-.hljs-string,
-.hljs-regexp,
-.hljs-addition,
-.hljs-attribute { color: var(--tk-string); }
-.hljs-number,
-.hljs-symbol,
-.hljs-bullet,
-.hljs-meta { color: var(--tk-number); }
-.hljs-title,
-.hljs-title.function_,
-.hljs-title.class_,
-.hljs-name { color: var(--tk-function); }
-.hljs-built_in,
-.hljs-type { color: var(--tk-builtin); }
-.hljs-variable,
-.hljs-template-variable,
-.hljs-attr,
-.hljs-property,
-.hljs-params { color: var(--tk-variable); }
-.hljs-tag { color: var(--tk-tag); }
-.hljs-emphasis { font-style: italic; }
-.hljs-strong { font-weight: 700; }
-
 /* On mobile, keep code on a single line (no wrap) — scroll horizontally to view
    long lines. Only long prose/URLs wrap. */
 @media (max-width: 768px) {
