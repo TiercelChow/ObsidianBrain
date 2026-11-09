@@ -345,6 +345,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "local timeline originals, revision and bounded image cache",
         sql: include_str!("../../migrations/059_local_timeline.sql"),
     },
+    Migration {
+        version: 60,
+        description: "per-book Markdown and PDF position bookmarks",
+        sql: include_str!("../../migrations/060_reader_bookmarks.sql"),
+    },
 ];
 
 #[cfg(test)]

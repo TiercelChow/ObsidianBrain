@@ -8,6 +8,7 @@
 pub mod book_wiki_handlers;
 pub mod code_repo_handlers;
 pub mod config_handlers;
+pub mod reader_bookmark_handlers;
 pub mod reader_handlers;
 pub mod task_handlers;
 pub mod timeline_handlers;
@@ -19,6 +20,7 @@ use crate::tools::handlers::code_repo_handlers::*;
 use crate::tools::handlers::config_handlers::{
     GetConfigHandler, SaveConfigHandler, VerifyLlmHandler,
 };
+use crate::tools::handlers::reader_bookmark_handlers::*;
 use crate::tools::handlers::reader_handlers::*;
 use crate::tools::handlers::task_handlers::*;
 use crate::tools::handlers::timeline_handlers::*;
@@ -254,5 +256,12 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
     registry.register(Arc::new(GetReaderBooksHandler)).await;
     registry.register(Arc::new(SaveReaderBooksHandler)).await;
     registry.register(Arc::new(SaveReaderProgressHandler)).await;
+    registry
+        .register(Arc::new(ListReaderBookmarksHandler))
+        .await;
+    registry.register(Arc::new(SaveReaderBookmarkHandler)).await;
+    registry
+        .register(Arc::new(DeleteReaderBookmarkHandler))
+        .await;
     registry.register(Arc::new(StatLocalPathHandler)).await;
 }

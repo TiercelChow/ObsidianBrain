@@ -36,7 +36,7 @@ fn normalized(path: &str) -> Result<String, BrainError> {
     })
 }
 
-fn belongs(path: &str, book_path: &str, kind: &str) -> Result<bool, BrainError> {
+pub(crate) fn belongs(path: &str, book_path: &str, kind: &str) -> Result<bool, BrainError> {
     let file = normalized(path)?;
     let root = normalized(book_path)?;
     Ok(if kind == "pdf" {

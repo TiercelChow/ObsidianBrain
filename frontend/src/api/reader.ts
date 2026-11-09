@@ -1,4 +1,20 @@
 import { callTool } from '@/api'
+import type { BookmarkDraft, ReaderBookmark } from '@/utils/readerBookmarks'
+
+export async function listReaderBookmarks(bookId: string): Promise<ReaderBookmark[]> {
+  const response = await callTool('list_reader_bookmarks', { book_id: bookId }) as unknown as ToolEnvelope<{bookmarks:ReaderBookmark[]}>
+  if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '书签加载失败')
+  return response.result.bookmarks
+}
+export async function saveReaderBookmark(draft: BookmarkDraft): Promise<ReaderBookmark> {
+  const response = await callTool('save_reader_bookmark', draft) as unknown as ToolEnvelope<{bookmark:ReaderBookmark}>
+  if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '书签保存失败')
+  return response.result.bookmark
+}
+export async function deleteReaderBookmark(bookmark: ReaderBookmark): Promise<void> {
+  const response = await callTool('delete_reader_bookmark', {book_id:bookmark.book_id,id:bookmark.id,revision:bookmark.revision}) as unknown as ToolEnvelope<{deleted:boolean}>
+  if (response.status !== 'success' || !response.result?.deleted) throw new Error(response.error?.message || '书签删除失败')
+}
 
 /** A single node in the directory tree returned by list_local_dir. */
 export interface DirEntry {

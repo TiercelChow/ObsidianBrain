@@ -54,6 +54,7 @@
       <el-button data-icon-only v-show="viewMode === 'read'" class="icon-btn reader-fullscreen-btn" :title="isImmersive ? '退出沉浸阅读' : '沉浸阅读'" @click="toggleFullscreen">
         <el-icon><FullScreen /></el-icon>
       </el-button>
+      <button v-if="!isMobile && viewMode==='read'" data-icon-only type="button" class="ui-icon-action reader-bookmarks-trigger" aria-label="本书书签" title="本书书签" :disabled="!currentShelfBookId" @click="openBookmarks()"><el-icon><CollectionTag /></el-icon></button>
     </div>
 
     <MobilePageAction
@@ -158,6 +159,7 @@
         class="pane pane-center"
         data-glass="card"
         @scroll="onContentScroll"
+        @pointerdown="rememberBookmarkPoint"
         @touchmove.passive="revealMobileToolbar"
         @click="fileKind === 'pdf' && revealMobileToolbar()"
         @mouseup="captureMarkdownSelection"
@@ -177,11 +179,13 @@
             @pagechange="onPdfPageChange"
             @pagecount="onPdfPageCount"
             @zoomchange="pdfZoomRatio = $event"
+            @loaderror="onPdfBookmarkError"
           />
           <article
             v-else-if="renderedHtml"
             :key="displayedFile"
             class="markdown-body"
+            :class="{'has-reader-bookmarks':bookmarks.some(item=>item.file_path===displayedFile)}"
             v-html="renderedHtml"
           ></article>
           <div v-else key="empty" class="center-state">
@@ -194,6 +198,7 @@
         <div v-if="fileLoading" class="loadbar"><span></span></div>
         <!-- error banner (old content remains behind) -->
         <div v-if="error" class="error-banner"><el-icon aria-hidden="true"><WarningFilled /></el-icon><span>{{ error }}</span></div>
+        <ReaderBookmarkMarkers v-if="displayedFile" :pane="contentRef" :file="displayedFile" :bookmarks="bookmarks" :ready="fileKind==='md'?renderedHtml:pdfPageCount" @open="openBookmarks" />
       </main>
 
       <!-- Right: TOC -->
@@ -228,6 +233,7 @@
         <button type="button" @click="useSelection('explain')">解释</button>
         <button type="button" @click="useSelection('candidate')">加入知识</button>
         <button type="button" @click="useSelection('research')">研究任务</button>
+        <button type="button" @click="openBookmarks()">书签</button>
       </div>
     </transition>
 
@@ -262,16 +268,16 @@
         v-if="fileKind === 'pdf' && displayedFile"
         type="button"
         class="reader-document-center"
-        :aria-label="`${mobileDocumentLabel}，点按恢复适宽`"
-        title="双指缩放 · 横向滑动查看 · 点按恢复整页适宽"
-        @click="fitPdf"
+        :aria-label="`${mobileDocumentLabel}，本书书签`"
+        title="本书书签 · 双指缩放 PDF"
+        @click="openBookmarks()"
       >
-        <span class="reader-document-label">{{ mobileDocumentLabel }}</span>
+        <span class="reader-document-label"><el-icon><CollectionTag /></el-icon> {{ mobileDocumentLabel }}</span>
         <small>{{ pdfCurrentPage || 1 }} / {{ pdfPageCount || '—' }} · {{ Math.round(pdfZoomRatio * 100) }}%</small>
       </button>
-      <div v-else class="reader-document-center" :aria-label="mobileDocumentLabel">
-        <span class="reader-document-label">{{ mobileDocumentLabel }}</span>
-      </div>
+      <button v-else type="button" class="reader-document-center" :aria-label="`${mobileDocumentLabel}，本书书签`" :disabled="!currentShelfBookId" @click="openBookmarks()">
+        <span class="reader-document-label"><el-icon><CollectionTag /></el-icon> {{ mobileDocumentLabel }}</span>
+      </button>
       <div class="mobile-toolbar-side mobile-toolbar-right">
         <template v-if="fileKind === 'pdf' && displayedFile">
           <button data-icon-only type="button" aria-label="缩小 PDF" title="缩小" :disabled="pdfZoomRatio <= .6" @click="setPdfZoom(-1)">
@@ -327,6 +333,7 @@
       <button data-icon-only class="fs-fab" :title="isFullscreen ? '退出全屏 (Esc)' : '退出沉浸阅读'" @click="toggleFullscreen">
         <el-icon :size="20"><FullScreen /></el-icon>
       </button>
+      <button data-icon-only class="fs-fab" aria-label="本书书签" :disabled="!currentShelfBookId" @click="openBookmarks()"><el-icon :size="20"><CollectionTag /></el-icon></button>
       </div>
     </div>
 
@@ -349,6 +356,7 @@
       @close="previewPath = ''"
       @open-in-reader="onPreviewOpenInReader"
     />
+    <ReaderBookmarksPanel v-if="bookmarkPanelMounted" :model-value="bookmarkPanelOpen" :book-id="currentShelfBookId || ''" :book-name="bookmarkBookName" :items="bookmarks" :loading="bookmarksLoading" :error="bookmarksError" :can-create="Boolean(bookmarkCapture)" :capture="() => bookmarkCapture" :initial-id="initialBookmarkId" :teleport-to="readerPageRef || 'body'" @update:model-value="bookmarkPanelOpen=$event" @saved="onBookmarkSaved" @deleted="onBookmarkDeleted" @refresh="loadBookmarks" @jump="jumpToBookmark" />
   </div>
 </template>
 
@@ -360,11 +368,12 @@ import { nextPdfZoomRatio } from '@/components/reader/pdfRenderPolicy'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  FolderOpened, Menu, Document, FullScreen, Refresh, Minus, Plus, Search, Close, WarningFilled,
+  FolderOpened, Menu, Document, FullScreen, Refresh, Minus, Plus, Search, Close, WarningFilled, CollectionTag,
 } from '@element-plus/icons-vue'
 import {
   listLocalDir, readLocalFile,
   type DirEntry, type ReaderBook,
+  listReaderBookmarks,
 } from '@/api/reader'
 import { makeReaderImageResolvers } from '@/utils/readerImages'
 import { resolveRelativePath } from '@/utils/markdownImages'
@@ -391,11 +400,14 @@ import { useModalEnvironment } from '@/composables/useModalEnvironment'
 import { canFocusDocument } from '@/utils/modalFocusPolicy'
 import { searchReaderFiles } from '@/utils/readerFileSearch'
 import { listBookKnowledgeBases, proposeReaderSelection } from '@/api/knowledge'
+import ReaderBookmarkMarkers from '@/components/reader/ReaderBookmarkMarkers.vue'
+import { captureBookmarkLocation,bookmarkTarget,type ReaderBookmark,type BookmarkDraft } from '@/utils/readerBookmarks'
 
 // Heavy, optional readers stay out of the Markdown-first route chunk.
 const MermaidViewer = defineAsyncComponent(() => import('@/components/reader/MermaidViewer.vue'))
 const PathPreviewModal = defineAsyncComponent(() => import('@/components/reader/PathPreviewModal.vue'))
 const PdfViewer = defineAsyncComponent(() => import('@/components/reader/PdfViewer.vue'))
+const ReaderBookmarksPanel = defineAsyncComponent(() => import('@/components/reader/ReaderBookmarksPanel.vue'))
 
 const appStore = useAppStore()
 const { isMobile } = usePhoneViewport()
@@ -905,6 +917,7 @@ const pdfPageCount = ref(0)
 const pdfZoomRatio = ref(1)
 
 function fitPdf() {
+  stopBookmarkHold()
   pdfZoomRatio.value = 1
   pdfViewerRef.value?.setZoom('fit')
 }
@@ -1072,6 +1085,9 @@ function cancelPendingFileSelection() {
 }
 
 async function onSelectFile(path: string) {
+  stopBookmarkHold()
+  bookmarkPoint=null
+  if(pendingBookmarkJump && pendingBookmarkJump.file_path!==path)pendingBookmarkJump=null
   activeFile.value = path
   // Already displaying this file — skip to avoid resetting rendered mermaid back to source.
   if (path === displayedFile.value) return
@@ -1158,6 +1174,7 @@ async function onArticleEnter(el: Element) {
   if (contentRef.value && !pendingAnchor.value) contentRef.value.scrollTop = 0
   buildToc(el as HTMLElement)
   await enhance(el as HTMLElement)
+  if (pendingBookmarkJump?.file_path===displayedFile.value) { applyBookmarkJump(); return }
   if (pendingAnchor.value) {
     scrollToHeading(pendingAnchor.value)
     pendingAnchor.value = ''
@@ -1191,6 +1208,7 @@ function onContentAfterLeave(el: Element) {
 function onPdfPageChange(page: number, source: string) {
   if (source !== displayedFile.value) return
   pdfCurrentPage.value = page
+  if (pendingBookmarkJump) return
   // Skip capturing during a restore jump — pdf.js fires intermediate page
   // events as it renders toward the target page; the restore owns the position.
   if (fileKind.value !== 'pdf' || viewMode.value !== 'read' || pdfPageCount.value <= 0) return
@@ -1212,6 +1230,7 @@ function onPdfPageCount(count: number, source: string) {
   pdfPageCount.value = count
   const id = currentShelfBookId.value
   if (id && displayedFile.value && count > 0 && viewMode.value === 'read') shelf.openFile(id, displayedFile.value, 'pdf')
+  if (pendingBookmarkJump?.file_path===source) { void nextTick().then(() => {if (source===displayedFile.value) applyBookmarkJump()}); return }
   // Book-open restore (FR-14): page wraps mount with pageMetas as the pdf
   // loads, so one rAF after the count arrives the target wrap is addressable.
   if (pendingPdfPage !== null) {
@@ -1238,6 +1257,7 @@ function onPdfOutline(items: { text: string; level: number; page: number }[]) {
 
 /** TOC click: jump to a PDF page (if pdf) or a markdown heading (if md). */
 function onTocClick(t: TocItem) {
+  stopBookmarkHold()
   if (t.page !== undefined && fileKind.value === 'pdf') {
     // PDF pages flow in pane-center too, so the jump scrolls the same
     // container — hold the header state before PdfViewer scrolls it.
@@ -1332,6 +1352,7 @@ function holdHeaderForJump() {
 }
 
 function onContentScroll() {
+  if(bookmarkPoint && contentRef.value && (Math.abs(contentRef.value.scrollTop-bookmarkPoint.scrollTop)>1 || Math.abs(contentRef.value.scrollLeft-bookmarkPoint.scrollLeft)>1))bookmarkPoint=null
   if (contentScrollFrame !== null) return
   contentScrollFrame = window.requestAnimationFrame(processContentScroll)
 }
@@ -1376,6 +1397,7 @@ function scrollTocToActive() {
 }
 
 function scrollToHeading(id: string) {
+  stopBookmarkHold()
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   holdHeaderForJump()
   findMarkdownHeading(id)?.scrollIntoView({
@@ -1436,6 +1458,83 @@ onBeforeUnmount(() => {
   if (document.fullscreenElement) void document.exitFullscreen()
 })
 onBeforeRouteLeave(() => { flushProgressNow() })
+
+// Bookmarks are book-scoped data, never written into the source or progress JSON.
+const bookmarks=ref<ReaderBookmark[]>([]),bookmarksLoading=ref(false),bookmarksError=ref('')
+const bookmarkPanelOpen=ref(false),initialBookmarkId=ref(''),bookmarkCapture=ref<BookmarkDraft|null>(null)
+const bookmarkPanelMounted=ref(false)
+const bookmarkBookName=computed(()=>shelf.books.value.find(book=>book.id===currentShelfBookId.value)?.name || '当前书籍')
+let bookmarkRequest=0,pendingBookmarkJump:ReaderBookmark|null=null
+let bookmarkPoint:{position:ReturnType<typeof captureBookmarkLocation>;scrollTop:number;scrollLeft:number}|null=null
+function rememberBookmarkPoint(event:PointerEvent){
+  stopRestoreCorrection();stopBookmarkHold()
+  const pane=contentRef.value
+  if(pane && !(event.target as Element).closest('button,a,input,textarea'))bookmarkPoint={position:captureBookmarkLocation(pane,fileKind.value,{x:event.clientX,y:event.clientY}),scrollTop:pane.scrollTop,scrollLeft:pane.scrollLeft}
+}
+let bookmarkHoldCleanup:(()=>void)|null=null
+function stopBookmarkHold(){bookmarkHoldCleanup?.();bookmarkHoldCleanup=null}
+watch(currentShelfBookId,()=>{bookmarkPanelOpen.value=false;bookmarks.value=[];pendingBookmarkJump=null;stopBookmarkHold();void loadBookmarks()},{immediate:true})
+async function loadBookmarks(){
+  const id=currentShelfBookId.value,request=++bookmarkRequest
+  bookmarksError.value='';bookmarksLoading.value=Boolean(id)
+  if(!id)return
+  try{const result=await listReaderBookmarks(id);if(request===bookmarkRequest && id===currentShelfBookId.value)bookmarks.value=result}
+  catch(e){if(request===bookmarkRequest)bookmarksError.value=(e as Error).message || '书签加载失败'}
+  finally{if(request===bookmarkRequest)bookmarksLoading.value=false}
+}
+function openBookmarks(bookmark?:ReaderBookmark){
+  const id=currentShelfBookId.value,pane=contentRef.value
+  if(!id)return
+  const selection=window.getSelection()
+  const hasSelection=Boolean(selection && !selection.isCollapsed && pane?.contains(selection.anchorNode))
+  const position=pane && !fileLoading.value && (fileKind.value!=='pdf'||pdfPageCount.value>0) ? (hasSelection?captureBookmarkLocation(pane,fileKind.value):bookmarkPoint?.position || captureBookmarkLocation(pane,fileKind.value)) : null
+  bookmarkCapture.value=position?{book_id:id,file_path:displayedFile.value,title:[...position.excerpt].slice(0,80).join('')||mobileDocumentLabel.value,note_md:'',location:position.location}:null
+  initialBookmarkId.value=bookmark?.id||''
+  selectionMenu.value.visible=false;bookmarkPanelMounted.value=true;bookmarkPanelOpen.value=true
+  if(bookmarksError.value)void loadBookmarks()
+}
+function onBookmarkSaved(bookmark:ReaderBookmark){if(bookmark.book_id===currentShelfBookId.value){bookmarks.value=[...bookmarks.value.filter(item=>item.id!==bookmark.id),bookmark];bookmarksError.value=''}}
+function onBookmarkDeleted(bookmark:ReaderBookmark){if(bookmark.book_id===currentShelfBookId.value)bookmarks.value=bookmarks.value.filter(item=>item.id!==bookmark.id)}
+async function jumpToBookmark(bookmark:ReaderBookmark){
+  if(bookmark.book_id!==currentShelfBookId.value)return
+  if(resolveReadingBookId(shelf.books.value,rootPath.value,bookmark.file_path,activeReadingBookId.value)!==bookmark.book_id){bookmarksError.value='书籍路径已变化，无法定位旧文件；书签笔记仍保留。';return}
+  bookmarksError.value='';stopRestoreCorrection();stopBookmarkHold()
+  pendingBookmarkJump=bookmark
+  if(bookmark.file_path!==displayedFile.value){
+    await onSelectFile(bookmark.file_path)
+    if(bookmark.book_id!==currentShelfBookId.value || (pendingBookmarkJump && pendingBookmarkJump.id!==bookmark.id))return
+    if(error.value || displayedFile.value!==bookmark.file_path){pendingBookmarkJump=null;bookmarksError.value=error.value || '文件无法打开，书签笔记仍保留。';return}
+  }
+  await nextTick()
+  applyBookmarkJump()
+}
+function applyBookmarkJump(){
+  const bookmark=pendingBookmarkJump,pane=contentRef.value
+  if(!bookmark || !pane || bookmark.file_path!==displayedFile.value)return
+  const target=bookmarkTarget(pane,bookmark.location)
+  if(!target){if(bookmark.location.kind==='pdf' && pdfPageCount.value>0){bookmarksError.value='该 PDF 已变化，书签页码超出当前文件范围。';pendingBookmarkJump=null;pendingPdfPage=null}return}
+  stopRestoreCorrection();pendingRestoreRatio=null;pendingPdfPage=null;pendingBookmarkJump=null
+  holdHeaderForJump()
+  const position=()=>{const next=bookmarkTarget(pane,bookmark.location);if(next){pane.scrollTop=Math.max(0,next.top-64);pane.scrollLeft=next.left}}
+  position();bookmarkPanelOpen.value=false
+  if(target.approximate)ElMessage.info('原段落已变化，已跳转到保存的阅读比例。')
+  const controller=new AbortController(),observer=new ResizeObserver(position)
+  const body=currentMarkdownBody() || pane.querySelector('.pdf-pages')
+  if(body)observer.observe(body)
+  const stop=()=>{controller.abort();observer.disconnect();clearTimeout(timer);clearInterval(correction);bookmarkHoldCleanup=null}
+  const timer=setTimeout(stop,1800)
+  // PDF fit/resize and the departing article can finish after the first jump.
+  // Re-anchor briefly, like normal progress restoration, until layout settles.
+  const correction=setInterval(position,120)
+  for(const event of ['wheel','touchstart','keydown'])pane.addEventListener(event,stop,{once:true,passive:true,signal:controller.signal})
+  bookmarkHoldCleanup=stop
+}
+function onPdfBookmarkError(message:string,source:string){
+  if(source!==displayedFile.value || pendingBookmarkJump?.file_path!==source)return
+  pendingBookmarkJump=null;pendingPdfPage=null
+  bookmarksError.value=`PDF 无法打开：${message}；书签笔记仍保留。`
+}
+onBeforeUnmount(()=>{bookmarkRequest++;stopBookmarkHold()})
 </script>
 
 <style scoped>
@@ -1448,6 +1547,9 @@ onBeforeRouteLeave(() => { flushProgressNow() })
 }
 /* Tighter page-header spacing — the Reader is a tool page, not a content page. */
 .reader-page .page-header { margin-bottom: 6px; }
+.markdown-body.has-reader-bookmarks { padding-inline-start:32px; }
+.reader-bookmarks-trigger { flex:none; }
+.reader-document-label > .el-icon { font-size:12px; vertical-align:-1px; }
 .reader-progress-notice { display:flex; align-items:center; justify-content:space-between; gap:12px; flex:none; margin:0; color:var(--text-secondary); font-size:12px; line-height:1.5; }
 .reader-progress-notice button { flex:none; min-height:44px; padding:0 8px; border:0; background:none; color:inherit; font:inherit; cursor:pointer; }
 .reader-selection-menu { position: fixed; z-index: 2600; display: flex; gap: 3px; padding: 5px; border-radius: 13px; box-shadow: var(--shadow-lg); transform-origin: center bottom; }
@@ -1591,7 +1693,7 @@ onBeforeRouteLeave(() => { flushProgressNow() })
   animation: fs-ui-materialize var(--motion-fast) var(--ease-emphasized) backwards;
 }
 .fs-ui.hidden { opacity: 0; pointer-events: none; }
-.fs-tool-surface { position: relative; border-radius: 50%; }
+.fs-tool-surface { position: relative; display:flex; border-radius:999px; }
 .fs-fab {
   width: 42px; height: 42px; border-radius: 50%;
   border: 1px solid var(--border-glass);

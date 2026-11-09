@@ -48,6 +48,7 @@ const emit = defineEmits<{
   pagechange: [page: number, src: string]
   pagecount: [pages: number, src: string]
   zoomchange: [ratio: number]
+  loaderror: [message: string, src: string]
 }>()
 const appStore = useAppStore()
 const theme = ref(appStore.theme)
@@ -672,8 +673,10 @@ async function load() {
     } catch (destroyError) {
       if (!isCancellationError(destroyError)) console.warn('释放失败的 PDF 加载任务:', destroyError)
     }
+    if (generation !== loadGeneration || unmounted) return
     error.value = (e as Error)?.message || 'PDF 解析失败'
     loading.value = false
+    emit('loaderror', error.value, props.src)
   }
 }
 

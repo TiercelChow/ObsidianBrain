@@ -1,5 +1,5 @@
 <template>
-  <Teleport to="body">
+  <Teleport :to="teleportTo">
       <div
         v-if="present"
         class="motion-modal"
@@ -45,10 +45,12 @@ const props = withDefaults(defineProps<{
   ariaLabel?: string
   size?: 'regular' | 'wide'
   dismissible?: boolean
+  teleportTo?: string | HTMLElement
 }>(), {
   ariaLabel: '对话框',
   size: 'regular',
   dismissible: true,
+  teleportTo: 'body',
 })
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 const panelRef = ref<HTMLElement | null>(null)

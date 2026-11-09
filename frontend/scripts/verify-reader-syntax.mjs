@@ -32,6 +32,7 @@ const markdown = '# 代码高亮\n\n行内 `npm run_build` 与公式 $x_i^2$ 保
 const book = { id: 'syntax-preview', name: '代码高亮', path: '/mock/syntax', kind: 'folder', description: '', category: '', addedAt: 1 }
 const mockResults = {
   get_reader_books: { books: [book] }, get_reader_history: { history: [] },
+  list_reader_bookmarks: { bookmarks: [] },
   list_local_dir: { root: book.path, total: 1, entries: [{ name: 'code.md', path: `${book.path}/code.md`, is_dir: false, is_markdown: true, is_pdf: false }] },
   save_reader_history: { ok: true, count: 1 },
   get_memo_stats: { total_memos: 1 },

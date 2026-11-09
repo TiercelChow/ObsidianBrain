@@ -14,6 +14,10 @@
 
 该工具只在阻塞任务中原子更新一行阅读状态，不访问原书、目录或模型，未加入 Harness 工具白名单。按文件更新时间和独立 lastReadAt 合并迟到请求。`get_reader_books` 返回含 byFile/lastReadAt 的 progress 供跨浏览器恢复；`save_reader_books` 保留已存进度，仅负责元数据与活动书架列表。完整合同见[阅读状态修复设计](2026-10-05-reader-progress.md)。
 
+### 书签工具（2026-11-10）
+
+Reader 模块新增 `list_reader_bookmarks({book_id}) → {bookmarks}`、`save_reader_bookmark({book_id,file_path,title,note_md,location,id?,revision?}) → {bookmark}`、`delete_reader_bookmark({book_id,id,revision}) → {deleted}`。创建不传 id/revision，编辑与删除必须使用最新 revision；位置采用 md/pdf 标签联合类型。均在阻塞任务中访问 SQLite，不改原书，也不进入 Harness 白名单。文件归属、位置、容量、活动书籍和乐观版本均在存储层再次校验；完整合同见[书签设计](2026-11-10-reader-bookmarks.md)。
+
 ## 1. 技术架构详细设计
 
 ### 1.1 分层架构

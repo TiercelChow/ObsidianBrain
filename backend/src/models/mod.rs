@@ -5,6 +5,7 @@ pub mod book_wiki;
 pub mod home;
 pub mod memory;
 pub mod note;
+pub mod reader_bookmark;
 pub mod repo;
 pub mod task;
 pub mod timeline;
