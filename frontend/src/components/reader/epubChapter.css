@@ -1,0 +1,72 @@
+/* Installed before the book's own sheets. Important declarations in the
+   first cascade layer beat publisher colors, even in a publisher layer. */
+@layer brain-epub-reader {
+  html {
+    color-scheme: var(--epub-scheme) !important;
+    overflow: hidden !important;
+    height: auto !important;
+  }
+
+  body {
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    padding: 24px 28px 36px !important;
+    min-height: 0 !important;
+    height: auto !important;
+    max-width: 100% !important;
+    width: auto !important;
+    font: 17px/1.85 var(--epub-font) !important;
+    overflow-wrap: anywhere;
+  }
+
+  :where(html, body, body *:not(:is(svg, img, picture, video, canvas, [role='img']), :is(svg, picture, video, canvas, [role='img']) *)) {
+    color: inherit !important;
+    background-color: transparent !important;
+    background-image: none !important;
+    border-color: var(--epub-border) !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    -webkit-text-fill-color: currentColor !important;
+  }
+
+  body { color: var(--epub-text) !important; }
+  body * { box-sizing: border-box; max-width: 100%; }
+  p { margin: 0 0 1.2em; }
+  a:any-link { color: var(--epub-accent) !important; }
+  h1, h2, h3 { line-height: 1.4; letter-spacing: -.02em; }
+  h1 { font-size: 1.7em; }
+  h2 { font-size: 1.4em; }
+  h3 { font-size: 1.2em; }
+  img, svg, video { max-width: 100% !important; height: auto !important; }
+  table, pre { display: block; max-width: 100% !important; overflow: auto; }
+  pre {
+    color: var(--epub-code-text) !important;
+    background-color: var(--epub-code-block) !important;
+    padding: .8em 1em;
+    border-radius: 8px;
+    white-space: pre;
+    overflow-wrap: normal;
+  }
+  code:not(pre *) {
+    color: var(--epub-code-inline) !important;
+    background-color: var(--epub-code-bg) !important;
+    border-radius: 4px;
+    padding-inline: .2em;
+  }
+  th, tbody tr:nth-child(even) > td { background-color: var(--epub-hover) !important; }
+  blockquote {
+    margin-inline: 0;
+    padding-inline-start: 16px;
+    border-inline-start: 3px solid var(--epub-accent-border) !important;
+    color: var(--epub-secondary) !important;
+  }
+  mark {
+    background-color: var(--epub-mark) !important;
+    color: inherit !important;
+  }
+  ::selection { background-color: var(--epub-selection) !important; color: inherit !important; }
+
+  @media (max-width: 600px) {
+    body { padding: 16px 16px 28px !important; }
+  }
+}

@@ -56,7 +56,19 @@ impl ReaderBookmarkStore {
             return Err(invalid("更新必须提供书签 ID 与版本"));
         }
         let unit = |value: f64| value.is_finite() && (0.0..=1.0).contains(&value);
-        let pdf = match &draft.location {
+        let kind = match &draft.location {
+            BookmarkLocation::Epub { chapter, ratio } => {
+                if !unit(*ratio)
+                    || chapter.is_empty()
+                    || chapter.len() > 4096
+                    || chapter.contains(['\\', '\0', ':'])
+                    || chapter.starts_with('/')
+                    || chapter.split('/').any(|p| p == "..")
+                {
+                    return Err(invalid("EPUB 定位不合法"));
+                }
+                "epub"
+            }
             BookmarkLocation::Md {
                 ratio,
                 block_index,
@@ -70,18 +82,19 @@ impl ReaderBookmarkStore {
                 {
                     return Err(invalid("Markdown 定位不合法"));
                 }
-                false
+                "md"
             }
             BookmarkLocation::Pdf { page, offset, x } => {
                 if !(1..=1_000_000).contains(page) || !unit(*offset) || !unit(*x) {
                     return Err(invalid("PDF 定位不合法"));
                 }
-                true
+                "pdf"
             }
         };
         let lower = draft.file_path.to_ascii_lowercase();
-        if pdf != lower.ends_with(".pdf")
-            || (!pdf && !lower.ends_with(".md") && !lower.ends_with(".markdown"))
+        if (kind == "pdf" && !lower.ends_with(".pdf"))
+            || (kind == "epub" && !lower.ends_with(".epub"))
+            || (kind == "md" && !lower.ends_with(".md") && !lower.ends_with(".markdown"))
         {
             return Err(invalid("文件类型与定位类型不一致"));
         }

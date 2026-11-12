@@ -72,11 +72,11 @@
       append-to-body
     >
       <el-form label-position="top" @submit.prevent>
-        <el-form-item label="路径（文件夹或 PDF 文件）" :error="formError || undefined">
+        <el-form-item label="路径（文件夹、PDF 或 EPUB）" :error="formError || undefined">
           <div class="path-field">
             <el-input
               v-model="form.path"
-              placeholder="/Users/you/Documents/book.pdf"
+              placeholder="输入路径，或点击右侧浏览"
               @blur="onPathBlur"
             />
             <UiAction class="browse-btn" :icon="FolderOpened" label="浏览本地路径" @click="openPicker" />
@@ -132,7 +132,7 @@ import {
   sortBooks,
   validateBookForm,
 } from '@/utils/readerBooks'
-import { parentPath } from '@/utils/pathPicker'
+import { normalizePickerPath, parentPath } from '@/utils/pathPicker'
 
 const emit = defineEmits<{ open: [book: ReaderBook] }>()
 const props = defineProps<{ query?: string }>()
@@ -205,12 +205,12 @@ function openEdit(b: ReaderBook) {
 // ── path picker ───────────────────────────────────────────────────────
 const pickerVisible = ref(false)
 /** Start the picker where it's most useful: the form's path (edit), the
- *  parent of the most recent book (add, shelf non-empty), or /Users. */
+ *  parent of the most recent book, or let the picker use host locations. */
 const pickerInitialPath = computed(() => {
   if (form.path.trim()) return form.path.trim()
   const first = books.value[0]
   if (first) return parentPath(first.path)
-  return '/Users'
+  return undefined
 })
 
 function openPicker() {
@@ -232,17 +232,20 @@ function removeFromDialog() {
 }
 
 async function refreshStat() {
-  if (!form.path.trim()) {
-    pathStat.value = null
-    return
-  }
+  const input = form.path
+  const path = normalizePickerPath(input)
+  if (!path) return null
+  let stat: PathStat | null = null
   try {
-    const res = await statLocalPath(form.path.trim())
-    pathStat.value = res.status === 'success' && res.result ? res.result : null
+    const res = await statLocalPath(path)
+    stat = res.status === 'success' && res.result ? res.result : null
   } catch {
-    pathStat.value = null
+    // An unavailable service is not permission to register an unverified path.
   }
+  if (form.path !== input) return null
+  pathStat.value = stat
   validate()
+  return stat
 }
 
 function onPathBlur() {
@@ -252,25 +255,34 @@ function onPathBlur() {
 }
 
 function validate() {
-  formError.value =
-    validateBookForm(form.path.trim(), editingId.value, shelf.books.value, pathStat.value) ?? ''
+  const path = normalizePickerPath(form.path)
+  formError.value = !path && form.path.trim()
+    ? '请输入完整的本地或共享路径'
+    : validateBookForm(path ?? '', editingId.value, shelf.books.value, pathStat.value) ?? ''
 }
 
 watch(
   () => form.path,
   () => {
+    pathStat.value = null
     if (formVisible.value) validate()
   },
 )
 
 async function submit() {
-  await refreshStat()
+  const input = form.path
+  const path = normalizePickerPath(input)
+  const stat = await refreshStat()
+  if (form.path !== input) return
   validate()
-  if (formError.value) return
-  const path = form.path.trim()
+  if (!path || formError.value) return
+  if (!stat) {
+    formError.value = '暂时无法验证路径，请重试'
+    return
+  }
   const base = {
-    path,
-    kind: deriveKind(path),
+    path: input === editingBook.value?.path ? input : path,
+    kind: deriveKind(path, stat.is_dir),
     name: form.name.trim() || defaultBookName(path),
     description: form.description.trim(),
     category: form.category.trim(),

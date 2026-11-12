@@ -8,6 +8,8 @@
 
 ## 1. 设计目标
 
+2026-11-11 增加独立附件存储：元数据 `task_attachments` 使用稳定的任务/进展 UUID，不对会整文档重写的任务行设置删除级联；文件按附件 ID 存于 `tasks/attachments/`，流式上传，持久化中断/删除清理状态。API 和验证合同见 [EPUB 与任务附件设计](2026-11-11-epub-task-attachments.md)。
+
 本模块以 SQLite 为唯一权威任务存储，提供可交互、可检索的个人任务管理能力，不再读写任何 Obsidian Markdown 文件。
 
 技术目标：

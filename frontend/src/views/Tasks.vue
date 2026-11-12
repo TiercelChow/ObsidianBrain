@@ -189,6 +189,8 @@
         </div>
         <div class="mobile-detail-scroll" @scroll="onPanelScroll">
         <div class="detail-summary">
+          <div class="task-overview">
+          <div class="task-overview-info">
           <header ref="detailHeaderRef" class="detail-header">
             <div class="detail-title-group">
               <h2>{{ detail.root.title }}</h2>
@@ -210,6 +212,9 @@
           <div class="detail-context">
           <p v-if="detail.root.description" class="task-description">{{ detail.root.description }}</p>
           </div>
+          </div>
+          <TaskAttachments class="task-overview-attachments" compact :key="detail.root.id" :task-id="detail.root.id" />
+          </div>
 
           <div v-if="detail.root.kind === 'long'" class="detail-switch" data-glass="inset" role="tablist" aria-label="切换拆解与进展">
             <span class="detail-switch-indicator" data-glass-indicator :class="detailSection" aria-hidden="true"></span>
@@ -223,7 +228,7 @@
           <section v-if="detail.root.kind === 'long'" v-show="!isPhone || detailSection === 'breakdown'" class="detail-section task-breakdown">
             <div class="column-heading">
               <div><span>任务拆解</span><strong>{{ detail.completed_leaf_count }}/{{ detail.effective_leaf_count }}</strong></div>
-              <button data-icon-only type="button" aria-label="添加子任务" @click="openSubtask(detail.root)"><el-icon class="ui-action-icon" aria-hidden="true"><Plus /></el-icon></button>
+              <UiAction :icon="Plus" label="添加子任务" @click="openSubtask(detail.root)" />
             </div>
             <div class="column-scroll" @scroll="onPanelScroll">
             <TaskTree
@@ -241,7 +246,7 @@
         <aside v-show="!isPhone || detail.root.kind !== 'long' || detailSection === 'progress'" ref="activitySectionRef" class="task-progress-panel">
           <div class="progress-column-header">
             <div><span>进展</span><strong>{{ activity.length }} 条记录</strong></div>
-            <button data-icon-only v-if="detail.root.kind === 'long' && !isTaskClosed(detail.root)" type="button" aria-label="记录进展" @click="openProgress(detail.root)"><el-icon class="ui-action-icon" aria-hidden="true"><Plus /></el-icon></button>
+            <UiAction v-if="detail.root.kind === 'long' && !isTaskClosed(detail.root)" :icon="Plus" label="记录进展" @click="openProgress(detail.root)" />
           </div>
           <div class="progress-body" @scroll="onPanelScroll">
             <div v-if="activity.length" class="activity-list">
@@ -334,16 +339,21 @@
             </div>
           </div>
           <h3 class="child-task-title">{{ drawerNode.title }}</h3>
-          <div class="detail-pills">
-            <span class="task-pill" :class="`status-${drawerNode.status}`">{{ taskStatusLabel(drawerNode.status) }}</span>
-            <span class="task-pill" :class="`importance-${drawerNode.importance}`">{{ taskImportanceLabel(drawerNode.importance) }}</span>
-          </div>
         </header>
         <div class="child-dialog-scroll">
-          <p v-if="drawerNode.description" class="child-description">{{ drawerNode.description }}</p>
-          <div class="child-facts">
-            <span>{{ drawerNode.start_date }} → {{ drawerNode.end_date }}</span>
-            <strong :class="taskTiming(drawerNode, today).tone">{{ taskTiming(drawerNode, today).label }}</strong>
+          <div class="child-overview">
+            <div class="child-task-info">
+              <div class="detail-pills">
+                <span class="task-pill" :class="`status-${drawerNode.status}`">{{ taskStatusLabel(drawerNode.status) }}</span>
+                <span class="task-pill" :class="`importance-${drawerNode.importance}`">{{ taskImportanceLabel(drawerNode.importance) }}</span>
+              </div>
+              <p v-if="drawerNode.description" class="child-description">{{ drawerNode.description }}</p>
+              <div class="child-facts">
+                <span>{{ drawerNode.start_date }} → {{ drawerNode.end_date }}</span>
+                <strong :class="taskTiming(drawerNode, today).tone">{{ taskTiming(drawerNode, today).label }}</strong>
+              </div>
+            </div>
+            <TaskAttachments :key="drawerNode.id" :task-id="drawerNode.id" />
           </div>
           <section class="child-section" aria-label="子任务">
             <div class="column-heading">
@@ -398,23 +408,26 @@
         </header>
 
         <p v-if="store.error" class="sheet-error" role="alert">{{ store.error }}</p>
+        <p v-if="progressDraftError && sheetMode==='progress'" class="sheet-error" role="alert">{{ progressDraftError }}</p>
 
         <div v-if="sheetMode === 'progress'" class="sheet-body" :inert="sheetSubmitting ? true : undefined">
+          <p v-if="progressDraft.progressId" class="progress-saved-hint" role="status">进展文字已保存，重试只上传尚未成功的附件，不会重复创建记录。</p>
           <label class="field full">
             <span>进展说明</span>
-            <textarea v-model="progressForm.note" rows="5" required placeholder="记录发生了什么、下一步是什么…"></textarea>
+            <textarea v-model="progressForm.note" :disabled="Boolean(progressDraft.progressId)" rows="5" required placeholder="记录发生了什么、下一步是什么…"></textarea>
           </label>
           <label class="check-field">
-            <input v-model="progressForm.includePercent" type="checkbox" aria-label="同时更新明确完成度" />
+            <input v-model="progressForm.includePercent" :disabled="Boolean(progressDraft.progressId)" type="checkbox" aria-label="同时更新明确完成度" />
             <span>同时更新明确完成度</span>
           </label>
           <label v-if="progressForm.includePercent" class="field full">
             <span>完成度</span>
             <div class="range-field">
-              <input v-model.number="progressForm.percent" type="range" min="0" max="100" step="5" />
+              <input v-model.number="progressForm.percent" :disabled="Boolean(progressDraft.progressId)" type="range" min="0" max="100" step="5" />
               <output>{{ progressForm.percent }}%</output>
             </div>
           </label>
+          <ProgressAttachmentPicker :items="progressDraft.files" :busy="sheetSubmitting" @select="selectProgressFiles" @remove="removeProgressFile" />
         </div>
 
         <div v-else class="sheet-body form-grid" :inert="sheetSubmitting ? true : undefined">
@@ -518,8 +531,8 @@
 
         <footer class="sheet-footer">
           <button v-if="sheetMode === 'edit' && targetNode?.role === 'root'" type="button" class="archive-from-edit" :disabled="sheetSubmitting" @click="openArchiveFromEditor">归档任务</button>
-          <button v-else type="button" class="cancel" :disabled="sheetSubmitting" @click="sheetOpen = false">取消</button>
-          <button type="submit" class="confirm" :disabled="sheetSubmitting">{{ sheetSubmitting ? '保存中…' : sheetAction }}</button>
+          <button v-else type="button" class="cancel" :disabled="sheetSubmitting && !(sheetMode==='progress' && progressDraft.progressId)" @click="sheetSubmitting ? progressUpload?.abort() : (sheetOpen = false)">{{ sheetMode==='progress' && progressDraft.progressId ? (sheetSubmitting?'停止上传':'完成，稍后补充') : '取消' }}</button>
+          <button type="submit" class="confirm" :disabled="sheetSubmitting">{{ sheetSubmitting ? (sheetMode==='progress' && progressDraft.progressId ? '上传附件中…' : '保存中…') : sheetAction }}</button>
         </footer>
       </form>
       </MotionSwap>
@@ -545,25 +558,32 @@
       </section>
     </MotionModal>
 
-    <MotionModal v-model="activityDetailOpen" aria-label="记录详情">
+    <MotionModal v-model="activityDetailOpen" mobile-safe-area="content" aria-label="记录详情">
       <section v-if="activityDetail" class="activity-dialog glass-surface-heavy">
         <div class="activity-dialog-head">
           <span class="task-pill" :class="`type-${activityDetail.type}`">{{ activityDetail.title }}</span>
           <strong>{{ activityDetail.taskTitle }}</strong>
         </div>
         <time>{{ formatTimestamp(activityDetail.time) }}</time>
-        <p v-if="activityDetail.detail">{{ activityDetail.detail }}</p>
-        <p v-if="activityDetail.note">{{ activityDetail.note }}</p>
-        <p v-else class="activity-dialog-empty">这条记录没有备注。</p>
+        <div class="activity-dialog-scroll">
+          <p v-if="activityDetail.detail">{{ activityDetail.detail }}</p>
+          <p v-if="activityDetail.note">{{ activityDetail.note }}</p>
+          <p v-else class="activity-dialog-empty">这条记录没有备注。</p>
+          <TaskAttachments v-if="activityDetail.type==='progress'" :key="activityDetail.id" :task-id="activityDetail.taskId" :progress-id="activityDetail.id.slice('progress:'.length)" />
+        </div>
       </section>
     </MotionModal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ArrowLeft, ArrowRight, Calendar, Check, Close, EditPen, Filter, FolderChecked, List, Plus, Search, TopRight } from '@element-plus/icons-vue'
 import TaskStatusMark from '@/components/tasks/TaskStatusMark.vue'
+import TaskAttachments from '@/components/tasks/TaskAttachments.vue'
+import ProgressAttachmentPicker from '@/components/tasks/ProgressAttachmentPicker.vue'
+import {createProgressDraft,appendProgressFiles,submitProgressDraft} from '@/utils/progressAttachmentDraft'
+import {uploadTaskAttachment} from '@/api/taskAttachments'
 import { useMediaQuery } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
@@ -667,6 +687,16 @@ const form = ref<TaskFields & { kind: TaskKind }>({
   kind: 'short', title: '', description: '', start_date: today, end_date: today, importance: 'normal',
 })
 const progressForm = ref({ note: '', percent: 0, includePercent: false })
+const progressDraft=reactive(createProgressDraft<File>())
+const progressDraftError=ref('')
+let progressUpload:AbortController|null=null
+watch(()=>[sheetOpen.value,sheetSubmitting.value],()=>{if(!sheetOpen.value && !sheetSubmitting.value){
+  if(progressDraft.progressId && progressDraft.files.some(item=>item.status!=='uploaded'))ElMessage.info('进展和已上传的附件已保留，未成功的文件可稍后补充。')
+  progressDraft.files=[];progressDraft.progressId=null;progressDraftError.value=''
+}})
+onUnmounted(()=>{progressUpload?.abort()})
+function selectProgressFiles(files:File[]){try{appendProgressFiles(progressDraft,files);progressDraftError.value=''}catch(e){progressDraftError.value=(e as Error).message}}
+function removeProgressFile(id:string){progressDraft.files=progressDraft.files.filter(item=>item.id!==id || item.status==='uploaded')}
 const statusForm = ref<{ status: TaskStatus; note: string; cascade: boolean }>({ status: 'in_progress', note: '', cascade: false })
 const moveForm = ref({ parentId: '' })
 
@@ -741,7 +771,7 @@ const drawerActivity = computed(() => (drawerNode.value ? buildTaskActivity(deta
 const sheetTitle = computed(() => ({
   create: '新建任务', edit: '编辑任务', subtask: '添加子任务', progress: '记录进展',
 })[sheetMode.value])
-const sheetAction = computed(() => ({ create: '创建', edit: '保存', subtask: '添加', progress: '记录' })[sheetMode.value])
+const sheetAction = computed(() => sheetMode.value==='progress' && progressDraft.progressId ? '重试上传' : ({ create: '创建', edit: '保存', subtask: '添加', progress: '记录' })[sheetMode.value])
 
 function taskFilters() {
   const activeStatuses: TaskStatus[] = ['open', 'planned', 'in_progress', 'blocked']
@@ -948,6 +978,7 @@ watch(() => store.selectedDetail?.root.id, () => {
 })
 
 function openProgress(task: TaskNode) {
+  progressDraft.progressId=null;progressDraft.files=[];progressDraftError.value=''
   store.clearError()
   sheetMode.value = 'progress'
   targetNode.value = task
@@ -979,14 +1010,31 @@ async function submitSheet() {
       }
     }
     else if (mode === 'subtask' && writeTarget) await store.addSubtask(writeTarget.id, fields)
-    else if (mode === 'progress' && writeTarget) await store.addProgress(writeTarget.id, progressForm.value.note, progressForm.value.includePercent ? progressForm.value.percent : undefined)
+    else if (mode === 'progress' && writeTarget) {
+      progressDraftError.value=''
+      const uploadController=new AbortController();progressUpload=uploadController
+      const completed=await submitProgressDraft(progressDraft,{
+        create:async()=>{
+          const existing=new Set(detail.value?.progress.map(item=>item.id))
+          const updated=await store.addProgress(writeTarget.id,progressForm.value.note,progressForm.value.includePercent?progressForm.value.percent:undefined)
+          const entry=updated.progress.find(item=>item.task_id===writeTarget.id && !existing.has(item.id))
+          if(!entry)throw new Error('进展已保存，但无法确认记录编号，请刷新后检查，避免重复创建。')
+          return entry.id
+        },
+        upload:async(file,id,onProgress,key)=>{
+          try{return await uploadTaskAttachment(writeTarget.id,id,file,uploadController.signal,onProgress,key)}
+          catch(e){const error=e as {response?:{data?:{message?:string}};message?:string};throw new Error(uploadController.signal.aborted?'上传已停止，可直接重试':error.response?.data?.message || error.message || '上传失败，请重试')}
+        },
+      })
+      if(!completed){progressDraftError.value='进展已保存，部分附件上传失败。可直接重试，或移除未上传的文件。';return}
+    }
     sheetOpen.value = false
     // Surface the affected task: subtask writes open its drawer, root writes stay on the overview.
     drawerNodeId.value = writeTarget && writeTarget.role === 'subtask' ? writeTarget.id : null
     await refreshCurrent()
     if (mode === 'progress' && writeTarget?.role === 'root') detailSection.value = 'progress'
     if (mode === 'progress' && writeTarget?.role === 'subtask') childSection.value = 'progress'
-    ElMessage.success(`${sheetAction.value}成功`)
+    ElMessage.success(mode==='progress'?'进展及附件已保存':`${sheetAction.value}成功`)
     // Show the user what changed: progress writes reveal the new entry (in the
     // drawer when one is open, otherwise the panel's activity section); other
     // writes reveal the refreshed header when no drawer is open.
@@ -994,9 +1042,11 @@ async function submitSheet() {
       await nextTick()
       await revealDetailEl(mode === 'progress' ? activitySectionRef.value : detailHeaderRef.value)
     }
-  } catch {
+  } catch(e) {
+    if(sheetMode.value==='progress' && !store.error)progressDraftError.value=(e as Error).message || '提交失败'
     // The store exposes the actionable error in the page banner.
   } finally {
+    progressUpload=null
     sheetSubmitting.value = false
   }
 }
@@ -1115,7 +1165,12 @@ onMounted(async () => {
 .error-banner-enter-from, .error-banner-leave-to { opacity: 0; transform: translateY(-5px); }
 .task-workspace { height: 100%; flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(300px, 350px) minmax(0, 1fr); gap: 14px; transition: grid-template-columns 400ms var(--ease-spring-gentle); }
 .task-workspace.list-collapsed { grid-template-columns: 68px minmax(0, 1fr); }
-.task-detail-zone { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-radius: 22px; overflow: hidden; }
+.task-detail-zone {
+  --task-detail-tracks: minmax(0, 1.12fr) minmax(310px, .88fr);
+  --task-detail-gutter: 24px;
+  --task-detail-divider: 1px;
+  min-width: 0; min-height: 0; display: flex; flex-direction: column; border-radius: 22px; overflow: hidden;
+}
 .mobile-detail-scroll { display: contents; }
 .task-list-panel { border-radius: 22px; min-height: 0; overflow: auto; }
 .task-list-panel { position: relative; min-width: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
@@ -1180,23 +1235,33 @@ onMounted(async () => {
 .empty-orb { width: 54px; height: 54px; display: grid; place-items: center; margin-bottom: 13px; border-radius: 18px; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); font-size: 25px; }
 .detail-section, .task-progress-panel, .task-detail-placeholder { min-width: 0; min-height: 0; }
 .detail-summary { flex: none; padding: 24px 24px 0; min-width: 0; }
+.task-overview { display:grid;gap:14px;align-items:start;min-width:0; }
+.task-overview-info { min-width:0;max-height:min(30dvh,270px);overflow:auto;overscroll-behavior:contain; }
+.task-overview-attachments { min-width:0;margin:0; }
+@media (min-width: 769px) {
+  .detail-summary { padding-inline: 0; }
+  .detail-summary .task-overview { grid-template-columns: var(--task-detail-tracks); gap: 0; }
+  .detail-summary .task-overview > * { padding-inline: var(--task-detail-gutter); }
+  .detail-summary .task-overview-attachments { border-left: var(--task-detail-divider) solid transparent; }
+}
+.progress-saved-hint { margin:0;color:var(--text-secondary);font-size:12px;line-height:1.7; }
 .detail-columns { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; display: grid; grid-template-columns: 1fr; gap: 0; }
-.detail-columns.split { grid-template-columns: minmax(0, 1.12fr) minmax(310px, .88fr); }
-.detail-columns.split .task-progress-panel { border-left: 1px solid var(--border-subtle); }
+.detail-columns.split { grid-template-columns: var(--task-detail-tracks); }
+.detail-columns.split .task-progress-panel { border-left: var(--task-detail-divider) solid var(--border-subtle); }
 .task-progress-panel { padding: 0; border-radius: 0 22px 0 0; display: flex; flex-direction: column; overflow: hidden; }
-.progress-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 28px; }
+.progress-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--task-detail-gutter) 28px; }
 .column-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .task-detail-placeholder, .empty-detail { flex: 1; min-height: 0; }
-.progress-column-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; padding: 8px 24px 0; }
+.progress-column-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; padding: 8px var(--task-detail-gutter) 0; }
 .progress-column-header > div { display: flex; align-items: baseline; gap: 8px; }
 .progress-column-header span { color: var(--text-primary); font-size: 18px; font-weight: 700; letter-spacing: -.015em; }
 .progress-column-header strong { color: var(--text-faint); font-size: 11px; font-weight: 520; }
-.progress-column-header button, .column-heading button { min-height: 40px; padding: 0 12px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-glass-strong); color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; }
+.progress-column-header :deep(.ui-action), .column-heading :deep(.ui-action) { width:44px;height:44px;min-width:44px;min-height:44px;border-radius:50%; }
 .column-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .column-heading > div { display: flex; align-items: baseline; gap: 8px; }
 .column-heading span { font-size: 17px; font-weight: 680; }
 .column-heading strong { color: var(--text-faint); font-size: 12px; }
-.task-breakdown .column-heading { margin: 0 -24px; padding: 8px 24px 0; }
+.task-breakdown .column-heading { margin: 0 calc(-1 * var(--task-detail-gutter)); padding: 8px var(--task-detail-gutter) 0; }
 .mobile-detail-nav { display: none; }
 .detail-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 18px; }
 /* Keep scrollIntoView() reveals clear of the fixed mobile global header. */
@@ -1226,7 +1291,7 @@ onMounted(async () => {
 .detail-switch button { flex: 1; min-height: 40px; padding: 8px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text-muted); font: inherit; font-size: 14px; cursor: pointer; }
 .detail-switch button.active { color: var(--text-primary); font-weight: 600; }
 .detail-switch button span { margin-left: 6px; color: var(--text-faint); font-size: 12px; font-variant-numeric: tabular-nums; }
-.detail-section { margin-top: 0; padding: 0 24px 34px; border-radius: 22px 0 0 0; display: flex; flex-direction: column; overflow: hidden; }
+.detail-section { margin-top: 0; padding: 0 var(--task-detail-gutter) 34px; border-radius: 22px 0 0 0; display: flex; flex-direction: column; overflow: hidden; }
 .activity-empty-copy { color: var(--text-faint); font-size: 13px; line-height: 1.7; }
 .progress-track { height: 8px; border-radius: 8px; background: color-mix(in srgb, var(--text-primary) 6%, transparent); overflow: hidden; }
 .progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 65%, #34c759)); transition: width var(--motion-slow) var(--ease-spring-gentle); }
@@ -1250,10 +1315,11 @@ onMounted(async () => {
 .activity-dot { width: 9px; height: 9px; margin-top: 5px; border: 2px solid var(--accent); border-radius: 50%; background: var(--bg-base); }
 .activity-dot.audit { border-color: var(--text-faint); }
 .activity-item time { color: var(--text-faint); font-size: 10px; }
-.activity-dialog { display: grid; gap: 10px; min-width: min(420px, 86vw); max-width: 86vw; padding: 22px; border-radius: 20px; }
-.activity-dialog-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.activity-dialog { display: flex; flex-direction: column; gap: 10px; width: 100%; min-width: 0; padding: 22px; border-radius: 20px; overflow: hidden; overflow-wrap: anywhere; }
+.activity-dialog-head { display: flex; flex: none; align-items: center; flex-wrap: wrap; gap: 8px; }
 .activity-dialog-head strong { font-size: 15px; }
-.activity-dialog time { color: var(--text-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.activity-dialog time { flex: none; color: var(--text-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.activity-dialog-scroll { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 10px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .activity-dialog p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 .activity-dialog p.activity-dialog-empty { color: var(--text-faint); }
 .child-task-dialog { width: 100%; max-height: min(760px, calc(100dvh - 48px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-glass); border-radius: 24px; background: var(--bg-glass-strong); box-shadow: var(--shadow-lg), var(--inset-highlight); }
@@ -1262,13 +1328,14 @@ onMounted(async () => {
 .child-parent-path { display: flex; align-items: center; min-width: 0; min-height: 44px; gap: 4px; }
 .child-parent-path > span { min-width: 0; overflow: hidden; color: var(--text-faint); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .child-dialog-header h3 { margin: 0; font-size: 22px; line-height: 1.3; letter-spacing: -.015em; overflow-wrap: anywhere; }
-.child-dialog-header .detail-pills { margin: 0; }
 .child-back, .child-edit, .child-close { display: grid; place-items: center; min-width: 40px; width: 40px; min-height: 40px; padding: 0; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-glass); color: var(--text-secondary); font: inherit; font-size: 16px; cursor: pointer; }
 .child-back { flex: none; margin-left: -10px; color: var(--accent); }
 .child-close { color: var(--text-muted); font-size: 23px; }
 .child-header-actions { display: flex; flex: none; gap: 7px; }
 .child-dialog-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 26px 20px; }
-.child-description { margin: 0 0 14px; color: var(--text-muted); font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
+.child-task-info { display: grid; gap: 10px; min-width: 0; }
+.child-task-info .detail-pills { margin: 0; }
+.child-description { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
 .child-facts { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 12px 14px; border-radius: 13px; background: color-mix(in srgb, var(--text-primary) 4%, transparent); color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .child-facts > span, .child-facts > strong { white-space: nowrap; }
 .child-facts > strong { margin-left: auto; }
@@ -1487,6 +1554,7 @@ onMounted(async () => {
   .child-back, .child-edit, .child-close { width: 44px; min-width: 44px; min-height: 44px; }
   .child-dialog-header h3 { font-size: 21px; }
   .child-dialog-scroll { padding: 0 20px 18px; }
+  .activity-dialog { padding: 32px 20px calc(20px + var(--safe-bottom)); border-radius: 24px 24px 0 0; }
   .task-sheet { max-height: min(90dvh, 760px); border-radius: 24px 24px 0 0; border-bottom: 0; }
   .task-sheet.child-editor { height:min(80dvh,720px); max-height:inherit; }
   .sheet-header { padding: 34px 20px 16px; }

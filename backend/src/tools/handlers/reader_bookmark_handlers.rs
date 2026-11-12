@@ -61,6 +61,7 @@ impl ToolHandler for SaveReaderBookmarkHandler {
             "book_id":{"type":"string","minLength":1,"maxLength":200},"file_path":{"type":"string","minLength":1,"maxLength":8192},
             "title":{"type":"string","minLength":1,"maxLength":240},"note_md":{"type":"string","maxLength":131072},
             "location":{"oneOf":[
+                {"type":"object","additionalProperties":false,"properties":{"kind":{"const":"epub"},"chapter":{"type":"string","minLength":1,"maxLength":4096},"ratio":unit},"required":["kind","chapter","ratio"]},
                 {"type":"object","additionalProperties":false,"properties":{"kind":{"const":"md"},"ratio":unit,"block_index":{"type":"integer","minimum":0,"maximum":1000000},"text":{"type":"string","maxLength":240},"offset":unit},"required":["kind","ratio","block_index","text","offset"]},
                 {"type":"object","additionalProperties":false,"properties":{"kind":{"const":"pdf"},"page":{"type":"integer","minimum":1,"maximum":1000000},"offset":unit,"x":unit},"required":["kind","page","offset","x"]}
             ]}

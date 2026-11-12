@@ -409,6 +409,11 @@ async fn run_server_async(
         TimelineConfig::default(),
     ));
     let memo_manager = Arc::new(MemoManager::new(db.clone(), images.clone()));
+    if let Err(error) =
+        infra::task_attachments::TaskAttachmentStore::new(db.clone()).recover_interrupted()
+    {
+        tracing::warn!(%error, "未完成附件清理稍后重试");
+    }
     let task_service = Arc::new(TaskService::new(Arc::new(SqliteTaskIndexStore::new(
         db.clone(),
     ))));

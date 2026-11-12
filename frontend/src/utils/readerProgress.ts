@@ -17,7 +17,7 @@
  */
 import { scrollRatio } from './readerBooks.ts'
 
-export type FileKind = 'md' | 'pdf'
+export type FileKind = 'md' | 'pdf' | 'epub'
 
 /** Progress for a single file within a book. */
 export interface FileProgress {
@@ -48,7 +48,7 @@ export interface DisplayProgress {
 
 /** A file's kind from its path: .pdf (any case) → pdf, everything else → md. */
 export function deriveFileKind(filePath: string): FileKind {
-  return /\.pdf$/i.test(filePath) ? 'pdf' : 'md'
+  return /\.pdf$/i.test(filePath) ? 'pdf' : /\.epub$/i.test(filePath) ? 'epub' : 'md'
 }
 
 /** Capture an md file's scroll position as a 0..1 ratio. */
@@ -140,16 +140,16 @@ function normalizeReadingPath(path: string): string {
   const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '')
   return /^[a-z]:/i.test(normalized) ? normalized.toLowerCase() : normalized
 }
-export function readingFileBelongs(book: {path:string;kind:'folder'|'pdf'}, file: string): boolean {
+export function readingFileBelongs(book: {path:string;kind:'folder'|'pdf'|'epub'}, file: string): boolean {
   const path = normalizeReadingPath(file), root = normalizeReadingPath(book.path)
   if (path.split('/').some(part => part === '..' || part === '.')) return false
-  return book.kind === 'pdf' ? path === root : path.startsWith(`${root}/`)
+  return book.kind !== 'folder' ? path === root : path.startsWith(`${root}/`)
 }
-export function resolveReadingBookId(books: {id:string;path:string;kind:'folder'|'pdf'}[], root: string, file: string, preferred?: string | null): string | null {
+export function resolveReadingBookId(books: {id:string;path:string;kind:'folder'|'pdf'|'epub'}[], root: string, file: string, preferred?: string | null): string | null {
   if (!file) return null
   const selected = books.find(book => book.id === preferred && readingFileBelongs(book, file))
   if (selected) return selected.id
-  const pdf = books.find(book => book.kind === 'pdf' && readingFileBelongs(book, file))
+  const pdf = books.find(book => book.kind !== 'folder' && readingFileBelongs(book, file))
   return pdf?.id ?? books.find(book => book.kind === 'folder' && normalizeReadingPath(book.path) === normalizeReadingPath(root) && readingFileBelongs(book, file))?.id ?? null
 }
 
@@ -162,7 +162,7 @@ export function resolveReadingBookId(books: {id:string;path:string;kind:'folder'
 export function migrateFromLegacy(
   legacy: { lastFile?: string | null; position: number; pageCount?: number | null; updatedAt: number } | null,
   bookPath: string,
-  bookKind: 'folder' | 'pdf',
+  bookKind: 'folder' | 'pdf' | 'epub',
 ): BookProgressState | null {
   if (!legacy) return null
   // Nothing meaningful (position 0 with no lastFile = never started).

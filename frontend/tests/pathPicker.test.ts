@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { parentPath, pathSegments, pickableEntries } from '../src/utils/pathPicker.ts'
+import { normalizePickerPath, parentPath, pathSegments, pickableEntries } from '../src/utils/pathPicker.ts'
 import type { DirEntry } from '../src/api/reader.ts'
 
 // ── parentPath ────────────────────────────────────────────────────────────
@@ -40,6 +40,37 @@ test('pathSegments tolerates trailing slashes', () => {
     pathSegments('/a/b/').map((s) => s.path),
     ['/', '/a', '/a/b'],
   )
+})
+
+test('Windows drive breadcrumbs retain the absolute drive root', () => {
+  assert.equal(parentPath('C:\\'), 'C:\\')
+  assert.equal(parentPath('C:\\Book.epub'), 'C:\\')
+  assert.deepEqual(pathSegments('D:/书库/机器 学习/'), [
+    { name: 'D:', path: 'D:\\' },
+    { name: '书库', path: 'D:\\书库' },
+    { name: '机器 学习', path: 'D:\\书库\\机器 学习' },
+  ])
+})
+
+test('UNC paths never navigate above the share, including the extended form', () => {
+  const root = String.raw`\\server\共享`
+  const extended = String.raw`\\?\UNC\server\共享`
+  assert.deepEqual(pathSegments(`${root}\\书库`), [
+    { name: root, path: root },
+    { name: '书库', path: `${root}\\书库` },
+  ])
+  assert.equal(parentPath(root), root)
+  assert.equal(parentPath(`${extended}\\书库`), extended)
+})
+
+test('pasted paths accept Explorer quotes and drive shorthand, not relative or device paths', () => {
+  assert.equal(normalizePickerPath(' "d:/书 库/书.pdf" '), 'D:\\书 库\\书.pdf')
+  assert.equal(normalizePickerPath('D:'), 'D:\\')
+  assert.equal(normalizePickerPath('//nas/books/目录'), String.raw`\\nas\books\目录`)
+  assert.equal(normalizePickerPath(String.raw`/tmp/name\with-slash`), String.raw`/tmp/name\with-slash`)
+  for (const value of ['C:book.pdf', '../book.pdf', String.raw`\book.pdf`, String.raw`\\.\PhysicalDrive0`, String.raw`\\server`]) {
+    assert.equal(normalizePickerPath(value), null)
+  }
 })
 
 // ── pickableEntries ───────────────────────────────────────────────────────

@@ -12,7 +12,8 @@ use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use serde::Deserialize;
+use axum::Json;
+use serde::{Deserialize, Serialize};
 use std::io::SeekFrom;
 use std::path::{Component, PathBuf};
 use std::sync::Arc;
@@ -20,6 +21,75 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
 use crate::AppContext;
+
+#[derive(Serialize)]
+pub struct ReaderLocations {
+    platform: &'static str,
+    home: Option<String>,
+    roots: Vec<String>,
+}
+
+#[cfg(any(windows, test))]
+fn drive_paths(mask: u32) -> Vec<String> {
+    (b'A'..=b'Z')
+        .enumerate()
+        .filter(|(index, _)| mask & (1 << index) != 0)
+        .map(|(_, letter)| format!("{}:\\", char::from(letter)))
+        .collect()
+}
+
+/// Enumerate locations on the host, not on the device running the browser.
+pub async fn reader_locations() -> Json<ReaderLocations> {
+    #[cfg(windows)]
+    let roots = {
+        use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
+        // SAFETY: Win32 GetLogicalDrives takes no inputs or pointers and only
+        // returns a bitmask. This does not probe or open any listed drive.
+        drive_paths(unsafe { GetLogicalDrives() })
+    };
+    #[cfg(not(windows))]
+    let roots = vec!["/".to_string()];
+
+    Json(ReaderLocations {
+        platform: if cfg!(windows) { "windows" } else { "unix" },
+        home: std::env::home_dir()
+            .filter(|path| path.is_absolute())
+            .map(|path| path.to_string_lossy().into_owned()),
+        roots,
+    })
+}
+
+#[cfg(test)]
+mod locations_tests {
+    use super::*;
+
+    #[test]
+    fn test_drive_paths_sparse_mask_uses_absolute_roots() {
+        assert_eq!(drive_paths(0), Vec::<String>::new());
+        assert_eq!(
+            drive_paths((1 << 2) | (1 << 5) | (1 << 25) | (1 << 30)),
+            ["C:\\", "F:\\", "Z:\\"]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_reader_locations_returns_host_platform_and_absolute_roots() {
+        let Json(locations) = reader_locations().await;
+        assert_eq!(
+            locations.platform,
+            if cfg!(windows) { "windows" } else { "unix" }
+        );
+        assert!(locations
+            .roots
+            .iter()
+            .all(|path| PathBuf::from(path).is_absolute()));
+        if let Some(home) = locations.home {
+            assert!(PathBuf::from(home).is_absolute());
+        }
+        #[cfg(unix)]
+        assert_eq!(locations.roots, ["/"]);
+    }
+}
 
 #[derive(Deserialize)]
 pub struct ReaderRawQuery {

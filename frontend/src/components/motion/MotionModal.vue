@@ -10,7 +10,7 @@
         <section
           ref="panelRef"
           class="motion-modal__panel"
-          :class="{ 'is-wide': size === 'wide' }"
+          :class="{ 'is-wide': size === 'wide', 'has-content-safe-area': mobileSafeArea === 'content' }"
           :style="{ transform: panelTransform, opacity: isMobile() ? 1 : opacity }"
           role="dialog"
           aria-modal="true"
@@ -45,11 +45,14 @@ const props = withDefaults(defineProps<{
   ariaLabel?: string
   size?: 'regular' | 'wide'
   dismissible?: boolean
+  /** Opt-in when the painted content itself includes the bottom safe area. */
+  mobileSafeArea?: 'panel' | 'content'
   teleportTo?: string | HTMLElement
 }>(), {
   ariaLabel: '对话框',
   size: 'regular',
   dismissible: true,
+  mobileSafeArea: 'panel',
   teleportTo: 'body',
 })
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
@@ -197,8 +200,9 @@ onBeforeUnmount(() => {
     border-radius: 24px 24px 0 0 !important;
     touch-action: pan-y;
     overscroll-behavior: contain;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: var(--safe-bottom);
   }
+  .motion-modal__panel.has-content-safe-area { padding-bottom: 0; }
   .motion-modal__panel.is-wide { width: 100%; }
   .motion-modal__handle {
     display: flex;

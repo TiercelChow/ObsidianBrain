@@ -43,7 +43,7 @@ watch(()=>[props.pane,props.file,props.bookmarks,props.ready],async()=>{
   scrollPane=pane;pane.addEventListener('scroll',syncHorizontal,{passive:true});syncHorizontal()
   resize=new ResizeObserver(schedule);resize.observe(pane)
   mutation=new MutationObserver(schedule)
-  pane.querySelectorAll('article.markdown-body,.pdf-pages').forEach(element=>{resize!.observe(element);mutation!.observe(element,{subtree:true,childList:true})})
+  pane.querySelectorAll('article.markdown-body,.pdf-pages,.epub-frame').forEach(element=>{resize!.observe(element);mutation!.observe(element,{subtree:true,childList:true})})
   schedule()
 },{immediate:true,flush:'post'})
 onBeforeUnmount(()=>{disposed=true;generation++;resize?.disconnect();mutation?.disconnect();scrollPane?.removeEventListener('scroll',syncHorizontal);if(frame!==null)cancelAnimationFrame(frame)})

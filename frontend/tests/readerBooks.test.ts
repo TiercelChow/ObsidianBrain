@@ -22,6 +22,7 @@ import type { ReaderBook } from '../src/api/reader.ts'
 test('deriveKind maps .pdf (any case) to pdf, everything else to folder', () => {
   assert.equal(deriveKind('/a/b/Book.PDF'), 'pdf')
   assert.equal(deriveKind('/a/b/book.pdf'), 'pdf')
+  assert.equal(deriveKind('D:\\资料.pdf', true), 'folder')
   assert.equal(deriveKind('/a/docs'), 'folder')
   assert.equal(deriveKind('/a/notes.md'), 'folder')
 })
@@ -30,6 +31,14 @@ test('defaultBookName takes the last path segment', () => {
   assert.equal(defaultBookName('/a/docs'), 'docs')
   assert.equal(defaultBookName('/a/机器学习.pdf'), '机器学习.pdf')
   assert.equal(defaultBookName('/'), '')
+  assert.equal(defaultBookName(String.raw`D:\藏书\一本书.epub`), '一本书.epub')
+  assert.equal(defaultBookName(String.raw`\\server\藏书`), '藏书')
+})
+
+test('book form recognizes equivalent Windows paths as duplicate registrations', () => {
+  const book: ReaderBook = { id: 'windows', path: 'D:\\书库\\指南.pdf', kind: 'pdf', name: '指南', description: '', category: '', addedAt: 1 }
+  assert.match(validateBookForm('d:/书库/指南.pdf', null, [book], null)!, /已在书架/)
+  assert.equal(validateBookForm('d:/书库/指南.pdf', book.id, [book], null), null)
 })
 
 test('makeBookId yields unique non-empty ids', () => {
@@ -178,7 +187,7 @@ test('validateBookForm rejects empty, missing, wrong-kind, duplicate paths', () 
   const dirStat = { exists: true, is_dir: true }
   assert.match(validateBookForm('', null, books, null)!, /路径/)
   assert.match(validateBookForm('/nope', null, books, { exists: false, is_dir: false })!, /不存在/)
-  assert.match(validateBookForm('/x.txt', null, books, { exists: true, is_dir: false })!, /文件夹或 PDF/)
+  assert.match(validateBookForm('/x.txt', null, books, { exists: true, is_dir: false })!, /文件夹、PDF 或 EPUB/)
   assert.match(validateBookForm('/d', null, books, dirStat)!, /已在书架/)
   // 编辑同一本书时路径未变不算重复
   assert.equal(validateBookForm('/d', 'a', books, dirStat), null)

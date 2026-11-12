@@ -6,7 +6,7 @@ export interface HomeTask {
   child_risk_id: string | null; child_risk_title: string | null
 }
 export interface HomeBook {
-  id: string; name: string; kind: 'folder' | 'pdf'; last_file: string | null
+  id: string; name: string; kind: 'folder' | 'pdf' | 'epub'; last_file: string | null
   position: number; page_count: number | null; read_at: number
 }
 export interface HomeMemo { id: string; date: string; timestamp: string; excerpt: string; thumbnail: string | null; tags: string[] }

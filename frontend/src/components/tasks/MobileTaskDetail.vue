@@ -12,6 +12,7 @@
           <h2>{{ node.title }}</h2>
           <UiAction :icon="EditPen" label="编辑任务" @click="$emit('edit', node)" />
         </div>
+        <div class="mobile-task-overview"><div class="mobile-task-info">
         <div class="mobile-detail-meta"><TaskStatusMark :status="node.status" /><span>{{ taskStatusLabel(node.status) }}</span><span class="mobile-detail-kind">{{ child ? '子任务' : node.kind === 'long' ? '长期任务' : '短期待办' }}</span><span v-if="node.importance !== 'normal'" class="task-pill" :class="`importance-${node.importance}`">{{ taskImportanceLabel(node.importance) }}</span></div>
         <div class="mobile-detail-dates"><span>{{ formatTaskDateRange(node.start_date, node.end_date) }}</span><strong v-if="!isTaskClosed(node)" :class="taskTiming(node, today).tone">{{ taskTiming(node, today).label }}</strong></div>
         <p v-if="node.description" class="mobile-detail-description">{{ node.description }}</p>
@@ -19,6 +20,7 @@
           <span><strong>{{ progressPercent }}<small>%</small></strong><small>{{ completedLeaves }} / {{ effectiveLeaves }} 项完成</small></span>
           <span class="mobile-progress-track" aria-hidden="true"><i :style="{ transform: `scaleX(${progressPercent / 100})` }"></i></span>
         </div>
+        </div><TaskAttachments :key="node.id" :task-id="node.id" /></div>
       </div>
       <MotionSwap :view-key="node.kind === 'short' ? 'progress' : section" :direction="section === 'progress' ? 1 : -1" horizontal>
         <div v-if="node.kind === 'long' && section === 'breakdown'" class="mobile-child-rows" aria-label="直属子任务">
@@ -59,6 +61,7 @@ import MotionSwap from '@/components/motion/MotionSwap.vue'
 import UiAction from '@/components/motion/UiAction'
 import TaskStatusMark from './TaskStatusMark.vue'
 import MobileTaskActivity from './MobileTaskActivity.vue'
+import TaskAttachments from './TaskAttachments.vue'
 const props = withDefaults(defineProps<{
   node: TaskNode; tasks: TaskNode[]; entries: TaskActivityEntry[]; today: string; child?: boolean; parentTitle?: string
   section: 'breakdown' | 'progress'; progressPercent?: number; completedLeaves?: number; effectiveLeaves?: number
@@ -124,7 +127,7 @@ const progressCount = computed(() => props.entries.filter(item => item.type === 
 .mobile-detail-tabs button { display:flex; align-items:center; justify-content:center; gap:6px; min-height:44px; padding:7px; border:0; border-radius:14px; background:transparent; color:var(--text-muted); font:inherit; font-size:14px; cursor:pointer; }
 .mobile-detail-tabs button.active { color:var(--text-primary); font-weight:650; }
 .mobile-detail-tabs small { font-size:11px; color:var(--text-faint); font-variant-numeric:tabular-nums; }
-.mobile-context-create { flex:none; width:52px; height:52px; }
+.mobile-context-create, .mobile-context-create:focus-visible { flex:none; width:52px; height:52px; min-height:52px; min-width:52px; border-radius:50%; }
 .mobile-complete-task { display:flex; align-items:center; justify-content:center; gap:8px; min-height:48px; width:100%; border:0; border-radius:16px; background:var(--bg-hover); color:var(--text-primary); font:inherit; font-size:15px; font-weight:600; cursor:pointer; }
 .is-child { height:min(80dvh,720px); max-height:inherit; padding:22px 20px 0; border-radius:24px 24px 0 0; background:var(--bg-glass-strong); }
 .is-child .mobile-task-detail-nav { top:22px; left:20px; right:20px; }

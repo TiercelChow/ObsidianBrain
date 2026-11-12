@@ -1450,6 +1450,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "html-escape"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9356095b4b41197bba32173600e1582792cda618f65d12f68e2e77d273413c5"
+
+[[package]]
 name = "htmlescape"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2414,6 +2420,7 @@ dependencies = [
  "git2",
  "gray_matter",
  "hex",
+ "html-escape",
  "image",
  "jsonschema",
  "keyring",
@@ -2422,6 +2429,7 @@ dependencies = [
  "notify",
  "pulldown-cmark",
  "reqwest",
+ "roxmltree",
  "rusqlite",
  "rust-embed",
  "serde",
@@ -2440,6 +2448,7 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "uuid",
+ "windows-sys 0.61.2",
  "wiremock",
  "zip",
 ]
@@ -3029,6 +3038,15 @@ dependencies = [
  "bitflags 2.11.1",
  "serde",
  "serde_derive",
+]
+
+[[package]]
+name = "roxmltree"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9da7f59328b09405b181fee1018925fad50f157afb43c0c0f5c522c256dd5907"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

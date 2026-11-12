@@ -350,6 +350,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "per-book Markdown and PDF position bookmarks",
         sql: include_str!("../../migrations/060_reader_bookmarks.sql"),
     },
+    Migration {
+        version: 61,
+        description: "EPUB books and independently stored task attachments",
+        sql: include_str!("../../migrations/061_epub_task_attachments.sql"),
+    },
 ];
 
 #[cfg(test)]
@@ -863,11 +868,36 @@ impl SqliteStore {
 
         let conn = self.conn.lock().unwrap();
 
-        // Wrap all pending migrations in a single transaction
+        // SQLite's documented parent-table rebuild procedure. This guard also
+        // restores enforcement on every rollback/error path.
+        struct RestoreForeignKeys<'a>(&'a Connection);
+        impl Drop for RestoreForeignKeys<'_> {
+            fn drop(&mut self) {
+                if !self.0.is_autocommit() {
+                    if let Err(error) = self.0.execute_batch("ROLLBACK;") {
+                        tracing::error!(%error,"迁移失败后回滚异常");
+                    }
+                }
+                if let Err(error) = self.0.execute_batch("PRAGMA foreign_keys=ON;") {
+                    tracing::error!(%error, "迁移后恢复外键失败");
+                }
+            }
+        }
+        let mut _foreign_keys = None;
+
+        // Ordinary migrations share a transaction; v61 has its own protected
+        // parent-table rebuild transaction (earlier cascades must stay enabled).
         conn.execute_batch("BEGIN IMMEDIATE;")
             .map_err(|e| BrainError::Internal(format!("迁移事务开始失败: {e}")))?;
 
         for migration in &pending {
+            if migration.version == 61 {
+                // Earlier migrations rely on cascades (notably Skill cleanup),
+                // so only the parent rebuild runs with enforcement suspended.
+                conn.execute_batch("COMMIT; PRAGMA foreign_keys=OFF;")?;
+                _foreign_keys = Some(RestoreForeignKeys(&conn));
+                conn.execute_batch("BEGIN IMMEDIATE;")?;
+            }
             tracing::info!("执行迁移 v{}: {}", migration.version, migration.description);
             if let Err(e) = conn.execute_batch(migration.sql) {
                 let _ = conn.execute_batch("ROLLBACK;");
@@ -922,6 +952,16 @@ impl SqliteStore {
             }
         }
 
+        let violations: i64 =
+            conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })?;
+        if violations != 0 {
+            conn.execute_batch("ROLLBACK;")?;
+            return Err(BrainError::Internal(format!(
+                "迁移后存在 {violations} 项外键异常，已回滚"
+            )));
+        }
         conn.execute_batch("COMMIT;")
             .map_err(|e| BrainError::Internal(format!("迁移事务提交失败: {e}")))?;
 

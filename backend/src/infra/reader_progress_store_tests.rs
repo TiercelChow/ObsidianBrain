@@ -25,6 +25,35 @@ fn state(file: &str, kind: &str, position: f64, updated: i64, read: i64) -> Read
 }
 
 #[test]
+fn test_epub_progress_fraction_persists_and_rejects_wrong_kind() {
+    let (store, books, _dir) = store();
+    let mut book = books.list_reader_books().unwrap().remove(0);
+    book.kind = BookKind::Epub;
+    book.path = "/books/test.epub".into();
+    books.save_reader_books(&[book]).unwrap();
+    store
+        .save("book", state("/books/test.epub", "epub", 0.63, 100, 100))
+        .unwrap();
+    assert_eq!(
+        books.list_reader_books().unwrap()[0]
+            .progress
+            .as_ref()
+            .unwrap()
+            .position,
+        0.63
+    );
+    assert!(store
+        .save("book", state("/books/test.epub", "md", 0.2, 200, 200))
+        .is_err());
+    assert!(store
+        .save("book", state("/books/test.epub", "epub", 1.5, 200, 200))
+        .is_err());
+    assert!(store
+        .save("book", state("/books/other.epub", "epub", 0.2, 200, 200))
+        .is_err());
+}
+
+#[test]
 fn test_progress_merges_files_and_separates_open_time_from_position() {
     let (store, books, _dir) = store();
     store

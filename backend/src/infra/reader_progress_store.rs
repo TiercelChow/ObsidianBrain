@@ -39,7 +39,7 @@ fn normalized(path: &str) -> Result<String, BrainError> {
 pub(crate) fn belongs(path: &str, book_path: &str, kind: &str) -> Result<bool, BrainError> {
     let file = normalized(path)?;
     let root = normalized(book_path)?;
-    Ok(if kind == "pdf" {
+    Ok(if kind == "pdf" || kind == "epub" {
         file == root
     } else {
         file.starts_with(&format!("{root}/"))
@@ -85,15 +85,17 @@ impl ReaderProgressStore {
                 let lower = file.to_ascii_lowercase();
                 let pdf = lower.ends_with(".pdf");
                 let md = lower.ends_with(".md") || lower.ends_with(".markdown");
+                let epub = lower.ends_with(".epub");
                 if (pdf && progress.kind != ReaderFileKind::Pdf)
                     || (md && progress.kind != ReaderFileKind::Md)
-                    || (!pdf && !md)
+                    || (epub && progress.kind != ReaderFileKind::Epub)
+                    || (!pdf && !md && !epub)
                 {
                     return Err(invalid("文件类型与进度类型不一致"));
                 }
                 if !progress.position.is_finite()
                     || (pdf && (progress.position < 1.0 || progress.position.fract() != 0.0))
-                    || (md && !(0.0..=1.0).contains(&progress.position))
+                    || ((md || epub) && !(0.0..=1.0).contains(&progress.position))
                 {
                     return Err(invalid("阅读位置不合法"));
                 }
@@ -126,12 +128,14 @@ impl ReaderProgressStore {
             if let Some(old) = old {
                 state.last_read_at = old.last_read_at.unwrap_or(old.updated_at);
                 state.last_file = old.last_file.unwrap_or_else(|| {
-                    if book_kind == "pdf" { book_path.clone() } else { String::new() }
+                    if book_kind == "pdf" || book_kind == "epub" { book_path.clone() } else { String::new() }
                 });
                 state.by_file = old.by_file;
                 if !state.last_file.is_empty() && !state.by_file.contains_key(&state.last_file) {
                     let kind = if state.last_file.to_ascii_lowercase().ends_with(".pdf") {
                         ReaderFileKind::Pdf
+                    } else if state.last_file.to_ascii_lowercase().ends_with(".epub") {
+                        ReaderFileKind::Epub
                     } else {
                         ReaderFileKind::Md
                     };

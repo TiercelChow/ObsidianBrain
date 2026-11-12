@@ -51,7 +51,7 @@ export interface Bookshelf {
   /** Synchronous recovery cache plus coalesced single-book server patch. */
   saveFileProgress: (id: string, file: string, progress: FileProgress) => void
   /** Set the lastFile pointer, seeding a fresh entry only if the file is new. */
-  openFile: (id: string, file: string, kind: 'md' | 'pdf') => void
+  openFile: (id: string, file: string, kind: 'md' | 'pdf' | 'epub') => void
   /** Full per-file state for restore (null if none). */
   getFileProgressState: (id: string) => BookProgressState | null
   findBook: (path: string) => ReaderBook | undefined
@@ -200,7 +200,7 @@ export function createBookshelf(deps: BookshelfDeps): Bookshelf {
   }
 
   /** Set the lastFile pointer (seeds a fresh entry only for a brand-new file). */
-  function openFile(id: string, file: string, kind: 'md' | 'pdf') {
+  function openFile(id: string, file: string, kind: 'md' | 'pdf' | 'epub') {
     if (!books.value.some((b) => b.id === id)) return
     progressMap[id] = setLastFile(progressMap[id] ?? null, file, kind, Date.now())
     deps.saveProgress(progressMap)

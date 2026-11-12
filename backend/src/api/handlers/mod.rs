@@ -7,7 +7,9 @@ pub mod knowledge_chat;
 pub mod knowledge_export;
 pub mod knowledge_skill;
 pub mod offline;
+pub mod reader_epub;
 pub mod reader_file;
+pub mod task_attachment;
 #[cfg(test)]
 mod timeline_tests;
 pub mod tool_handler;

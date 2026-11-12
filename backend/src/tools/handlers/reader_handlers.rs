@@ -50,6 +50,7 @@ struct DirEntry {
     is_dir: bool,
     is_markdown: bool,
     is_pdf: bool,
+    is_epub: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     children: Option<Vec<DirEntry>>,
 }
@@ -73,11 +74,8 @@ fn should_skip(name: &str) -> bool {
 ///
 /// Errors reading individual entries are swallowed (the entry is skipped) so one
 /// permission-denied subdir doesn't fail the whole listing.
-fn build_tree(path: &Path, depth: usize, max_depth: usize) -> Vec<DirEntry> {
-    let read_dir = match std::fs::read_dir(path) {
-        Ok(rd) => rd,
-        Err(_) => return Vec::new(),
-    };
+fn build_tree(path: &Path, depth: usize, max_depth: usize) -> std::io::Result<Vec<DirEntry>> {
+    let read_dir = std::fs::read_dir(path)?;
 
     let mut entries: Vec<DirEntry> = read_dir
         .filter_map(|e| e.ok())
@@ -90,9 +88,10 @@ fn build_tree(path: &Path, depth: usize, max_depth: usize) -> Vec<DirEntry> {
             let is_dir = file_type.is_dir();
             let is_markdown = !is_dir && is_markdown_ext(&name);
             let is_pdf = !is_dir && is_pdf_ext(&name);
+            let is_epub = !is_dir && name.to_ascii_lowercase().ends_with(".epub");
             let entry_path = e.path();
             let children = if is_dir && depth < max_depth {
-                Some(build_tree(&entry_path, depth + 1, max_depth))
+                Some(build_tree(&entry_path, depth + 1, max_depth).unwrap_or_default())
             } else {
                 None
             };
@@ -102,6 +101,7 @@ fn build_tree(path: &Path, depth: usize, max_depth: usize) -> Vec<DirEntry> {
                 is_dir,
                 is_markdown,
                 is_pdf,
+                is_epub,
                 children,
             })
         })
@@ -117,7 +117,7 @@ fn build_tree(path: &Path, depth: usize, max_depth: usize) -> Vec<DirEntry> {
             .cmp(&b.name.to_ascii_lowercase()),
     });
 
-    entries
+    Ok(entries)
 }
 
 /// Read a local file as UTF-8 text. Returns `(name, content, size_bytes)`.
@@ -197,7 +197,8 @@ impl ToolHandler for ListLocalDirHandler {
         let root = path.clone();
         let entries = tokio::task::spawn_blocking(move || build_tree(&root, 0, depth))
             .await
-            .map_err(|e| BrainError::Internal(format!("遍历任务失败: {e}")))?;
+            .map_err(|e| BrainError::Internal(format!("遍历任务失败: {e}")))?
+            .map_err(|e| BrainError::Internal(format!("无法读取此文件夹: {e}")))?;
 
         let total = entries.len();
         let entries_json = serde_json::to_value(&entries)
@@ -416,7 +417,7 @@ impl ToolHandler for SaveReaderBooksHandler {
                         "properties": {
                             "id": { "type": "string" },
                             "path": { "type": "string" },
-                            "kind": { "type": "string", "enum": ["folder", "pdf"] },
+                            "kind": { "type": "string", "enum": ["folder", "pdf", "epub"] },
                             "name": { "type": "string" },
                             "description": { "type": "string" },
                             "category": { "type": "string" },
@@ -473,7 +474,7 @@ impl ToolHandler for SaveReaderProgressHandler {
                 "lastReadAt":{"type":"integer","minimum":1},
                 "byFile":{"type":"object","minProperties":1,"maxProperties":10000,"additionalProperties":{
                     "type":"object","additionalProperties":false,"properties":{
-                        "kind":{"type":"string","enum":["md","pdf"]},"position":{"type":"number","minimum":0},
+                        "kind":{"type":"string","enum":["md","pdf","epub"]},"position":{"type":"number","minimum":0},
                         "pageCount":{"type":"integer","minimum":1,"maximum":1000000},"updatedAt":{"type":"integer","minimum":1}
                     },"required":["kind","position","updatedAt"]}}
             },"required":["lastFile","lastReadAt","byFile"]}
@@ -602,7 +603,7 @@ mod tests {
         std::fs::write(root.join(".git").join("x.md"), "hidden").unwrap();
         std::fs::write(root.join("doc.pdf"), b"%PDF-1.4 fake").unwrap();
 
-        let entries = build_tree(root, 0, 3);
+        let entries = build_tree(root, 0, 3).unwrap();
         // Top-level: "sub" (dir), "a.md", "doc.pdf". ".git" skipped.
         assert_eq!(
             entries.len(),
@@ -647,7 +648,7 @@ mod tests {
         std::fs::write(root.join("l1").join("l2").join("deep.md"), "deep").unwrap();
 
         // depth 0: do not recurse into l1.
-        let entries = build_tree(root, 0, 0);
+        let entries = build_tree(root, 0, 0).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "l1");
         assert!(
@@ -656,7 +657,7 @@ mod tests {
         );
 
         // depth 1: expand l1 but not l2.
-        let entries = build_tree(root, 0, 1);
+        let entries = build_tree(root, 0, 1).unwrap();
         let l1 = &entries[0];
         let l1_children = l1.children.as_ref().expect("l1 expanded at depth 1");
         assert_eq!(l1_children.len(), 1);
@@ -714,7 +715,7 @@ mod tests {
         let root = tmp.path();
         make_tree(root).await;
 
-        let entries = build_tree(root, 0, 3);
+        let entries = build_tree(root, 0, 3).unwrap();
         let json = serde_json::to_value(&entries).unwrap();
         assert!(json.is_array());
         assert_eq!(json.as_array().unwrap().len(), 3);

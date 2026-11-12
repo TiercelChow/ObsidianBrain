@@ -11,6 +11,7 @@ pub const MARKDOWN_EXTRACTION_VERSION: &str = "markdown-v3-structured";
 pub enum BookKind {
     Folder,
     Pdf,
+    Epub,
 }
 
 impl BookKind {
@@ -18,6 +19,7 @@ impl BookKind {
         match self {
             Self::Folder => "folder",
             Self::Pdf => "pdf",
+            Self::Epub => "epub",
         }
     }
 }
@@ -29,6 +31,7 @@ impl TryFrom<&str> for BookKind {
         match value {
             "folder" => Ok(Self::Folder),
             "pdf" => Ok(Self::Pdf),
+            "epub" => Ok(Self::Epub),
             _ => Err(format!("未知书籍类型: {value}")),
         }
     }
@@ -54,6 +57,7 @@ pub struct BookProgress {
 pub enum ReaderFileKind {
     Md,
     Pdf,
+    Epub,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

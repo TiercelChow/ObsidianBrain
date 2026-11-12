@@ -1334,6 +1334,10 @@ async fn export_reader_book(
     let available = match book.kind {
         crate::models::book_wiki::BookKind::Folder => FsPath::new(&book.path).is_dir(),
         crate::models::book_wiki::BookKind::Pdf => FsPath::new(&book.path).is_file(),
+        crate::models::book_wiki::BookKind::Epub => {
+            builder.error(&scope, "EPUB 暂不支持离线快照，请在常规阅境轩阅读");
+            return;
+        }
     };
     if !available {
         builder.error(&scope, "文集路径不可用或文件类型已改变");

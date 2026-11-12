@@ -4,13 +4,20 @@
  * module only uses type imports.
  */
 import type { ReaderBook } from '@/api/reader'
+import { localPathName, normalizePickerPath } from './pathPicker.ts'
 
-export function deriveKind(path: string): 'folder' | 'pdf' {
-  return /\.pdf$/i.test(path) ? 'pdf' : 'folder'
+export function deriveKind(path: string, isDirectory = false): 'folder' | 'pdf' | 'epub' {
+  if (isDirectory) return 'folder'
+  return /\.pdf$/i.test(path) ? 'pdf' : /\.epub$/i.test(path) ? 'epub' : 'folder'
 }
 
 export function defaultBookName(path: string): string {
-  return path.split('/').filter(Boolean).pop() ?? ''
+  return localPathName(path)
+}
+
+function bookPathKey(path: string): string {
+  const value = normalizePickerPath(path) ?? path
+  return value.startsWith('/') ? value : value.toLowerCase()
 }
 
 export function makeBookId(): string {
@@ -95,11 +102,12 @@ export function validateBookForm(
   stat: { exists: boolean; is_dir: boolean } | null,
 ): string | null {
   if (!path.trim()) return '请输入路径'
-  const duplicate = books.find((b) => b.path === path.trim() && b.id !== editingId)
+  const key = bookPathKey(path.trim())
+  const duplicate = books.find((b) => b.id !== editingId && bookPathKey(b.path) === key)
   if (duplicate) return '该书已在书架'
   if (stat) {
     if (!stat.exists) return '路径不存在'
-    if (!(stat.is_dir || /\.pdf$/i.test(path))) return '仅支持文件夹或 PDF 文件'
+    if (!(stat.is_dir || /\.(pdf|epub)$/i.test(path))) return '仅支持文件夹、PDF 或 EPUB 文件'
   }
   return null
 }

@@ -4,7 +4,7 @@ export interface ReaderFileSearchResult {
   name: string
   path: string
   relativePath: string
-  kind: 'markdown' | 'pdf'
+  kind: 'markdown' | 'pdf' | 'epub'
 }
 
 function relativeToRoot(path: string, root: string) {
@@ -22,12 +22,12 @@ function collectReadableFiles(entries: DirEntry[], root: string, output: ReaderF
       if (entry.children?.length) collectReadableFiles(entry.children, root, output)
       continue
     }
-    if (!entry.is_markdown && !entry.is_pdf) continue
+    if (!entry.is_markdown && !entry.is_pdf && !entry.is_epub) continue
     output.push({
       name: entry.name,
       path: entry.path,
       relativePath: relativeToRoot(entry.path, root),
-      kind: entry.is_pdf ? 'pdf' : 'markdown',
+      kind: entry.is_pdf ? 'pdf' : entry.is_epub ? 'epub' : 'markdown',
     })
   }
 }

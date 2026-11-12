@@ -10,6 +10,8 @@
 
 下文涉及旧 Memory Engine、Obsidian 客户端、Vault 写入和旧工具的设计仅保留演进背景，不是现行能力。既有 SQLite 快照仅包含数据库，完整照片备份必须同时保留原图目录。
 
+2026-11-11：阅境轩增加 EPUB 2/3 章节阅读；任务及进展附件的元数据保存在 SQLite，文件位于数据库同级 `tasks/attachments/`。完整任务备份必须同时保留该目录，数据库快照本身不包含附件文件。具体合同见 [EPUB 与任务附件设计](development/2026-11-11-epub-task-attachments.md)。
+
 ---
 
 ## 1. 项目概述

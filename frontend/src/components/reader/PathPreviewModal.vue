@@ -32,8 +32,8 @@
           <pre class="code-content"><code ref="codeRef" :class="codeClass">{{ codeContent }}</code></pre>
         </div>
         <div v-else-if="kind === 'image'" class="ppm-state"><el-icon aria-hidden="true"><Picture /></el-icon><span>暂不支持图片预览</span></div>
-        <div v-else-if="kind === 'pdf'" class="ppm-state">
-          <el-icon><Document /></el-icon><span>PDF 预览请点击右上「阅读器」按钮打开</span>
+        <div v-else-if="kind === 'pdf' || kind === 'epub'" class="ppm-state">
+          <el-icon><Document /></el-icon><span>{{ kind==='epub'?'EPUB':'PDF' }} 请点击右上「阅读器」按钮打开</span>
         </div>
         <div v-else class="ppm-state">该文件类型暂不支持预览</div>
       </div>
@@ -93,7 +93,7 @@ const mermaidSvg = ref('')
 const mermaidSource = ref('')
 
 const canOpenInReader = computed(
-  () => kind.value === 'pdf' || (kind.value === 'md' && isUnderRoot(currentPath.value)),
+  () => kind.value === 'pdf' || kind.value === 'epub' || (kind.value === 'md' && isUnderRoot(currentPath.value)),
 )
 
 function isUnderRoot(p: string): boolean {
@@ -114,7 +114,7 @@ function onLinkClick(href: string) {
   const resolved = resolveRelativePath(baseDir, decodeURIComponent(pathPartRaw))
   if (!resolved) return
   pendingAnchor.value = anchor ? decodeURIComponent(anchor) : ''
-  if (/\.(md|markdown|pdf)$/i.test(resolved) && isUnderRoot(resolved)) {
+  if (/\.(md|markdown|pdf|epub)$/i.test(resolved) && isUnderRoot(resolved)) {
     emit('open-in-reader', resolved, pendingAnchor.value)
   } else {
     currentPath.value = resolved
@@ -129,6 +129,7 @@ function classify(s: PathStat): string {
   const ext = s.ext.toLowerCase()
   if (ext === 'md' || ext === 'markdown') return 'md'
   if (ext === 'pdf') return 'pdf'
+  if (ext === 'epub') return 'epub'
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)) return 'image'
   return 'code'
 }
@@ -274,7 +275,7 @@ async function scrollToAnchor() {
 }
 
 function onTreeSelect(path: string) {
-  if (/\.(md|markdown|pdf)$/i.test(path) && isUnderRoot(path)) {
+  if (/\.(md|markdown|pdf|epub)$/i.test(path) && isUnderRoot(path)) {
     emit('open-in-reader', path)
   } else {
     currentPath.value = path

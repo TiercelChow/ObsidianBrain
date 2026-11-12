@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum BookmarkLocation {
+    Epub {
+        chapter: String,
+        ratio: f64,
+    },
     Md {
         ratio: f64,
         block_index: u32,

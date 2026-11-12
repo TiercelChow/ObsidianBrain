@@ -25,6 +25,36 @@ fn draft() -> BookmarkWrite {
 }
 
 #[test]
+fn test_epub_upgrade_preserves_books_bookmarks_and_knowledge_base() {
+    let (store, dir) = setup();
+    let bookmark = store.save(draft()).unwrap();
+    store.db.with_connection(|c|{
+        c.execute("INSERT INTO knowledge_bases(id,book_id,created_at,updated_at) VALUES ('base','a','now','now')",[])?;
+        c.execute("DELETE FROM _migrations WHERE version=61",[])?;Ok(())
+    }).unwrap();
+    drop(store);
+    let db = Arc::new(SqliteStore::new(&dir.path().join("bookmarks.db")).unwrap());
+    assert_eq!(
+        ReaderBookmarkStore::new(db.clone()).list("a").unwrap()[0].id,
+        bookmark.id
+    );
+    db.with_connection(|c|{
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM knowledge_bases WHERE id='base'",[],|r|r.get::<_,i64>(0))?,1);
+        assert_eq!(c.query_row("PRAGMA foreign_keys",[],|r|r.get::<_,i64>(0))?,1);
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check",[],|r|r.get::<_,i64>(0))?,0);
+        c.execute("INSERT INTO reader_books(id,path,kind,name,added_at) VALUES ('epub','/books/book.epub','epub','EPUB',1)",[])?;Ok(())
+    }).unwrap();
+    let mut draft = draft();
+    draft.book_id = "epub".into();
+    draft.file_path = "/books/book.epub".into();
+    draft.location = BookmarkLocation::Epub {
+        chapter: "OPS/one.xhtml".into(),
+        ratio: 0.6,
+    };
+    assert!(ReaderBookmarkStore::new(db).save(draft).is_ok());
+}
+
+#[test]
 fn test_bookmarks_crud_persistence_isolation_and_optimistic_lock() {
     let (store, dir) = setup();
     let saved = store.save(draft()).unwrap();

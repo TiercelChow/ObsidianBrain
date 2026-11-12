@@ -1,4 +1,4 @@
-import { callTool } from '@/api'
+import api, { callTool } from '@/api'
 import type { BookmarkDraft, ReaderBookmark } from '@/utils/readerBookmarks'
 
 export async function listReaderBookmarks(bookId: string): Promise<ReaderBookmark[]> {
@@ -23,6 +23,7 @@ export interface DirEntry {
   is_dir: boolean
   is_markdown: boolean
   is_pdf: boolean
+  is_epub?: boolean
   children?: DirEntry[]
 }
 
@@ -30,6 +31,16 @@ export interface ListLocalDirResult {
   root: string
   entries: DirEntry[]
   total: number
+}
+
+export interface ReaderLocations {
+  platform: 'windows' | 'unix'
+  home: string | null
+  roots: string[]
+}
+
+export async function getReaderLocations(signal?: AbortSignal): Promise<ReaderLocations> {
+  return await api.get('/reader/locations', { signal }) as unknown as ReaderLocations
 }
 
 export interface ReadLocalFileResult {
@@ -48,8 +59,8 @@ export interface ToolEnvelope<T> {
 }
 
 /** List a local directory as a recursive file tree (filesystem-scoped, not vault). */
-export function listLocalDir(path: string, depth = 10): Promise<ToolEnvelope<ListLocalDirResult>> {
-  return callTool('list_local_dir', { path, depth }) as unknown as Promise<ToolEnvelope<ListLocalDirResult>>
+export function listLocalDir(path: string, depth = 10, signal?: AbortSignal): Promise<ToolEnvelope<ListLocalDirResult>> {
+  return callTool('list_local_dir', { path, depth }, { signal }) as unknown as Promise<ToolEnvelope<ListLocalDirResult>>
 }
 
 /** Read a local file's text content (5MB cap). */
@@ -72,8 +83,8 @@ export interface PathStat {
 }
 
 /** Stat a local path (file/dir, ext, size) to decide how to preview it. */
-export function statLocalPath(path: string): Promise<ToolEnvelope<PathStat>> {
-  return callTool('stat_local_path', { path }) as unknown as Promise<ToolEnvelope<PathStat>>
+export function statLocalPath(path: string, signal?: AbortSignal): Promise<ToolEnvelope<PathStat>> {
+  return callTool('stat_local_path', { path }, { signal }) as unknown as Promise<ToolEnvelope<PathStat>>
 }
 
 /** A reader history entry (server-stored, shared across all users). */
@@ -118,7 +129,7 @@ export function saveReaderProgress(bookId: string, state: import('../utils/reade
 export interface ReaderBook {
   id: string
   path: string
-  kind: 'folder' | 'pdf'
+  kind: 'folder' | 'pdf' | 'epub'
   name: string
   description: string
   category: string

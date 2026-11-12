@@ -118,7 +118,7 @@
                     :class="{ active: file.path === displayedFile }"
                     @click="selectSearchResult(file.path)"
                   >
-                    <span class="reader-search-kind">{{ file.kind === 'pdf' ? 'PDF' : 'MD' }}</span>
+                    <span class="reader-search-kind">{{ file.kind === 'pdf' ? 'PDF' : file.kind === 'epub' ? 'EPUB' : 'MD' }}</span>
                     <span class="reader-search-copy">
                       <strong>{{ file.name }}</strong>
                       <small>{{ file.relativePath }}</small>
@@ -170,8 +170,9 @@
           @enter="onArticleEnter"
           @after-leave="onContentAfterLeave"
         >
+          <EpubViewer v-if="fileKind==='epub' && displayedFile" ref="epubViewerRef" :key="displayedFile" :file="displayedFile" :book-id="currentShelfBookId || ''" :initial-position="epubInitialPosition" @outline="onEpubOutline" @ready="onEpubReady" @loaderror="onEpubError" @point="rememberEpubPoint" @interact="stopBookmarkHold" @beforechange="captureProgressNow" @location="onEpubLocation" />
           <PdfViewer
-            v-if="fileKind === 'pdf' && renderedHtml === ''"
+            v-else-if="fileKind === 'pdf' && renderedHtml === ''"
             ref="pdfViewerRef"
             :key="displayedFile"
             :src="displayedFile"
@@ -198,7 +199,7 @@
         <div v-if="fileLoading" class="loadbar"><span></span></div>
         <!-- error banner (old content remains behind) -->
         <div v-if="error" class="error-banner"><el-icon aria-hidden="true"><WarningFilled /></el-icon><span>{{ error }}</span></div>
-        <ReaderBookmarkMarkers v-if="displayedFile" :pane="contentRef" :file="displayedFile" :bookmarks="bookmarks" :ready="fileKind==='md'?renderedHtml:pdfPageCount" @open="openBookmarks" />
+        <ReaderBookmarkMarkers v-if="displayedFile" :pane="contentRef" :file="displayedFile" :bookmarks="bookmarks" :ready="fileKind==='md'?renderedHtml:fileKind==='epub'?epubReady:pdfPageCount" @open="openBookmarks" />
       </main>
 
       <!-- Right: TOC -->
@@ -382,6 +383,7 @@ import { normalizeHeadingAnchor } from '@/markdown/headingAnchors'
 import { attachGlassLens, detachGlassLens } from '@/utils/glassOptics'
 import { useBookshelf } from '@/composables/useBookshelf'
 import { clampPdfPage } from '@/utils/readerBooks'
+import { localPathName, parentPath } from '@/utils/pathPicker'
 import {
   captureMdFileProgress,
   capturePdfFileProgress,
@@ -407,6 +409,7 @@ import { captureBookmarkLocation,bookmarkTarget,type ReaderBookmark,type Bookmar
 const MermaidViewer = defineAsyncComponent(() => import('@/components/reader/MermaidViewer.vue'))
 const PathPreviewModal = defineAsyncComponent(() => import('@/components/reader/PathPreviewModal.vue'))
 const PdfViewer = defineAsyncComponent(() => import('@/components/reader/PdfViewer.vue'))
+const EpubViewer = defineAsyncComponent(() => import('@/components/reader/EpubViewer.vue'))
 const ReaderBookmarksPanel = defineAsyncComponent(() => import('@/components/reader/ReaderBookmarksPanel.vue'))
 
 const appStore = useAppStore()
@@ -608,9 +611,8 @@ async function openBook(book: ReaderBook) {
   activeReadingBookId.value = book.id
   changeView('read', false)
   const state = shelf.getFileProgressState(book.id)
-  if (book.kind === 'pdf') {
-    const dir = book.path.substring(0, book.path.lastIndexOf('/'))
-    await openPath(dir)
+  if (book.kind === 'pdf' || book.kind === 'epub') {
+    await openPath(parentPath(book.path))
     await onSelectFile(book.path)
     return
   }
@@ -694,6 +696,11 @@ function captureProgressNow() {
   const bookId = currentShelfBookId.value
   const el = contentRef.value
   if (!bookId || !el || !displayedFile.value) return
+  if(fileKind.value==='epub') {
+    const position=epubViewerRef.value?.getProgress()
+    if(position!==null && position!==undefined)shelf.saveFileProgress(bookId,displayedFile.value,{kind:'epub',position,updatedAt:Date.now()})
+    return
+  }
   shelf.saveFileProgress(
     bookId,
     displayedFile.value,
@@ -903,9 +910,24 @@ function onFullscreenChange() {
 // page-turn transition. (Separate from activeFile, which updates immediately for the
 // tree highlight.)
 const displayedFile = ref('')
-const fileKind = ref<'md' | 'pdf'>('md')
+const fileKind = ref<'md' | 'pdf' | 'epub'>('md')
+const epubViewerRef=ref<{getProgress:()=>number|null;goTo:(href:string,ratio?:number)=>boolean}|null>(null)
+const epubInitialPosition=ref(0),epubReady=ref('')
+let epubOpened=false
+function onEpubOutline(items:{href:string;title:string}[],file:string){if(file!==displayedFile.value || fileKind.value!=='epub')return;toc.value=items.map(item=>({id:item.href,text:item.title,level:1}))}
+function onEpubReady(value:string,file:string){
+  if(file!==displayedFile.value || fileKind.value!=='epub')return
+  epubReady.value=value
+  activeHeading.value=contentRef.value?.querySelector<HTMLIFrameElement>('.epub-frame')?.dataset.epubChapter || ''
+  const id=currentShelfBookId.value
+  if(!epubOpened && id && viewMode.value==='read'){epubOpened=true;shelf.openFile(id,displayedFile.value,'epub')}
+  if(pendingBookmarkJump)applyBookmarkJump()
+}
+function onEpubError(message:string,file:string){if(file!==displayedFile.value || fileKind.value!=='epub')return;bookmarksError.value=`EPUB 无法定位：${message}；书签笔记仍保留。`;pendingBookmarkJump=null}
+function onEpubLocation(value:{file:string;position:number}){const id=currentShelfBookId.value;if(id && viewMode.value==='read' && fileKind.value==='epub' && value.file===displayedFile.value)shelf.saveFileProgress(id,value.file,{kind:'epub',position:value.position,updatedAt:Date.now()})}
+function rememberEpubPoint(point:{x:number;y:number}){const pane=contentRef.value;if(pane)bookmarkPoint={position:captureBookmarkLocation(pane,'epub',point),scrollTop:pane.scrollTop,scrollLeft:pane.scrollLeft}}
 const mobileDocumentLabel = computed(() => (
-  displayedFile.value.split('/').pop() || (rootPath.value ? '选择文章' : '阅读工具')
+  localPathName(displayedFile.value) || (rootPath.value ? '选择文章' : '阅读工具')
 ))
 const pdfViewerRef = ref<{
   scrollToPage: (n: number) => void
@@ -934,7 +956,7 @@ const flatFiles = computed(() => {
   const walk = (entries: DirEntry[]) => {
     for (const e of entries) {
       if (e.is_dir) e.children && walk(e.children)
-      else if (e.is_markdown || e.is_pdf) out.push(e.path)
+      else if (e.is_markdown || e.is_pdf || e.is_epub) out.push(e.path)
     }
   }
   walk(tree.value)
@@ -1101,9 +1123,10 @@ async function onSelectFile(path: string) {
   error.value = ''
 
   const isPdf = /\.pdf$/i.test(path)
+  const isEpub = /\.epub$/i.test(path)
   const targetBook = resolveReadingBookId(shelf.books.value, rootPath.value, path, activeReadingBookId.value)
   const saved = targetBook ? shelf.getFileProgressState(targetBook)?.byFile[path] : undefined
-  pendingRestoreRatio = isPdf ? null : saved?.position ?? 0
+  pendingRestoreRatio = isPdf || isEpub ? null : saved?.position ?? 0
   pendingPdfPage = isPdf ? clampPdfPage(saved?.position ?? 1, saved?.pageCount ?? 0) : null
   // Determine page-turn direction from the file's position in the tree.
   const oldIdx = flatFiles.value.indexOf(displayedFile.value)
@@ -1112,7 +1135,12 @@ async function onSelectFile(path: string) {
     oldIdx >= 0 && newIdx >= 0 && newIdx < oldIdx ? 'page-prev' : 'page-next'
 
   try {
-    if (isPdf) {
+    if (isEpub) {
+      if(!targetBook)throw new Error('请先将此 EPUB 或所在文件夹添加到书架')
+      epubInitialPosition.value=saved?.position ?? 0;epubReady.value='';epubOpened=false
+      fileKind.value='epub';renderedHtml.value='';displayedFile.value=path;toc.value=[]
+      localStorage.setItem(LAST_FILE_KEY,path)
+    } else if (isPdf) {
       // PDF: don't read/render text — just hand the path to PdfViewer. The outline
       // arrives via onPdfOutline after pdf.js loads the document.
       fileKind.value = 'pdf'
@@ -1258,7 +1286,8 @@ function onPdfOutline(items: { text: string; level: number; page: number }[]) {
 /** TOC click: jump to a PDF page (if pdf) or a markdown heading (if md). */
 function onTocClick(t: TocItem) {
   stopBookmarkHold()
-  if (t.page !== undefined && fileKind.value === 'pdf') {
+  if(fileKind.value==='epub'){epubViewerRef.value?.goTo(t.id)}
+  else if (t.page !== undefined && fileKind.value === 'pdf') {
     // PDF pages flow in pane-center too, so the jump scrolls the same
     // container — hold the header state before PdfViewer scrolls it.
     holdHeaderForJump()
@@ -1368,7 +1397,7 @@ function processContentScroll() {
   if (contentRef.value && performance.now() > headerHoldUntil) {
     appStore.handleScroll(contentRef.value.scrollTop)
   }
-  if (!contentRef.value || fileKind.value === 'pdf' || !toc.value.length) return
+  if (!contentRef.value || fileKind.value !== 'md' || !toc.value.length) return
   const containerTop = contentRef.value.getBoundingClientRect().top
   let current = ''
   for (const t of toc.value) {
@@ -1486,7 +1515,8 @@ function openBookmarks(bookmark?:ReaderBookmark){
   const id=currentShelfBookId.value,pane=contentRef.value
   if(!id)return
   const selection=window.getSelection()
-  const hasSelection=Boolean(selection && !selection.isCollapsed && pane?.contains(selection.anchorNode))
+  const epubSelection=pane?.querySelector<HTMLIFrameElement>('.epub-frame')?.contentWindow?.getSelection()
+  const hasSelection=Boolean((selection && !selection.isCollapsed && pane?.contains(selection.anchorNode)) || (epubSelection && !epubSelection.isCollapsed))
   const position=pane && !fileLoading.value && (fileKind.value!=='pdf'||pdfPageCount.value>0) ? (hasSelection?captureBookmarkLocation(pane,fileKind.value):bookmarkPoint?.position || captureBookmarkLocation(pane,fileKind.value)) : null
   bookmarkCapture.value=position?{book_id:id,file_path:displayedFile.value,title:[...position.excerpt].slice(0,80).join('')||mobileDocumentLabel.value,note_md:'',location:position.location}:null
   initialBookmarkId.value=bookmark?.id||''
@@ -1512,14 +1542,21 @@ function applyBookmarkJump(){
   const bookmark=pendingBookmarkJump,pane=contentRef.value
   if(!bookmark || !pane || bookmark.file_path!==displayedFile.value)return
   const target=bookmarkTarget(pane,bookmark.location)
-  if(!target){if(bookmark.location.kind==='pdf' && pdfPageCount.value>0){bookmarksError.value='该 PDF 已变化，书签页码超出当前文件范围。';pendingBookmarkJump=null;pendingPdfPage=null}return}
+  if(!target){
+    if(bookmark.location.kind==='epub'){
+      const accepted=epubViewerRef.value?.goTo(bookmark.location.chapter,bookmark.location.ratio)
+      if(accepted===false && epubViewerRef.value?.getProgress()!=null){bookmarksError.value='该章节已不存在；书签笔记仍保留。';pendingBookmarkJump=null}
+    }
+    if(bookmark.location.kind==='pdf' && pdfPageCount.value>0){bookmarksError.value='该 PDF 已变化，书签页码超出当前文件范围。';pendingBookmarkJump=null;pendingPdfPage=null}
+    return
+  }
   stopRestoreCorrection();pendingRestoreRatio=null;pendingPdfPage=null;pendingBookmarkJump=null
   holdHeaderForJump()
   const position=()=>{const next=bookmarkTarget(pane,bookmark.location);if(next){pane.scrollTop=Math.max(0,next.top-64);pane.scrollLeft=next.left}}
   position();bookmarkPanelOpen.value=false
   if(target.approximate)ElMessage.info('原段落已变化，已跳转到保存的阅读比例。')
   const controller=new AbortController(),observer=new ResizeObserver(position)
-  const body=currentMarkdownBody() || pane.querySelector('.pdf-pages')
+  const body=currentMarkdownBody() || pane.querySelector('.pdf-pages,.epub-frame')
   if(body)observer.observe(body)
   const stop=()=>{controller.abort();observer.disconnect();clearTimeout(timer);clearInterval(correction);bookmarkHoldCleanup=null}
   const timer=setTimeout(stop,1800)

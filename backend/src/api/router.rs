@@ -15,7 +15,7 @@ use crate::api::handlers::knowledge_backup::{
 use crate::api::handlers::knowledge_chat::stream_knowledge_chat;
 use crate::api::handlers::knowledge_export::download_book_wiki_export;
 use crate::api::handlers::knowledge_skill::upload_wiki_skill_archive;
-use crate::api::handlers::reader_file::serve_reader_file;
+use crate::api::handlers::reader_file::{reader_locations, serve_reader_file};
 use crate::api::handlers::tool_handler::{call_tool, list_tools};
 use crate::api::handlers::upload::{serve_image, serve_thumbnail, upload_images};
 use crate::frontend_assets;
@@ -50,6 +50,26 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
         .route("/vault/images/*path", get(serve_image))
         .route("/vault/thumbnails/*path", get(serve_thumbnail))
         .route("/reader/raw", get(serve_reader_file))
+        .route("/reader/locations", get(reader_locations))
+        .route(
+            "/reader/epub/:id/metadata",
+            get(crate::api::handlers::reader_epub::metadata),
+        )
+        .route(
+            "/reader/epub/:id/:token/*entry",
+            get(crate::api::handlers::reader_epub::resource),
+        )
+        .route(
+            "/tasks/:task_id/attachments",
+            get(crate::api::handlers::task_attachment::list)
+                .post(crate::api::handlers::task_attachment::upload)
+                .layer(DefaultBodyLimit::max(51 * 1024 * 1024)),
+        )
+        .route(
+            "/tasks/attachments/:id",
+            get(crate::api::handlers::task_attachment::download)
+                .delete(crate::api::handlers::task_attachment::remove),
+        )
         .route("/knowledge/agent-mcp", post(agent_mcp))
         .route("/knowledge/chat/stream", post(stream_knowledge_chat))
         .route(
