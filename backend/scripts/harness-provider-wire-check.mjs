@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { pathToFileURL } from 'node:url'
 
-const { apply } = await import(pathToFileURL(process.argv[2]).href)
+const { apply, Config } = await import(pathToFileURL(process.argv[2]).href)
 const input = []
 for await (const chunk of process.stdin) input.push(chunk)
 const patches = JSON.parse(Buffer.concat(input).toString('utf8'))
@@ -33,13 +33,16 @@ try {
     apply({
       get: name => name === 'credentials' ? credentials : undefined,
       inject() {},
+      fiber: {},
+      on() {},
+      waterfall: (...args) => args.at(-1)(),
       logger: { warn() {} },
       llm: {
         registerAdapter: (_, value) => { adapter = value; return { replace() {} } },
         registerConfigurableProviders: () => ({ replace() {} }),
         registerModelDiscovery() {},
       },
-    }, config)
+    }, Config ? Config(config) : config)
     assert.ok(adapter)
     let completed = false
     for await (const event of adapter.stream({
@@ -56,12 +59,21 @@ try {
     }
     assert.equal(payloads.length, Object.keys(patches).indexOf(label) + 1)
     const wire = payloads.at(-1)
-    assert.equal(wire.messages[0].role, 'system', 'Bailian accepts system, not developer instructions')
-    if (label === 'auto') assert.equal(wire.enable_thinking, undefined, 'QA auto must keep the supplier default')
-    else assert.equal(wire.enable_thinking, false, `${label} must disable thinking on the wire`)
+    if (label.endsWith('auto')) {
+      assert.equal(wire.enable_thinking, undefined)
+      assert.equal(wire.thinking, undefined, 'QA auto must keep the supplier default')
+    } else {
+      assert.equal(wire.messages[0].role, 'system')
+      if (label === 'deepseek_compile') {
+        assert.equal(wire.enable_thinking, undefined)
+        assert.deepEqual(wire.thinking, { type: 'disabled' })
+      } else {
+        assert.equal(wire.enable_thinking, false, `${label} must disable thinking on the wire`)
+      }
+    }
     assert.equal(wire.max_tokens ?? wire.max_completion_tokens, 10016)
     assert.ok(completed, 'Adapter must finish, not merely submit the HTTP request')
-    console.log(JSON.stringify({ case: label, local_only: true, thinking: wire.enable_thinking ?? 'supplier_default', passed: true }))
+    console.log(JSON.stringify({ case: label, local_only: true, thinking: wire.thinking?.type ?? wire.enable_thinking ?? 'supplier_default', passed: true }))
   }
 } finally {
   server.closeAllConnections()

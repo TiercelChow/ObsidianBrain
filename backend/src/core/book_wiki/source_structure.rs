@@ -33,8 +33,6 @@ pub(super) struct SourceFragment {
     pub content: String,
     pub char_start: usize,
     pub char_end: usize,
-    pub line_start: usize,
-    pub line_end: usize,
     pub heading_path: Vec<String>,
     pub oversize_atomic: bool,
 }
@@ -398,21 +396,15 @@ pub(super) fn structured_fragments(content: &str, target: usize) -> Vec<SourceFr
         pieces.push(current);
     }
     let mut char_offset = 0;
-    let mut line = 1;
     pieces
         .into_iter()
         .map(|range| {
             let value = &content[range.clone()];
             let size = value.chars().count();
-            let newline_count = value.bytes().filter(|ch| *ch == b'\n').count();
             let fragment = SourceFragment {
                 content: value.to_string(),
                 char_start: char_offset,
                 char_end: char_offset + size,
-                line_start: line,
-                line_end: (line + newline_count)
-                    .saturating_sub(usize::from(value.ends_with('\n')))
-                    .max(line),
                 heading_path: structure
                     .headings
                     .iter()
@@ -423,7 +415,6 @@ pub(super) fn structured_fragments(content: &str, target: usize) -> Vec<SourceFr
                 oversize_atomic: size > target,
             };
             char_offset += size;
-            line += newline_count;
             fragment
         })
         .collect()

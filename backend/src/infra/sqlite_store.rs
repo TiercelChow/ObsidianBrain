@@ -355,11 +355,79 @@ const MIGRATIONS: &[Migration] = &[
         description: "EPUB books and independently stored task attachments",
         sql: include_str!("../../migrations/061_epub_task_attachments.sql"),
     },
+    Migration {
+        version: 62,
+        description: "independent Book Wiki topic pages and revision search",
+        sql: include_str!("../../migrations/062_wiki_topic_pages.sql"),
+    },
+    Migration {
+        version: 63,
+        description: "whole-book topic compilation and source coverage",
+        sql: include_str!("../../migrations/063_wiki_topic_book_builds.sql"),
+    },
+    Migration {
+        version: 64,
+        description: "retire generated semantic Wiki entries and superseded drafts",
+        sql: include_str!("../../migrations/064_retire_semantic_wiki.sql"),
+    },
+    Migration {
+        version: 65,
+        description: "versioned topic cross-references and book build history",
+        sql: include_str!("../../migrations/065_wiki_editorial_artifacts.sql"),
+    },
+    Migration {
+        version: 66,
+        description: "per-source maintenance decisions in the Wiki log",
+        sql: include_str!("../../migrations/066_wiki_maintenance_log.sql"),
+    },
+    Migration {
+        version: 67,
+        description: "local file storage for model credentials",
+        sql: include_str!("../../migrations/067_local_model_credentials.sql"),
+    },
+    Migration {
+        version: 68,
+        description: "revision-scoped Wiki editorial reviews",
+        sql: include_str!("../../migrations/068_wiki_semantic_review.sql"),
+    },
+    Migration {
+        version: 69,
+        description: "resume presentation regeneration without rerunning research",
+        sql: include_str!("../../migrations/069_presentation_regeneration.sql"),
+    },
 ];
 
 #[cfg(test)]
 #[path = "sqlite_store_research_tests.rs"]
 mod research_migration_tests;
+
+fn ensure_topic_links_column(conn: &Connection) -> Result<(), BrainError> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('wiki_topic_revisions') WHERE name='links_json')",
+        [], |row| row.get(0),
+    )?;
+    if !exists {
+        conn.execute_batch(
+            "ALTER TABLE wiki_topic_revisions ADD COLUMN links_json TEXT NOT NULL DEFAULT '[]'
+                            CHECK (json_valid(links_json) AND json_type(links_json) = 'array');",
+        )?;
+    }
+    Ok(())
+}
+
+fn check_migration_foreign_keys(conn: &Connection) -> Result<(), BrainError> {
+    let violations: i64 =
+        conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })?;
+    if violations != 0 {
+        conn.execute_batch("ROLLBACK;")?;
+        return Err(BrainError::Internal(format!(
+            "迁移后存在 {violations} 项外键异常，已回滚"
+        )));
+    }
+    Ok(())
+}
 
 fn seed_detailed_ingest_skill(conn: &Connection) -> Result<(), BrainError> {
     seed_builtin_skill_file(
@@ -899,7 +967,28 @@ impl SqliteStore {
                 conn.execute_batch("BEGIN IMMEDIATE;")?;
             }
             tracing::info!("执行迁移 v{}: {}", migration.version, migration.description);
-            if let Err(e) = conn.execute_batch(migration.sql) {
+            let added_column = match migration.version {
+                66 => Some(("wiki_topic_build_log", "maintenance_json")),
+                69 => Some(("knowledge_tasks", "presentation_only")),
+                _ => None,
+            };
+            let applied = if let Some((table, column)) = added_column {
+                conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name=?2)",
+                    params![table, column],
+                    |row| row.get::<_, bool>(0),
+                )
+                .and_then(|already_present| {
+                    if already_present {
+                        Ok(())
+                    } else {
+                        conn.execute_batch(migration.sql)
+                    }
+                })
+            } else {
+                conn.execute_batch(migration.sql)
+            };
+            if let Err(e) = applied {
                 let _ = conn.execute_batch("ROLLBACK;");
                 return Err(BrainError::Internal(format!(
                     "迁移 v{} 执行失败: {e}",
@@ -907,6 +996,7 @@ impl SqliteStore {
                 )));
             }
             let seed_result = match migration.version {
+                65 => ensure_topic_links_column(&conn),
                 59 => {
                     let has_revision = conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('memos') WHERE name='revision')", [], |row| row.get::<_,bool>(0));
                     match has_revision {
@@ -950,18 +1040,15 @@ impl SqliteStore {
                     migration.version
                 )));
             }
+            if migration.version == 61 {
+                check_migration_foreign_keys(&conn)?;
+                conn.execute_batch("COMMIT;")?;
+                drop(_foreign_keys.take());
+                conn.execute_batch("BEGIN IMMEDIATE;")?;
+            }
         }
 
-        let violations: i64 =
-            conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
-                r.get(0)
-            })?;
-        if violations != 0 {
-            conn.execute_batch("ROLLBACK;")?;
-            return Err(BrainError::Internal(format!(
-                "迁移后存在 {violations} 项外键异常，已回滚"
-            )));
-        }
+        check_migration_foreign_keys(&conn)?;
         conn.execute_batch("COMMIT;")
             .map_err(|e| BrainError::Internal(format!("迁移事务提交失败: {e}")))?;
 
@@ -1644,6 +1731,63 @@ mod tests {
         }
     }
     use tempfile::TempDir;
+
+    #[test]
+    fn test_topic_retirement_removes_old_derived_data_and_keeps_topics_and_research() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wiki.db");
+        let store = SqliteStore::new(&path).unwrap();
+        store.with_connection(|conn| {
+            conn.execute_batch(r#"
+                DELETE FROM _migrations WHERE version >= 64;
+                INSERT INTO reader_books(id,path,kind,name,added_at) VALUES ('book','/sample','folder','Sample',1);
+                INSERT INTO knowledge_bases(id,book_id,created_at,updated_at,compile_state)
+                    VALUES ('base','book','2026-01-01','2026-01-01','ready');
+                INSERT INTO knowledge_entries(id,knowledge_base_id,entry_type,slug,title,created_at,updated_at) VALUES
+                    ('raw','base','source_section','source','original','2026-01-01','2026-01-01'),
+                    ('old','base','concept','retired','old entry','2026-01-01','2026-01-01');
+                INSERT INTO knowledge_entries_fts(entry_id,knowledge_base_id,title) VALUES ('raw','base','original'),('old','base','old entry');
+                INSERT INTO knowledge_entry_versions(id,entry_id,revision,title,summary,content_md,status,created_at)
+                    VALUES ('old-v1','old',1,'old entry','','','verified','2026-01-01');
+                INSERT INTO knowledge_tasks(id,knowledge_base_id,title,status,result_summary,knowledge_change_state,created_at,updated_at)
+                    VALUES ('report','base','Research','completed','Published report','applied','2026-01-01','2026-01-01');
+                INSERT INTO agent_runs(id,knowledge_base_id,runtime,task_type,status,input_json,created_at) VALUES
+                    ('old-run','base','mock','wiki_topic_compile','completed','{}','2026-01-01'),
+                    ('whole-run','base','mock','wiki_topic_compile','completed','{"required_topic_citations":[]}','2026-02-01');
+                INSERT INTO wiki_topic_pages(id,knowledge_base_id,topic_key,title,published_id,draft_id,created_at) VALUES
+                    ('old-draft','base','old-draft','Prototype',NULL,'old-topic-v1','2026-01-01'),
+                    ('manual','base','manual','Manual',NULL,'manual-v2','2026-01-01'),
+                    ('current','base','current','Current','current-v1',NULL,'2026-02-01'),
+                    ('queued','base','queued','Current draft',NULL,'queued-v1','2026-02-01');
+                INSERT INTO wiki_topic_revisions(id,page_id,parent_id,run_id,input_hash,markdown,created_at,published_at) VALUES
+                    ('old-topic-v1','old-draft',NULL,'old-run','old','old draft','2026-01-01',NULL),
+                    ('manual-v1','manual',NULL,'old-run','manual','manual base','2026-01-01',NULL),
+                    ('manual-v2','manual','manual-v1','old-run','manual','human edit','2026-01-02',NULL),
+                    ('current-v1','current',NULL,'whole-run','whole','published topic','2026-02-01','2026-02-01'),
+                    ('queued-v1','queued',NULL,'whole-run','whole','current draft','2026-02-01',NULL);
+                INSERT INTO wiki_topic_book_builds(knowledge_base_id,attempt_id,status,state_json,updated_at)
+                    VALUES ('base','current-build','ready','{"pages":[{"page_id":"current","revision_id":"current-v1"},{"page_id":"queued","revision_id":"queued-v1"}]}','2026-02-01');
+            "#)?;
+            Ok(())
+        }).unwrap();
+        drop(store);
+        let upgraded = SqliteStore::new(&path).unwrap();
+        upgraded.with_connection(|conn| {
+            for (sql, expected) in [
+                ("SELECT group_concat(id) FROM knowledge_entries", "raw"),
+                ("SELECT group_concat(entry_id) FROM knowledge_entries_fts", "raw"),
+                ("SELECT group_concat(id) FROM (SELECT id FROM wiki_topic_pages ORDER BY id)", "current,manual,queued"),
+                ("SELECT result_summary FROM knowledge_tasks WHERE id='report'", "Published report"),
+                ("SELECT markdown FROM wiki_topic_revisions WHERE id='current-v1'", "published topic"),
+            ] {
+                assert_eq!(conn.query_row(sql, [], |row| row.get::<_, String>(0))?, expected);
+            }
+            for sql in ["SELECT COUNT(*) FROM pragma_foreign_key_check", "SELECT COUNT(*) FROM knowledge_entry_versions WHERE entry_id='old'", "SELECT COUNT(*) FROM wiki_topic_revisions WHERE id='old-topic-v1'"] {
+                assert_eq!(conn.query_row(sql, [], |row| row.get::<_, i64>(0))?, 0);
+            }
+            Ok(())
+        }).unwrap();
+    }
 
     #[test]
     fn test_new_creates_db_and_runs_migrations() {

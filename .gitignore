@@ -20,6 +20,8 @@ website/dist/
 
 # Data (runtime — ~/.obsidian-brain/ is outside the repo, but local data/ too)
 data/
+*model-credentials.json
+*model-credentials.lock
 
 # IDE
 .idea/

@@ -108,7 +108,7 @@ test('primary actions share neutral optical controls without filtering every but
 })
 
 test('page sidebars opt into structure, with modal sidebars avoiding a second filter', async () => {
-  for (const [file, cls] of [['views/Reader.vue', 'pane pane-left'], ['views/Reader.vue', 'pane pane-right'], ['views/Tasks.vue', 'task-list-panel glass-surface'], ['views/Timeline.vue', 'time-nav'], ['views/knowledge/WikiWorkspace.vue', 'entry-pane knowledge-surface'], ['views/knowledge/KnowledgeChat.vue', 'chat-context knowledge-surface'], ['views/knowledge/WikiSettings.vue', 'settings-nav knowledge-surface'], ['views/knowledge/WikiSettings.vue', 'skill-detail-sidebar']]) {
+  for (const [file, cls] of [['views/Reader.vue', 'pane pane-left'], ['views/Reader.vue', 'pane pane-right'], ['views/Tasks.vue', 'task-list-panel glass-surface'], ['views/Timeline.vue', 'time-nav'], ['views/knowledge/WikiTopics.vue', 'topic-directory knowledge-surface'], ['views/knowledge/KnowledgeChat.vue', 'chat-context knowledge-surface'], ['views/knowledge/WikiSettings.vue', 'settings-nav knowledge-surface'], ['views/knowledge/WikiSettings.vue', 'skill-detail-sidebar']]) {
     assert.match(await source(file), new RegExp(`class="${cls}"[^>]*data-glass="structural"`), `${file}: ${cls}`)
   }
   assert.match(await source('styles/materials.css'), /\.knowledge-modal-card[\s\S]+?\[data-glass="structural"\][\s\S]+?--material-filter:\s*none/)

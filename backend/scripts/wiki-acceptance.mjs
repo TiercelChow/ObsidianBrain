@@ -20,11 +20,25 @@ export function acceptanceBookId(workspace) {
 }
 
 export async function canonicalHealth(health) {
-  return { ...health, vault: { ...health.vault, path: await realpath(health.vault.path) } }
+  if (!health?.storage?.path || health.storage.exists === false) throw new Error('服务缺少数据目录')
+  return { ...health, storage: { ...health.storage, path: await realpath(health.storage.path) } }
 }
 
 export function compilationNeedsPolling(state) {
-  return state.compile_state === 'compiling' && state.compile_phase !== 'waiting_review'
+  return state?.status === 'running'
+}
+
+export function assertQaVariant(index, variant) {
+  if (!Array.isArray(index?.pages)) throw new Error('无法确认主题索引状态')
+  if (variant === 'raw') {
+    if (index.pages.length) throw new Error('原文对照需要独立的未发布 Wiki 实例')
+  } else if (variant === 'topics') {
+    if (!index.pages.length || index.pages.some(page => page.needs_review)) {
+      throw new Error('主题组需要已发布且当前有效的主题页')
+    }
+  } else {
+    throw new Error('问答对照组应为 topics 或 raw')
+  }
 }
 
 export function assertTaskScope(task, knowledgeBaseId, taskId) {
@@ -41,8 +55,7 @@ export function assertIsolatedTarget(health, books, workspace) {
   if (!path.isAbsolute(workspace) || !path.basename(workspace).startsWith('obsidianbrain-wiki-acceptance.')) {
     throw new Error('必须使用专门创建的验收临时目录')
   }
-  if (health?.vault?.path !== path.join(workspace, 'vault')) throw new Error('服务 Vault 与隔离目录不匹配，拒绝写入')
-  if (health?.components?.obsidian !== 'disabled') throw new Error('测试实例必须禁用 Obsidian 连接')
+  if (health?.storage?.path !== workspace) throw new Error('服务数据目录与隔离目录不匹配，拒绝写入')
   if (!Array.isArray(books) || books.length > 1 || books.some(book => book.id !== acceptanceBookId(workspace) || book.path !== path.join(workspace, 'sources'))) {
     throw new Error('书架包含非本次验收的书籍，拒绝整体替换')
   }
@@ -119,6 +132,15 @@ async function request(origin, tool, args = {}) {
   return envelope.result
 }
 
+async function wikiRequest(origin, route, method = 'GET') {
+  const response = await fetch(origin + route, {
+    method, signal: AbortSignal.timeout(60_000),
+  })
+  const result = await response.json()
+  if (!response.ok) throw new Error(result.error?.message ?? result.message ?? `${route}: HTTP ${response.status}`)
+  return result
+}
+
 async function guard(origin, workspace) {
   const health = await canonicalHealth(await (await fetch(origin + '/v1/health', { signal: AbortSignal.timeout(5000) })).json())
   const { books } = await request(origin, 'get_reader_books')
@@ -140,7 +162,7 @@ async function streamTurn(origin, knowledgeBaseId, question, conversationId) {
   try {
     const response = await fetch(origin + '/v1/knowledge/chat/stream', {
       method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify({ knowledge_base_id: knowledgeBaseId, question, ...(conversationId ? { conversation_id: conversationId } : {}) }),
+      body: JSON.stringify({ knowledge_base_id: knowledgeBaseId, question, wiki_mode: 'topics', ...(conversationId ? { conversation_id: conversationId } : {}) }),
       signal: AbortSignal.timeout(2_520_000),
     })
     if (!response.ok || !response.body) throw new Error(`问答流 HTTP ${response.status}`)
@@ -159,11 +181,12 @@ async function streamTurn(origin, knowledgeBaseId, question, conversationId) {
 async function run(argv) {
   const [command, ...flags] = argv
   const options = {}
+  const usage = '用法 prepare|status|compile|qa|watch-task --workspace <隔离目录> [--case Q1] [--variant topics|raw] [--task-id ID]'
   for (let index = 0; index < flags.length; index += 2) {
-    if (!['--workspace', '--case', '--task-id'].includes(flags[index]) || !flags[index + 1] || options[flags[index]]) throw new Error('参数：prepare|status|compile|qa|watch-task --workspace <隔离目录> [--case Q1] [--task-id ID]')
+    if (!['--workspace', '--case', '--task-id', '--variant'].includes(flags[index]) || !flags[index + 1] || options[flags[index]]) throw new Error(usage)
     options[flags[index]] = flags[index + 1]
   }
-  if (!['prepare', 'status', 'compile', 'qa', 'watch-task'].includes(command) || !options['--workspace']) throw new Error('参数：prepare|status|compile|qa|watch-task --workspace <隔离目录> [--case Q1] [--task-id ID]')
+  if (!['prepare', 'status', 'compile', 'qa', 'watch-task'].includes(command) || !options['--workspace'] || (options['--variant'] && command !== 'qa')) throw new Error(usage)
   const workspace = await realpath(options['--workspace'])
   const origin = assertLocalTarget(defaultTarget)
   const books = await guard(origin, workspace)
@@ -194,9 +217,14 @@ async function run(argv) {
   const cards = await request(origin, 'list_book_knowledge_bases')
   const base = cards.items.find(item => item.book.id === bookId)?.knowledge_base
   if (!base) throw new Error('验收知识库不存在')
+  const topicsRoute = '/v1/knowledge/bases/' + encodeURIComponent(base.id) + '/topics'
   if (command === 'status') {
     const settings = await request(origin, 'get_book_wiki_settings')
-    console.log(JSON.stringify({ knowledge_base: base, runtime_profiles: settings.runtime_profiles, model_providers: settings.model_providers }, null, 2))
+    const [build, index] = await Promise.all([
+      wikiRequest(origin, topicsRoute + '/build'),
+      wikiRequest(origin, topicsRoute + '/index'),
+    ])
+    console.log(JSON.stringify({ knowledge_base: base, build, index, runtime_profiles: settings.runtime_profiles, model_providers: settings.model_providers }, null, 2))
     return
   }
 
@@ -240,39 +268,49 @@ async function run(argv) {
   }
 
   if (command === 'compile') {
-    if (base.compile_state === 'compiling' || base.pending_review_count > 0) throw new Error('已有编译或待审核候选，拒绝重复调用')
+    const prior = await wikiRequest(origin, topicsRoute + '/build')
+    if (compilationNeedsPolling(prior)) throw new Error('已有编译正在运行')
     const started = performance.now()
     const timeline = []
-    let state = (await request(origin, 'compile_book_knowledge_base', { knowledge_base_id: base.id })).knowledge_base
+    let state = await wikiRequest(origin, topicsRoute + '/build', 'POST')
+    const attempt = state.id
     let signature
     do {
-      const next = JSON.stringify([state.compile_state, state.compile_phase, state.compile_current_batch, state.compile_message, state.compile_error])
+      if (state?.id !== attempt) throw new Error('本次编译已被其他任务替代')
+      const pagesReady = state.pages.filter(page => page.revision_id).length
+      const next = JSON.stringify([state.status, state.phase, pagesReady, state.error])
       if (signature !== next) {
-        timeline.push({ elapsed_ms: Math.round(performance.now() - started), state })
-        console.log(JSON.stringify({ elapsed_ms: Math.round(performance.now() - started), state: state.compile_state, phase: state.compile_phase, batch: state.compile_current_batch, message: state.compile_message, error: state.compile_error }))
+        const elapsedMs = Math.round(performance.now() - started)
+        timeline.push({ elapsed_ms: elapsedMs, pages_ready: pagesReady, status: state.status, phase: state.phase, error: state.error })
+        console.log(JSON.stringify(timeline.at(-1)))
         signature = next
       }
       if (!compilationNeedsPolling(state)) break
       if (performance.now() - started > 1_800_000) throw new Error('编译观察已到30分钟上限；不自动取消或重新排队，请查看阶段状态')
       await new Promise(resolve => setTimeout(resolve, 2000))
       await guard(origin, workspace)
-      state = await request(origin, 'get_book_knowledge_base', { knowledge_base_id: base.id })
+      state = await wikiRequest(origin, topicsRoute + '/build')
     } while (true)
-    const changes = await request(origin, 'list_knowledge_change_sets', { knowledge_base_id: base.id })
-    const report = await request(origin, 'get_knowledge_compile_report', { knowledge_base_id: base.id })
+    const drafts = await Promise.all(state.pages.filter(page => page.revision_id).map(page =>
+      wikiRequest(origin, topicsRoute + '/' + encodeURIComponent(page.page_id))))
+    const firstDraft = timeline.find(item => item.pages_ready > 0)?.elapsed_ms ?? null
+    const metrics = { total_ms: timeline.at(-1)?.elapsed_ms, first_draft_observed_ms: firstDraft,
+      indexed_sources: state.sources.length, referenced_sources: state.sources.filter(source => source.status === 'linked').length }
     const name = 'W1-' + new Date().toISOString().replaceAll(':', '-') + '.json'
-    await saveRecord(workspace, name, { started_at: new Date(Date.now() - (performance.now() - started)).toISOString(), timeline, state, report, changes, semantic_review: 'not_reviewed' })
-    console.log('已保存编译合同与候选，尚未批准：' + path.join(workspace, 'results', name))
-    if (state.compile_state === 'failed') process.exitCode = 1
+    await saveRecord(workspace, name, { started_at: new Date(Date.now() - (performance.now() - started)).toISOString(), timeline, state, metrics, drafts, semantic_review: 'not_reviewed' })
+    console.log('已保存编译过程和主题草稿 ' + path.join(workspace, 'results', name))
+    if (state.status !== 'ready') process.exitCode = 1
     return
   }
 
   const item = selectQaCase(manifest, options['--case'])
-  if (base.compile_mode !== 'smart' || base.compile_state !== 'ready' || base.pending_review_count > 0) throw new Error('真实问答验收需要先完成智能编译并人工审核；不使用按章兜底结果代替')
-  const record = { started_at: new Date().toISOString(), origin, case: item, knowledge_base: base, turns: [] }
+  const variant = options['--variant'] ?? 'topics'
+  assertQaVariant(await wikiRequest(origin, topicsRoute + '/index'), variant)
+  const record = { started_at: new Date().toISOString(), origin, variant, case: item, knowledge_base: base, turns: [] }
   let conversationId
   for (const question of item.turns) {
     await guard(origin, workspace)
+    assertQaVariant(await wikiRequest(origin, topicsRoute + '/index'), variant)
     const turn = await streamTurn(origin, base.id, question, conversationId)
     record.turns.push(turn)
     console.log(JSON.stringify(turn.metrics))
@@ -285,7 +323,7 @@ async function run(argv) {
       record.persisted_conversation = await request(origin, 'get_knowledge_conversation', { conversation_id: conversationId })
     } catch (error) { record.history_error = error.message }
   }
-  const name = item.id + '-' + new Date().toISOString().replaceAll(':', '-') + '.json'
+  const name = item.id + '-' + variant + '-' + new Date().toISOString().replaceAll(':', '-') + '.json'
   await saveRecord(workspace, name, record)
   console.log('已保存原始输出与接收时间，需人工核对语义：' + path.join(workspace, 'results', name))
   if (record.turns.length !== item.turns.length || record.turns.some(turn => !turn.metrics.completed)) process.exitCode = 1

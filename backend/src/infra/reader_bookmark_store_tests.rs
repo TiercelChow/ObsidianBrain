@@ -30,7 +30,7 @@ fn test_epub_upgrade_preserves_books_bookmarks_and_knowledge_base() {
     let bookmark = store.save(draft()).unwrap();
     store.db.with_connection(|c|{
         c.execute("INSERT INTO knowledge_bases(id,book_id,created_at,updated_at) VALUES ('base','a','now','now')",[])?;
-        c.execute("DELETE FROM _migrations WHERE version=61",[])?;Ok(())
+        c.execute("DELETE FROM _migrations WHERE version>=61",[])?;Ok(())
     }).unwrap();
     drop(store);
     let db = Arc::new(SqliteStore::new(&dir.path().join("bookmarks.db")).unwrap());

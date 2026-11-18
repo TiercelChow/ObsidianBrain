@@ -136,23 +136,22 @@ fn memos(conn: &Connection, week: NaiveDate, today: NaiveDate) -> Result<HomeMem
 }
 
 fn wiki(conn: &Connection) -> Result<HomeWiki, BrainError> {
-    // waiting_review is not an actively running compilation, even on older records.
-    let compile_running: u64 = conn.query_row("SELECT COUNT(*) FROM knowledge_bases WHERE lifecycle!='archived' AND compile_state='compiling' AND compile_phase!='waiting_review'", [], |r| r.get(0))?;
+    let compile_running: u64 = conn.query_row("SELECT COUNT(*) FROM wiki_topic_book_builds w JOIN knowledge_bases b ON b.id=w.knowledge_base_id WHERE b.lifecycle!='archived' AND w.status='running'", [], |r| r.get(0))?;
     let research_running: u64 = conn.query_row("SELECT COUNT(*) FROM knowledge_tasks t JOIN knowledge_bases b ON b.id=t.knowledge_base_id WHERE b.lifecycle!='archived' AND t.status IN ('queued','running')", [], |r| r.get(0))?;
-    let review_count = conn.query_row("SELECT COUNT(*) FROM knowledge_change_sets c JOIN knowledge_bases b ON b.id=c.knowledge_base_id WHERE b.lifecycle!='archived' AND c.status='proposed'", [], |r| r.get(0))?;
-    let failed_count = conn.query_row("SELECT (SELECT COUNT(*) FROM knowledge_bases WHERE lifecycle!='archived' AND compile_state='failed') + (SELECT COUNT(*) FROM knowledge_tasks t JOIN knowledge_bases b ON b.id=t.knowledge_base_id WHERE b.lifecycle!='archived' AND (t.status='failed' OR t.artifact_state='failed'))", [], |r| r.get(0))?;
+    let review_count = conn.query_row("SELECT COUNT(*) FROM wiki_topic_pages p JOIN knowledge_bases b ON b.id=p.knowledge_base_id WHERE b.lifecycle!='archived' AND p.draft_id IS NOT NULL", [], |r| r.get(0))?;
+    let failed_count = conn.query_row("SELECT (SELECT COUNT(*) FROM wiki_topic_book_builds w JOIN knowledge_bases b ON b.id=w.knowledge_base_id WHERE b.lifecycle!='archived' AND w.status IN ('failed','partial')) + (SELECT COUNT(*) FROM knowledge_tasks t JOIN knowledge_bases b ON b.id=t.knowledge_base_id WHERE b.lifecycle!='archived' AND (t.status='failed' OR t.artifact_state='failed'))", [], |r| r.get(0))?;
     let mut stmt = conn.prepare(
         "SELECT id,base_id,book_name,kind,title,status,detail,artifact_state,updated_at FROM (
-         SELECT b.id AS id,b.id AS base_id,substr(r.name,1,200) AS book_name,'compile' AS kind,'知识编译' AS title,b.compile_state AS status,substr(b.compile_message,1,160) AS detail,NULL AS artifact_state,b.updated_at,
-          CASE WHEN b.compile_state='compiling' THEN 0 ELSE 1 END AS priority
-         FROM knowledge_bases b JOIN reader_books r ON r.id=b.book_id WHERE b.lifecycle!='archived' AND b.compile_state IN ('compiling','failed') AND b.compile_phase!='waiting_review'
+         SELECT b.id AS id,b.id AS base_id,substr(r.name,1,200) AS book_name,'compile' AS kind,'全库编译' AS title,w.status AS status,substr(COALESCE(json_extract(w.state_json,'$.error'),''),1,160) AS detail,NULL AS artifact_state,w.updated_at,
+          CASE WHEN w.status='running' THEN 0 ELSE 1 END AS priority
+         FROM wiki_topic_book_builds w JOIN knowledge_bases b ON b.id=w.knowledge_base_id JOIN reader_books r ON r.id=b.book_id WHERE b.lifecycle!='archived' AND w.status IN ('running','partial','failed')
          UNION ALL
          SELECT t.id,b.id,substr(r.name,1,200),'research',substr(t.title,1,200),t.status,substr(t.result_summary,1,160),t.artifact_state,t.updated_at,
           CASE WHEN t.status IN ('queued','running') THEN 0 WHEN t.status='failed' OR t.artifact_state='failed' THEN 1 ELSE 3 END
          FROM knowledge_tasks t JOIN knowledge_bases b ON b.id=t.knowledge_base_id JOIN reader_books r ON r.id=b.book_id WHERE b.lifecycle!='archived' AND t.status IN ('queued','running','failed','completed')
          UNION ALL
-         SELECT c.id,b.id,substr(r.name,1,200),'review',substr(c.title,1,200),c.status,substr(c.reason,1,160),NULL,c.created_at,2
-         FROM knowledge_change_sets c JOIN knowledge_bases b ON b.id=c.knowledge_base_id JOIN reader_books r ON r.id=b.book_id WHERE b.lifecycle!='archived' AND c.status='proposed'
+         SELECT p.id,b.id,substr(r.name,1,200),'review',substr(p.title,1,200),'draft','',NULL,v.created_at,2
+         FROM wiki_topic_pages p JOIN wiki_topic_revisions v ON v.id=p.draft_id JOIN knowledge_bases b ON b.id=p.knowledge_base_id JOIN reader_books r ON r.id=b.book_id WHERE b.lifecycle!='archived'
          ) ORDER BY priority,updated_at DESC,id LIMIT 5")?;
     let items = stmt
         .query_map([], |r| {

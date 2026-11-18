@@ -61,7 +61,7 @@
           <section v-else-if="selectedBase && readiness" class="research-readiness" :class="`is-${readiness.status}`" aria-label="材料准备情况">
             <div class="research-readiness-head"><strong>材料准备情况</strong><span>{{ readiness.status === 'blocked' ? '需先处理' : readiness.status === 'attention' ? '建议检查' : '可继续' }}</span></div>
             <p>{{ readiness.summary }}</p>
-            <div class="research-readiness-counts"><span>已同步来源 {{ selectedBase.source_count }}</span><span>可检索条目 {{ selectedBase.entry_count }}</span><span>待审核 {{ selectedBase.pending_review_count }}</span></div>
+            <div class="research-readiness-counts"><span>已同步来源 {{ selectedBase.source_count }}</span><span>已索引章节 {{ selectedBase.entry_count }}</span></div>
             <ul><li v-for="note in readiness.notes" :key="note">{{ note }}</li></ul>
             <button v-if="readiness.status !== 'ready'" type="button" @click="openBaseManagement">前往知识库处理</button>
           </section>
@@ -105,6 +105,7 @@
           <label v-if="briefFieldVisible('presentation_theme')" class="research-brief-field" :class="{ 'is-focus': briefIsFocus('presentation_theme') }"><span>PPT 视觉主题 <small v-if="briefIsFocus('presentation_theme')">建议确认</small></span><span v-if="briefDecision('presentation_theme')" class="research-decision-tip"><b>{{ briefDecision('presentation_theme')?.question }}</b><em>{{ briefDecision('presentation_theme')?.impact }}</em></span><el-select v-model="brief.presentation_theme" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="Editorial · 明亮编辑风" value="editorial" /><el-option label="Midnight · 深色聚焦" value="midnight" /><el-option label="Sage · 柔和人文" value="sage" /></el-select></label>
           <label v-if="briefFieldVisible('presentation_format')" class="research-brief-field" :class="{ 'is-focus': briefIsFocus('presentation_format') }"><span>PPT 编排方式 <small v-if="briefIsFocus('presentation_format')">建议确认</small></span><span v-if="briefDecision('presentation_format')" class="research-decision-tip"><b>{{ briefDecision('presentation_format')?.question }}</b><em>{{ briefDecision('presentation_format')?.impact }}</em></span><el-select v-model="brief.presentation_format" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true"><el-option label="论点式材料 · 连贯叙事" value="narrative" /><el-option label="问答式讲解 · 逐题讨论" value="qa" /></el-select></label>
           <div v-if="hasSecondaryBriefOptions" class="research-brief-more"><span>其他偏好会保留当前设置，也可以逐项调整。</span><button type="button" :aria-expanded="showAllBriefOptions" @click="showAllBriefOptions = !showAllBriefOptions">{{ showAllBriefOptions ? '只看关键选择' : '调整全部偏好' }}</button></div>
+          <PresentationPaginationFields v-if="draft.deliverableType === 'presentation'" v-model="brief.presentation_pagination" />
           <label class="research-brief-field"><span>特别强调（可选）</span><el-input v-model="brief.emphasis" :maxlength="500" show-word-limit placeholder="例如：多比较反例、面向非技术听众" /></label>
         </div>
         <p v-if="previewing" class="research-preflight-progress" role="status">正在分析任务目标和材料偏好；如输出不完整，会自动恢复一次。</p>
@@ -128,9 +129,23 @@
         </div>
         <MotionSwap class="task-result-switch" :view-key="resultTab" contained horizontal>
         <div v-if="resultTab === 'report'" class="task-result-scroll" role="region" aria-label="研究报告">
-          <div v-if="activeTask.artifact_state === 'failed'" class="artifact-failure" role="status"><strong>PPTX 生成失败，研究报告已保留</strong><span>可在下方阅读完整报告，或打开运行检查器定位原因后重新运行。</span></div>
+          <div v-if="!reportVerified" class="artifact-failure" role="status"><strong>报告待复核</strong><span>可查看当前稿件。复核结果和恢复入口在研究阶段。</span></div>
+          <div v-else-if="activeTask.artifact_state === 'failed'" class="artifact-failure" role="status"><strong>PPTX 生成失败，研究报告已保留</strong><span>可在下方阅读完整报告，或重新生成演示。</span></div>
           <div class="task-result-content">
             <KnowledgeAnswerMarkdown :content="reportContent" :evidence-count="activeEvidence.length" @citation="openEvidence" />
+          </div>
+          <div v-if="reportVerified && reportRunId && activeEvidence.length" class="task-artifacts">
+            <el-button @click="openReportDraft(activeTask)">整理报告片段为主题草稿</el-button>
+          </div>
+          <div v-if="canRegeneratePresentation" class="task-artifacts" aria-label="重新生成演示文稿">
+            <el-button v-if="!editingPagination" @click="startPresentationRegeneration">重新生成演示</el-button>
+            <template v-else>
+              <PresentationPaginationFields v-model="regenerationPagination" />
+              <div class="knowledge-modal-actions">
+                <el-button :disabled="regeneratingPresentation" @click="editingPagination = false">取消</el-button>
+                <el-button type="primary" :loading="regeneratingPresentation" @click="regeneratePresentation">生成新版演示</el-button>
+              </div>
+            </template>
           </div>
           <div v-if="activeArtifacts.length" class="task-artifacts" aria-label="研究成果下载">
             <article v-for="artifact in activeArtifacts" :key="artifact.id" class="artifact-card">
@@ -149,6 +164,9 @@
                 <summary>查看质量检查</summary>
                 <ul><li v-for="check in artifactQuality(artifact)?.checks" :key="check.code"><i :class="{ 'is-pass': check.passed }"></i><span><b>{{ check.label }}</b><small>{{ check.detail }}</small></span></li></ul>
               </details>
+              <small v-if="artifactQuality(artifact)?.estimated_duration_seconds" class="artifact-copy">
+                预计讲述 {{ formatSpeakingDuration(artifactQuality(artifact)?.estimated_duration_seconds || 0) }}
+              </small>
             </article>
           </div>
           <button v-if="activeTask.knowledge_change_state === 'proposed'" class="review-result-link" type="button" @click="openTaskReview(activeTask)">审核研究结论</button>
@@ -268,6 +286,7 @@ import KnowledgeRunInspector from '@/components/knowledge/KnowledgeRunInspector.
 import KnowledgeResearchWorkspace from '@/components/knowledge/KnowledgeResearchWorkspace.vue'
 import KnowledgeCitationPreview from '@/components/knowledge/KnowledgeCitationPreview.vue'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
+import PresentationPaginationFields from '@/components/knowledge/PresentationPaginationFields.vue'
 import { canFocusDocument } from '@/utils/modalFocusPolicy'
 import { knowledgeRunDiagnostics } from '@/utils/knowledgeRunDiagnostics'
 import { researchTaskCapacityFailure, researchTaskStallFailure, researchTaskStartupFailure, researchTaskTurnLimitFailure } from '@/utils/knowledgeRuntimePolicy'
@@ -285,11 +304,13 @@ import {
   listBookKnowledgeBases,
   listKnowledgeTasks,
   previewKnowledgeTaskBrief,
+  regenerateKnowledgePresentation,
   updateKnowledgeTaskBrief,
   knowledgeArtifactDownloadUrl,
   type KnowledgeArtifact,
   type AgentRunInspection,
   type PresentationQualityReport,
+  type PresentationPagination,
   type KnowledgeTaskExecution,
   type KnowledgeBaseSummary,
   type KnowledgeEntrySummary,
@@ -320,6 +341,9 @@ const createVisible = ref(false)
 const editingTask = ref<KnowledgeTask | null>(null)
 const resultVisible = ref(false)
 const activeTask = ref<KnowledgeTask | null>(null)
+const editingPagination = ref(false)
+const regenerationPagination = ref<PresentationPagination>({ mode: 'auto' })
+const regeneratingPresentation = ref(false)
 const hasTurnLimitFailure = computed(() => researchTaskTurnLimitFailure(activeTask.value))
 const hasCapacityFailure = computed(() => researchTaskCapacityFailure(activeTask.value))
 const hasStallFailure = computed(() => researchTaskStallFailure(activeTask.value))
@@ -329,6 +353,11 @@ const activeArtifacts = ref<KnowledgeArtifact[]>([])
 const activeInspection = ref<AgentRunInspection | null>(null)
 const activeRunId = ref('')
 const reportRunId = ref('')
+const reportVerified = ref(true)
+const canRegeneratePresentation = computed(() => Boolean(
+  reportVerified.value && reportRunId.value && activeTask.value?.deliverable_type === 'presentation'
+  && ['completed', 'failed', 'cancelled'].includes(activeTask.value.status)
+))
 const reportContent = ref('')
 const sourcePreviewVisible = ref(false)
 const sourcePreviewEntry = ref<KnowledgeEntrySummary | null>(null)
@@ -343,7 +372,7 @@ const draft = reactive({ knowledgeBaseId: '', title: '', description: '', taskTy
 const selectedBase = computed(() => bases.value.find(base => base.id === draft.knowledgeBaseId))
 const readiness = computed(() => selectedBase.value ? researchReadiness(selectedBase.value) : null)
 const canPrepareBrief = computed(() => Boolean(!readinessLoading.value && !readinessError.value && readiness.value?.canCreate && draft.title.trim()))
-function defaultBrief(): ResearchBrief { return { confirmed: false, audience: 'general', purpose: 'understand', tone: 'analytical', depth: 'standard', presentation_theme: 'editorial', presentation_format: 'narrative', emphasis: '' } }
+function defaultBrief(): ResearchBrief { return { confirmed: false, audience: 'general', purpose: 'understand', tone: 'analytical', depth: 'standard', presentation_theme: 'editorial', presentation_format: 'narrative', presentation_pagination: { mode: 'auto' }, emphasis: '' } }
 const brief = reactive<ResearchBrief>(defaultBrief())
 const visibleBriefFields = computed(() => visibleResearchBriefFields(preflight.value, draft.deliverableType, showAllBriefOptions.value))
 const hasSecondaryBriefOptions = computed(() => visibleResearchBriefFields(preflight.value, draft.deliverableType, false).length < visibleResearchBriefFields(preflight.value, draft.deliverableType, true).length)
@@ -365,7 +394,8 @@ let inspectionRequestId = 0
 let resultRequestId = 0
 let taskPollTimer: ReturnType<typeof setTimeout> | undefined
 let tasksRequestId = 0
-watch(resultVisible, visible => { if (!visible) { ++resultRequestId; ++inspectionRequestId; loadingResultId.value = '' } })
+watch(resultVisible, visible => { if (!visible) { ++resultRequestId; ++inspectionRequestId; loadingResultId.value = ''; editingPagination.value = false } })
+watch(() => activeTask.value?.id, () => { editingPagination.value = false })
 watch(createVisible, visible => { if (!visible) { ++briefPreviewRequestId; ++baseRefreshRequestId; readinessLoading.value = false } })
 
 watch(() => draft.taskType, taskType => {
@@ -716,6 +746,7 @@ function showResult(result: KnowledgeTaskExecution) {
   activeArtifacts.value = result.artifacts
   activeRunId.value = result.run_id
   reportRunId.value = result.run_id
+  reportVerified.value = result.report_verified !== false
   reportContent.value = result.task.result_summary
   resultTab.value = 'report'
   resultVisible.value = true
@@ -727,6 +758,39 @@ function artifactQuality(artifact: KnowledgeArtifact) {
   return typeof details?.slide_count === 'number'
     ? details as PresentationQualityReport
     : null
+}
+
+function startPresentationRegeneration() {
+  regenerationPagination.value = activeTask.value?.brief.presentation_pagination ?? { mode: 'auto' }
+  editingPagination.value = true
+}
+
+async function regeneratePresentation() {
+  const task = activeTask.value
+  if (!task || !canRegeneratePresentation.value || regeneratingPresentation.value) return
+  regeneratingPresentation.value = true
+  try {
+    const response = await regenerateKnowledgePresentation(task.id, task.updated_at, regenerationPagination.value)
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '演示生成未进入队列')
+    if (!viewActive) return
+    if (resultVisible.value && activeTask.value?.id === task.id) {
+      activeTask.value = response.result
+      editingPagination.value = false
+      resultTab.value = 'stages'
+    }
+    ElMessage.success('新版演示已排队，将使用这份报告')
+    await loadTasks(true)
+  } catch (error) {
+    if (viewActive && resultVisible.value && activeTask.value?.id === task.id) ElMessage.error((error as Error).message)
+  } finally {
+    regeneratingPresentation.value = false
+  }
+}
+
+function formatSpeakingDuration(seconds: number) {
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds % 60
+  return [minutes ? `${minutes} 分钟` : '', remainder ? `${remainder} 秒` : ''].filter(Boolean).join(' ')
 }
 
 function themeLabel(theme?: PresentationQualityReport['theme']) {
@@ -788,6 +852,12 @@ function openEvidence(sourceIndex: number) {
   sourcePreviewEntry.value = entry
   sourcePreviewIndex.value = sourceIndex
   sourcePreviewVisible.value = true
+}
+
+function openReportDraft(task: KnowledgeTask) {
+  if (!reportVerified.value || !reportRunId.value) return
+  resultVisible.value = false
+  void router.push({ path: '/knowledge/wiki', query: { base: task.knowledge_base_id, writebackRun: reportRunId.value } })
 }
 
 function openTaskReview(task: KnowledgeTask) {

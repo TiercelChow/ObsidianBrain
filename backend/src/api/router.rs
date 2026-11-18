@@ -72,6 +72,10 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
         )
         .route("/knowledge/agent-mcp", post(agent_mcp))
         .route("/knowledge/chat/stream", post(stream_knowledge_chat))
+        .nest(
+            "/knowledge/bases/:base_id/topics",
+            crate::api::handlers::wiki_topics::routes(),
+        )
         .route(
             "/knowledge/artifacts/:artifact_id",
             get(download_knowledge_artifact),

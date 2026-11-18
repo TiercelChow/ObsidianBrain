@@ -23,7 +23,7 @@ test('phone settings explicitly flatten their layout shell and use one content s
 })
 
 test('segmented choices and moving indicators share paint without owning geometry or adding filters', async () => {
-  for (const file of ['views/Tasks.vue', 'views/Reader.vue', 'views/knowledge/KnowledgeTasks.vue', 'views/knowledge/WikiWorkspace.vue', 'components/controls/AppDatePicker.vue']) {
+  for (const file of ['views/Tasks.vue', 'views/Reader.vue', 'views/knowledge/KnowledgeTasks.vue', 'components/controls/AppDatePicker.vue']) {
     assert.match(await source(file), /data-glass="inset"/, file)
   }
   assert.match(await source('views/Tasks.vue'), /class="switch-indicator"[^>]*data-glass-indicator/)
@@ -34,11 +34,10 @@ test('segmented choices and moving indicators share paint without owning geometr
   assert.match(await source('components/reader/BookshelfView.vue'), /class="shelf-chip"[^>]*data-glass-choice/)
 })
 
-test('graph and Skill surfaces no longer reference missing legacy material tokens', async () => {
-  for (const file of ['components/knowledge/KnowledgeGraphCanvas.vue', 'views/knowledge/WikiWorkspace.vue', 'views/knowledge/WikiSettings.vue']) {
+test('Wiki and Skill surfaces no longer reference missing legacy material tokens', async () => {
+  for (const file of ['views/knowledge/WikiTopics.vue', 'views/knowledge/WikiSettings.vue']) {
     assert.doesNotMatch(await source(file), /var\(--(?:bg-surface|bg-soft|shadow-xs)\)/, file)
   }
-  assert.match(await source('components/knowledge/KnowledgeGraphCanvas.vue'), /class="canvas-controls"[^>]*data-glass="group"/)
   assert.match(await source('components/tasks/TaskCalendar.vue'), /class="calendar-nav"[^>]*:data-glass="compact \? 'flat' : 'group'"/)
 })
 

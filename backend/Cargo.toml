@@ -28,6 +28,7 @@ futures = "0.3"
 agent-client-protocol = "2.1.0"
 shell-words = "1"
 tempfile = "3"
+regex = "1"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 roxmltree = "0.21"
 html-escape = "0.2"
@@ -37,7 +38,7 @@ gray_matter = "0.2"
 git2 = "0.19"
 sha2 = "0.10"
 hex = "0.4"
-keyring = { version = "3.6.3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service"] }
+zeroize = "1"
 
 jsonschema = "0.18"
 urlencoding = "2"

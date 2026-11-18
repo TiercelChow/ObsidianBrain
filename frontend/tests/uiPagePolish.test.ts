@@ -84,14 +84,9 @@ test('task urgency and completed markers share semantic text colors in all theme
   assert.match(tasks, /\.danger \{ color: var\(--danger\)/)
 })
 
-test('single-column Wiki navigation resets detail scroll and restores the list position', async () => {
-  const wiki = await source('views/knowledge/WikiWorkspace.vue')
-  assert.ok(wiki.includes('@click="returnToEntryList"'))
-  assert.ok(wiki.includes('entryListScrollTop = scroller?.scrollTop ?? 0'))
-  assert.ok(wiki.includes('scroller.scrollTop = entryListScrollTop'))
-  assert.ok(wiki.includes('entryDetailRef.value.scrollTop = 0'))
-  assert.ok(wiki.includes(':data-entry-id="entry.id"'))
-  assert.ok(wiki.includes('focus({ preventScroll: true })'))
-  assert.match(wiki, /renderedHtml.value = html[\s\S]*?detailLoading.value = false\s+await nextTick\(\)\s+if \(markdownRef.value\) await enhance/)
-  assert.ok(wiki.includes('sequence !== entryReadSequence || selectedEntry.value?.id !== entry.id'))
+test('selecting a topic exposes the article on narrow screens and resets the desktop detail scroll', async () => {
+  const wiki = await source('views/knowledge/WikiTopics.vue')
+  assert.match(wiki, /ref="readingPane" tabindex="-1"/)
+  assert.match(wiki, /await nextTick\(\)[\s\S]*request !== pageRequest[\s\S]*readingPane\.value\.scrollTop = 0/)
+  assert.match(wiki, /window\.matchMedia\('\(max-width: 1100px\)'\)[\s\S]*scrollIntoView\([\s\S]*focus\(\{ preventScroll: true \}\)/)
 })

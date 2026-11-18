@@ -18,6 +18,14 @@ pub struct KnowledgeChatStreamRequest {
     pub question: String,
     pub conversation_id: Option<String>,
     pub resume_run_id: Option<String>,
+    #[serde(rename = "wiki_mode")]
+    _legacy_mode: Option<WikiChatMode>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum WikiChatMode {
+    Topics,
 }
 
 pub async fn stream_knowledge_chat(

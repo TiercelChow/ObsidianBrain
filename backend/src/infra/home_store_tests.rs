@@ -98,13 +98,18 @@ fn test_overview_section_failure_does_not_zero_other_sections() {
 }
 
 #[test]
-fn test_overview_wiki_counts_waiting_review_once_and_bounds_activity() {
+fn test_overview_wiki_counts_topic_drafts_and_bounds_activity() {
     let (_dir, db) = database();
     db.with_connection(|conn| {
         conn.execute("INSERT INTO reader_books(id,path,kind,name,added_at) VALUES('book','/test','folder','测试书',1)", [])?;
-        conn.execute("INSERT INTO knowledge_bases(id,book_id,created_at,updated_at,compile_state,compile_phase) VALUES('base','book','2026-10-01','2026-10-04','compiling','waiting_review')", [])?;
+        conn.execute("INSERT INTO knowledge_bases(id,book_id,created_at,updated_at) VALUES('base','book','2026-10-01','2026-10-04')", [])?;
+        conn.execute("INSERT INTO wiki_topic_book_builds(knowledge_base_id,attempt_id,status,state_json,updated_at) VALUES('base','build','ready','{}','2026-10-04')", [])?;
+        conn.execute("INSERT INTO agent_runs(id,knowledge_base_id,runtime,task_type,status,created_at) VALUES('run','base','test','wiki_topic_compile','completed','2026-10-04')", [])?;
         for n in 0..7 {
-            conn.execute("INSERT INTO knowledge_change_sets(id,knowledge_base_id,title,idempotency_key,created_at) VALUES(?1,'base','待审核',?1,'2026-10-04')", [format!("review-{n}")])?;
+            let page = format!("page-{n}");
+            let draft = format!("draft-{n}");
+            conn.execute("INSERT INTO wiki_topic_pages(id,knowledge_base_id,topic_key,title,draft_id,created_at) VALUES(?1,'base',?1,'待审核',?2,'2026-10-04')", params![page,draft])?;
+            conn.execute("INSERT INTO wiki_topic_revisions(id,page_id,run_id,input_hash,markdown,created_at) VALUES(?1,?2,'run','input','主题草稿','2026-10-04')", params![draft,page])?;
         }
         for (id,status,artifact) in [("running","running","pending"),("queued","queued","not_requested"),("completed","completed","failed"),("failed","failed","not_requested")] {
             conn.execute("INSERT INTO knowledge_tasks(id,knowledge_base_id,title,status,artifact_state,created_at,updated_at) VALUES(?1,'base',?1,?2,?3,'2026-10-04','2026-10-04')",params![id,status,artifact])?;
@@ -127,6 +132,17 @@ fn test_overview_wiki_counts_waiting_review_once_and_bounds_activity() {
             .as_deref(),
         Some("failed")
     );
+    db.with_connection(|conn| {
+        conn.execute("UPDATE wiki_topic_book_builds SET status='running'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    let running = overview(&db, date()).unwrap().wiki.data.unwrap();
+    assert_eq!(running.running_count, 3);
+    assert!(running
+        .items
+        .iter()
+        .any(|i| i.kind == "compile" && i.status == "running"));
     db.with_connection(|conn| {
         conn.execute("UPDATE knowledge_bases SET lifecycle='archived'", [])?;
         Ok(())

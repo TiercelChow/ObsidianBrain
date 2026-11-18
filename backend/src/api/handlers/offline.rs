@@ -502,7 +502,6 @@ const READ_EXPORT_TOOLS: &[&str] = &[
     "get_knowledge_task_activity",
     "list_wiki_skills",
     "get_wiki_skill_detail",
-    "list_knowledge_change_sets",
 ];
 
 fn redact(value: &mut Value) {
@@ -906,13 +905,6 @@ async fn export_text(builder: &mut ExportBuilder) -> Result<(), BrainError> {
             .call(
                 &scope,
                 "list_knowledge_tasks",
-                json!({"knowledge_base_id":base}),
-            )
-            .await;
-        builder
-            .call(
-                &scope,
-                "list_knowledge_change_sets",
                 json!({"knowledge_base_id":base}),
             )
             .await;

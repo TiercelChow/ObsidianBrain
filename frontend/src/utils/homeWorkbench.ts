@@ -8,13 +8,13 @@ export function readingPosition(book: HomeBook): string {
   return book.last_file?.split(/[\\/]/).pop()?.replace(/\.md$/i, '') || '继续上次阅读'
 }
 export function wikiItemRoute(item: HomeWikiItem) {
-  if (item.kind === 'review') return { path: '/knowledge/wiki', query: { base: item.base_id, review: item.id } }
-  if (item.kind === 'compile') return { path: '/knowledge', query: { base: item.base_id, report: '1' } }
+  if (item.kind === 'review') return { path: '/knowledge/wiki', query: { base: item.base_id, page: item.id } }
+  if (item.kind === 'compile') return { path: '/knowledge/wiki', query: { base: item.base_id } }
   return { path: '/knowledge/tasks', query: { base: item.base_id, task: item.id } }
 }
 export function wikiStatus(item: HomeWikiItem): string {
-  if (item.kind === 'review') return item.status === 'conflicted' ? '审核有冲突' : '等待审核'
-  if (item.kind === 'compile') return item.status === 'failed' ? '编译失败' : '编译中'
+  if (item.kind === 'review') return '等待审核'
+  if (item.kind === 'compile') return ({ failed: '编译失败', partial: '部分完成' } as Record<string, string>)[item.status] || '编译中'
   if (item.status === 'completed') {
     if (item.artifact_state === 'failed') return '报告已完成 · PPT 失败'
     if (item.artifact_state === 'pending') return '报告已完成 · PPT 准备中'

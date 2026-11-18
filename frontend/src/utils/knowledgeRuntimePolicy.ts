@@ -33,7 +33,7 @@ export function interruptedKnowledgeAnswer(displayedText: string, receivedText: 
   const notice = kind === 'cancelled'
     ? '已停止生成，内容可能不完整。'
     : kind === 'credentials'
-      ? '本次凭据授权未完成，内容可能不完整。检查供应商凭据后可以再次尝试。'
+      ? '本次调用遇到供应商凭据问题。请在 Wiki 配置中检查 API Key 后重试。'
       : kind === 'turn_limit'
         ? 'Harness 请求轮次已用尽，内容不完整。增加输出 token 无法解决；复杂问题建议转为研究任务，按子问题独立分析后综合。'
       : kind === 'scope_limit'

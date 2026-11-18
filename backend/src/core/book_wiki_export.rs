@@ -10,6 +10,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 use crate::error::BrainError;
+use crate::infra::book_wiki_store::{read_topic_links, read_topic_wiki_index};
 use crate::infra::sqlite_store::SqliteStore;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -178,6 +179,75 @@ fn write_json_export(
             "exported_at": manifest.exported_at,
         }),
         true,
+    )?;
+
+    let index = read_topic_wiki_index(conn, &manifest.base_id)?;
+    start_file(archive, "wiki-index.json", options)?;
+    write_value(
+        archive,
+        &serde_json::to_value(index)
+            .map_err(|error| BrainError::Internal(format!("主题索引序列化失败: {error}")))?,
+        true,
+    )?;
+    write_jsonl_query(
+        conn,
+        archive,
+        options,
+        "topic-links.jsonl",
+        "SELECT p.id, r.id, target.id, target.title, json_extract(link.value, '$.reason')
+         FROM wiki_topic_pages p JOIN wiki_topic_revisions r ON r.id=p.published_id
+         CROSS JOIN json_each(r.links_json) AS link
+         JOIN wiki_topic_pages target ON target.id=json_extract(link.value, '$.page_id')
+              AND target.knowledge_base_id=p.knowledge_base_id AND target.published_id IS NOT NULL
+         WHERE p.knowledge_base_id=?1 ORDER BY p.id, link.key",
+        &manifest.base_id,
+        |row| {
+            Ok(
+                json!({"page_id":row.get::<_, String>(0)?,"revision_id":row.get::<_, String>(1)?,
+            "target_page_id":row.get::<_, String>(2)?,"target_title":row.get::<_, String>(3)?,
+            "reason":row.get::<_, String>(4)?}),
+            )
+        },
+    )?;
+
+    write_jsonl_query(
+        conn,
+        archive,
+        options,
+        "topics.jsonl",
+        "SELECT p.id, p.title, r.id, r.markdown, r.run_id, r.published_at
+         FROM wiki_topic_pages p JOIN wiki_topic_revisions r ON r.id = p.published_id
+         WHERE p.knowledge_base_id = ?1 ORDER BY p.title, p.id",
+        &manifest.base_id,
+        |row| {
+            Ok(
+                json!({"id":row.get::<_, String>(0)?, "title":row.get::<_, String>(1)?,
+            "revision_id":row.get::<_, String>(2)?, "markdown":row.get::<_, String>(3)?,
+            "run_id":row.get::<_, String>(4)?, "published_at":row.get::<_, String>(5)?}),
+            )
+        },
+    )?;
+    write_jsonl_query(
+        conn,
+        archive,
+        options,
+        "topic-citations.jsonl",
+        "SELECT p.id, r.id, c.citation_index, c.object_id, c.version_id, d.relative_path, s.heading
+         FROM wiki_topic_pages p JOIN wiki_topic_revisions r ON r.id = p.published_id
+         JOIN agent_run_citations c ON c.run_id = r.run_id AND c.kind = 'source_span'
+         JOIN source_spans s ON s.id = c.object_id AND s.source_version_id = c.version_id
+         JOIN source_versions v ON v.id = s.source_version_id
+         JOIN source_documents d ON d.id = v.source_document_id
+         WHERE p.knowledge_base_id = ?1 ORDER BY p.id, c.citation_index",
+        &manifest.base_id,
+        |row| {
+            Ok(
+                json!({"page_id":row.get::<_, String>(0)?, "revision_id":row.get::<_, String>(1)?,
+            "citation_index":row.get::<_, i64>(2)?, "source_span_id":row.get::<_, String>(3)?,
+            "source_version_id":row.get::<_, String>(4)?, "source_path":row.get::<_, String>(5)?,
+            "heading":row.get::<_, Option<String>>(6)?}),
+            )
+        },
     )?;
 
     write_jsonl_query(
@@ -400,7 +470,9 @@ fn write_markdown_export(
         "- 来源：{} · 实体：{} · 论断：{} · 关系：{}\n",
         counts.0, counts.1, counts.2, counts.3
     )?;
-    writeln!(archive, "## 浏览\n\n- [知识实体](entities/INDEX.md)\n- [来源目录](sources.md)\n- [问答记录](reports/conversations.md)\n- [研究任务](reports/research-tasks.md)")?;
+    writeln!(archive, "## 浏览\n\n- [全书导览与主题索引](topics/INDEX.md)\n- [维护日志](topics/LOG.md)\n- [原文章节](entities/INDEX.md)\n- [来源目录](sources.md)\n- [问答记录](reports/conversations.md)\n- [研究任务](reports/research-tasks.md)")?;
+
+    write_topics_markdown(conn, archive, options, &manifest.base_id)?;
 
     let mut statement = conn.prepare(
         "SELECT id, entry_type, title, summary, content_md, status, confidence, revision
@@ -448,6 +520,136 @@ fn write_markdown_export(
     write_conversations_markdown(conn, archive, options, &manifest.base_id)?;
     write_tasks_markdown(conn, archive, options, &manifest.base_id)?;
     Ok(())
+}
+
+fn write_topics_markdown(
+    conn: &Connection,
+    archive: &mut ZipWriter<File>,
+    options: SimpleFileOptions,
+    base_id: &str,
+) -> Result<(), BrainError> {
+    let mut statement = conn.prepare(
+        "SELECT p.id, p.title, r.markdown, r.run_id, r.id
+         FROM wiki_topic_pages p JOIN wiki_topic_revisions r ON r.id = p.published_id
+         WHERE p.knowledge_base_id = ?1 ORDER BY p.title, p.id",
+    )?;
+    let mut citations = conn.prepare(
+        "SELECT c.citation_index, d.relative_path, s.heading, s.line_start
+         FROM agent_run_citations c JOIN source_spans s ON s.id = c.object_id AND s.source_version_id = c.version_id
+         JOIN source_versions v ON v.id = s.source_version_id
+         JOIN source_documents d ON d.id = v.source_document_id
+         WHERE c.run_id = ?1 AND c.kind = 'source_span' ORDER BY c.citation_index",
+    )?;
+    let rows = statement.query_map([base_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+        ))
+    })?;
+    for row in rows {
+        let (id, title, markdown, run_id, revision_id) = row?;
+        let filename = format!("{}.md", safe_component(&id));
+        start_file(archive, &format!("topics/{filename}"), options)?;
+        writeln!(archive, "# {title}\n\n{markdown}\n\n## 原文出处\n")?;
+        let mut rows = citations.query([run_id])?;
+        while let Some(row) = rows.next()? {
+            let number = row.get::<_, i64>(0)?;
+            let path = row.get::<_, String>(1)?;
+            let heading = row.get::<_, Option<String>>(2)?.unwrap_or_default();
+            let line = row
+                .get::<_, Option<i64>>(3)?
+                .map_or_else(String::new, |line| format!(" · 第 {line} 行"));
+            writeln!(archive, "- [S{number}] {path} {heading}{line}")?;
+        }
+        let links = read_topic_links(conn, base_id, &revision_id)?;
+        let mut published = links.into_iter().filter(|page| page.published).peekable();
+        if published.peek().is_some() {
+            writeln!(archive, "\n## 延伸阅读\n")?;
+            for page in published {
+                writeln!(
+                    archive,
+                    "- [{}]({}.md) · {}",
+                    topic_link_label(&page.link.title),
+                    safe_component(&page.link.page_id),
+                    topic_link_label(&page.link.reason)
+                )?;
+            }
+        }
+    }
+    let index = read_topic_wiki_index(conn, base_id)?;
+    start_file(archive, "topics/INDEX.md", options)?;
+    writeln!(archive, "# 全书导览\n")?;
+    if let Some(overview) = index.overview {
+        writeln!(archive, "{overview}\n")?;
+    }
+    writeln!(archive, "## 主题索引\n")?;
+    for page in index.pages {
+        let summary = if page.summary.is_empty() {
+            page.scope.as_deref().unwrap_or_default()
+        } else {
+            &page.summary
+        };
+        writeln!(
+            archive,
+            "- [{}]({}.md) · {summary}",
+            topic_link_label(&page.title),
+            safe_component(&page.page_id)
+        )?;
+    }
+    start_file(archive, "topics/LOG.md", options)?;
+    writeln!(archive, "# 最近的 Wiki 维护记录\n")?;
+    let mut entries = index
+        .builds
+        .into_iter()
+        .map(|build| {
+            let status = match build.status.as_str() {
+                "ready" => "完成",
+                "partial" => "部分完成",
+                _ => "失败",
+            };
+            let mut entry = format!(
+                "compile | {status}\n\n{} 份来源，{} 份有主题引用，生成 {} 篇主题。",
+                build.source_count, build.linked_sources, build.written_pages,
+            );
+            if let Some(maintenance) = build.maintenance {
+                entry.push_str(&format!("复用 {} 篇。\n", maintenance.reused_pages));
+                for change in maintenance.changes {
+                    entry.push_str(&format!(
+                        "\n- {} · {}",
+                        topic_link_label(&change.path),
+                        topic_link_label(&change.reason),
+                    ));
+                }
+            }
+            (build.recorded_at, entry)
+        })
+        .chain(index.publications.into_iter().map(|publication| {
+            (
+                publication.published_at,
+                format!(
+                    "publish | [{}]({}.md)",
+                    topic_link_label(&publication.title),
+                    safe_component(&publication.page_id)
+                ),
+            )
+        }))
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    for (date, entry) in entries {
+        writeln!(archive, "## [{date}] {entry}\n")?;
+    }
+    Ok(())
+}
+
+fn topic_link_label(title: &str) -> String {
+    title
+        .replace(['\n', '\r'], " ")
+        .replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
 }
 
 fn write_entry_evidence(

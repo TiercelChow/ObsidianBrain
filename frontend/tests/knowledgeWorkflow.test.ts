@@ -158,7 +158,7 @@ test('failed research stages can inspect unpublished output without presenting i
   assert.match(workspace, /\+\+rawOutputRequest/)
 })
 
-test('knowledge chat previews numbered sources before an explicit workspace navigation', async () => {
+test('knowledge chat previews source snapshots and sends follow-up questions to a topic', async () => {
   const [chat, api] = await Promise.all([
     source('src/views/knowledge/KnowledgeChat.vue'),
     source('src/api/knowledge.ts'),
@@ -168,15 +168,14 @@ test('knowledge chat previews numbered sources before an explicit workspace navi
   assert.match(chat, /S\{\{ evidenceIndex \+ 1 \}\}/)
   assert.match(chat, /<MotionModal[^>]+aria-label="来源预览"/)
   assert.match(chat, /getKnowledgeEntry/)
-  assert.match(chat, /@click="openSourceWorkspace">打开当前版本/)
   assert.match(chat, /loadKnowledgeCitationPreview/)
   assert.match(chat, /message\.runId, sourceIndex/)
   assert.match(chat, /answer-interruption/)
   assert.doesNotMatch(chat.split('async function ask')[1]?.split('async function saveAnswer')[0] || '', /runtimeReady\.value = false/)
   assert.match(chat, /class="source-markdown markdown-body" v-html="sourceHtml"/)
-  assert.match(chat, /保存到 Wiki/)
-  assert.match(chat, /saveKnowledgeAnswer/)
-  assert.match(api, /save_knowledge_answer/)
+  assert.match(chat, /留作主题待验证问题/)
+  assert.match(chat, /questionRun: message.runId/)
+  assert.doesNotMatch(api, /save_knowledge_answer|wiki_mode/)
 })
 
 test('knowledge chat uses an uninterrupted text shimmer and an independent three-dot wave', async () => {
@@ -206,7 +205,7 @@ test('knowledge dropdowns use shared system visuals with layout-only utility cla
     source('src/styles/motion.css'),
     source('src/views/Tasks.vue'),
     source('src/views/knowledge/KnowledgeChat.vue'),
-    source('src/views/knowledge/WikiWorkspace.vue'),
+    source('src/views/knowledge/WikiTopics.vue'),
     source('src/views/knowledge/KnowledgeTasks.vue'),
     source('src/views/knowledge/WikiSettings.vue'),
   ])
@@ -296,7 +295,7 @@ test('knowledge tasks expose durable execution controls and real presentation ar
 
   assert.match(view, /executeKnowledgeTask/)
   assert.match(view, /getKnowledgeTaskResult/)
-  assert.match(view, /重新运行/)
+  assert.match(view, /恢复未完成阶段/)
   assert.match(view, /cancelKnowledgeTask/)
   assert.match(view, /getKnowledgeTaskActivity/)
   assert.match(view, /task-live/)
@@ -306,6 +305,8 @@ test('knowledge tasks expose durable execution controls and real presentation ar
   assert.match(view, /引用覆盖/)
   assert.match(view, /data-icon-only class="ui-icon-action" :href="knowledgeArtifactDownloadUrl/)
   assert.match(view, /PPTX 生成失败，研究报告已保留/)
+  assert.match(view, /v-if="!reportVerified"[\s\S]*?报告待复核/)
+  assert.match(view, /reportVerified\.value && reportRunId\.value/)
   assert.match(view, /task\.artifact_state === 'failed'/)
   assert.match(api, /PresentationQualityReport/)
   assert.match(api, /validation_details/)
@@ -401,85 +402,56 @@ test('external research stays opt-in, domain scoped, and rate limited per task',
   assert.match(api, /external_request_limit/)
 })
 
-test('knowledge pages distinguish source synchronization from wiki compilation', async () => {
-  const [bases, workspace, api] = await Promise.all([
+test('source synchronization and whole-book compilation are separate actions', async () => {
+  const [bases, wiki, api] = await Promise.all([
     source('src/views/knowledge/KnowledgeBases.vue'),
-    source('src/views/knowledge/WikiWorkspace.vue'),
-    source('src/api/knowledge.ts'),
+    source('src/views/knowledge/WikiTopics.vue'),
+    source('src/api/wikiTopics.ts'),
   ])
-
   assert.match(bases, /来源 ·/)
   assert.match(bases, /Wiki ·/)
-  assert.match(bases, /章节索引/)
-  assert.match(workspace, /compileLabel/)
-  assert.match(workspace, /可核验论断/)
-  assert.match(workspace, /知识关系/)
-  assert.match(workspace, /版本历史/)
-  assert.match(workspace, /知识体检/)
-  assert.match(workspace, /批准并应用/)
-  assert.match(api, /compile_mode: 'chapter' \| 'smart'/)
-  assert.match(api, /compile_state: 'not_started' \| 'outdated' \| 'compiling' \| 'ready' \| 'failed'/)
+  assert.match(wiki, /@click="syncSources">同步来源/)
+  assert.match(wiki, /@click="startBuild"/)
+  assert.match(wiki, /编译整个知识库/)
+  assert.match(api, /startTopicBookBuild/)
 })
 
-test('smart wiki compilation runs in background and exposes recoverable live progress', async () => {
-  const [bases, api] = await Promise.all([
+test('the Wiki workspace shows background compile progress and allows stopping and retrying', async () => {
+  const [bases, wiki] = await Promise.all([
     source('src/views/knowledge/KnowledgeBases.vue'),
-    source('src/api/knowledge.ts'),
+    source('src/views/knowledge/WikiTopics.vue'),
   ])
-
-  assert.match(api, /compile_phase:/)
-  assert.match(api, /compile_message:/)
-  assert.match(api, /compile_current_batch:/)
-  assert.match(api, /compile_total_batches:/)
-  assert.match(api, /compile_active_run_id/)
-  assert.match(api, /compile_change_set_id/)
-  assert.match(api, /cancel_book_knowledge_compile/)
   assert.match(bases, /任务已进入后台，可以离开当前页面/)
-  assert.match(bases, /cancelBookKnowledgeCompile/)
-  assert.match(bases, /setInterval/)
-  assert.match(bases, /compile-phase/)
-  assert.match(bases, /查看并审核/)
+  assert.match(wiki, /setInterval\(\(\) => \{ void refreshBuild\(\) \}/)
+  assert.match(wiki, /bookBuild\.sources\.length/)
+  assert.match(wiki, /@click="stopBuild">停止编译/)
+  assert.match(wiki, /继续全库编译/)
+  assert.match(wiki, /查看每份文档的处理结果/)
 })
 
-test('wiki workspace supports reviewed structure changes, paging, and an on-demand graph canvas', async () => {
-  const [bases, workspace, graphCanvas, reader, chat, tasks, api] = await Promise.all([
+test('the canonical Wiki reviews, publishes, edits, and cites topic drafts', async () => {
+  const [bases, wiki, reader, chat, tasks, routes] = await Promise.all([
     source('src/views/knowledge/KnowledgeBases.vue'),
-    source('src/views/knowledge/WikiWorkspace.vue'),
-    source('src/components/knowledge/KnowledgeGraphCanvas.vue'),
+    source('src/views/knowledge/WikiTopics.vue'),
     source('src/views/Reader.vue'),
     source('src/views/knowledge/KnowledgeChat.vue'),
     source('src/views/knowledge/KnowledgeTasks.vue'),
-    source('src/api/knowledge.ts'),
+    source('src/router/index.ts'),
   ])
-
-  assert.match(bases, /管理知识库/)
   assert.match(bases, /setBookKnowledgeBaseLifecycle/)
   assert.match(bases, /原书目录已失效/)
-  assert.match(workspace, /继续加载/)
-  assert.match(workspace, /proposeKnowledgeEntryEdit/)
-  assert.match(workspace, /proposeKnowledgeEntryMerge/)
-  assert.match(workspace, /proposeKnowledgeEntrySplit/)
-  assert.match(workspace, /调整知识实体/)
-  assert.match(workspace, /查看变更前后/)
-  assert.match(workspace, /变更分类/)
-  assert.match(workspace, /引用审计/)
-  assert.match(workspace, /级联影响/)
-  assert.match(workspace, /关系洞察/)
-  assert.match(workspace, /findKnowledgeGraphPath/)
-  assert.match(workspace, /getKnowledgeGraphSnapshot/)
-  assert.match(graphCanvas, /@wheel\.prevent="onWheel"/)
-  assert.match(graphCanvas, /@pointermove="movePan"/)
-  assert.match(graphCanvas, /@media \(max-width: 768px\) \{ \.graph-canvas-shell \{ display: none;/)
+  assert.match(wiki, /@click="publishBuild"/)
+  assert.match(wiki, /@click="publish">发布草稿/)
+  assert.match(wiki, /@submit.prevent="saveMarkdown"/)
+  assert.match(wiki, /aria-label="阅读版本"/)
+  assert.match(wiki, /@citation="viewCitation"/)
   assert.match(reader, /proposeReaderSelection/)
-  assert.match(reader, /加入知识/)
+  assert.match(reader, /page: response\.result\.page\.id/)
   assert.match(reader, /fileKind === 'md'/)
   assert.match(chat, /route\.query\.question/)
   assert.match(tasks, /route\.query\.create === '1'/)
-  assert.match(api, /source_available: boolean/)
-  assert.match(api, /has_more: boolean/)
-  assert.match(api, /propose_knowledge_entry_merge/)
-  assert.match(api, /propose_knowledge_entry_split/)
-  assert.match(api, /get_knowledge_graph_snapshot/)
+  assert.match(routes, /path: '\/knowledge\/wiki',[\s\S]*import\('@\/views\/knowledge\/WikiTopics\.vue'\)/)
+  assert.match(routes, /path: '\/knowledge\/wiki\/topics',\s*redirect: to => \(\{ path: '\/knowledge\/wiki', query: to.query \}\)/)
 })
 
 test('Book Wiki only exposes Markdown folders while Reader keeps PDF support', async () => {
@@ -534,7 +506,7 @@ test('runtime settings select a model provider and manage API keys on the page',
   // the runtime profile references a provider by id instead of an inline provider_config object
   assert.match(api, /provider_id: profile\.provider_id \?\? ''/)
   assert.doesNotMatch(api, /provider_config: profile\.provider_config/)
-  // providers are managed through dedicated tools; keychain keys are written to the system credential store
+  // providers and their local credentials are managed through dedicated tools
   assert.match(api, /save_model_provider/)
   assert.match(api, /delete_model_provider/)
   assert.match(api, /list_model_providers/)

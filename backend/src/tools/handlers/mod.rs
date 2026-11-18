@@ -100,50 +100,14 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(CompileBookKnowledgeBaseHandler))
         .await;
     registry
-        .register(Arc::new(RetryKnowledgeSourceReviewHandler))
-        .await;
-    registry
-        .register(Arc::new(ProposeKnowledgeEntryArchiveHandler))
-        .await;
-    registry
-        .register(Arc::new(GetKnowledgeCompileReportHandler))
-        .await;
-    registry
         .register(Arc::new(CancelBookKnowledgeCompileHandler))
-        .await;
-    registry
-        .register(Arc::new(ListKnowledgeChangeSetsHandler))
-        .await;
-    registry
-        .register(Arc::new(ResolveKnowledgeChangeSetHandler))
         .await;
     registry
         .register(Arc::new(ListKnowledgeEntriesHandler))
         .await;
     registry.register(Arc::new(GetKnowledgeEntryHandler)).await;
     registry
-        .register(Arc::new(ProposeKnowledgeEntryEditHandler))
-        .await;
-    registry
-        .register(Arc::new(ProposeKnowledgeEntryMergeHandler))
-        .await;
-    registry
-        .register(Arc::new(ProposeKnowledgeEntrySplitHandler))
-        .await;
-    registry
         .register(Arc::new(ProposeReaderSelectionHandler))
-        .await;
-    registry
-        .register(Arc::new(GetKnowledgeGraphOverviewHandler))
-        .await;
-    registry
-        .register(Arc::new(FindKnowledgeGraphPathHandler))
-        .await;
-    registry
-        .register(Arc::new(GetKnowledgeGraphSnapshotHandler))
-        .await;
-    registry
-        .register(Arc::new(LintBookKnowledgeBaseHandler))
         .await;
     registry
         .register(Arc::new(ListKnowledgeConversationsHandler))
@@ -158,15 +122,15 @@ pub async fn register_all_tools(registry: &ToolRegistry, _ctx: Arc<AppContext>) 
         .register(Arc::new(RecoverCompletedQaAnswerHandler))
         .await;
     registry.register(Arc::new(AskBookKnowledgeHandler)).await;
-    registry
-        .register(Arc::new(SaveKnowledgeAnswerHandler))
-        .await;
     registry.register(Arc::new(ListKnowledgeTasksHandler)).await;
     registry
         .register(Arc::new(CreateKnowledgeTaskHandler))
         .await;
     registry
         .register(Arc::new(UpdateKnowledgeTaskBriefHandler))
+        .await;
+    registry
+        .register(Arc::new(RegenerateKnowledgePresentationHandler))
         .await;
     registry
         .register(Arc::new(PreviewKnowledgeTaskBriefHandler))

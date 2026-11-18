@@ -13,7 +13,7 @@
     <section v-if="cards.length" class="overview-strip knowledge-surface" data-glass="card">
       <div><strong>{{ cards.length }}</strong><span>书架藏书</span></div>
       <div><strong>{{ initializedCount }}</strong><span>已建知识库</span></div>
-      <div><strong>{{ entryCount }}</strong><span>数据库实体</span></div>
+      <div><strong>{{ entryCount }}</strong><span>已索引原文章节</span></div>
       <div><strong>{{ attentionCount }}</strong><span>需要处理</span></div>
     </section>
 
@@ -55,8 +55,8 @@
               <span
                 v-if="card.knowledge_base"
                 class="knowledge-status"
-                :class="`is-${card.knowledge_base.compile_state}`"
-              >Wiki · {{ compileStatusLabel(card.knowledge_base) }}</span>
+                :class="`is-${card.topic_build?.status || 'not_started'}`"
+              >Wiki · {{ topicBuildLabel(card) }}</span>
               <span
                 v-if="card.knowledge_base && card.knowledge_base.lifecycle !== 'active'"
                 class="knowledge-status is-warning"
@@ -69,65 +69,29 @@
 
           <div v-if="card.knowledge_base" class="book-stats">
             <span><strong>{{ card.knowledge_base.source_count }}</strong> 来源</span>
-            <span><strong>{{ card.knowledge_base.entry_count }}</strong> 实体</span>
-            <span><strong>{{ card.knowledge_base.claim_count }}</strong> 论断</span>
+            <span><strong>{{ card.knowledge_base.entry_count }}</strong> 原文章节</span>
             <span><strong>{{ card.knowledge_base.task_count }}</strong> 任务</span>
           </div>
-          <div v-if="card.knowledge_base?.compile_state === 'compiling'" class="compile-activity">
-            <div class="compile-phase">
-              <span class="compile-phase-dot" :class="{ 'is-still': !isCompileActivelyRunning(card.knowledge_base) }"></span>
-              <div>
-                <strong>{{ compilePhaseLabel(card.knowledge_base) }}</strong>
-                <p>{{ card.knowledge_base.compile_message || '正在准备智能编译…' }}</p>
-              </div>
-              <span class="compile-percent">{{ compileProgressValue(card.knowledge_base) }}%</span>
-            </div>
-            <div class="compile-progress" role="progressbar" :aria-valuenow="compileProgressValue(card.knowledge_base)" aria-valuemin="0" aria-valuemax="100">
-              <i :style="{ width: compileProgress(card.knowledge_base) }"></i>
-            </div>
-            <div class="compile-meta">
-              <span>{{ card.knowledge_base.compile_processed_sources }}/{{ card.knowledge_base.compile_total_sources }} 个来源</span>
-              <span v-if="card.knowledge_base.compile_total_batches">
-                第 {{ card.knowledge_base.compile_current_batch }}/{{ card.knowledge_base.compile_total_batches }} 批
-              </span>
-              <span v-else>等待模型任务启动</span>
-              <span v-if="card.knowledge_base.compile_heartbeat_at" :title="card.knowledge_base.compile_heartbeat_at">
-                {{ formatCompileActivityTime(card.knowledge_base.compile_heartbeat_at) }} 更新
-              </span>
-            </div>
-            <div class="compile-controls">
-              <el-button
-                v-if="card.knowledge_base.compile_phase === 'waiting_review' && card.knowledge_base.compile_change_set_id"
-                type="primary"
-                size="small"
-                @click="openCompileReview(card.knowledge_base)"
-              >查看并审核</el-button>
-              <el-button
-                v-else
-                size="small"
-                :loading="cancellingBaseId === card.knowledge_base.id"
-                :disabled="card.knowledge_base.compile_cancel_requested"
-                @click="cancelCompile(card.knowledge_base)"
-              >{{ card.knowledge_base.compile_cancel_requested ? '正在停止…' : '停止编译' }}</el-button>
-            </div>
+          <div v-if="card.topic_build?.status === 'running' || card.topic_build?.status === 'partial' || card.topic_build?.status === 'failed'" class="topic-card-progress">
+            <span>{{ card.topic_build.source_count }} 份来源 · {{ card.topic_build.ready_pages }}/{{ card.topic_build.total_pages }} 篇主题已生成</span>
+            <button v-if="card.knowledge_base" type="button" @click="openWiki(card.knowledge_base.id)">查看全库编译</button>
           </div>
-          <div v-else-if="!card.knowledge_base" class="book-uninitialized">
+          <div v-if="!card.knowledge_base" class="book-uninitialized">
             尚未建立知识库
           </div>
           <div v-else-if="!card.knowledge_base.source_available" class="book-uninitialized is-warning">
             原书目录已失效。历史知识仍可浏览，请先在阅境轩重新添加正确目录。
           </div>
 
-          <p v-if="card.knowledge_base?.compile_error || card.knowledge_base?.last_error" class="book-error">
-            {{ card.knowledge_base.compile_error || card.knowledge_base.last_error }}
+          <p v-if="card.knowledge_base?.last_error" class="book-error">
+            {{ card.knowledge_base.last_error }}
           </p>
         </div>
         <footer v-if="!isMobile" class="book-actions">
           <div class="book-utility-actions" role="group" :aria-label="`${card.book.name} · 书籍操作`">
             <UiAction :icon="Reading" label="阅读原书" @click="$router.push({ path: '/reader', query: { book: card.book.id } })" />
             <template v-if="card.knowledge_base">
-              <UiAction :icon="Refresh" label="同步知识库来源" :loading="busyBookId === card.book.id" :disabled="card.knowledge_base.lifecycle !== 'active' || !card.knowledge_base.source_available || card.knowledge_base.compile_state === 'compiling'" @click="sync(card)" />
-              <UiAction :icon="Tickets" label="查看编译报告" @click="reportBase = card.knowledge_base; reportVisible = true" />
+              <UiAction :icon="Refresh" label="同步知识库来源" :loading="busyBookId === card.book.id" :disabled="card.knowledge_base.lifecycle !== 'active' || !card.knowledge_base.source_available || card.topic_build?.status === 'running'" @click="sync(card)" />
               <UiAction :icon="Setting" label="管理知识库" @click="openManage(card)" />
             </template>
           </div>
@@ -140,12 +104,12 @@
             >建立知识库</el-button>
             <template v-else>
               <el-button
-                v-if="card.book.kind === 'folder' && card.knowledge_base.sync_state === 'clean' && card.knowledge_base.compile_state !== 'compiling'"
+                v-if="card.book.kind === 'folder'"
                 :icon="MagicStick"
-                :disabled="card.knowledge_base.lifecycle !== 'active' || !card.knowledge_base.source_available"
+                :disabled="card.knowledge_base.lifecycle !== 'active' || !card.knowledge_base.source_available || card.topic_build?.status === 'running'"
                 :loading="compilingBaseId === card.knowledge_base.id"
                 @click="compileWiki(card)"
-              >{{ compileActionLabel(card.knowledge_base) }}</el-button>
+              >{{ compileActionLabel(card) }}</el-button>
               <el-button type="primary" @click="openWiki(card.knowledge_base.id)">打开 Wiki</el-button>
             </template>
           </div>
@@ -161,15 +125,13 @@
       <el-button type="primary" @click="$router.push('/reader')">前往阅境轩</el-button>
     </div>
 
-    <KnowledgeCompileReport v-model="reportVisible" :base-id="reportBase?.id || ''" :book-name="reportBase?.book_name" @review="id => router.push({ path: '/knowledge/wiki', query: { base: reportBase?.id, review: id } })" />
     <MotionModal v-model="actionSheetVisible" aria-label="知识库操作">
       <div v-if="actionCard" class="knowledge-modal-card">
         <header class="knowledge-modal-head"><h3>知识库操作</h3><p>{{ actionCard.book.name }}</p></header>
         <div class="knowledge-modal-body book-action-sheet">
           <template v-if="actionCard.knowledge_base">
-            <el-button v-if="actionCard.book.kind === 'folder' && actionCard.knowledge_base.sync_state === 'clean' && actionCard.knowledge_base.compile_state !== 'compiling'" :disabled="actionCard.knowledge_base.lifecycle !== 'active' || !actionCard.knowledge_base.source_available" :loading="compilingBaseId === actionCard.knowledge_base.id" @click="actionSheetVisible = false; compileWiki(actionCard)"><el-icon><MagicStick /></el-icon>{{ compileActionLabel(actionCard.knowledge_base) }}</el-button>
-            <el-button :disabled="actionCard.knowledge_base.lifecycle !== 'active' || !actionCard.knowledge_base.source_available || actionCard.knowledge_base.compile_state === 'compiling'" :loading="busyBookId === actionCard.book.id" @click="actionSheetVisible = false; sync(actionCard)"><el-icon><Refresh /></el-icon>同步来源</el-button>
-            <el-button @click="actionSheetVisible = false; reportBase = actionCard.knowledge_base; reportVisible = true">编译报告</el-button>
+            <el-button v-if="actionCard.book.kind === 'folder'" :disabled="actionCard.knowledge_base.lifecycle !== 'active' || !actionCard.knowledge_base.source_available || actionCard.topic_build?.status === 'running'" :loading="compilingBaseId === actionCard.knowledge_base.id" @click="actionSheetVisible = false; compileWiki(actionCard)"><el-icon><MagicStick /></el-icon>{{ compileActionLabel(actionCard) }}</el-button>
+            <el-button :disabled="actionCard.knowledge_base.lifecycle !== 'active' || !actionCard.knowledge_base.source_available || actionCard.topic_build?.status === 'running'" :loading="busyBookId === actionCard.book.id" @click="actionSheetVisible = false; sync(actionCard)"><el-icon><Refresh /></el-icon>同步来源</el-button>
             <el-button @click="actionSheetVisible = false; openManage(actionCard)">管理知识库</el-button>
           </template>
           <el-button v-else type="primary" :loading="busyBookId === actionCard.book.id" @click="actionSheetVisible = false; initialize(actionCard)">建立知识库</el-button>
@@ -207,46 +169,39 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Collection, FolderOpened, Loading, MagicStick, MoreFilled, Reading, Refresh, Setting, Tickets } from '@element-plus/icons-vue'
+import { Collection, FolderOpened, Loading, MagicStick, MoreFilled, Reading, Refresh, Setting } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
-import KnowledgeCompileReport from '@/components/knowledge/KnowledgeCompileReport.vue'
 import MotionModal from '@/components/motion/MotionModal.vue'
 import UiAction from '@/components/motion/UiAction'
 import { usePhoneViewport } from '@/composables/usePhoneViewport'
 import { freezeCollectionLeave, resetCollectionEnter } from '@/utils/collectionMotion'
 import { canFocusDocument } from '@/utils/modalFocusPolicy'
+import { startTopicBookBuild, topicErrorMessage } from '@/api/wikiTopics'
 import {
-  cancelBookKnowledgeCompile,
-  compileBookKnowledgeBase,
   deleteBookKnowledgeBase,
   initializeBookKnowledgeBase,
   listBookKnowledgeBases,
   setBookKnowledgeBaseLifecycle,
   syncBookKnowledgeBase,
   type BookKnowledgeCard,
-  type KnowledgeBaseSummary,
 } from '@/api/knowledge'
 
 const router = useRouter()
 const { isMobile } = usePhoneViewport()
 const cards = ref<BookKnowledgeCard[]>([])
-let pageAlive = true
 const runningOnly = computed(() => router.currentRoute.value.query.activity === 'running')
 const attentionOnly = computed(() => router.currentRoute.value.query.activity === 'attention')
 const visibleCards = computed(() => cards.value.filter(card => {
   const base = card.knowledge_base
-  if (runningOnly.value) return base?.lifecycle !== 'archived' && base?.compile_state === 'compiling' && base.compile_phase !== 'waiting_review'
-  if (attentionOnly.value) return base?.lifecycle !== 'archived' && base?.compile_state === 'failed'
+  if (runningOnly.value) return base?.lifecycle !== 'archived' && card.topic_build?.status === 'running'
+  if (attentionOnly.value) return base?.lifecycle !== 'archived' && (card.topic_build?.status === 'partial' || card.topic_build?.status === 'failed')
   return true
 }))
 const loading = ref(false)
 const busyBookId = ref('')
 const compilingBaseId = ref('')
-const cancellingBaseId = ref('')
 const manageVisible = ref(false)
-const reportVisible = ref(false)
-const reportBase = ref<KnowledgeBaseSummary | null>(null)
 const managedCard = ref<BookKnowledgeCard | null>(null)
 const actionSheetVisible = ref(false)
 const actionBookId = ref('')
@@ -262,7 +217,7 @@ const attentionCount = computed(() => cards.value.filter(card => {
   return base && (
     base.sync_state !== 'clean'
     || base.health_state !== 'healthy'
-    || (base.compile_mode === 'smart' && base.compile_state !== 'ready')
+    || card.topic_build?.status === 'partial' || card.topic_build?.status === 'failed'
   )
 }).length)
 
@@ -310,40 +265,18 @@ async function sync(card: BookKnowledgeCard) {
 
 async function compileWiki(card: BookKnowledgeCard) {
   if (!card.knowledge_base) return
-  compilingBaseId.value = card.knowledge_base.id
+  const base = card.knowledge_base.id
+  compilingBaseId.value = base
   try {
-    const response = await compileBookKnowledgeBase(card.knowledge_base.id)
-    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '智能编译失败')
-    card.knowledge_base = response.result.knowledge_base
-    ElMessage.success(response.result.message || '智能编译任务已进入后台，可以离开当前页面')
-    await loadCards(true)
+    await startTopicBookBuild(base)
+    ElMessage.success('全库编译任务已进入后台，可以离开当前页面')
+    await router.push({ path: '/knowledge/wiki', query: { base } })
   } catch (error) {
-    ElMessage.error((error as Error).message)
+    ElMessage.error(topicErrorMessage(error))
     await loadCards(true)
   } finally {
     compilingBaseId.value = ''
   }
-}
-
-async function cancelCompile(base: KnowledgeBaseSummary) {
-  cancellingBaseId.value = base.id
-  try {
-    const response = await cancelBookKnowledgeCompile(base.id)
-    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '停止编译失败')
-    const card = cards.value.find(item => item.knowledge_base?.id === base.id)
-    if (card) card.knowledge_base = response.result.knowledge_base
-    ElMessage.success('已请求停止编译，当前模型调用结束后会安全退出')
-  } catch (error) {
-    ElMessage.error((error as Error).message)
-  } finally {
-    cancellingBaseId.value = ''
-    await loadCards(true)
-  }
-}
-
-function openCompileReview(base: KnowledgeBaseSummary) {
-  if (!base.compile_change_set_id) return
-  router.push({ path: '/knowledge/wiki', query: { base: base.id, review: base.compile_change_set_id } })
 }
 
 function openWiki(baseId: string) {
@@ -407,79 +340,33 @@ function sourceStatusClass(card: BookKnowledgeCard) {
   return card.knowledge_base ? `is-${card.knowledge_base.sync_state}` : 'is-draft'
 }
 
-function compileStatusLabel(base: NonNullable<BookKnowledgeCard['knowledge_base']>) {
-  if (base.compile_mode === 'chapter' && base.compile_state === 'not_started') return '章节索引'
-  if (base.compile_phase === 'waiting_review') return '待审核'
-  if (base.compile_phase === 'cancelling') return '停止中'
-  const labels: Record<string, string> = {
-    not_started: '待编译', outdated: '待更新', compiling: '编译中', ready: '智能 Wiki', failed: '编译失败',
-  }
-  return labels[base.compile_state] || base.compile_state
+function compileActionLabel(card: BookKnowledgeCard) {
+  if (card.topic_build?.status === 'running') return '全库编译中'
+  if (card.topic_build?.status === 'failed' || card.topic_build?.status === 'partial') return '继续全库编译'
+  return card.topic_build ? '更新全库 Wiki' : '编译整个知识库'
 }
 
-function compileActionLabel(base: KnowledgeBaseSummary) {
-  if (base.compile_state === 'failed') return '重新编译'
-  return base.compile_state === 'ready' ? '增量编译' : '智能编译'
-}
-
-function compilePhaseLabel(base: KnowledgeBaseSummary) {
-  const labels: Record<string, string> = {
-    queued: '已进入后台队列', preparing: '正在准备来源', invoking: '正在连接模型',
-    runtime: '正在准备模型请求', launching: '正在启动运行时', connected: '运行时已连接',
-    session_ready: '模型会话已就绪', request_sent: '正在等待模型返回',
-    stopped: '模型已结束，正在校验返回',
-    thinking: '模型正在分析', tool: '正在调用知识工具',
-    generating: '正在生成知识候选', retrying: '正在校正模型结果',
-    batch_completed: '本批分析完成', finalizing: '正在保存候选变更',
-    waiting_review: '智能编译完成，等待审核', cancelling: '正在安全停止',
-  }
-  return labels[base.compile_phase] || '智能编译进行中'
-}
-
-function isCompileActivelyRunning(base: KnowledgeBaseSummary) {
-  return base.compile_phase !== 'waiting_review'
-}
-
-function formatCompileActivityTime(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '刚刚'
-  return new Intl.DateTimeFormat('zh-CN', {
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-  }).format(date)
-}
-
-function compileProgressValue(base: KnowledgeBaseSummary) {
-  const sourceProgress = base.compile_total_sources
-    ? base.compile_processed_sources / base.compile_total_sources
-    : 0
-  const batchProgress = base.compile_total_batches
-    ? Math.max(0, base.compile_current_batch - (base.compile_phase === 'batch_completed' ? 0 : 1)) / base.compile_total_batches
-    : 0
-  if (base.compile_phase === 'waiting_review') return 100
-  return Math.min(99, Math.round(Math.max(sourceProgress, batchProgress) * 100))
-}
-
-function compileProgress(base: NonNullable<BookKnowledgeCard['knowledge_base']>) {
-  return `${compileProgressValue(base)}%`
+function topicBuildLabel(card: BookKnowledgeCard) {
+  const build = card.topic_build
+  if (!build) return '待编译'
+  if (build.status === 'running') return '全库编译中'
+  if (build?.outdated) return '有新来源'
+  if (build?.status === 'partial') return '部分完成'
+  if (build?.status === 'failed') return '全库编译失败'
+  return '已编译'
 }
 
 onMounted(() => {
-  void loadCards().then(() => {
-    if (pageAlive && router.currentRoute.value.query.report === '1' && canFocusDocument(document)) {
-      reportBase.value = cards.value.find(card => card.knowledge_base?.id === router.currentRoute.value.query.base)?.knowledge_base || null
-      reportVisible.value = !!reportBase.value
-    }
-  })
+  void loadCards()
   pollingTimer = window.setInterval(() => {
     if (!canFocusDocument(document)) return
-    if (cards.value.some(card => card.knowledge_base?.compile_state === 'compiling' && card.knowledge_base.compile_phase !== 'waiting_review')) {
+    if (cards.value.some(card => card.topic_build?.status === 'running')) {
       void loadCards(true)
     }
   }, 2500)
 })
 
 onBeforeUnmount(() => {
-  pageAlive = false
   if (pollingTimer !== undefined) window.clearInterval(pollingTimer)
 })
 </script>
@@ -488,6 +375,8 @@ onBeforeUnmount(() => {
 .activity-context { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; font-size:13px; }
 .activity-context a,.activity-context button { color:var(--text-secondary); min-height:44px; display:inline-flex; align-items:center; background:none; border:0; font:inherit; cursor:pointer; }
 .mobile-base-actions { display: none; }
+.topic-card-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }
+.topic-card-progress button { padding: 4px; border: 0; background: none; color: var(--accent); cursor: pointer; font: inherit; }
 .book-action-sheet .el-button { width: 100%; min-height: 48px; height: auto; margin: 0; padding: 12px; justify-content: flex-start; white-space: normal; }
 .book-location { min-width: 0; color: var(--text-muted); font-size: 13px; }
 .book-location summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
@@ -512,18 +401,6 @@ onBeforeUnmount(() => {
 .book-path { overflow: hidden; color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .book-stats { display: flex; flex-wrap: wrap; gap: 7px 14px; margin-top: 14px; color: var(--text-muted); font-size: 11px; }
 .book-stats strong { color: var(--text-primary); font-size: 14px; font-variant-numeric: tabular-nums; }
-.compile-activity { display: grid; gap: 9px; margin-top: 13px; padding: 12px; border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--border-faint)); border-radius: 14px; background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 6%, var(--bg-glass-subtle)), var(--bg-glass-subtle)); }
-.compile-phase { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 9px; }
-.compile-phase-dot { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 30%, transparent); animation: compile-pulse 1.8s ease-out infinite; }
-.compile-phase-dot.is-still { animation: none; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 10%, transparent); }
-.compile-phase strong { display: block; font-size: 12px; font-weight: 690; line-height: 1.45; }
-.compile-phase p { margin: 2px 0 0; overflow-wrap: anywhere; color: var(--text-muted); font-size: 10px; line-height: 1.5; }
-.compile-percent { color: var(--accent); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.compile-progress { position: relative; height: 5px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--accent) 10%, var(--bg-glass-subtle)); }
-.compile-progress i { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 75%, white), var(--accent)); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 28%, transparent); transition: width var(--motion-slow) var(--ease-emphasized); }
-.compile-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; color: var(--text-faint); font-size: 10px; font-variant-numeric: tabular-nums; }
-.compile-controls { display: flex; justify-content: flex-end; gap: 7px; }
-.compile-controls .el-button { margin: 0; }
 .book-uninitialized { margin-top: 13px; padding: 9px 11px; border-radius: 10px; background: var(--bg-glass-subtle); color: var(--text-faint); font-size: 11px; line-height: 1.55; }
 .book-uninitialized.is-warning { color: #b56600; background: color-mix(in srgb, #ff9f0a 10%, var(--bg-glass-subtle)); }
 .book-actions { grid-column: 1 / -1; align-self: end; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; padding-top: 4px; }
@@ -541,8 +418,6 @@ onBeforeUnmount(() => {
 .delete-zone p { color: var(--text-muted); font-size: 11px; line-height: 1.55; }
 .delete-zone .el-button { width: fit-content; margin: 0; }
 @keyframes knowledge-card-in { from { opacity: 0; transform: translateY(12px) scale(.985); } to { opacity: 1; transform: none; } }
-@keyframes compile-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 32%, transparent); } 70%, 100% { box-shadow: 0 0 0 8px transparent; } }
-@media (prefers-reduced-motion: reduce) { .compile-phase-dot { animation: none; } }
 @media (min-width: 769px) { .book-wiki-card { grid-template-rows: minmax(0, 1fr) auto; } }
 @media (max-width: 1050px) { .book-wiki-grid { grid-template-columns: 1fr; } }
 @media (max-width: 768px) {
@@ -559,21 +434,18 @@ onBeforeUnmount(() => {
   .book-wiki-link::after { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit; cursor: pointer; }
   .book-wiki-link:focus-visible { outline: none; box-shadow: none !important; }
   .book-wiki-card:has(.book-wiki-link:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
-  .compile-controls > * { position: relative; z-index: 2; }
   .book-cover { grid-row: 1; height: 60px; border-radius: 10px; gap: 3px; }
   .book-cover .el-icon { font-size: 21px; }
   .book-card-main { display: contents; }
   .book-card-main > * { min-width: 0; grid-column: 1 / -1; }
   .book-card-main > .book-card-title-row { grid-column: 2; }
   .book-card-title-row { display: block; padding-inline-end: 44px; }
+  .topic-card-progress button { position: relative; z-index: 2; }
   .book-card-title-row h2 { margin-top: 0; font-size: 17px; line-height: 1.45; }
   .knowledge-status-stack { max-width: 100%; display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 4px; margin-top: 6px; }
   .knowledge-status-stack .knowledge-status { font-size: 10px; padding: 3px 7px; }
   .book-description, .book-stats { margin-top: 0; }
   .book-stats { gap: 6px 12px; }
-  .compile-activity { grid-column: 1 / -1; }
   .book-more { position: absolute; top: 8px; right: 8px; z-index: 2; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--text-muted); font-size: 20px; cursor: pointer; }
-  .compile-controls .el-button, .manage-actions .el-button, .delete-zone .el-button { min-height: 44px; height: auto; }
-  .compile-phase p, .compile-meta { font-size: 12px; }
 }
 </style>

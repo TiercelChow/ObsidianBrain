@@ -4,8 +4,8 @@ import test from 'node:test'
 
 const source = (file: string) => readFile(new URL(`../src/${file}`, import.meta.url), 'utf8')
 
-test('all four search families share one material and geometry, with no separate Reader/Task lens', async () => {
-  for (const [file, count] of [['views/Reader.vue', 3], ['views/Tasks.vue', 2], ['views/Timeline.vue', 1], ['views/knowledge/WikiWorkspace.vue', 1]] as const) {
+test('all search families share one material and geometry, with no separate Reader/Task lens', async () => {
+  for (const [file, count] of [['views/Reader.vue', 3], ['views/Tasks.vue', 2], ['views/Timeline.vue', 1]] as const) {
     const template = (await source(file)).split('<script')[0]
     const searches = template.match(/<[^>]*data-glass="search"[^>]*>/g) || []
     assert.equal(searches.length, count, file)
@@ -36,7 +36,7 @@ test('each product page explicitly marks its principal content surfaces', async 
     ['views/Tasks.vue', ['task-detail-zone glass-surface']],
     ['views/CodeRepo.vue', ['repo-card']],
     ['views/knowledge/KnowledgeBases.vue', ['overview-strip knowledge-surface', 'book-wiki-card knowledge-surface']],
-    ['views/knowledge/WikiWorkspace.vue', ['entry-detail knowledge-surface']],
+    ['views/knowledge/WikiTopics.vue', ['topic-content knowledge-surface']],
     ['views/knowledge/KnowledgeChat.vue', ['chat-panel knowledge-surface']],
     ['views/knowledge/KnowledgeTasks.vue', ['research-task knowledge-surface']],
   ] as const) {

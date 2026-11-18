@@ -9,6 +9,8 @@ pub mod reader_bookmark;
 pub mod repo;
 pub mod task;
 pub mod timeline;
+pub mod wiki_review;
+pub mod wiki_topics;
 
 pub use book_wiki::*;
 pub use memory::MemoryStats;

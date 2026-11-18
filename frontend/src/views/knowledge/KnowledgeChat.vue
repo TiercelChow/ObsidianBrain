@@ -129,7 +129,8 @@
                   <div v-if="message.runId" class="answer-actions" role="group" aria-label="回答操作">
                     <UiAction :icon="View" label="查看本轮运行" appearance="quiet" @click="inspectRun(message.runId)" />
                     <UiAction v-if="message.unsavedAnswer" :icon="DocumentAdd" label="补存到会话历史" appearance="quiet" :disabled="searching" :loading="savingHistoryRunId === message.runId" @click="persistRecoveredAnswer(message)" />
-                    <UiAction v-if="!message.interruption && !message.unsavedAnswer" :icon="Checked" label="保存到 Wiki 待审核候选" appearance="quiet" :loading="savingRunId === message.runId" @click="saveAnswer(message)" />
+                    <UiAction v-if="!message.interruption && !message.unsavedAnswer && message.evidence?.length" :icon="DocumentAdd" label="整理回答为主题草稿" appearance="quiet" @click="openAnswerDraft(message)" />
+                    <UiAction v-if="!message.interruption && !message.unsavedAnswer"  :icon="DocumentAdd" label="留作主题待验证问题" appearance="quiet" @click="saveAnswer(message)" />
                     <UiAction v-if="!message.interruption && message.originalQuestion" :icon="Reading" label="深入研究此问题" appearance="quiet" :disabled="searching || (!!researchTransferMessageId && researchTransferMessageId !== message.id)" :loading="researchTransferMessageId === message.id" @click="openResearchTask(message)" />
                   </div>
                 </div>
@@ -249,8 +250,7 @@
         </div>
         <footer class="knowledge-modal-actions">
           <UiAction :icon="Close" label="关闭来源预览" @click="sourceVisible = false" />
-          <el-button v-if="sourceDetail && sourceDetail.entry_type !== 'external'" type="primary" @click="openSourceWorkspace">打开当前版本</el-button>
-          <el-button v-else-if="sourceCurrentEntry && sourceError && sourceCurrentEntry.entry_type !== 'external'" @click="openCurrentSource">查看当前版本（非本轮证据）</el-button>
+            <el-button v-if="sourceCurrentEntry && sourceError && sourceCurrentEntry.entry_type !== 'external'" @click="openCurrentSource">查看当前版本（非本轮证据）</el-button>
         </footer>
       </div>
     </MotionModal>
@@ -260,7 +260,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ArrowRight, ChatDotRound, ChatLineSquare, Checked, Close, DocumentAdd, Loading, Lock, Plus, Reading, Refresh, Top, View } from '@element-plus/icons-vue'
+import { ArrowRight, ChatDotRound, ChatLineSquare, Close, DocumentAdd, Loading, Lock, Plus, Reading, Refresh, Top, View } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import KnowledgeAnswerMarkdown from '@/components/knowledge/KnowledgeAnswerMarkdown.vue'
@@ -284,7 +284,6 @@ import {
   listUnfinishedQaRuns,
   listKnowledgeEntries,
   recoverCompletedQaAnswer,
-  saveKnowledgeAnswer,
   streamBookKnowledge,
   type KnowledgeBaseSummary,
   type KnowledgeConversationSummary,
@@ -343,7 +342,6 @@ const sourceError = ref('')
 const sourceCurrentEntry = ref<KnowledgeEntrySummary | null>(null)
 const sourceHtml = ref('')
 const sourceMarkdownRef = ref<HTMLElement | null>(null)
-const savingRunId = ref('')
 const researchTransferMessageId = ref('')
 const inspectorVisible = ref(false)
 const inspectorLoading = ref(false)
@@ -784,18 +782,15 @@ async function persistRecoveredAnswer(message: ChatMessage) {
   }
 }
 
-async function saveAnswer(message: ChatMessage) {
-  if (!message.runId || !activeBaseId.value) return
-  savingRunId.value = message.runId
-  try {
-    const response = await saveKnowledgeAnswer(activeBaseId.value, message.runId)
-    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '保存失败')
-    ElMessage.success('已生成待审核知识候选')
-    await router.push({ path: '/knowledge/wiki', query: { base: activeBaseId.value, review: response.result.id } })
-  } catch (error) {
-    ElMessage.error((error as Error).message)
-  } finally {
-    savingRunId.value = ''
+function saveAnswer(message: ChatMessage) {
+  if (message.runId && activeBaseId.value) {
+    void router.push({ path: '/knowledge/wiki', query: { base: activeBaseId.value, questionRun: message.runId } })
+  }
+}
+
+function openAnswerDraft(message: ChatMessage) {
+  if (message.runId && activeBaseId.value) {
+    void router.push({ path: '/knowledge/wiki', query: { base: activeBaseId.value, writebackRun: message.runId } })
   }
 }
 
@@ -849,11 +844,6 @@ function previewEvidence(message: ChatMessage, sourceIndex: number) {
 
 function openCurrentSource() {
   if (sourceCurrentEntry.value) void previewSource(sourceCurrentEntry.value)
-}
-
-function openSourceWorkspace() {
-  if (!sourceDetail.value) return
-  router.push({ path: '/knowledge/wiki', query: { base: activeBaseId.value, entry: sourceDetail.value.id } })
 }
 
 function formatConversationTime(value: string) {

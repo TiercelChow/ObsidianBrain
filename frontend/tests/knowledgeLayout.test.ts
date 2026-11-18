@@ -25,7 +25,7 @@ test('long Wiki dialogs fit their panel and scroll content before actions', asyn
     source('src/styles/knowledge.css'),
     source('src/views/knowledge/KnowledgeTasks.vue'),
     source('src/views/knowledge/WikiSettings.vue'),
-    source('src/views/knowledge/WikiWorkspace.vue'),
+    source('src/views/knowledge/WikiTopics.vue'),
   ])
 
   assert.match(shared, /\.knowledge-modal-card\s*\{[^}]*max-height:\s*calc\(100dvh - 48px\)/)
@@ -37,19 +37,19 @@ test('long Wiki dialogs fit their panel and scroll content before actions', asyn
   assert.match(tasks, /\.task-result-scroll\s*\{[^}]*padding:\s*0 24px 24px/)
   assert.match(settings, /\.skill-detail-modal\s*\{[^}]*width:\s*100%/)
   assert.match(settings, /\.skill-detail-layout\s*\{[^}]*min-height:\s*0/)
-  assert.match(workspace, /\.review-content\s*\{[^}]*overflow:\s*auto/)
+  assert.match(workspace, /\.build-coverage\s*\{[^}]*overflow:\s*auto/)
 })
 
 test('narrow Wiki navigation keeps all actions reachable and long content contained', async () => {
   const [workspace, chat, tasks] = await Promise.all([
-    source('src/views/knowledge/WikiWorkspace.vue'),
+    source('src/views/knowledge/WikiTopics.vue'),
     source('src/views/knowledge/KnowledgeChat.vue'),
     source('src/views/knowledge/KnowledgeTasks.vue'),
   ])
 
-  assert.match(workspace, /aria-label="Wiki 操作"/)
-  assert.match(workspace, /v-model="mobileActionsVisible"/)
-  assert.match(workspace, /@media \(max-width: 1100px\)/)
+  assert.match(workspace, /aria-label="主题目录"/)
+  assert.match(workspace, /\.topic-actions\s*\{[^}]*flex-wrap:\s*wrap/)
+  assert.match(workspace, /@media \(max-width: 768px\)/)
   assert.match(chat, /@media \(min-width: 769px\) and \(max-width: 1150px\)/)
   assert.match(tasks, /\.task-main footer\s*\{[^}]*flex-wrap:\s*wrap/)
   assert.match(tasks, /\.task-topline\s*\{[^}]*flex-wrap:\s*wrap/)
@@ -82,14 +82,13 @@ test('desktop Wiki headers reserve the same action height even without actions o
 test('desktop Wiki reading surfaces fill the available height without clipping their own scroll areas', async () => {
   const [shared, workspace, chat] = await Promise.all([
     source('src/styles/knowledge.css'),
-    source('src/views/knowledge/WikiWorkspace.vue'),
+    source('src/views/knowledge/WikiTopics.vue'),
     source('src/views/knowledge/KnowledgeChat.vue'),
   ])
 
-  assert.match(shared, /\.knowledge-page:has\(\.wiki-workspace\)/)
+  assert.match(shared, /\.knowledge-page:has\(\.topic-layout\)/)
   assert.match(shared, /\.knowledge-page:has\(\.chat-layout\)/)
-  assert.match(workspace, /\.entry-list\s*\{[^}]*max-height:\s*none/)
-  assert.match(workspace, /\.entry-detail\s*\{[^}]*max-height:\s*none/)
+  assert.match(workspace, /\.topic-directory, \.topic-content\s*\{[^}]*min-height:\s*0;[^}]*overflow:\s*auto/)
   assert.match(chat, /\.message-list\s*\{[^}]*min-height:\s*0;[^}]*max-height:\s*none/)
 })
 

@@ -19,7 +19,9 @@ test('Wiki links only inspect, never run or cancel work and distinguish partial 
   const item = { id:'t',base_id:'b',kind:'research',status:'completed',artifact_state:'failed' } as HomeWikiItem
   assert.deepEqual(wikiItemRoute(item), { path:'/knowledge/tasks',query:{base:'b',task:'t'} })
   assert.equal(wikiStatus(item), '报告已完成 · PPT 失败')
-  assert.deepEqual(wikiItemRoute({ ...item, kind:'review' }), {path:'/knowledge/wiki',query:{base:'b',review:'t'}})
+  assert.deepEqual(wikiItemRoute({ ...item, kind:'review' }), {path:'/knowledge/wiki',query:{base:'b',page:'t'}})
+  assert.deepEqual(wikiItemRoute({ ...item, kind:'compile' }), {path:'/knowledge/wiki',query:{base:'b'}})
+  assert.equal(wikiStatus({...item, kind:'compile', status:'partial'}), '部分完成')
   assert.equal(wikiStatus({...item, artifact_state:'ready'}), '报告与 PPT 已就绪')
 })
 test('section failures retain last success explicitly and polling requires visible running Wiki', () => {

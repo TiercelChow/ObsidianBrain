@@ -19,8 +19,12 @@ const router = createRouter({
     {
       path: '/knowledge/wiki',
       name: 'KnowledgeWiki',
-      component: () => import('@/views/knowledge/WikiWorkspace.vue'),
+      component: () => import('@/views/knowledge/WikiTopics.vue'),
       meta: { title: 'Wiki 工作台' },
+    },
+    {
+      path: '/knowledge/wiki/topics',
+      redirect: to => ({ path: '/knowledge/wiki', query: to.query }),
     },
     {
       path: '/knowledge/chat',

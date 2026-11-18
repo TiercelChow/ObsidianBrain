@@ -12,6 +12,8 @@
   disabled: true
 - id: tool-fs-search
   disabled: true
+- id: tool-working-directory
+  disabled: true
 - id: tool-skill
   disabled: true
 - id: tool-subagent-control

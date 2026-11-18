@@ -17,10 +17,8 @@ pub const AGENT_KNOWLEDGE_TOOLS: &[&str] = &[
     "knowledge_get_research_section",
     "knowledge_get_research_manifest",
     "knowledge_get_neighbors",
-    "knowledge_propose_changes",
     "knowledge_create_task",
     "knowledge_report_progress",
-    "knowledge_get_review_result",
     "knowledge_get_run_budget",
     "knowledge_request_budget_extension",
     "knowledge_report_evidence_coverage",
@@ -123,7 +121,7 @@ pub fn agent_knowledge_tool_schemas() -> Vec<Value> {
             "分页读取冻结正文、主张及旧版来源；章节只读本主题，综合须指定本任务的question_id。历史输入没有S编号，不是当前证据。metadata_offset补读元数据，source_basis_index读取保留的旧原文（即使当前span已替换）",
             object_schema(json!({"entry_id":{"type":"string"},"question_id":{"type":"string","minLength":1,"maxLength":80},"offset_chars":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000},"metadata_offset":{"type":"integer","minimum":0},"source_basis_index":{"type":"integer","minimum":0}}), &["entry_id"]),
         ),
-        tool_schema("knowledge_get_research_section", "仅在本任务综合阶段分页读取已保存章节；旧编号不是本轮证据，核对当前实体/原文后才能获得S引用", object_schema(json!({"question_id":{"type":"string","minLength":1,"maxLength":80},"offset_chars":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000}}), &["question_id"])),
+        tool_schema("knowledge_get_research_section", "仅在本任务综合阶段分页读取已保存章节。长稿编辑可用 author:章节ID 读取完整成稿。旧编号只供定位", object_schema(json!({"question_id":{"type":"string","minLength":1,"maxLength":80},"offset_chars":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000}}), &["question_id"])),
         tool_schema("knowledge_get_research_manifest", "仅在本任务综合阶段分页读取保存的发现矩阵和引用对象；可用 question_id 定向读取单章，按 offset_chars 连续补读，旧编号不是本轮证据", object_schema(json!({"question_id":{"type":"string","minLength":1,"maxLength":80},"offset_chars":{"type":"integer","minimum":0},"max_chars":{"type":"integer","minimum":1,"maximum":12000}}), &[])),
         tool_schema(
             "knowledge_get_neighbors",
@@ -133,25 +131,6 @@ pub fn agent_knowledge_tool_schemas() -> Vec<Value> {
                     "entry_id": { "type": "string" }
                 }),
                 &["entry_id"],
-            ),
-        ),
-        tool_schema(
-            "knowledge_propose_changes",
-            "提交结构化知识候选供用户审核，不直接修改正式知识",
-            object_schema(
-                json!({
-                    "knowledge_base_id": { "type": "string" },
-                    "title": { "type": "string", "minLength": 1, "maxLength": 200 },
-                    "reason": { "type": "string", "maxLength": 2000 },
-                    "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 200 },
-                    "candidates": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "type": "object" } }
-                }),
-                &[
-                    "knowledge_base_id",
-                    "title",
-                    "idempotency_key",
-                    "candidates",
-                ],
             ),
         ),
         tool_schema(
@@ -178,16 +157,6 @@ pub fn agent_knowledge_tool_schemas() -> Vec<Value> {
                     "message": { "type": "string", "maxLength": 500 }
                 }),
                 &["phase", "percent", "message"],
-            ),
-        ),
-        tool_schema(
-            "knowledge_get_review_result",
-            "读取当前授权知识库中的变更集审核结果",
-            object_schema(
-                json!({
-                    "change_set_id": { "type": "string" }
-                }),
-                &["change_set_id"],
             ),
         ),
         tool_schema(
@@ -368,6 +337,24 @@ pub fn call_agent_knowledge_tool(
             })?;
             let task = store.get_task(task_id)?;
             require_scope(&grant, &task.knowledge_base_id)?;
+            if let Some(chapter) = args.question_id.strip_prefix("author:") {
+                let checkpoint = &run.input["research_author_checkpoint"];
+                if checkpoint["slot"] != "edit" {
+                    return Err(BrainError::KnowledgeValidation(
+                        "长报告章节只在全文编辑阶段开放".into(),
+                    ));
+                }
+                let generation = checkpoint["generation"].as_str().ok_or_else(|| {
+                    BrainError::KnowledgeValidation("全文编辑缺少成稿版本".into())
+                })?;
+                return store.read_research_author_chapter_page(
+                    task_id,
+                    generation,
+                    chapter,
+                    args.offset_chars.unwrap_or(0),
+                    args.max_chars.unwrap_or(12_000),
+                );
+            }
             store.read_research_section_page(
                 task_id,
                 &args.question_id,
@@ -454,22 +441,6 @@ pub fn call_agent_knowledge_tool(
                 "relations": entry.relations,
             }))
         }
-        "knowledge_propose_changes" => {
-            let args: ProposeChangesArgs = parse_arguments(arguments)?;
-            require_scope(&grant, &args.knowledge_base_id)?;
-            let change_set = store.create_semantic_change_set(
-                &args.knowledge_base_id,
-                &grant.run_id,
-                &args.title,
-                args.reason
-                    .as_deref()
-                    .unwrap_or("Agent 通过受控工具提交知识候选"),
-                &format!("agent-tool:{}:{}", grant.run_id, args.idempotency_key),
-                &args.candidates,
-            )?;
-            serde_json::to_value(change_set)
-                .map_err(|error| BrainError::Internal(format!("变更集序列化失败: {error}")))
-        }
         "knowledge_create_task" => {
             let args: CreateTaskArgs = parse_arguments(arguments)?;
             require_scope(&grant, &args.knowledge_base_id)?;
@@ -499,13 +470,6 @@ pub fn call_agent_knowledge_tool(
             )?;
             serde_json::to_value(event)
                 .map_err(|error| BrainError::Internal(format!("进度事件序列化失败: {error}")))
-        }
-        "knowledge_get_review_result" => {
-            let args: ReviewArgs = parse_arguments(arguments)?;
-            let change_set = store.get_change_set(&args.change_set_id)?;
-            require_scope(&grant, &change_set.knowledge_base_id)?;
-            serde_json::to_value(change_set)
-                .map_err(|error| BrainError::Internal(format!("审核结果序列化失败: {error}")))
         }
         _ => unreachable!("agent tool allowlist and dispatcher must stay aligned"),
     }
@@ -667,16 +631,6 @@ struct ResearchManifestArgs {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ProposeChangesArgs {
-    knowledge_base_id: String,
-    title: String,
-    reason: Option<String>,
-    idempotency_key: String,
-    candidates: Vec<Value>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct CreateTaskArgs {
     knowledge_base_id: String,
     title: String,
@@ -691,12 +645,6 @@ struct ReportProgressArgs {
     phase: String,
     percent: f64,
     message: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ReviewArgs {
-    change_set_id: String,
 }
 
 #[cfg(test)]

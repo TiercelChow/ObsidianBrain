@@ -56,7 +56,7 @@
 
         <section v-if="isMobile || section === 'providers'" class="settings-card" :data-glass="isMobile ? 'card' : 'flat'" id="settings-providers" aria-labelledby="settings-providers-title">
           <header class="settings-section-head split provider-section-head">
-            <div><h2 id="settings-providers-title">模型供应商</h2><p>API Key 写入系统凭据库；环境变量模式使用启动进程提供的密钥。</p></div>
+            <div><h2 id="settings-providers-title">模型供应商</h2><p>页面填写的 API Key 明文保存在应用数据目录的 model-credentials.json。</p></div>
             <el-button data-icon-only type="primary" class="ui-icon-action" :icon="Plus" aria-label="新增供应商" title="新增供应商" @click="openNewProvider" />
           </header>
           <div v-if="loading" class="settings-loading"><el-icon class="is-loading"><Loading /></el-icon></div>
@@ -68,7 +68,7 @@
             <div class="provider-meta">
               <span>协议：{{ protocolLabel(provider.api_protocol) }}</span>
               <span>Base URL：{{ provider.base_url }}</span>
-              <span>凭据来源：{{ provider.credential_source === 'keychain' ? '系统凭据库' : `环境变量 ${provider.api_key_env || '—'}` }}</span>
+              <span>凭据来源：{{ provider.credential_source === 'local_file' ? '本地文件' : `环境变量 ${provider.api_key_env || '—'}` }}</span>
               <span>上下文：{{ provider.context_window == null ? '未声明' : `${formatTokenCount(provider.context_window)} tokens` }}</span>
               <span>最大输出：{{ provider.max_output_tokens == null ? '未声明' : `${formatTokenCount(provider.max_output_tokens)} tokens` }}</span>
               <span>推理：{{ reasoningPolicyLabel(provider.reasoning_policy || 'auto') }}</span>
@@ -200,7 +200,7 @@
     <MotionModal v-model="providerEditorVisible" aria-label="编辑模型供应商">
       <div class="knowledge-modal-card">
         <div class="knowledge-modal-head">
-          <div><h3>{{ providerDraft.provider_id ? '编辑供应商' : '新增供应商' }}</h3><p>keychain 模式：API Key 写入系统凭据库，数据库只存配置元数据。environment 模式：启动 ObsidianBrain 前设置好对应环境变量。</p></div>
+          <div><h3>{{ providerDraft.provider_id ? '编辑供应商' : '新增供应商' }}</h3><p>本地文件模式保存页面填写的明文密钥。环境变量模式使用应用启动时读取的变量。</p></div>
           <span v-if="providerDraft.api_key_configured" class="knowledge-status is-healthy">已配置密钥</span>
         </div>
         <div class="knowledge-modal-body provider-editor-form">
@@ -222,12 +222,12 @@
             <p v-else class="is-wide">未声明上下文时，问答与研究使用 1M 应用默认值，Runtime 上报容量后按实际值校验；不表示所有模型都支持 1M。最大输出与上下文不同，研究按正文、JSON 和推理分别预留，截断后仅扩容当前阶段；填写的供应商上限始终优先。</p>
           </section>
           <el-select v-model="providerDraft.credential_source" class="knowledge-select is-fluid" popper-class="system-select-popper" placement="bottom-start" :offset="0" :fit-input-width="true">
-            <el-option label="系统凭据库（页面填写 API Key）" value="keychain" />
+            <el-option label="本地文件（页面填写 API Key）" value="local_file" />
             <el-option label="环境变量（启动进程注入）" value="environment" />
           </el-select>
           <el-input v-if="providerDraft.credential_source === 'environment'" v-model="providerDraft.api_key_env" placeholder="API Key 环境变量，例如：CUSTOM_LLM_API_KEY" />
           <template v-else>
-            <el-input v-model="providerDraft.api_key" type="password" show-password :placeholder="providerDraft.api_key_configured ? '留空保留现有密钥' : '粘贴 API Key，保存后写入系统凭据库'" />
+            <el-input v-model="providerDraft.api_key" type="password" show-password :placeholder="providerDraft.api_key_configured ? '留空保留现有密钥' : '粘贴 API Key，保存到本地文件'" />
             <el-checkbox v-if="providerDraft.api_key_configured" v-model="providerDraft.clear_api_key">保存时清除已配置的密钥</el-checkbox>
           </template>
           <el-switch v-model="providerDraft.enabled" active-text="启用" />
@@ -416,7 +416,7 @@ const providerDraft = reactive<SaveModelProviderRequest & { api_key_configured: 
   context_window: null,
   max_output_tokens: null,
   reasoning_policy: 'auto',
-  credential_source: 'keychain',
+  credential_source: 'local_file',
   api_key_env: '',
   api_key: '',
   clear_api_key: false,
@@ -576,7 +576,7 @@ function resetProviderDraft() {
     context_window: null,
     max_output_tokens: null,
     reasoning_policy: 'auto',
-    credential_source: 'keychain',
+    credential_source: 'local_file',
     api_key_env: '',
     api_key: '',
     clear_api_key: false,

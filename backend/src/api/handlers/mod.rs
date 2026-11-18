@@ -14,3 +14,5 @@ pub mod task_attachment;
 mod timeline_tests;
 pub mod tool_handler;
 pub mod upload;
+pub mod wiki_topic_review;
+pub mod wiki_topics;

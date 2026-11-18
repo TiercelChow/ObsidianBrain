@@ -142,46 +142,12 @@ pub struct KnowledgeEntryPage {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct KnowledgeBridgeEntry {
-    #[serde(flatten)]
-    pub entry: KnowledgeEntrySummary,
-    pub degree: i64,
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct KnowledgeGraphOverview {
-    pub relation_count: i64,
-    pub orphan_entries: Vec<KnowledgeEntrySummary>,
-    pub bridge_entries: Vec<KnowledgeBridgeEntry>,
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct KnowledgeGraphPath {
-    pub entries: Vec<KnowledgeEntrySummary>,
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct KnowledgeGraphRelation {
-    pub id: String,
-    pub from_entry_id: String,
-    pub to_entry_id: String,
-    pub relation_type: String,
-    pub strength: Option<f64>,
-    pub evidence: String,
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct KnowledgeGraphSnapshot {
-    pub entries: Vec<KnowledgeEntrySummary>,
-    pub relations: Vec<KnowledgeGraphRelation>,
-    pub total_entries: i64,
-    pub truncated: bool,
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct BookKnowledgeCard {
     pub book: ReaderBook,
     pub knowledge_base: Option<KnowledgeBaseSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic_build: Option<super::wiki_topics::TopicBookBuildSummary>,
+    pub topic_draft_count: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -291,6 +257,41 @@ pub struct KnowledgeTask {
     pub updated_at: String,
 }
 
+pub const MIN_PRESENTATION_SLIDES: usize = 3;
+pub const MAX_PRESENTATION_SLIDES: usize = 24;
+pub const MAX_PRESENTATION_MINUTES: u16 = 45;
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PresentationPagination {
+    #[default]
+    Auto,
+    Fixed {
+        total_slides: usize,
+    },
+    Duration {
+        minutes: u16,
+    },
+}
+
+impl PresentationPagination {
+    pub fn validate(self) -> Result<(), String> {
+        match self {
+            Self::Fixed { total_slides }
+                if !(MIN_PRESENTATION_SLIDES..=MAX_PRESENTATION_SLIDES).contains(&total_slides) =>
+            {
+                Err(format!(
+                    "演示总页数须为 {MIN_PRESENTATION_SLIDES} 至 {MAX_PRESENTATION_SLIDES} 页，含封面"
+                ))
+            }
+            Self::Duration { minutes } if !(1..=MAX_PRESENTATION_MINUTES).contains(&minutes) => {
+                Err(format!("演示时长须为 1 至 {MAX_PRESENTATION_MINUTES} 分钟"))
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
 /// User-confirmed editorial contract; it is task input, not model evidence.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default, deny_unknown_fields)]
@@ -303,6 +304,7 @@ pub struct ResearchBrief {
     pub presentation_theme: String,
     /// Narrative material by default; Q&A slides require explicit confirmation.
     pub presentation_format: String,
+    pub presentation_pagination: PresentationPagination,
     pub emphasis: String,
 }
 
@@ -316,6 +318,7 @@ impl Default for ResearchBrief {
             depth: "standard".into(),
             presentation_theme: "editorial".into(),
             presentation_format: "narrative".into(),
+            presentation_pagination: PresentationPagination::Auto,
             emphasis: String::new(),
         }
     }
@@ -358,7 +361,7 @@ impl ResearchBrief {
         if self.emphasis.chars().count() > 500 {
             return Err("研究强调事项不能超过 500 个字符".into());
         }
-        Ok(())
+        self.presentation_pagination.validate()
     }
 }
 
@@ -437,7 +440,7 @@ impl ResearchPreflight {
 
 #[cfg(test)]
 mod research_brief_tests {
-    use super::ResearchBrief;
+    use super::{PresentationPagination, ResearchBrief};
 
     #[test]
     fn test_research_brief_rejects_unknown_presentation_theme() {
@@ -455,6 +458,7 @@ mod research_brief_tests {
         }))
         .unwrap();
         assert_eq!(old.presentation_format, "narrative");
+        assert_eq!(old.presentation_pagination, PresentationPagination::Auto);
         let mut brief = old;
         brief.presentation_format = "qa".into();
         assert!(brief.validate().is_ok());
@@ -472,6 +476,7 @@ mod research_brief_tests {
             depth: "deep".into(),
             presentation_theme: "midnight".into(),
             presentation_format: "narrative".into(),
+            presentation_pagination: PresentationPagination::Fixed { total_slides: 3 },
             emphasis: "优先比较方案的适用边界".into(),
         };
         assert!(brief.validate().is_ok());
@@ -757,6 +762,7 @@ pub struct KnowledgeConversationDetail {
 pub struct KnowledgeTaskExecution {
     pub task: KnowledgeTask,
     pub run_id: String,
+    pub report_verified: bool,
     pub evidence: Vec<KnowledgeEntrySummary>,
     pub artifacts: Vec<KnowledgeArtifact>,
 }
@@ -1053,94 +1059,6 @@ pub struct SourceDocumentSummary {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct KnowledgeChange {
-    pub id: String,
-    pub ordinal: i64,
-    pub operation: String,
-    pub object_type: String,
-    pub object_id: String,
-    pub expected_revision: Option<i64>,
-    pub classification: String,
-    pub citation_audit: Value,
-    pub impact: Value,
-    pub before: Option<Value>,
-    pub after: Value,
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct KnowledgeChangeSet {
-    pub id: String,
-    pub knowledge_base_id: String,
-    pub agent_run_id: Option<String>,
-    pub title: String,
-    pub reason: String,
-    pub risk_level: String,
-    pub status: String,
-    pub created_at: String,
-    pub resolved_at: Option<String>,
-    pub resolved_by: Option<String>,
-    pub classification_summary: Value,
-    pub citation_audit: Value,
-    pub impact_summary: Value,
-    pub changes: Vec<KnowledgeChange>,
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct SemanticCompileResult {
-    pub knowledge_base: KnowledgeBaseSummary,
-    pub change_set: KnowledgeChangeSet,
-    pub processed_sources: i64,
-    pub total_sources: i64,
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct KnowledgeCompileFragment {
-    pub ordinal: i64,
-    pub batch: i64,
-    pub source_document_id: String,
-    pub source_version_id: String,
-    pub source_span_id: String,
-    pub source_path: String,
-    pub line_start: Option<i64>,
-    pub line_end: Option<i64>,
-    pub locator: Value,
-    pub status: String,
-    pub run_id: Option<String>,
-    /// Candidate references are batch-level, not a proof of fragment coverage.
-    pub candidate_slugs: Vec<String>,
-    pub reason: Option<String>,
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct KnowledgeCompileReport {
-    pub id: String,
-    pub knowledge_base_id: String,
-    pub status: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub selected_sources: i64,
-    pub current_sources: i64,
-    pub selected_spans: i64,
-    pub planned: bool,
-    pub fragment_total: i64,
-    pub analyzed_fragments: i64,
-    pub no_material_fragments: i64,
-    pub failed_fragments: i64,
-    pub unprocessed_fragments: i64,
-    pub fragment_offset: usize,
-    pub fragment_has_more: bool,
-    pub fragments: Vec<KnowledgeCompileFragment>,
-    pub topic_total: i64,
-    pub topic_offset: usize,
-    pub topic_has_more: bool,
-    pub topics: Vec<Value>,
-    pub change_set_id: Option<String>,
-    pub error: Option<String>,
-    pub previous_report_id: Option<String>,
-    pub next_report_id: Option<String>,
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct KnowledgeArtifact {
     pub id: String,
     pub knowledge_base_id: String,
@@ -1157,24 +1075,4 @@ pub struct KnowledgeArtifact {
     pub validation_message: String,
     pub validation_details: Value,
     pub created_at: String,
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct KnowledgeHealthIssue {
-    pub code: String,
-    pub severity: String,
-    pub title: String,
-    pub detail: String,
-    pub object_ids: Vec<String>,
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct KnowledgeHealthReport {
-    pub knowledge_base_id: String,
-    pub state: String,
-    pub semantic_entry_count: i64,
-    pub source_span_count: i64,
-    pub pending_review_count: i64,
-    pub issues: Vec<KnowledgeHealthIssue>,
-    pub generated_at: String,
 }

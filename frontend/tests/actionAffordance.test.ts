@@ -30,11 +30,11 @@ test('collection transitions outrank scoped tile positioning and hover transitio
 })
 
 test('every page family participates beyond creation buttons', async () => {
-  for (const page of ['Tasks.vue','CodeRepo.vue','knowledge/WikiSettings.vue','knowledge/KnowledgeChat.vue','knowledge/WikiWorkspace.vue','knowledge/KnowledgeTasks.vue']) {
+  for (const page of ['Tasks.vue','CodeRepo.vue','knowledge/WikiSettings.vue','knowledge/KnowledgeChat.vue','knowledge/KnowledgeTasks.vue']) {
     const text = await source(`views/${page}`)
     assert.match(text, /<UiAction/, page)
   }
-  for (const page of ['knowledge/WikiSettings.vue','knowledge/KnowledgeTasks.vue','knowledge/WikiWorkspace.vue']) {
+  for (const page of ['knowledge/WikiSettings.vue','knowledge/KnowledgeTasks.vue']) {
     assert.match(await source(`views/${page}`), /<MotionSwap/, page)
   }
   const reader = await source('views/Reader.vue')

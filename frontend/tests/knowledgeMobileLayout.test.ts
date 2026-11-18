@@ -29,15 +29,15 @@ test('phone book and research cards give the body full width', async () => {
   assert.match(tasks, /\.task-main\s*\{[^}]*grid-column:\s*1 \/ -1/)
 })
 
-test('phone settings and entity reading avoid redundant persistent chrome', async () => {
+test('phone settings and topic reading avoid redundant persistent chrome', async () => {
   const [settings, workspace, research] = await Promise.all([
-    source('views/knowledge/WikiSettings.vue'), source('views/knowledge/WikiWorkspace.vue'),
+    source('views/knowledge/WikiSettings.vue'), source('views/knowledge/WikiTopics.vue'),
     source('components/knowledge/KnowledgeResearchWorkspace.vue'),
   ])
   assert.match(settings, /:view-key="isMobile \? 'feed' : section"/)
   assert.match(settings, /\.settings-card\s*\{[^}]*padding:\s*14px/)
-  assert.match(workspace, /'is-reading': Boolean\(selectedEntry\)/)
-  assert.match(workspace, /\.wiki-toolbar\.is-reading \.knowledge-search\s*\{[^}]*display:\s*none/)
+  assert.match(workspace, /readingPane\.value\.scrollIntoView\(/)
+  assert.match(workspace, /\.topic-layout\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/)
   assert.match(research, /class="research-stage-directory"/)
   assert.match(research, /stageDirectoryOpen\.value = false/)
   assert.match(settings, /class="mobile-skill-metadata-toggle"/)

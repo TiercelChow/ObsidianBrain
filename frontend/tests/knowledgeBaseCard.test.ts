@@ -22,7 +22,7 @@ test('only mobile card more actions occupy the upper right and sit above the car
   const mobileStyles = page.slice(page.indexOf('@media (max-width: 768px)'))
   assert.match(mobileStyles, /\.book-more\s*\{[^}]*position: absolute;[^}]*top: 8px;[^}]*right: 8px;[^}]*z-index: 2/)
   assert.match(mobileStyles, /\.book-card-title-row\s*\{[^}]*padding-inline-end: 44px/)
-  assert.match(mobileStyles, /\.compile-controls > \*\s*\{[^}]*position: relative;[^}]*z-index: 2/)
+  assert.match(mobileStyles, /\.topic-card-progress button\s*\{[^}]*position: relative;[^}]*z-index: 2/)
 })
 
 test('mobile initialization is available only in the more sheet and linked cards have accessible focus', async () => {
@@ -52,7 +52,7 @@ test('desktop actions span the whole card outside the content and align at the b
 test('desktop footer separates borderless utility controls from primary navigation', async () => {
   const page = await source()
   const utilities = page.match(/<div class="book-utility-actions"[\s\S]*?<\/div>/)?.[0] ?? ''
-  for (const label of ['阅读原书', '同步知识库来源', '查看编译报告', '管理知识库']) {
+  for (const label of ['阅读原书', '同步知识库来源', '管理知识库']) {
     assert.ok(utilities.includes(`label="${label}"`), label)
   }
   assert.match(utilities, /role="group"[^>]*aria-label=/)

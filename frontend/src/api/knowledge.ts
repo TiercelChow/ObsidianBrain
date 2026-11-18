@@ -1,4 +1,5 @@
 import api, { callTool } from '@/api'
+import type { TopicBookBuildSummary, TopicPage } from '@/api/wikiTopics'
 import type { ReaderBook, ToolEnvelope } from '@/api/reader'
 import { createSseDataParser } from '@/utils/sseDataParser'
 import { buildModelProviderPayload } from '@/utils/modelProviderPayload'
@@ -43,69 +44,8 @@ export interface KnowledgeBaseSummary {
 export interface BookKnowledgeCard {
   book: ReaderBook
   knowledge_base?: KnowledgeBaseSummary | null
-}
-
-export interface KnowledgeCompileFragment {
-  ordinal: number
-  batch: number
-  source_document_id: string
-  source_version_id: string
-  source_span_id: string
-  source_path: string
-  line_start: number | null
-  line_end: number | null
-  locator: Record<string, unknown>
-  status: string
-  run_id: string | null
-  candidate_slugs: string[]
-  reason: string | null
-}
-
-export interface KnowledgeCompileTopic {
-  slug: string
-  title?: string
-  outcome: string
-  reason?: string
-  analysis_contribution_count?: number
-  preserved_claim_count?: number
-  retired_claim_count?: number
-  body_coverage?: string
-  conflicts?: Array<{ claim_indices: number[]; reason: string }>
-}
-
-export interface KnowledgeCompileReport {
-  id: string
-  knowledge_base_id: string
-  status: string
-  created_at: string
-  updated_at: string
-  selected_sources: number
-  current_sources: number
-  selected_spans: number
-  planned: boolean
-  fragment_total: number
-  analyzed_fragments: number
-  no_material_fragments: number
-  failed_fragments: number
-  unprocessed_fragments: number
-  fragment_offset: number
-  fragment_has_more: boolean
-  fragments: KnowledgeCompileFragment[]
-  topic_total: number
-  topic_offset: number
-  topic_has_more: boolean
-  topics: KnowledgeCompileTopic[]
-  change_set_id: string | null
-  error: string | null
-  previous_report_id: string | null
-  next_report_id: string | null
-}
-
-export function getKnowledgeCompileReport(knowledgeBaseId: string, reportId?: string, fragmentOffset = 0, topicOffset = 0, limit = 20) {
-  return callTool('get_knowledge_compile_report', {
-    knowledge_base_id: knowledgeBaseId, report_id: reportId,
-    fragment_offset: fragmentOffset, topic_offset: topicOffset, limit,
-  }) as unknown as Promise<ToolEnvelope<{ report: KnowledgeCompileReport | null }>>
+  topic_build?: TopicBookBuildSummary
+  topic_draft_count: number
 }
 
 export interface SyncKnowledgeBaseResult {
@@ -228,6 +168,11 @@ export interface KnowledgeGraphSnapshot {
   truncated: boolean
 }
 
+export type PresentationPagination =
+  | { mode: 'auto' }
+  | { mode: 'fixed'; total_slides: number }
+  | { mode: 'duration'; minutes: number }
+
 export interface ResearchBrief {
   confirmed: boolean
   audience: 'general' | 'specialist' | 'beginner' | 'self'
@@ -236,6 +181,7 @@ export interface ResearchBrief {
   depth: 'brief' | 'standard' | 'deep'
   presentation_theme: 'editorial' | 'midnight' | 'sage'
   presentation_format: 'narrative' | 'qa'
+  presentation_pagination?: PresentationPagination
   emphasis: string
 }
 
@@ -354,7 +300,7 @@ export interface ModelProviderProfile {
   context_window?: number | null
   max_output_tokens?: number | null
   reasoning_policy?: 'auto' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-  credential_source: 'keychain' | 'environment'
+  credential_source: 'local_file' | 'environment'
   api_key_env: string
   api_key_configured: boolean
   enabled: boolean
@@ -437,6 +383,7 @@ export interface KnowledgeConversationDetail extends KnowledgeConversationSummar
 export interface KnowledgeTaskExecution {
   task: KnowledgeTask
   run_id: string
+  report_verified: boolean
   evidence: KnowledgeEntrySummary[]
   artifacts: KnowledgeArtifact[]
 }
@@ -477,6 +424,7 @@ export interface PresentationQualityReport {
   citation_coverage_percent: number
   package_part_count: number
   editable_text_and_shapes: boolean
+  estimated_duration_seconds?: number
   checks: PresentationQualityCheck[]
   summary: string
 }
@@ -716,86 +664,6 @@ export type KnowledgeChatStreamEvent =
   | { type: 'completed'; result: KnowledgeAnswer }
   | { type: 'error'; message: string }
 
-export interface KnowledgeChange {
-  id: string
-  ordinal: number
-  operation: 'create' | 'update' | 'merge' | 'split' | 'archive' | 'restore'
-  object_type: 'entry' | 'claim' | 'relation'
-  object_id: string
-  expected_revision?: number | null
-  classification: 'new' | 'update' | 'disputed'
-  citation_audit: {
-    passed: boolean
-    entry_citations: number
-    explicit_claim_citations: number
-    inherited_claims: number
-    effective_claim_citations: number
-    issues: string[]
-  }
-  impact: {
-    entries: number
-    claims: number
-    relations: number
-    citations: number
-    relation_entry_ids: string[]
-  }
-  before?: Record<string, unknown> | null
-  after: Record<string, unknown>
-}
-
-export interface KnowledgeChangeSet {
-  id: string
-  knowledge_base_id: string
-  agent_run_id?: string | null
-  title: string
-  reason: string
-  risk_level: 'low' | 'medium' | 'high'
-  status: 'proposed' | 'approved' | 'rejected' | 'applied' | 'conflicted'
-  created_at: string
-  resolved_at?: string | null
-  resolved_by?: string | null
-  classification_summary: { new: number; update: number; disputed: number; no_material: number }
-  citation_audit: { passed: boolean; historical_archive?: boolean; entry_citations: number; claim_citations: number; issues: string[] }
-  impact_summary: { entries: number; claims: number; relations: number; citations: number }
-  changes: KnowledgeChange[]
-}
-
-export interface SemanticCompileResult {
-  knowledge_base: KnowledgeBaseSummary
-  change_set: KnowledgeChangeSet
-  processed_sources: number
-  total_sources: number
-}
-
-export interface SemanticCompileQueueResult {
-  knowledge_base: KnowledgeBaseSummary
-  queued: boolean
-  message: string
-}
-
-export interface SemanticCompileCancelResult {
-  knowledge_base: KnowledgeBaseSummary
-  cancel_requested: boolean
-}
-
-export interface KnowledgeHealthIssue {
-  code: string
-  severity: 'warning' | 'error'
-  title: string
-  detail: string
-  object_ids: string[]
-}
-
-export interface KnowledgeHealthReport {
-  knowledge_base_id: string
-  state: 'healthy' | 'warning' | 'error'
-  semantic_entry_count: number
-  source_span_count: number
-  pending_review_count: number
-  issues: KnowledgeHealthIssue[]
-  generated_at: string
-}
-
 export function listBookKnowledgeBases() {
   return callTool('list_book_knowledge_bases') as unknown as Promise<
     ToolEnvelope<{ items: BookKnowledgeCard[] }>
@@ -838,45 +706,6 @@ export function deleteBookKnowledgeBase(knowledgeBaseId: string, confirmation: s
   }) as unknown as Promise<ToolEnvelope<{ deleted: boolean }>>
 }
 
-export function compileBookKnowledgeBase(knowledgeBaseId: string) {
-  return callTool('compile_book_knowledge_base', {
-    knowledge_base_id: knowledgeBaseId,
-  }) as unknown as Promise<ToolEnvelope<SemanticCompileQueueResult>>
-}
-
-export function retryKnowledgeSourceReview(knowledgeBaseId: string) {
-  return callTool('retry_knowledge_source_review', { knowledge_base_id: knowledgeBaseId }) as unknown as Promise<ToolEnvelope<SemanticCompileQueueResult>>
-}
-
-export function proposeKnowledgeEntryArchive(entryId: string, expectedRevision: number) {
-  return callTool('propose_knowledge_entry_archive', { entry_id: entryId, expected_revision: expectedRevision }) as unknown as Promise<ToolEnvelope<KnowledgeChangeSet>>
-}
-
-export function cancelBookKnowledgeCompile(knowledgeBaseId: string) {
-  return callTool('cancel_book_knowledge_compile', {
-    knowledge_base_id: knowledgeBaseId,
-  }) as unknown as Promise<ToolEnvelope<SemanticCompileCancelResult>>
-}
-
-export function listKnowledgeChangeSets(knowledgeBaseId: string, status?: KnowledgeChangeSet['status']) {
-  return callTool('list_knowledge_change_sets', {
-    knowledge_base_id: knowledgeBaseId,
-    ...(status ? { status } : {}),
-  }) as unknown as Promise<ToolEnvelope<{ change_sets: KnowledgeChangeSet[] }>>
-}
-
-export function resolveKnowledgeChangeSet(
-  changeSetId: string,
-  decision: 'approve' | 'reject',
-  note = '',
-) {
-  return callTool('resolve_knowledge_change_set', {
-    change_set_id: changeSetId,
-    decision,
-    note,
-  }) as unknown as Promise<ToolEnvelope<KnowledgeChangeSet>>
-}
-
 export function listKnowledgeEntries(
   knowledgeBaseId: string,
   options: { query?: string; entryType?: string; offset?: number; limit?: number; includeStale?: boolean } = {},
@@ -897,68 +726,6 @@ export function getKnowledgeEntry(entryId: string) {
   >
 }
 
-export function proposeKnowledgeEntryEdit(input: {
-  entryId: string
-  title: string
-  summary: string
-  contentMd: string
-  aliases: string[]
-  status: 'draft' | 'verified' | 'archived'
-  expectedRevision: number
-}) {
-  return callTool('propose_knowledge_entry_edit', {
-    entry_id: input.entryId,
-    title: input.title,
-    summary: input.summary,
-    content_md: input.contentMd,
-    aliases: input.aliases,
-    status: input.status,
-    expected_revision: input.expectedRevision,
-  }) as unknown as Promise<ToolEnvelope<KnowledgeChangeSet>>
-}
-
-export function proposeKnowledgeEntryMerge(input: {
-  targetEntryId: string
-  title: string
-  summary: string
-  contentMd: string
-  aliases: string[]
-  status: 'draft' | 'verified'
-  expectedRevision: number
-  sources: Array<{ entryId: string; expectedRevision: number }>
-}) {
-  return callTool('propose_knowledge_entry_merge', {
-    target_entry_id: input.targetEntryId,
-    title: input.title,
-    summary: input.summary,
-    content_md: input.contentMd,
-    aliases: input.aliases,
-    status: input.status,
-    expected_revision: input.expectedRevision,
-    sources: input.sources.map(source => ({
-      entry_id: source.entryId,
-      expected_revision: source.expectedRevision,
-    })),
-  }) as unknown as Promise<ToolEnvelope<KnowledgeChangeSet>>
-}
-
-export function proposeKnowledgeEntrySplit(input: {
-  entryId: string
-  expectedRevision: number
-  parts: Array<{ title: string; summary: string; contentMd: string; aliases: string[] }>
-}) {
-  return callTool('propose_knowledge_entry_split', {
-    entry_id: input.entryId,
-    expected_revision: input.expectedRevision,
-    parts: input.parts.map(part => ({
-      title: part.title,
-      summary: part.summary,
-      content_md: part.contentMd,
-      aliases: part.aliases,
-    })),
-  }) as unknown as Promise<ToolEnvelope<KnowledgeChangeSet>>
-}
-
 export function proposeReaderSelection(input: {
   knowledgeBaseId: string
   sourcePath: string
@@ -970,41 +737,7 @@ export function proposeReaderSelection(input: {
     source_path: input.sourcePath,
     selection: input.selection,
     ...(input.title ? { title: input.title } : {}),
-  }) as unknown as Promise<ToolEnvelope<KnowledgeChangeSet>>
-}
-
-export function getKnowledgeGraphOverview(knowledgeBaseId: string, limit = 20) {
-  return callTool('get_knowledge_graph_overview', {
-    knowledge_base_id: knowledgeBaseId,
-    limit,
-  }) as unknown as Promise<ToolEnvelope<KnowledgeGraphOverview>>
-}
-
-export function findKnowledgeGraphPath(
-  knowledgeBaseId: string,
-  fromEntryId: string,
-  toEntryId: string,
-  maxDepth = 5,
-) {
-  return callTool('find_knowledge_graph_path', {
-    knowledge_base_id: knowledgeBaseId,
-    from_entry_id: fromEntryId,
-    to_entry_id: toEntryId,
-    max_depth: maxDepth,
-  }) as unknown as Promise<ToolEnvelope<KnowledgeGraphPath>>
-}
-
-export function getKnowledgeGraphSnapshot(knowledgeBaseId: string, limit = 120) {
-  return callTool('get_knowledge_graph_snapshot', {
-    knowledge_base_id: knowledgeBaseId,
-    limit,
-  }) as unknown as Promise<ToolEnvelope<KnowledgeGraphSnapshot>>
-}
-
-export function lintBookKnowledgeBase(knowledgeBaseId: string) {
-  return callTool('lint_book_knowledge_base', {
-    knowledge_base_id: knowledgeBaseId,
-  }) as unknown as Promise<ToolEnvelope<KnowledgeHealthReport>>
+  }) as unknown as Promise<ToolEnvelope<TopicPage>>
 }
 
 export function askBookKnowledge(knowledgeBaseId: string, question: string, conversationId?: string) {
@@ -1062,13 +795,6 @@ export async function streamBookKnowledge(
   }
   if (!completed) throw new Error('问答流在完成前意外关闭')
   return completed
-}
-
-export function saveKnowledgeAnswer(knowledgeBaseId: string, runId: string) {
-  return callTool('save_knowledge_answer', {
-    knowledge_base_id: knowledgeBaseId,
-    run_id: runId,
-  }) as unknown as Promise<ToolEnvelope<KnowledgeChangeSet>>
 }
 
 export function recoverCompletedQaAnswer(knowledgeBaseId: string, runId: string) {
@@ -1157,6 +883,14 @@ export function previewKnowledgeTaskBrief(input: {
 export function executeKnowledgeTask(taskId: string) {
   return callTool('execute_knowledge_task', {
     task_id: taskId,
+  }) as unknown as Promise<ToolEnvelope<KnowledgeTask>>
+}
+
+export function regenerateKnowledgePresentation(taskId: string, expectedUpdatedAt: string, pagination: PresentationPagination) {
+  return callTool('regenerate_knowledge_presentation', {
+    task_id: taskId,
+    expected_updated_at: expectedUpdatedAt,
+    pagination,
   }) as unknown as Promise<ToolEnvelope<KnowledgeTask>>
 }
 

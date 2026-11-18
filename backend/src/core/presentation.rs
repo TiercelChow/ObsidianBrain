@@ -8,10 +8,108 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::error::BrainError;
+use crate::models::book_wiki::{
+    PresentationPagination, ResearchBrief, ResearchFinding, MAX_PRESENTATION_SLIDES,
+    MIN_PRESENTATION_SLIDES,
+};
 
-const MIN_CONTENT_SLIDES: usize = 4;
-const MAX_CONTENT_SLIDES: usize = 12;
+mod grounding;
+pub(super) use grounding::{presentation_source_number_labels, validate_presentation_grounding};
+
+const LEGACY_MIN_CONTENT_SLIDES: usize = 4;
+const LEGACY_MAX_CONTENT_SLIDES: usize = 12;
 const MAX_SLIDE_CHARACTERS: usize = 700;
+const COVER_SECONDS: u32 = 10;
+const MIN_CONTENT_SECONDS: u32 = 15;
+const MAX_CONTENT_SECONDS: u32 = 300;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct PresentationPagingPlan {
+    pub requested: PresentationPagination,
+    pub min_total: usize,
+    pub preferred_total: usize,
+    pub max_total: usize,
+    pub speaking_seconds_limit: Option<u32>,
+}
+
+impl PresentationPagingPlan {
+    pub fn new(brief: &ResearchBrief, findings: &[ResearchFinding]) -> Self {
+        let distinct_findings = findings
+            .iter()
+            .filter(|finding| !finding.citation_indices.is_empty())
+            .map(|finding| heading_identity(&finding.finding))
+            .collect::<HashSet<_>>()
+            .len();
+        let findings_per_slide = match brief.depth.as_str() {
+            "brief" => 3,
+            "deep" => 1,
+            _ if brief.purpose == "teach" => 1,
+            _ => 2,
+        };
+        let preferred = (distinct_findings.div_ceil(findings_per_slide) + 2)
+            .clamp(MIN_PRESENTATION_SLIDES, MAX_PRESENTATION_SLIDES);
+        let mut plan = Self {
+            requested: brief.presentation_pagination,
+            min_total: (preferred / 2 + 1).max(MIN_PRESENTATION_SLIDES),
+            preferred_total: preferred,
+            max_total: (preferred + 2).min(MAX_PRESENTATION_SLIDES),
+            speaking_seconds_limit: None,
+        };
+        match plan.requested {
+            PresentationPagination::Auto => {}
+            PresentationPagination::Fixed { total_slides } => {
+                plan.min_total = total_slides;
+                plan.preferred_total = total_slides;
+                plan.max_total = total_slides;
+            }
+            PresentationPagination::Duration { minutes } => {
+                let seconds = u32::from(minutes) * 60;
+                // Reserve enough presentation time for the ordinary pace of a slide.
+                // The per-slide times and their sum are checked independently.
+                let available = seconds.saturating_sub(COVER_SECONDS) as usize;
+                let cap =
+                    (available / MIN_CONTENT_SECONDS as usize + 1).max(MIN_PRESENTATION_SLIDES);
+                plan.max_total = plan.max_total.min(cap);
+                let comfortable = (available / 30 + 1).max(MIN_PRESENTATION_SLIDES);
+                plan.preferred_total = plan.preferred_total.min(plan.max_total).min(comfortable);
+                plan.min_total = plan.min_total.min(plan.preferred_total);
+                plan.speaking_seconds_limit = Some(seconds);
+            }
+        }
+        plan
+    }
+
+    pub fn validate(&self, spec: &PresentationSpec) -> Result<(), BrainError> {
+        if spec.schema_version != "2.0" {
+            return Err(validation_error(
+                "新演示必须提供 2.0 规格中的逐页职责和讲述时长",
+            ));
+        }
+        let total = spec.slides.len() + 1;
+        if !(self.min_total..=self.max_total).contains(&total) {
+            if self.min_total == self.max_total {
+                return Err(validation_error(&format!(
+                    "演示总页数必须为 {} 页（含封面及附录），当前为 {total} 页",
+                    self.min_total
+                )));
+            }
+            return Err(validation_error(&format!(
+                "当前材料的演示总页数范围为 {} 至 {} 页（含封面及附录），当前为 {total} 页",
+                self.min_total, self.max_total
+            )));
+        }
+        if let Some(limit) = self.speaking_seconds_limit {
+            let actual =
+                speaking_seconds(spec).ok_or_else(|| validation_error("缺少逐页讲述时长"))?;
+            if actual > limit {
+                return Err(validation_error(&format!(
+                    "预计讲述 {actual} 秒，超过指定的 {limit} 秒。请压缩相邻论点或减少可选内容"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -49,10 +147,28 @@ pub enum PresentationLayout {
     Summary,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PresentationRole {
+    Context,
+    Claim,
+    Mechanism,
+    Comparison,
+    Evidence,
+    Boundary,
+    Action,
+    Summary,
+    Appendix,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PresentationSlide {
     pub layout: PresentationLayout,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<PresentationRole>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_seconds: Option<u32>,
     #[serde(default)]
     pub eyebrow: String,
     pub title: String,
@@ -171,6 +287,10 @@ pub struct PresentationQualityReport {
     pub citation_coverage_percent: usize,
     pub package_part_count: usize,
     pub editable_text_and_shapes: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<PresentationPagingPlan>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_duration_seconds: Option<u32>,
     pub checks: Vec<PresentationQualityCheck>,
     pub summary: String,
 }
@@ -184,11 +304,16 @@ pub fn parse_presentation_spec(
         return Err(validation_error("演示策划返回了空结果"));
     }
     let mut deserializer = serde_json::Deserializer::from_str(trimmed);
-    let mut spec = PresentationSpec::deserialize(&mut deserializer)
-        .map_err(|error| validation_error(&format!("演示策划 JSON 解析失败: {error}")))?;
-    deserializer
-        .end()
-        .map_err(|error| validation_error(&format!("演示策划包含多余内容: {error}")))?;
+    let mut spec = match PresentationSpec::deserialize(&mut deserializer) {
+        Ok(spec) => {
+            deserializer
+                .end()
+                .map_err(|error| validation_error(&format!("演示策划包含多余内容: {error}")))?;
+            spec
+        }
+        Err(error) => normalize_presentation_payloads(trimmed)
+            .ok_or_else(|| validation_error(&format!("演示策划 JSON 解析失败: {error}")))?,
+    };
     for slide in &mut spec.slides {
         slide.citations = slide
             .citations
@@ -200,21 +325,81 @@ pub fn parse_presentation_spec(
     Ok(spec)
 }
 
+fn normalize_presentation_payloads(answer: &str) -> Option<PresentationSpec> {
+    let mut value: serde_json::Value = serde_json::from_str(answer).ok()?;
+    if value["schema_version"] != "2.0" {
+        return None;
+    }
+    let mut changed = false;
+    for slide in value["slides"].as_array_mut()? {
+        let slide = slide.as_object_mut()?;
+        let (layout, fields): (&str, &[&str]) = match slide.get("layout")?.as_str()? {
+            "metric" => ("metric", &["value", "label", "context"]),
+            "chart" => (
+                "chart",
+                &["unit", "context", "categories", "values", "highlight_index"],
+            ),
+            "relationship" => ("relationship", &["center", "related"]),
+            _ => continue,
+        };
+        if slide.contains_key(layout) {
+            continue;
+        }
+        let payload: serde_json::Map<_, _> = fields
+            .iter()
+            .filter_map(|&field| slide.remove(field).map(|value| (field.to_owned(), value)))
+            .collect();
+        if !payload.is_empty() {
+            slide.insert(layout.into(), serde_json::Value::Object(payload));
+            changed = true;
+        }
+    }
+    changed
+        .then(|| serde_json::from_value(value).ok())
+        .flatten()
+}
+
 pub fn validate_presentation_spec(
     spec: &PresentationSpec,
     evidence_count: usize,
 ) -> Result<PresentationPlanValidation, BrainError> {
-    if spec.schema_version != "1.0" {
-        return Err(validation_error("schema_version 必须为 1.0"));
-    }
+    let legacy = match spec.schema_version.as_str() {
+        "1.0" => true,
+        "2.0" => false,
+        _ => return Err(validation_error("schema_version 必须为 1.0 或 2.0")),
+    };
     validate_text("title", &spec.title, 80, false)?;
     validate_text("subtitle", &spec.subtitle, 120, false)?;
     validate_text("audience", &spec.audience, 120, false)?;
     validate_text("core_message", &spec.core_message, 180, false)?;
-    if !(MIN_CONTENT_SLIDES..=MAX_CONTENT_SLIDES).contains(&spec.slides.len()) {
+    let content_range = if legacy {
+        LEGACY_MIN_CONTENT_SLIDES..=LEGACY_MAX_CONTENT_SLIDES
+    } else {
+        (MIN_PRESENTATION_SLIDES - 1)..=(MAX_PRESENTATION_SLIDES - 1)
+    };
+    if !content_range.contains(&spec.slides.len()) {
         return Err(validation_error(&format!(
-            "slides 必须包含 {MIN_CONTENT_SLIDES} 到 {MAX_CONTENT_SLIDES} 页内容"
+            "slides 须包含 {} 至 {} 页，封面由系统渲染",
+            content_range.start(),
+            content_range.end()
         )));
+    }
+    let closing_index = spec
+        .slides
+        .iter()
+        .rposition(|slide| slide.role != Some(PresentationRole::Appendix));
+    if !legacy
+        && !closing_index.is_some_and(|index| {
+            index >= 1
+                && matches!(
+                    spec.slides[index].role,
+                    Some(PresentationRole::Summary | PresentationRole::Action)
+                )
+        })
+    {
+        return Err(validation_error(
+            "正文须以结论或行动页收束，附录排在正文之后",
+        ));
     }
 
     let mut layouts = HashSet::new();
@@ -223,6 +408,9 @@ pub fn validate_presentation_spec(
     let mut cited_slide_count = 0;
     for (index, slide) in spec.slides.iter().enumerate() {
         let field = format!("slides[{index}]");
+        if !legacy {
+            validate_presentation_role(&field, slide, index, closing_index)?;
+        }
         validate_text(&format!("{field}.eyebrow"), &slide.eyebrow, 24, true)?;
         validate_text(&format!("{field}.title"), &slide.title, 60, false)?;
         validate_text(&format!("{field}.takeaway"), &slide.takeaway, 140, false)?;
@@ -256,18 +444,25 @@ pub fn validate_presentation_spec(
         if slide.citations.len() > 4 {
             return Err(validation_error(&format!("{field}.citations 最多 4 个")));
         }
+        let mut unique_citations = HashSet::new();
         for citation in &slide.citations {
-            let ordinal = citation
-                .strip_prefix('S')
-                .and_then(|value| value.parse::<usize>().ok())
+            let ordinal = citation_ordinal(citation)
                 .ok_or_else(|| validation_error(&format!("{field} 引用 {citation} 格式无效")))?;
             if ordinal == 0 || ordinal > evidence_count {
                 return Err(validation_error(&format!(
                     "{field} 引用 {citation} 不在当前证据 S1..S{evidence_count} 中"
                 )));
             }
+            if !legacy && !unique_citations.insert(ordinal) {
+                return Err(validation_error(&format!("{field} 重复引用 {citation}")));
+            }
         }
-        if evidence_count > 0 && index + 1 < spec.slides.len() && slide.citations.is_empty() {
+        let closing = if legacy {
+            index + 1 == spec.slides.len()
+        } else {
+            closing_index == Some(index)
+        };
+        if evidence_count > 0 && !closing && slide.citations.is_empty() {
             return Err(validation_error(&format!(
                 "{field}.citations 不能为空：只有最后的收束页可以不带引用"
             )));
@@ -284,10 +479,62 @@ pub fn validate_presentation_spec(
             "5 页以上的演示文稿至少需要 3 种布局，避免整篇重复",
         ));
     }
+    if !legacy {
+        validate_slide_text_fit(spec)?;
+    }
     Ok(PresentationPlanValidation {
         content_slide_count: spec.slides.len(),
         layout_count: layouts.len(),
         cited_slide_count,
+    })
+}
+
+fn validate_presentation_role(
+    field: &str,
+    slide: &PresentationSlide,
+    index: usize,
+    closing_index: Option<usize>,
+) -> Result<(), BrainError> {
+    let role = slide
+        .role
+        .ok_or_else(|| validation_error(&format!("{field}.role 须交代页面职责")))?;
+    if role == PresentationRole::Appendix && closing_index.is_some_and(|closing| index < closing) {
+        return Err(validation_error(&format!("{field} 附录须排在正文收束之后")));
+    }
+    let seconds_are_valid = if role == PresentationRole::Appendix {
+        slide.estimated_seconds == Some(0)
+    } else {
+        slide
+            .estimated_seconds
+            .is_some_and(|seconds| (MIN_CONTENT_SECONDS..=MAX_CONTENT_SECONDS).contains(&seconds))
+    };
+    if !seconds_are_valid {
+        return Err(validation_error(&format!("{field}.estimated_seconds 须为正文 {MIN_CONTENT_SECONDS} 至 {MAX_CONTENT_SECONDS} 秒，附录为 0")));
+    }
+    if index == 0 && matches!(role, PresentationRole::Summary | PresentationRole::Action) {
+        return Err(validation_error(&format!(
+            "{field} 正文首张须建立听众理解后续内容所需的主题或判断"
+        )));
+    }
+    if slide
+        .chart
+        .as_ref()
+        .is_some_and(|chart| chart.context.trim().is_empty())
+    {
+        return Err(validation_error(&format!(
+            "{field}.chart.context 须交代可见的比较条件"
+        )));
+    }
+    Ok(())
+}
+
+fn citation_ordinal(citation: &str) -> Option<usize> {
+    citation.strip_prefix('S')?.parse().ok()
+}
+
+fn speaking_seconds(spec: &PresentationSpec) -> Option<u32> {
+    spec.slides.iter().try_fold(COVER_SECONDS, |sum, slide| {
+        sum.checked_add(slide.estimated_seconds?)
     })
 }
 
@@ -569,6 +816,13 @@ fn normalize_citation(value: &str) -> Result<String, BrainError> {
 }
 
 fn slide_character_count(slide: &PresentationSlide) -> usize {
+    slide_text_fields(slide)
+        .into_iter()
+        .map(|value| value.chars().count())
+        .sum()
+}
+
+fn slide_text_fields(slide: &PresentationSlide) -> Vec<&str> {
     let mut values = vec![
         slide.eyebrow.as_str(),
         slide.title.as_str(),
@@ -611,7 +865,7 @@ fn slide_character_count(slide: &PresentationSlide) -> usize {
             ]);
         }
     }
-    values.into_iter().map(|value| value.chars().count()).sum()
+    values
 }
 
 fn validation_error(message: &str) -> BrainError {
@@ -677,15 +931,14 @@ pub fn render_pptx(spec: &PresentationSpec, output: &Path) -> Result<(), BrainEr
     }
 
     let palette = Palette::for_theme(spec.theme);
-    let mut slides = vec![cover_slide_xml(spec, &palette, slide_count)];
-    slides.extend(
+    let slides = std::iter::once(cover_slide_shapes(spec, &palette)).chain(
         spec.slides
             .iter()
-            .enumerate()
-            .map(|(index, slide)| content_slide_xml(slide, &palette, index + 2, slide_count)),
+            .map(|slide| content_slide_shapes(slide, &palette)),
     );
-    for (offset, xml) in slides.into_iter().enumerate() {
-        let number = offset + 1;
+    for (index, shapes) in slides.enumerate() {
+        let number = index + 1;
+        let xml = slide_document(palette.background, &shapes, number, slide_count);
         write_part(
             &mut archive,
             options,
@@ -753,7 +1006,7 @@ pub fn validate_pptx(path: &Path) -> Result<PresentationValidation, BrainError> 
             }
         }
     }
-    if slide_count < MIN_CONTENT_SLIDES + 1 {
+    if slide_count < MIN_PRESENTATION_SLIDES {
         return Err(BrainError::Internal(format!(
             "PPTX 可显示页面不足：{slide_count} 页"
         )));
@@ -789,7 +1042,7 @@ pub fn build_presentation_quality_report(
         package.slide_count, plan.layout_count
     );
     PresentationQualityReport {
-        schema_version: "1.0".to_string(),
+        schema_version: spec.schema_version.clone(),
         slide_count: package.slide_count,
         content_slide_count: plan.content_slide_count,
         theme: theme_name(spec.theme).to_string(),
@@ -799,6 +1052,8 @@ pub fn build_presentation_quality_report(
         citation_coverage_percent,
         package_part_count: package.package_part_count,
         editable_text_and_shapes: true,
+        pagination: None,
+        estimated_duration_seconds: speaking_seconds(spec),
         checks: vec![
             PresentationQualityCheck {
                 code: "spec_contract".to_string(),
@@ -849,6 +1104,29 @@ struct Palette {
     inverse: &'static str,
 }
 
+struct SlideShape {
+    xml: String,
+    overflowing_field: Option<String>,
+}
+
+fn validate_slide_text_fit(spec: &PresentationSpec) -> Result<(), BrainError> {
+    let palette = Palette::for_theme(spec.theme);
+    let slides = std::iter::once(cover_slide_shapes(spec, &palette)).chain(
+        spec.slides
+            .iter()
+            .map(|slide| content_slide_shapes(slide, &palette)),
+    );
+    for (index, shapes) in slides.enumerate() {
+        if let Some(field) = shapes.into_iter().find_map(|shape| shape.overflowing_field) {
+            return Err(validation_error(&format!(
+                "第 {} 页的「{field}」超过所选版式在可读字号下的容量，请缩短或拆页",
+                index + 1
+            )));
+        }
+    }
+    Ok(())
+}
+
 impl Palette {
     fn for_theme(theme: PresentationTheme) -> Self {
         match theme {
@@ -883,15 +1161,15 @@ impl Palette {
     }
 }
 
-fn cover_slide_xml(spec: &PresentationSpec, palette: &Palette, total: usize) -> String {
-    let shapes = [
+fn cover_slide_shapes(spec: &PresentationSpec, palette: &Palette) -> Vec<SlideShape> {
+    vec![
         shape(
             2,
             "ppt-layout:cover",
             "rect",
-            8_950_000,
+            10_980_000,
             0,
-            3_242_000,
+            1_212_000,
             6_858_000,
             palette.accent,
             palette.accent,
@@ -914,7 +1192,7 @@ fn cover_slide_xml(spec: &PresentationSpec, palette: &Palette, total: usize) -> 
             "封面标题",
             720_000,
             1_420_000,
-            7_500_000,
+            9_550_000,
             1_650_000,
             &spec.title,
             4_200,
@@ -927,7 +1205,7 @@ fn cover_slide_xml(spec: &PresentationSpec, palette: &Palette, total: usize) -> 
             "核心信息",
             760_000,
             3_330_000,
-            6_900_000,
+            9_450_000,
             1_050_000,
             &spec.core_message,
             2_150,
@@ -940,7 +1218,7 @@ fn cover_slide_xml(spec: &PresentationSpec, palette: &Palette, total: usize) -> 
             "副标题",
             760_000,
             5_530_000,
-            7_200_000,
+            9_450_000,
             360_000,
             &spec.subtitle,
             1_250,
@@ -948,32 +1226,12 @@ fn cover_slide_xml(spec: &PresentationSpec, palette: &Palette, total: usize) -> 
             false,
             "l",
         ),
-        text_box(
-            7,
-            "受众",
-            9_360_000,
-            4_850_000,
-            2_200_000,
-            1_050_000,
-            &format!("为谁而讲\n{}", spec.audience),
-            1_300,
-            palette.inverse,
-            true,
-            "l",
-        ),
     ]
-    .join("");
-    slide_document(palette.background, &shapes, 1, total)
 }
 
-fn content_slide_xml(
-    slide: &PresentationSlide,
-    palette: &Palette,
-    index: usize,
-    total: usize,
-) -> String {
-    let mut shapes = String::new();
-    shapes.push_str(&text_box(
+fn content_slide_shapes(slide: &PresentationSlide, palette: &Palette) -> Vec<SlideShape> {
+    let mut shapes = Vec::new();
+    shapes.push(text_box(
         2,
         &format!("ppt-layout:{}", layout_name(slide.layout)),
         720_000,
@@ -990,7 +1248,7 @@ fn content_slide_xml(
         true,
         "l",
     ));
-    shapes.push_str(&text_box(
+    shapes.push(text_box(
         3,
         "页面标题",
         720_000,
@@ -1014,12 +1272,12 @@ fn content_slide_xml(
         PresentationLayout::Evidence => render_evidence(&mut shapes, slide, palette),
         PresentationLayout::Summary => render_summary(&mut shapes, slide, palette),
     }
-    shapes.push_str(&citation_footer(slide, palette));
-    slide_document(palette.background, &shapes, index, total)
+    shapes.push(citation_footer(slide, palette));
+    shapes
 }
 
-fn render_statement(out: &mut String, slide: &PresentationSlide, p: &Palette) {
-    out.push_str(&shape(
+fn render_statement(out: &mut Vec<SlideShape>, slide: &PresentationSlide, p: &Palette) {
+    out.push(shape(
         4,
         "强调线",
         "rect",
@@ -1030,7 +1288,7 @@ fn render_statement(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         p.accent_two,
         p.accent_two,
     ));
-    out.push_str(&text_box(
+    out.push(text_box(
         5,
         "核心观点",
         1_120_000,
@@ -1043,7 +1301,7 @@ fn render_statement(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         true,
         "l",
     ));
-    out.push_str(&bullet_box(
+    out.push(bullet_box(
         6,
         "补充要点",
         1_140_000,
@@ -1056,8 +1314,8 @@ fn render_statement(out: &mut String, slide: &PresentationSlide, p: &Palette) {
     ));
 }
 
-fn render_split(out: &mut String, slide: &PresentationSlide, p: &Palette) {
-    out.push_str(&text_box(
+fn render_split(out: &mut Vec<SlideShape>, slide: &PresentationSlide, p: &Palette) {
+    out.push(text_box(
         4,
         "页面结论",
         760_000,
@@ -1070,7 +1328,7 @@ fn render_split(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         false,
         "l",
     ));
-    out.push_str(&shape(
+    out.push(shape(
         5,
         "分隔线",
         "rect",
@@ -1088,7 +1346,7 @@ fn render_split(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         if let Some(panel) = panel {
             let id = if offset < 1_000_000 { 10 } else { 20 };
             let accent = if id == 10 { p.accent } else { p.accent_two };
-            out.push_str(&text_box(
+            out.push(text_box(
                 id,
                 "分栏标签",
                 offset,
@@ -1101,7 +1359,7 @@ fn render_split(out: &mut String, slide: &PresentationSlide, p: &Palette) {
                 true,
                 "l",
             ));
-            out.push_str(&text_box(
+            out.push(text_box(
                 id + 1,
                 "分栏标题",
                 offset,
@@ -1114,7 +1372,7 @@ fn render_split(out: &mut String, slide: &PresentationSlide, p: &Palette) {
                 true,
                 "l",
             ));
-            out.push_str(&bullet_box(
+            out.push(bullet_box(
                 id + 2,
                 "分栏要点",
                 offset,
@@ -1129,8 +1387,8 @@ fn render_split(out: &mut String, slide: &PresentationSlide, p: &Palette) {
     }
 }
 
-fn render_process(out: &mut String, slide: &PresentationSlide, p: &Palette) {
-    out.push_str(&text_box(
+fn render_process(out: &mut Vec<SlideShape>, slide: &PresentationSlide, p: &Palette) {
+    out.push(text_box(
         4,
         "页面结论",
         760_000,
@@ -1144,7 +1402,7 @@ fn render_process(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         "l",
     ));
     let width = 10_400_000 / slide.steps.len().max(1);
-    out.push_str(&shape(
+    out.push(shape(
         5,
         "流程连线",
         "rect",
@@ -1158,7 +1416,7 @@ fn render_process(out: &mut String, slide: &PresentationSlide, p: &Palette) {
     for (ordinal, step) in slide.steps.iter().enumerate() {
         let x = 760_000 + ordinal * width;
         let id = 10 + ordinal * 3;
-        out.push_str(&shape(
+        out.push(shape(
             id,
             "步骤编号",
             "ellipse",
@@ -1169,7 +1427,7 @@ fn render_process(out: &mut String, slide: &PresentationSlide, p: &Palette) {
             p.accent,
             p.accent,
         ));
-        out.push_str(&text_box(
+        out.push(text_box(
             id + 1,
             "步骤数字",
             x + 270_000,
@@ -1182,7 +1440,7 @@ fn render_process(out: &mut String, slide: &PresentationSlide, p: &Palette) {
             true,
             "ctr",
         ));
-        out.push_str(&text_box(
+        out.push(text_box(
             id + 2,
             "步骤内容",
             x,
@@ -1198,9 +1456,9 @@ fn render_process(out: &mut String, slide: &PresentationSlide, p: &Palette) {
     }
 }
 
-fn render_metric(out: &mut String, slide: &PresentationSlide, p: &Palette) {
+fn render_metric(out: &mut Vec<SlideShape>, slide: &PresentationSlide, p: &Palette) {
     let Some(metric) = &slide.metric else { return };
-    out.push_str(&text_box(
+    out.push(text_box(
         4,
         "数字",
         760_000,
@@ -1213,7 +1471,7 @@ fn render_metric(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         true,
         "l",
     ));
-    out.push_str(&text_box(
+    out.push(text_box(
         5,
         "数字标签",
         800_000,
@@ -1226,7 +1484,7 @@ fn render_metric(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         true,
         "l",
     ));
-    out.push_str(&text_box(
+    out.push(text_box(
         6,
         "数字语境",
         800_000,
@@ -1239,7 +1497,7 @@ fn render_metric(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         false,
         "l",
     ));
-    out.push_str(&shape(
+    out.push(shape(
         7,
         "数字分隔",
         "rect",
@@ -1250,7 +1508,7 @@ fn render_metric(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         p.accent_soft,
         p.accent_soft,
     ));
-    out.push_str(&text_box(
+    out.push(text_box(
         8,
         "数字结论",
         5_650_000,
@@ -1263,7 +1521,7 @@ fn render_metric(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         true,
         "l",
     ));
-    out.push_str(&bullet_box(
+    out.push(bullet_box(
         9,
         "数字要点",
         5_680_000,
@@ -1276,9 +1534,9 @@ fn render_metric(out: &mut String, slide: &PresentationSlide, p: &Palette) {
     ));
 }
 
-fn render_chart(out: &mut String, slide: &PresentationSlide, p: &Palette) {
+fn render_chart(out: &mut Vec<SlideShape>, slide: &PresentationSlide, p: &Palette) {
     let Some(chart) = &slide.chart else { return };
-    out.push_str(&text_box(
+    out.push(text_box(
         4,
         "图表结论",
         760_000,
@@ -1293,7 +1551,7 @@ fn render_chart(out: &mut String, slide: &PresentationSlide, p: &Palette) {
     ));
     let maximum = chart.values.iter().copied().fold(0.0_f64, f64::max);
     if !chart.context.is_empty() {
-        out.push_str(&text_box(
+        out.push(text_box(
             5,
             "图表条件",
             780_000,
@@ -1317,7 +1575,7 @@ fn render_chart(out: &mut String, slide: &PresentationSlide, p: &Palette) {
             p.accent
         };
         let id = 10 + index * 5;
-        out.push_str(&text_box(
+        out.push(text_box(
             id,
             "图表类别",
             780_000,
@@ -1330,7 +1588,7 @@ fn render_chart(out: &mut String, slide: &PresentationSlide, p: &Palette) {
             true,
             "l",
         ));
-        out.push_str(&shape(
+        out.push(shape(
             id + 1,
             "图表刻度轨",
             "roundRect",
@@ -1341,7 +1599,7 @@ fn render_chart(out: &mut String, slide: &PresentationSlide, p: &Palette) {
             p.accent_soft,
             p.accent_soft,
         ));
-        out.push_str(&shape(
+        out.push(shape(
             id + 2,
             "图表数据条",
             "roundRect",
@@ -1352,7 +1610,7 @@ fn render_chart(out: &mut String, slide: &PresentationSlide, p: &Palette) {
             color,
             color,
         ));
-        out.push_str(&text_box(
+        out.push(text_box(
             id + 3,
             "图表数值",
             9_250_000,
@@ -1368,11 +1626,11 @@ fn render_chart(out: &mut String, slide: &PresentationSlide, p: &Palette) {
     }
 }
 
-fn render_relationship(out: &mut String, slide: &PresentationSlide, p: &Palette) {
+fn render_relationship(out: &mut Vec<SlideShape>, slide: &PresentationSlide, p: &Palette) {
     let Some(relationship) = &slide.relationship else {
         return;
     };
-    out.push_str(&text_box(
+    out.push(text_box(
         4,
         "关系结论",
         760_000,
@@ -1389,7 +1647,7 @@ fn render_relationship(out: &mut String, slide: &PresentationSlide, p: &Palette)
     for (index, related) in relationship.related.iter().enumerate() {
         let y = 2_090_000 + index * row_height;
         let id = 20 + index * 5;
-        out.push_str(&shape(
+        out.push(shape(
             id,
             "关系连接线",
             "rect",
@@ -1400,7 +1658,7 @@ fn render_relationship(out: &mut String, slide: &PresentationSlide, p: &Palette)
             p.accent_soft,
             p.accent_soft,
         ));
-        out.push_str(&text_box(
+        out.push(text_box(
             id + 1,
             "关系标签",
             4_020_000,
@@ -1413,7 +1671,7 @@ fn render_relationship(out: &mut String, slide: &PresentationSlide, p: &Palette)
             true,
             "ctr",
         ));
-        out.push_str(&shape(
+        out.push(shape(
             id + 2,
             "相关概念",
             "roundRect",
@@ -1424,7 +1682,7 @@ fn render_relationship(out: &mut String, slide: &PresentationSlide, p: &Palette)
             p.accent_soft,
             p.accent_soft,
         ));
-        out.push_str(&text_box(
+        out.push(text_box(
             id + 3,
             "相关概念文字",
             5_850_000,
@@ -1438,7 +1696,7 @@ fn render_relationship(out: &mut String, slide: &PresentationSlide, p: &Palette)
             "l",
         ));
     }
-    out.push_str(&shape(
+    out.push(shape(
         10,
         "中心概念",
         "roundRect",
@@ -1449,7 +1707,7 @@ fn render_relationship(out: &mut String, slide: &PresentationSlide, p: &Palette)
         p.accent,
         p.accent,
     ));
-    out.push_str(&text_box(
+    out.push(text_box(
         11,
         "中心概念文字",
         1_060_000,
@@ -1468,15 +1726,11 @@ fn render_relationship(out: &mut String, slide: &PresentationSlide, p: &Palette)
 }
 
 fn format_chart_value(value: f64) -> String {
-    if value.fract().abs() < f64::EPSILON {
-        format!("{value:.0}")
-    } else {
-        format!("{value:.1}")
-    }
+    value.to_string()
 }
 
-fn render_quote(out: &mut String, slide: &PresentationSlide, p: &Palette) {
-    out.push_str(&text_box(
+fn render_quote(out: &mut Vec<SlideShape>, slide: &PresentationSlide, p: &Palette) {
+    out.push(text_box(
         4,
         "引号",
         760_000,
@@ -1489,7 +1743,7 @@ fn render_quote(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         true,
         "l",
     ));
-    out.push_str(&text_box(
+    out.push(text_box(
         5,
         "引语",
         1_650_000,
@@ -1502,7 +1756,7 @@ fn render_quote(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         true,
         "l",
     ));
-    out.push_str(&text_box(
+    out.push(text_box(
         6,
         "引语解读",
         1_700_000,
@@ -1517,8 +1771,8 @@ fn render_quote(out: &mut String, slide: &PresentationSlide, p: &Palette) {
     ));
 }
 
-fn render_evidence(out: &mut String, slide: &PresentationSlide, p: &Palette) {
-    out.push_str(&text_box(
+fn render_evidence(out: &mut Vec<SlideShape>, slide: &PresentationSlide, p: &Palette) {
+    out.push(text_box(
         4,
         "证据结论",
         760_000,
@@ -1531,7 +1785,7 @@ fn render_evidence(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         true,
         "l",
     ));
-    out.push_str(&bullet_box(
+    out.push(bullet_box(
         5,
         "证据要点",
         790_000,
@@ -1542,7 +1796,7 @@ fn render_evidence(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         1_550,
         p.muted,
     ));
-    out.push_str(&shape(
+    out.push(shape(
         6,
         "证据轨",
         "roundRect",
@@ -1553,7 +1807,7 @@ fn render_evidence(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         p.accent_soft,
         p.accent_soft,
     ));
-    out.push_str(&text_box(
+    out.push(text_box(
         7,
         "证据轨标题",
         9_060_000,
@@ -1566,7 +1820,7 @@ fn render_evidence(out: &mut String, slide: &PresentationSlide, p: &Palette) {
         true,
         "l",
     ));
-    out.push_str(&text_box(
+    out.push(text_box(
         8,
         "证据编号",
         9_060_000,
@@ -1581,8 +1835,8 @@ fn render_evidence(out: &mut String, slide: &PresentationSlide, p: &Palette) {
     ));
 }
 
-fn render_summary(out: &mut String, slide: &PresentationSlide, p: &Palette) {
-    out.push_str(&text_box(
+fn render_summary(out: &mut Vec<SlideShape>, slide: &PresentationSlide, p: &Palette) {
+    out.push(text_box(
         4,
         "收束结论",
         760_000,
@@ -1597,7 +1851,7 @@ fn render_summary(out: &mut String, slide: &PresentationSlide, p: &Palette) {
     ));
     for (index, item) in slide.body.iter().take(4).enumerate() {
         let y = 2_760_000 + index * 650_000;
-        out.push_str(&shape(
+        out.push(shape(
             10 + index * 3,
             "收束编号",
             "ellipse",
@@ -1608,7 +1862,7 @@ fn render_summary(out: &mut String, slide: &PresentationSlide, p: &Palette) {
             p.accent,
             p.accent,
         ));
-        out.push_str(&text_box(
+        out.push(text_box(
             11 + index * 3,
             "收束编号文本",
             810_000,
@@ -1621,7 +1875,7 @@ fn render_summary(out: &mut String, slide: &PresentationSlide, p: &Palette) {
             true,
             "ctr",
         ));
-        out.push_str(&text_box(
+        out.push(text_box(
             12 + index * 3,
             "收束要点",
             1_560_000,
@@ -1637,7 +1891,7 @@ fn render_summary(out: &mut String, slide: &PresentationSlide, p: &Palette) {
     }
 }
 
-fn citation_footer(slide: &PresentationSlide, p: &Palette) -> String {
+fn citation_footer(slide: &PresentationSlide, p: &Palette) -> SlideShape {
     let value = if slide.citations.is_empty() {
         "结论页 · 完整依据见研究报告".to_string()
     } else {
@@ -1680,7 +1934,8 @@ fn theme_name(theme: PresentationTheme) -> &'static str {
     }
 }
 
-fn slide_document(background: &str, shapes: &str, index: usize, total: usize) -> String {
+fn slide_document(background: &str, shapes: &[SlideShape], index: usize, total: usize) -> String {
+    let shapes: String = shapes.iter().map(|shape| shape.xml.as_str()).collect();
     let page = text_box(
         99,
         "页码",
@@ -1693,10 +1948,67 @@ fn slide_document(background: &str, shapes: &str, index: usize, total: usize) ->
         "8E8E93",
         false,
         "r",
-    );
+    )
+    .xml;
     format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="{background}"/></a:solidFill><a:effectLst/></p:bgPr></p:bg><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>{shapes}{page}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"#
     )
+}
+
+fn fitted_font_size(
+    lines: &[&str],
+    width: usize,
+    height: usize,
+    preferred: usize,
+) -> Option<usize> {
+    // DrawingML gives geometry in EMUs and font size in hundredths of a point.
+    // Mix full-width CJK glyphs with a conservative estimate for Latin text.
+    let minimum = (preferred * 3 / 4).max(preferred.min(1_250));
+    (minimum..=preferred)
+        .rev()
+        .step_by(25)
+        .chain([minimum])
+        .find(|&size| {
+            let line_width = width * 950 / (size * 127);
+            let line_count: usize = lines
+                .iter()
+                .map(|line| estimated_wrapped_lines(line, line_width))
+                .sum();
+            line_count * size * 162 <= height
+        })
+}
+
+fn estimated_wrapped_lines(text: &str, line_width: usize) -> usize {
+    fn glyph_width(ch: char) -> usize {
+        match ch {
+            'm' | 'w' | 'M' | 'W' => 925,
+            'i' | 'l' | 'I' | '.' | ',' | ' ' => 340,
+            'A'..='Z' => 715,
+            ch if ch.is_ascii() => 610,
+            _ => 1_000,
+        }
+    }
+
+    let mut lines = 1;
+    let mut width = 0;
+    for part in text.split_inclusive(' ') {
+        if part.is_ascii() {
+            let word_width: usize = part.trim_end().chars().map(glyph_width).sum();
+            if word_width <= line_width && width + word_width > line_width {
+                lines += 1;
+                width = 0;
+            }
+        }
+        for ch in part.chars() {
+            let glyph = glyph_width(ch);
+            if width > 0 && width + glyph > line_width {
+                lines += 1;
+                width = 0;
+            }
+            width += glyph;
+        }
+    }
+    lines
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1712,10 +2024,12 @@ fn text_box(
     color: &str,
     bold: bool,
     align: &str,
-) -> String {
+) -> SlideShape {
+    let lines = text.split('\n').collect::<Vec<_>>();
+    let fitted = fitted_font_size(&lines, cx, cy, size);
+    let size = fitted.unwrap_or(size);
     let bold = if bold { " b=\"1\"" } else { "" };
-    let paragraphs = text
-        .split('\n')
+    let paragraphs = lines.into_iter()
         .map(|line| {
             format!(
                 r#"<a:p><a:pPr algn="{align}"/><a:r><a:rPr lang="zh-CN" sz="{size}"{bold}><a:solidFill><a:srgbClr val="{color}"/></a:solidFill></a:rPr><a:t>{}</a:t></a:r><a:endParaRPr lang="zh-CN" sz="{size}"/></a:p>"#,
@@ -1723,10 +2037,14 @@ fn text_box(
             )
         })
         .collect::<String>();
-    format!(
+    let xml = format!(
         r#"<p:sp><p:nvSpPr><p:cNvPr id="{id}" name="{}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="ctr"/><a:lstStyle/>{paragraphs}</p:txBody></p:sp>"#,
         xml_escape(name)
-    )
+    );
+    SlideShape {
+        xml,
+        overflowing_field: fitted.is_none().then(|| name.to_owned()),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1740,10 +2058,15 @@ fn bullet_box(
     items: &[String],
     size: usize,
     color: &str,
-) -> String {
-    let paragraphs = items
+) -> SlideShape {
+    let items: Vec<_> = items.iter().take(5).map(String::as_str).collect();
+    let lines = items
         .iter()
-        .take(5)
+        .flat_map(|item| item.split('\n'))
+        .collect::<Vec<_>>();
+    let fitted = fitted_font_size(&lines, cx.saturating_sub(280_000), cy, size);
+    let size = fitted.unwrap_or(size);
+    let paragraphs = items.into_iter()
         .map(|item| {
             format!(
                 r#"<a:p><a:pPr marL="280000" indent="-210000"><a:buChar char="•"/></a:pPr><a:r><a:rPr lang="zh-CN" sz="{size}"><a:solidFill><a:srgbClr val="{color}"/></a:solidFill></a:rPr><a:t>{}</a:t></a:r><a:endParaRPr lang="zh-CN" sz="{size}"/></a:p>"#,
@@ -1751,10 +2074,14 @@ fn bullet_box(
             )
         })
         .collect::<String>();
-    format!(
+    let xml = format!(
         r#"<p:sp><p:nvSpPr><p:cNvPr id="{id}" name="{}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t"/><a:lstStyle/>{paragraphs}</p:txBody></p:sp>"#,
         xml_escape(name)
-    )
+    );
+    SlideShape {
+        xml,
+        overflowing_field: fitted.is_none().then(|| name.to_owned()),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1768,11 +2095,15 @@ fn shape(
     cy: usize,
     fill: &str,
     line: &str,
-) -> String {
-    format!(
+) -> SlideShape {
+    let xml = format!(
         r#"<p:sp><p:nvSpPr><p:cNvPr id="{id}" name="{}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="{geometry}"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="{fill}"/></a:solidFill><a:ln><a:solidFill><a:srgbClr val="{line}"/></a:solidFill></a:ln></p:spPr></p:sp>"#,
         xml_escape(name)
-    )
+    );
+    SlideShape {
+        xml,
+        overflowing_field: None,
+    }
 }
 
 fn write_part(
@@ -1864,6 +2195,160 @@ mod tests {
                 {"layout":"summary","eyebrow":"行动","title":"把分层变成可检查的工程约束","takeaway":"好架构的判断标准是下一次变更是否更容易。","body":["明确每层负责的变化。","检查跨层调用。","用变更成本复盘边界。"],"citations":[]}
             ]
         })).unwrap()
+    }
+
+    #[test]
+    fn test_short_presentation_renders_three_total_pages_including_cover() {
+        let mut sample = serde_json::to_value(sample_spec()).unwrap();
+        sample["schema_version"] = serde_json::json!("2.0");
+        sample["slides"] = serde_json::json!([
+            {"layout":"statement","role":"claim","estimated_seconds":25,
+             "title":"冷热负载的延迟差异","takeaway":"先核对实验负载。",
+             "body":["冷启动复用了不同的路径。"],"citations":["S1"]},
+            {"layout":"summary","role":"action","estimated_seconds":20,
+             "title":"统一条件后再做取舍","takeaway":"每次测试冻结请求分布。",
+             "body":["保持任务输入一致。"],"citations":["S1"]}
+        ]);
+        let spec = parse_presentation_spec(&sample.to_string(), 1).unwrap();
+        let mut brief = ResearchBrief {
+            presentation_pagination: PresentationPagination::Fixed { total_slides: 3 },
+            ..ResearchBrief::default()
+        };
+        assert!(PresentationPagingPlan::new(&brief, &[])
+            .validate(&spec)
+            .is_ok());
+        brief.presentation_pagination = PresentationPagination::Fixed { total_slides: 4 };
+        let error = PresentationPagingPlan::new(&brief, &[])
+            .validate(&spec)
+            .unwrap_err();
+        assert!(error.to_string().contains("总页数必须为 4 页"));
+        brief.presentation_pagination = PresentationPagination::Duration { minutes: 1 };
+        let timed = PresentationPagingPlan::new(&brief, &[]);
+        assert!(timed.validate(&spec).is_ok());
+        assert_eq!(speaking_seconds(&spec), Some(55));
+        let mut too_long = spec.clone();
+        too_long.slides[0].estimated_seconds = Some(40);
+        assert!(timed
+            .validate(&too_long)
+            .unwrap_err()
+            .to_string()
+            .contains("超过指定的 60 秒"));
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("three-slides.pptx");
+        render_pptx(&spec, &output).unwrap();
+        assert_eq!(validate_pptx(&output).unwrap().slide_count, 3);
+        if let Some(path) = std::env::var_os("OBRAIN_KEEP_SHORT_TEST_PPTX") {
+            std::fs::copy(output, path).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_automatic_paging_scales_with_distinct_supported_findings_and_depth() {
+        let findings = (1..=16)
+            .map(|index| ResearchFinding {
+                finding: format!("机制 {index} 的适用前提"),
+                status: "supported".to_string(),
+                citation_indices: vec![1],
+                limitations: Vec::new(),
+                baseline_entry_id: None,
+                baseline_claim_id: None,
+            })
+            .collect::<Vec<_>>();
+        let brief = ResearchBrief::default();
+        let short = PresentationPagingPlan::new(&brief, &findings[..1]);
+        let dense = PresentationPagingPlan::new(&brief, &findings);
+        assert_eq!(short.preferred_total, 3);
+        assert!(dense.min_total > short.max_total);
+
+        let mut noisy = findings.clone();
+        noisy.push(findings[0].clone());
+        let mut unsupported = findings[0].clone();
+        unsupported.finding = "待确认的补充说法".into();
+        unsupported.citation_indices.clear();
+        noisy.push(unsupported);
+        assert_eq!(PresentationPagingPlan::new(&brief, &noisy), dense);
+        let deep = ResearchBrief {
+            depth: "deep".into(),
+            ..brief
+        };
+        assert!(
+            PresentationPagingPlan::new(&deep, &findings).preferred_total > dense.preferred_total
+        );
+    }
+
+    #[test]
+    fn test_v2_presentation_rejects_content_that_cannot_fit_with_legible_type() {
+        let mut spec = sample_spec();
+        spec.schema_version = "2.0".into();
+        for (slide, role) in spec.slides.iter_mut().zip([
+            PresentationRole::Claim,
+            PresentationRole::Comparison,
+            PresentationRole::Mechanism,
+            PresentationRole::Action,
+        ]) {
+            slide.role = Some(role);
+            slide.estimated_seconds = Some(35);
+        }
+        assert!(validate_presentation_spec(&spec, 1).is_ok());
+        spec.slides[0].body = vec!["论点需要每项数据支持。".repeat(10); 5];
+        assert!(slide_character_count(&spec.slides[0]) < MAX_SLIDE_CHARACTERS);
+        let error = validate_presentation_spec(&spec, 1).unwrap_err();
+        assert!(error.to_string().contains("补充要点") && error.to_string().contains("可读字号"));
+    }
+
+    #[test]
+    fn test_chart_labels_keep_fractional_source_values() {
+        assert_eq!(format_chart_value(0.0375), "0.0375");
+        assert_eq!(format_chart_value(16.0), "16");
+    }
+
+    #[test]
+    fn test_presentation_grounding_rejects_swapped_chart_values_and_foreign_quotes() {
+        let mut spec = sample_spec();
+        spec.slides[1].left = None;
+        spec.slides[1].right = None;
+        spec.slides[1].layout = PresentationLayout::Chart;
+        spec.slides[1].chart = Some(PresentationChart {
+            unit: "ms".into(),
+            context: "同样本负载的平均延迟".into(),
+            categories: vec!["热点 CLOCK".into(), "热点 LRU".into()],
+            values: vec![1.8, 2.4],
+            highlight_index: None,
+        });
+        let sources = BTreeMap::from([
+            (
+                1,
+                "|负载|策略|平均延迟（ms）|\n|---|---|---|\n|热点|CLOCK|1.8|\n|热点|LRU|2.4|\n|扫描|CLOCK|4.1|\n相同负载下才能比较。",
+            ),
+            (2, "该策略节省 80% 的显存。"),
+        ]);
+        assert_eq!(
+            validate_presentation_grounding(&spec, &sources)
+                .unwrap()
+                .numbers,
+            2
+        );
+        let Some(chart) = spec.slides[1].chart.as_mut() else {
+            panic!("测试图表缺失");
+        };
+        chart.values.swap(0, 1);
+        let error = validate_presentation_grounding(&spec, &sources).unwrap_err();
+        assert!(error.to_string().contains("「热点 CLOCK」与数值 2.4ms"));
+        spec.slides[1].chart.as_mut().unwrap().values.swap(0, 1);
+        spec.slides[0].quote = "相同负载下才能比较。".into();
+        assert_eq!(
+            validate_presentation_grounding(&spec, &sources)
+                .unwrap()
+                .quotes,
+            1
+        );
+        spec.slides[0].quote = "该策略节省显存。".into();
+        let error = validate_presentation_grounding(&spec, &sources).unwrap_err();
+        assert!(error.to_string().contains("quote 无法在本页引文"));
+        spec.slides[0].quote.clear();
+        spec.slides[0].takeaway = "该策略节省 80% 的显存。".into();
+        let error = validate_presentation_grounding(&spec, &sources).unwrap_err();
+        assert!(error.to_string().contains("80% 无法在本页引文"));
     }
 
     #[test]
@@ -2003,6 +2488,32 @@ mod tests {
     }
 
     #[test]
+    fn test_v2_shallow_model_payload_is_normalized_with_its_values_intact() {
+        let mut value = serde_json::json!({
+            "schema_version":"2.0","title":"缓存的两条路径","subtitle":"空间与时效的验证口径",
+            "audience":"general","core_message":"先明确各路径的职责。",
+            "slides":[
+                {"layout":"relationship","role":"mechanism","estimated_seconds":45,
+                 "title":"淘汰和校验各有职责","takeaway":"两个判断发生在不同路径。",
+                 "center":{"title":"缓存","detail":"缓存项"},
+                 "related":[
+                    {"relation":"空间","title":"淘汰","detail":"管理容量"},
+                    {"relation":"时效","title":"读路径校验","detail":"检查过期"}
+                 ],"citations":["S1"]},
+                {"layout":"summary","role":"action","estimated_seconds":40,
+                 "title":"分别验证两条路径","takeaway":"把容量和过期计数作为独立观测量。",
+                 "body":["验证缓存项读出前经过时效检查。"],"citations":["S1"]}
+            ]
+        });
+        let spec = parse_presentation_spec(&value.to_string(), 1).unwrap();
+        let relationship = spec.slides[0].relationship.as_ref().unwrap();
+        assert_eq!(relationship.center.title, "缓存");
+        assert_eq!(relationship.related[1].detail, "检查过期");
+        value["slides"][0]["extra_note"] = serde_json::json!("没有可渲染位置");
+        assert!(parse_presentation_spec(&value.to_string(), 1).is_err());
+    }
+
+    #[test]
     fn test_presentation_chart_rejects_unbounded_or_fabricated_shape() {
         let mut value = serde_json::to_value(sample_spec()).unwrap();
         value["slides"][0] = serde_json::json!({
@@ -2025,7 +2536,7 @@ mod tests {
 
     #[test]
     fn test_chart_renders_conditions_next_to_data_without_dropping_them() {
-        let mut shapes = String::new();
+        let mut shapes = Vec::new();
         let mut slide = sample_spec().slides[0].clone();
         slide.chart = Some(PresentationChart {
             unit: "ms（平均延迟）".into(),
@@ -2039,6 +2550,7 @@ mod tests {
             &slide,
             &Palette::for_theme(PresentationTheme::Midnight),
         );
+        let shapes: String = shapes.into_iter().map(|shape| shape.xml).collect();
         assert!(shapes.contains("显式TTL60秒"));
         assert!(shapes.contains("未测P99"));
         assert!(shapes.contains("ms（平均延迟）"));

@@ -2,12 +2,15 @@
 
 use super::research_policy::ResearchResources;
 use super::*;
-use crate::infra::book_wiki_store::validate_research_plan;
+use crate::infra::book_wiki_store::{
+    validate_research_plan, ResearchAuthorSource, ResearchManuscript,
+};
 use crate::models::book_wiki::{
     ResearchPlan, ResearchQuestion, ResearchSectionOutput, ResearchStageSummary,
-    ResearchSynthesisOutput,
 };
 use serde_json::{json, Value};
+
+mod long_report;
 
 const MAX_PHASE_OUTPUT_EXPANSIONS: usize = 2;
 const MAX_PHASE_FORMAT_REPAIRS: usize = 1;
@@ -198,17 +201,73 @@ fn project_integration_manifest(manifest: &Value, token_budget: u64) -> Result<V
     Ok(projected)
 }
 
+fn select_frozen_sources(
+    sources: &[ResearchAuthorSource],
+    token_budget: u64,
+) -> (Vec<Value>, Vec<Value>, u64) {
+    let mut used = 0;
+    let mut source_numbers = HashMap::new();
+    let mut cards = Vec::new();
+    let mut receipts = Vec::new();
+    for source in sources {
+        let identity = source.identity();
+        let index = source_numbers
+            .get(&identity)
+            .copied()
+            .unwrap_or(source_numbers.len() + 1);
+        let card = source.card(index);
+        let size = estimated_tokens(&card.to_string()).saturating_add(4);
+        if used + size > token_budget {
+            continue;
+        }
+        used += size;
+        source_numbers.insert(identity, index);
+        cards.push(card);
+        receipts.push(source.receipt());
+    }
+    (cards, receipts, used)
+}
+
 fn phase_contract(phase: &str) -> serde_json::Value {
+    if let Some(contract) = long_report::output_contract(phase) {
+        return contract;
+    }
     if phase == "plan" {
         json!({"goal":"回答任务要解决的核心问题","report_title":"面向读者的材料标题","constraints":["用户明确要求的范围"],"acceptance":["能改变判断的具体验收条件"],"depth":"standard","terminology":["统一术语与定义口径，不捏造事实"],"questions":[{"id":"stable_ascii_id","title":"报告主题标题","question":"一个可完成、对整体目标有贡献的明确问题","required_evidence":["支撑此问题所需的证据类型或反例"],"expected_output_tokens":null,"target_entry_ids":[]}]})
     } else if phase == "synthesis" {
-        json!({"summary":"跨章节综合结论及必要限定","content_md":"回答整体目标，统一比较维度、术语与条件，明确冲突和未覆盖事项；不能重写或删去原始章节。事实使用本轮实际已读引用。","findings":[{"finding":"有界综合判断","status":"partial","citation_indices":[],"limitations":["明确未核验的条件或证据缺口"],"baseline_entry_id":null,"baseline_claim_id":null}],"section_checks":[{"question_id":"stable_ascii_id","revision":1,"assessment":"insufficient","note":"每个主题必须有一项，使用输入中的实际ID和版本；判定只选 consistent、qualified、conflict、insufficient"}]})
+        json!({"summary":"整份成稿的核心判断及其条件","chapters":[{"title":"承担独立阅读职责的章节标题","summary":"用于后续导航或选材的该节摘要","content_md":"这一节的完整 Markdown 正文。事实就近引用本轮已读原文。","findings":[{"finding":"该节正文中的有界判断","status":"partial","citation_indices":[],"limitations":["未核验的条件或证据缺口"],"baseline_entry_id":null,"baseline_claim_id":null}]}],"section_checks":[{"question_id":"stable_ascii_id","revision":1,"assessment":"insufficient","note":"每个取证主题填写一项。使用输入中的实际 ID 和版本，判定选 consistent、qualified、conflict 或 insufficient"}]})
     } else {
-        json!({"summary":"本主题的主要判断及必要限定，不空泛预告","content_md":"完整 Markdown 章节，保留完整公式、条件、表格、步骤与真正已读的 [S1]；不重新输出整份报告","findings":[{"finding":"具体有界结论","status":"partial","citation_indices":[1],"limitations":["partial/missing 必须明确缺口；supported/conflict 必须有已读引用"],"baseline_entry_id":null,"baseline_claim_id":null}]})
+        json!({"summary":"这条取证支线的主要发现和适用条件","content_md":"可供主作者复查的紧凑 Markdown 取证笔记，保存原文事实、单位、实验条件、反例、缺口和真正已读的 [S1]，关键公式与表格保留原有结构。","findings":[{"finding":"具体有界结论","status":"partial","citation_indices":[1],"limitations":["partial/missing 必须明确缺口，supported/conflict 必须有已读引用"],"baseline_entry_id":null,"baseline_claim_id":null}]})
     }
 }
 
 impl BookWikiService {
+    fn research_topic_hints(&self, base: &str, query: &str) -> Result<Vec<Value>, BrainError> {
+        let mut pages_seen = HashSet::new();
+        self.store.search_topic_sections(base, query, false)?
+            .into_iter()
+            .filter(|topic| pages_seen.insert(topic.page_id.clone()))
+            .take(3)
+            .map(|topic| {
+                let prior_refs = super::topic_pages::citation_numbers(&topic.section.markdown);
+                let original_spans = self.store
+                    .list_agent_run_citations(&topic.run_id)?
+                    .into_iter()
+                    .filter(|citation| citation.kind == "source_span" && prior_refs.contains(&citation.citation_index))
+                    .take(4)
+                    .map(|citation| citation.object_id)
+                    .collect::<Vec<_>>();
+                Ok(json!({
+                    "page_id": topic.page_id,
+                    "revision_id": topic.revision_id,
+                    "title": topic.title,
+                    "heading": topic.section.heading,
+                    "note_for_navigation": prefix_with_token_budget(&topic.section.markdown, 360, 1000).replace("[S", "〔主题旧引文 S"),
+                    "candidate_source_span_ids": original_spans,
+                }))
+            }).collect()
+    }
+
     fn research_phase_prompt(
         &self,
         phase: &ResearchPhase<'_>,
@@ -221,9 +280,15 @@ impl BookWikiService {
             .enabled_wiki_skills(&phase.task.knowledge_base_id, "research")?;
         skills.retain(|skill| skill.id != "skill-book-presentation");
         let mut prompt = build_task_prompt(&phase.task.book_name, phase.task, &[], &skills, &[]);
+        let mut visible_scope = phase.payload.clone();
+        let long_authoring = phase.payload.get("research_author_checkpoint").is_some();
+        if let Some(scope) = visible_scope.as_object_mut() {
+            scope.remove("frozen_source_receipts");
+            scope.remove("research_author_checkpoint");
+        }
         prompt.push_str(&format!(
             "<research_phase>{}</research_phase>\n<phase_scope>\n{}\n</phase_scope>\n",
-            phase.phase, phase.payload
+            phase.phase, visible_scope
         ));
         prompt.push_str("<research_configuration>\n");
         for document in documents {
@@ -264,30 +329,40 @@ impl BookWikiService {
                 ));
             }
         } else if phase.phase == "synthesis" {
-            prompt.push_str("综合只提供整体判断、跨主题取舍、决定性条件和会改变判断的缺口；机制推导/完整表格已在章节中保存，不逐章重写。不要公开阶段 key、revision、调用工具说明或研究操作日志。资料未报告某项指标时写‘当前材料未提供测量’，不能升级为‘该指标无法测量’。\n");
-            prompt.push_str("综合 finding.status 只选 supported、partial、missing、conflict。\n");
-            prompt.push_str("phase_scope.synthesis_output_adaptation 是按逐章对照结构和模型单次输出能力计算的本阶段篇幅规划。allocated_body_tokens 小于 requested_body_tokens 时，只压缩综合段落的重复表述，不删 section_checks、不省略关键冲突或条件；完整章节和证据仍在工作区，不能声称短综合替代了全部研究。\n");
-            prompt.push_str("本阶段综合全部已保存主题，回答整体目标，不再逐章重复研究。integration_manifest 是完整矩阵，或标有 complete=false 的容量内投影；投影仍列出全部主题身份和版本，但未预载的摘要、发现与引用对象并非不存在。需要这些信息时用 knowledge_get_research_manifest 按 question_id 定向读取有关章节，或不指定 question_id 浏览全部；按 offset_chars 分页，has_more 时继续。按需用 knowledge_get_research_section 分页查看完整章节。未核查的部分不能自报已证实一致。这些章节成果是待核验输入，不是本轮原始证据；旧章节引用已中性化，不能直接复制为本轮S引用。关键事实需通过当前实体/原文工具取得本轮编号。逐项对照全部主题的目标覆盖、术语、比较维度、适用条件/版本、同源重复、反例和矛盾；不得以术语统一抹平条件差异。section_checks 必须覆盖全部主题且精确对应版本；对照判断只是模型自报，不能冒充独立事实证明。明显冲突保留双方依据和条件，未知列出缺口，不强行得出一致结论。证据不足可输出 partial/missing；supported/conflict 仍必须有本轮实际已读引用。使用预算/覆盖/扩展工具按缺口补查，不固定top-k。question_index 按本阶段预算工具的 required_evidence 列表填写。禁止生成幻灯片、删去原报告章节或伪装历史对象核验。\n");
+            prompt.push_str("你负责全部成稿 chapters。先确定读者要理解或决定什么、中心判断、最能改变判断的依据和限制，再按因果、对照或学习顺序安排章节。每节有独立职责，可合并多条取证支线。章节顺序由论证决定。一组数据完整展开一次，其余地方只用必要结论。保留对结论有影响的条件、公式、机制步骤、反例和竞争解释，保留可复算的最小算例。缺少某项测量时写清已知范围和缺的证据。结尾说明改变判断的条件及验证方法。将阶段 ID、核验记录和操作日志留在正文之外。\n");
+            prompt.push_str("integration_manifest 保存取证主题、版本、发现与限制，旧章节编号不能直接作成稿引用。frozen_sources 是先前实际读到的原文范围，已为本轮重分配 [S<n>]，同一快照可有多个已读范围。以直接原文支撑精确量值、公式和强判断，必要时通过只读工具回查同书原文。引用附在对应正文、表格或推导附近。按需用 knowledge_get_research_section 读取取证笔记中的长公式、完整表格或反例。标记 complete=false 的矩阵须使用 knowledge_get_research_manifest 分页核对后才能判断有关主题；has_more 时继续。\n");
+            prompt.push_str("section_checks 为独立保存的逐主题对照记录，完整填写所有实际 ID 和版本。各用一两句指出修改了什么判断，或哪项证据仍缺，源材料用名称描述。正文和 findings 承担引文，检查记录只保留审校理由。核对结论是否依赖同源、条件是否可比、证据是否支持、冲突和未覆盖处。保留不同适用条件和分歧。每个章节的 findings 只记录该节正文实际交付的判断，status 选 supported、partial、missing、conflict；明确证据缺口，有支持或冲突的判断在同节正文给出对应引文。按 synthesis_output_adaptation.allocated_body_tokens 规划全文，优先压缩背景与重复。不要把章节摘要拼成报告，也不要生成幻灯片。\n");
+            prompt.push_str("交稿前逐项看是否把机制一致扩大成性能排序一致，或把独立职责扩大成事件发生率不受影响。给指标结论保留真实的配置与负载，直接指出变更条件后要重测的量。章节正文从论证开始，内部小标题只用于新的段落职责。\n");
             if phase.task.brief.confirmed {
                 match phase.task.brief.purpose.as_str() {
-                    "decision" => prompt.push_str("本综合将作为报告开篇的执行摘要：先给当前证据可支持的判断和判据，再说明关键取舍、适用条件与会改变判断的证据缺口。不要把各章节摘要简单堆叠，也不要把条件性建议写成无条件定论。\n"),
-                    "reference" => prompt.push_str("本综合将作为报告开篇的要点速览：按可检索的主题呈现结论、适用条件、例外和来源定位，让读者能快速找到后文细节；不要重复整份报告。\n"),
+                    "decision" => prompt.push_str("第一节给出当前证据可支持的判断和判据，再展开关键取舍、适用条件和会改变判断的证据缺口。宽泛建议收窄到其证据条件。\n"),
+                    "reference" => prompt.push_str("第一节提供要点速览，后续按可查阅的维度呈现结论、条件、例外和出处。把完整例证留给承担解释职责的一节。\n"),
                     _ => {}
                 }
             }
+        } else if long_authoring {
+            prompt.push_str(long_report::RULES);
+            prompt.push_str(match phase.phase {
+                "report_outline" => "\n本轮确定大纲，输出中心判断与章节分配。使用输入给出的上下界，预留必要正文篇幅。\n",
+                "report_chapter" => "\n本轮完成 chapter 指定的一个章节。需要读未展示的笔记时，使用 knowledge_get_research_section 分页。只使用本轮冻结原文与实际读取分配的 [S<n>]。旧笔记编号不适用。\n",
+                _ => "\n本轮编辑已写章节。按最终阅读顺序给出每节 ID，标题和衔接句。需要读全文时，用 knowledge_get_research_section 传 question_id=author:章节ID 分页阅读。仅当不同章节开场段完全相同且至少留一处时填写 omit_repeated_intro。使用实际的主题 ID 与版本填全 section_checks。输入为不完整发现矩阵时，通过 knowledge_get_research_manifest 补齐再判断，或标明 insufficient。\n",
+            });
         } else {
             prompt.push_str("本主题只完成自己的阅读职责，不在每章重新罗列全部其他主题和所有缺口。必须核对的精确数字、公式、默认值版本差异或强结论，请先从 knowledge_get_entry 的 source_basis 取得真实 source_span_id，再调用 book_read_source_span 回读对应原文；不能仅说‘仍需回读’却复述摘要为实测事实。未返回直接原文时保留明确未核对限定。引用一律 [S<n>]，包括表格、summary、findings 和 limitations；禁止裸写 S5、S1–S6、S1 与 S2。代码/产品标识 S5 使用行内代码以区别来源。\n");
             prompt.push_str("章节 finding.status 只选 supported、partial、missing、conflict。当前阶段容量中的章节正文上限是规划估计，不能为满足字数而省略必要条件；若证据或容量不足，应保留有界结论并具体说明缺口。\n");
-            prompt.push_str("只完成当前明确主题，完整呈现论证、条件和反例；其他主题由独立阶段保存。研究深度、召回和输出随问题决定，不固定 top-k。优先读取编译知识；必要时核对原文。使用 knowledge_get_run_budget、knowledge_request_budget_extension 与 knowledge_report_evidence_coverage 按缺口扩展（question_index 对应预算工具中的要求）。连续补查无新依据则停止，诚实交付缺口。统一 plan.terminology，但不能为统一用词抹去条件差异。presentation 任务此阶段仍保存完整研究章节，禁止提前压成幻灯片要点。每项 finding 的引用只来自本阶段真实已读编号；上阶段编号不能直接沿用。\n");
+            prompt.push_str("为当前子题写取证笔记。topic_sections 只用于定位相关范围和线索，事实回到原文引用。对每条可影响判断的发现，保存现象与条件、对应的反证或替代解释、版本与实际出处。把证据不足写成具体缺口。原文中的完整公式、关键对照数据及必要推导可以保留，省去同一发现的重复解释与成稿式铺陈。使用 knowledge_get_run_budget、knowledge_request_budget_extension 和 knowledge_report_evidence_coverage 按缺口扩展，question_index 对应预算中的要求。连续补查无新依据就停止。统一 plan.terminology，同时保留条件差异。每项 finding 的引用只来自本阶段真实已读编号。\n");
         }
-        if phase.phase != "synthesis" {
+        if matches!(phase.phase, "plan" | "section") {
             prompt.push_str("review/refresh 在规划中用 target_entry_ids 选择通过工具找到的真实编译条目，不能捏造ID或把章节兜底当作知识实体。章节阶段用 knowledge_get_research_baseline 分页读取已冻结的正文、具体主张和旧版来源，has_more/metadata_has_more 时补读。旧版输入不是当前证据，不可用它生成S引用；再读当前知识/原文完成对照。每个选定条目必须有对应 finding.baseline_entry_id，核验具体主张同时填 baseline_claim_id。review 明确原主张、支持/反驳依据、适用条件及缺口；refresh 明确旧版判断、当前判断、变化原因、未变和缺口，不虚构版本变化。不曾找到基线时只能输出 partial/missing。\n");
         }
         if phase.phase != "plan" && matches!(phase.task.task_type.as_str(), "review" | "refresh") {
             prompt.push_str("历史对照必须回读冻结基线而非只读当前版：knowledge_get_research_baseline 先返回正文与带source_basis_index的旧来源清单，再用同一工具的source_basis_index读取source_basis_page.baseline_source_content。旧source_span_id从当前来源列表消失不代表旧原文丢失，不对旧ID反复调用只读当前版的book_read_source_span。综合阶段同时传已保存主题的question_id，只读取本任务选择的基线；这是历史对照输入，无S编号，不能写成当前事实或在综合findings中冒充新的baseline核验。规划里的旧数值仅是待核验请求，不能盖过当前取证，也不要把来源版本更新误称编译错误。\n");
         }
         prompt.push_str(&format!("<phase_output_contract>\n{}\n</phase_output_contract>\n只输出单个完整 JSON 对象；不输出围栏、前后解释、第二个对象、占位符或隐藏思考。上方是字段合同示意，必须替换示例值；枚举只选一个合法值。阶段由 research_phase 标签确定，不增加 kind、phase、type 等合同外字段，也不包装外层对象。当前阶段合同优先于通用 Skill 的默认最终报告格式。\n",phase_contract(phase.phase)));
-        if phase.task.brief.confirmed && phase.phase != "plan" {
+        if phase.phase == "synthesis" {
+            prompt.push_str("章节保留 title、summary、content_md、findings 四个字段。基线对象和主张 ID 只在 findings 内用于核验，章节无需携带。\n");
+        }
+        if phase.task.brief.confirmed && phase.phase == "synthesis" {
             prompt.push_str(&format!(
                 "content_md 是面向 {}、用于 {} 的独立阅读材料，采用 {} 的表达方式；不要以‘用户问了什么、我回答什么’作为章节骨架，不写空泛的开场白或重复结论。预期深度为 {}，但篇幅服从证据与问题复杂度。\n",
                 phase.task.brief.audience,
@@ -370,7 +445,7 @@ impl BookWikiService {
                     .filter(|skill| skill.id != "skill-book-presentation")
                     .map(|skill| skill.id)
                     .collect::<Vec<_>>();
-                let manifest_topics = if phase.phase == "synthesis" {
+                let manifest_topics = if phase.key == "synthesis" {
                     self.store
                         .get_research_workspace(&phase.task.id)?
                         .and_then(|workspace| workspace.plan)
@@ -414,15 +489,21 @@ impl BookWikiService {
             let claim = self
                 .store
                 .claim_research_stage(&phase.task.id, &phase.key)?;
-            let input = json!({"knowledge_task_id":phase.task.id,"research_stage_key":phase.key,"research_claim_id":claim.claim_id,"research_claim_attempt":claim.attempt,
+            let mut input = json!({"knowledge_task_id":phase.task.id,"research_stage_key":phase.key,"research_claim_id":claim.claim_id,"research_claim_attempt":claim.attempt,
                 "research_resources":phase.resources,"research_plan":phase.payload.get("plan"),"research_question":phase.payload.get("question"),
                 "evidence_entry_ids":evidence_ids,"skill_ids":skills,"model":phase.profile.model,"provider_id":phase.profile.provider_id,"retry":retry,
                 "defer_research_citation_validation":phase.phase!="plan",
-                "research_manifest_projected":phase.phase=="synthesis" && phase.payload["integration_manifest"]["complete"]==false,
+                "research_manifest_projected":matches!(phase.phase,"synthesis"|"report_edit") && phase.payload["integration_manifest"]["complete"]==false,
                 "research_manifest_topics":manifest_topics,
                 "output_expansion_attempt":output_expansions,"format_repair_attempt":format_repairs,"research_retry_parent_run_id":retry_parent_run_id,
                 "request_max_output_tokens":phase.resources.output_tokens,"request_timeout_seconds":phase.resources.policy.timeout_seconds,"adaptive_budget":phase.resources.policy,
                 "external_research":{"enabled":phase.task.external_research_enabled && phase.phase!="plan","domains":phase.task.external_domains,"request_limit":phase.task.external_request_limit}});
+            if let Some(receipts) = phase.payload.get("frozen_source_receipts") {
+                input["research_frozen_sources"] = receipts.clone();
+            }
+            if let Some(checkpoint) = phase.payload.get("research_author_checkpoint") {
+                input["research_author_checkpoint"] = checkpoint.clone();
+            }
             let invocation_tokens = estimated_tokens(&invocation_prompt);
             let invocation = self
                 .run_audited(
@@ -714,7 +795,8 @@ impl BookWikiService {
                     return Err(error);
                 }
             };
-            self.persist_model_research_phase(ResearchPhase{task,profile:&profile,key:"plan".into(),phase:"plan",payload:json!({"goal":task.title,"description":task.description,"task_type":task.task_type}),resources,evidence:vec![]},|claim,run,answer| {
+            let topic_hints = self.research_topic_hints(&task.knowledge_base_id, &task.title)?;
+            self.persist_model_research_phase(ResearchPhase{task,profile:&profile,key:"plan".into(),phase:"plan",payload:json!({"goal":task.title,"description":task.description,"task_type":task.task_type,"topic_sections":topic_hints}),resources,evidence:vec![]},|claim,run,answer| {
                 let plan:ResearchPlan=parse_phase(answer)?;
                 validate_new_research_plan(&plan, &profile)?;
                 validate_reader_facing_plan_titles(&plan, &task.brief)?;
@@ -750,6 +832,7 @@ impl BookWikiService {
                 }
             };
             let query = format!("{} {}", question.title, question.question);
+            let topic_hints = self.research_topic_hints(&task.knowledge_base_id, &query)?;
             let seeds = self.store.list_entries(
                 &task.knowledge_base_id,
                 Some(&query),
@@ -774,7 +857,7 @@ impl BookWikiService {
                     profile: &profile,
                     key,
                     phase: "section",
-                payload: json!({"plan":{"goal":plan.goal,"report_title":plan.report_title,"constraints":plan.constraints,"acceptance":plan.acceptance,"depth":plan.depth,"terminology":plan.terminology},"question":question,"frozen_baselines":self.store.get_research_workspace(&task.id)?.map(|w|w.baselines.into_iter().filter(|b|b.question_id==question.id).collect::<Vec<_>>()).unwrap_or_default(),"report_outline":plan.questions.iter().map(|q|json!({"id":q.id,"title":q.title})).collect::<Vec<_>>()}),
+                payload: json!({"plan":{"goal":plan.goal,"report_title":plan.report_title,"constraints":plan.constraints,"acceptance":plan.acceptance,"depth":plan.depth,"terminology":plan.terminology},"question":question,"topic_sections":topic_hints,"frozen_baselines":self.store.get_research_workspace(&task.id)?.map(|w|w.baselines.into_iter().filter(|b|b.question_id==question.id).collect::<Vec<_>>()).unwrap_or_default(),"research_topics":plan.questions.iter().map(|q|json!({"id":q.id,"title":q.title})).collect::<Vec<_>>()}),
                     resources,
                     evidence,
                 },
@@ -792,9 +875,15 @@ impl BookWikiService {
             let previous_run = self
                 .store
                 .latest_research_stage_truncated_run(&task.id, "synthesis")?;
+            let requested_body_tokens = plan
+                .questions
+                .iter()
+                .map(|question| question.expected_output_tokens.unwrap_or(2048))
+                .fold(0u32, u32::saturating_add)
+                .min(120_000);
             let mut question = ResearchQuestion {
                 id: "_synthesis".into(),
-                title: "综合结论与交叉核验".into(),
+                title: "报告成稿与交叉核验".into(),
                 question: plan.goal.clone(),
                 required_evidence: vec![
                     "整体目标与全部主题覆盖".into(),
@@ -802,9 +891,11 @@ impl BookWikiService {
                     "比较维度、反例和竞争解释".into(),
                     "同源重复、冲突和证据缺口".into(),
                 ],
-                expected_output_tokens: Some(2048 + plan.questions.len() as u32 * 512),
+                expected_output_tokens: Some(requested_body_tokens.max(2048)),
                 target_entry_ids: vec![],
             };
+            let can_split = long_report::can_split(&profile, &plan);
+            let resume_long = self.has_long_report_outline(&task.id)?;
             let preparation = (|| {
                 let resources = self.research_phase_resources(
                     &profile,
@@ -813,9 +904,8 @@ impl BookWikiService {
                     catalog.len(),
                     previous_run.as_deref(),
                 )?;
-                let requested_body_tokens = question.expected_output_tokens.unwrap_or(0);
                 question.expected_output_tokens = Some(resources.content_output_tokens);
-                let mut payload = json!({"plan":{"goal":plan.goal,"report_title":plan.report_title,"constraints":plan.constraints,"acceptance":plan.acceptance,"depth":plan.depth,"terminology":plan.terminology},"question":question,"synthesis_output_adaptation":{"requested_body_tokens":requested_body_tokens,"allocated_body_tokens":resources.content_output_tokens,"structure_tokens":resources.structure_output_tokens,"reasoning_tokens":resources.reasoning_output_tokens,"request_output_tokens":resources.output_tokens,"section_count":plan.questions.len()},"integration_manifest":{"sections":[]}});
+                let mut payload = json!({"plan":{"goal":plan.goal,"report_title":plan.report_title,"constraints":plan.constraints,"acceptance":plan.acceptance,"depth":plan.depth,"terminology":plan.terminology},"question":question,"synthesis_output_adaptation":{"requested_body_tokens":requested_body_tokens,"allocated_body_tokens":resources.content_output_tokens,"structure_tokens":resources.structure_output_tokens,"reasoning_tokens":resources.reasoning_output_tokens,"request_output_tokens":resources.output_tokens,"section_count":plan.questions.len()},"integration_manifest":{"sections":[]},"frozen_sources":[]});
                 let skeleton = ResearchPhase {
                     task,
                     profile: &profile,
@@ -831,33 +921,71 @@ impl BookWikiService {
                     .saturating_sub(estimated_tokens(&base_prompt))
                     .saturating_sub(2048);
                 let manifest = self.store.research_integration_manifest(&task.id)?;
-                payload["integration_manifest"] =
-                    project_integration_manifest(&manifest, manifest_budget)?;
+                let sources = self.store.research_author_sources(&task.id)?;
+                let (cards, receipts, selected_tokens) =
+                    select_frozen_sources(&sources, manifest_budget / 2);
+                payload["frozen_sources"] = json!(cards);
+                payload["frozen_source_receipts"] = json!(receipts);
+                payload["integration_manifest"] = project_integration_manifest(
+                    &manifest,
+                    manifest_budget.saturating_sub(selected_tokens),
+                )?;
                 Ok::<_, BrainError>((resources, payload))
             })();
-            let (resources, payload) = match preparation {
-                Ok(value) => value,
-                Err(error) => {
-                    self.record_research_preflight_failure(&task.id, &synthesis.stage, &error)?;
-                    return Err(error);
+            let needs_long = can_split
+                && match &preparation {
+                    Ok((resources, payload)) => {
+                        resources.content_output_tokens < requested_body_tokens
+                            || payload["integration_manifest"]["complete"] == false
+                    }
+                    Err(error) => long_report::requires_split(error),
+                };
+            let result = if resume_long || needs_long {
+                self.write_long_report(task, &profile, &plan, requested_body_tokens)
+                    .await
+            } else {
+                let (resources, payload) = match preparation {
+                    Ok(value) => value,
+                    Err(error) => {
+                        self.record_research_preflight_failure(&task.id, &synthesis.stage, &error)?;
+                        return Err(error);
+                    }
+                };
+                match self
+                    .persist_model_research_phase(
+                        ResearchPhase {
+                            task,
+                            profile: &profile,
+                            key: "synthesis".into(),
+                            phase: "synthesis",
+                            payload,
+                            resources,
+                            evidence: vec![],
+                        },
+                        |claim, run, answer| {
+                            let output: ResearchManuscript = parse_phase(answer)?;
+                            self.store.save_research_manuscript(claim, run, &output)
+                        },
+                    )
+                    .await
+                {
+                    Err(error) if can_split && long_report::requires_split(&error) => {
+                        self.write_long_report(task, &profile, &plan, requested_body_tokens)
+                            .await
+                    }
+                    terminal => terminal,
                 }
             };
-            self.persist_model_research_phase(
-                ResearchPhase {
-                    task,
-                    profile: &profile,
-                    key: "synthesis".into(),
-                    phase: "synthesis",
-                    payload,
-                    resources,
-                    evidence: vec![],
-                },
-                |claim, run, answer| {
-                    let output: ResearchSynthesisOutput = parse_phase(answer)?;
-                    self.store.save_research_synthesis(claim, run, &output)
-                },
-            )
-            .await?;
+            if let Err(error) = result {
+                let stage = self
+                    .store
+                    .get_research_stage_content(&task.id, "synthesis", None)?
+                    .stage;
+                if matches!(stage.status.as_str(), "pending" | "stale") {
+                    self.record_research_preflight_failure(&task.id, &stage, &error)?;
+                }
+                return Err(error);
+            }
         }
         let mut report = self
             .store
@@ -883,13 +1011,28 @@ impl BookWikiService {
             != "completed"
         {
             let (claim, run) = self.application_research_stage(task, "validation")?;
-            if let Err(error) = self.store.check_research_report(&claim, &run) {
+            let validation = async {
+                let approval = self
+                    .audit_research_report(task, &plan, &profile, &claim, &run, &report)
+                    .await?;
+                self.store
+                    .check_research_report(&claim, &run, approval.as_ref())
+            }
+            .await;
+            if let Err(error) = validation {
                 let _ = self.store.fail_agent_run(&run, &error.to_string());
+                let cancelled = self
+                    .store
+                    .get_task(&task.id)
+                    .is_ok_and(|task| task.cancel_requested);
                 let _ = self
                     .store
-                    .fail_research_stage(&claim, &error.to_string(), false);
+                    .fail_research_stage(&claim, &error.to_string(), cancelled);
                 return Err(error);
             }
+            report = self
+                .store
+                .get_research_stage_content(&task.id, "report", None)?;
         }
         let run = report
             .content_run_id
@@ -908,6 +1051,14 @@ mod tests {
     use std::sync::Mutex;
 
     #[test]
+    fn test_research_editor_contract_keeps_authored_chapters_and_review_separate() {
+        let output = phase_contract("synthesis");
+        assert!(output["chapters"][0]["content_md"].is_string());
+        assert!(output["chapters"][0]["findings"].is_array());
+        assert!(output["section_checks"].is_array());
+    }
+
+    #[test]
     fn test_phase_contract_is_one_valid_example_and_rejects_trailing_or_incomplete_json() {
         assert_eq!(phase_contract("plan")["report_title"], "面向读者的材料标题");
         let plan: ResearchPlan = parse_phase(&phase_contract("plan").to_string()).unwrap();
@@ -921,11 +1072,20 @@ mod tests {
         assert!(parse_phase::<ResearchPlan>(&format!("{} {{}}", phase_contract("plan"))).is_err());
         assert!(parse_phase::<ResearchPlan>("{}").is_err());
         assert!(parse_phase::<ResearchSectionOutput>("{\"content_md\":\"正文\"}").is_err());
-        let synthesis: ResearchSynthesisOutput =
+        let synthesis: ResearchManuscript =
             parse_phase(&phase_contract("synthesis").to_string()).unwrap();
         assert_eq!(synthesis.section_checks.len(), 1);
-        assert!(parse_phase::<ResearchSynthesisOutput>("{}").is_err());
-        assert!(parse_phase::<ResearchSynthesisOutput>(&format!(
+        let mut chapter_metadata = phase_contract("synthesis");
+        chapter_metadata["chapters"][0]["baseline_entry_id"] = Value::Null;
+        chapter_metadata["chapters"][0]["baseline_claim_id"] = Value::Null;
+        assert!(parse_phase::<ResearchManuscript>(&chapter_metadata.to_string()).is_ok());
+        chapter_metadata["chapters"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("content_md");
+        assert!(parse_phase::<ResearchManuscript>(&chapter_metadata.to_string()).is_err());
+        assert!(parse_phase::<ResearchManuscript>("{}").is_err());
+        assert!(parse_phase::<ResearchManuscript>(&format!(
             "{} {{}}",
             phase_contract("synthesis")
         ))
@@ -1628,7 +1788,7 @@ mod tests {
             evidence: vec![],
         };
         let prompt = service.research_phase_prompt(&phase).unwrap().0;
-        assert!(prompt.contains("作为报告开篇的执行摘要"));
+        assert!(prompt.contains("第一节给出当前证据可支持的判断和判据"));
         assert!(prompt.contains("会改变判断的证据缺口"));
         assert!(!prompt.contains("按子问题论证"));
     }
@@ -1643,6 +1803,9 @@ mod tests {
     #[async_trait]
     impl AgentRuntime for ExpandingResearchRuntime {
         async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            if request.prompt.contains("<report_review>") {
+                return Ok(r#"{"issues":[]}"#.into());
+            }
             let phase = request
                 .prompt
                 .split_once("<research_phase>")
@@ -1756,7 +1919,8 @@ mod tests {
             }),
         );
         let (_, report, _) = service.execute_research_workflow(&task).await.unwrap();
-        assert!(report.contains("已保存当前主题"));
+        assert!(report.contains("机制的可核验范围"));
+        assert!(report.contains("适用条件与反例仍需独立实验"));
         let workspace = store.get_research_workspace(&task.id).unwrap().unwrap();
         assert!(workspace
             .stages
@@ -1767,6 +1931,12 @@ mod tests {
             .iter()
             .filter(|stage| matches!(stage.kind.as_str(), "plan" | "section" | "synthesis"))
         {
+            if stage.kind == "section" {
+                let note = store
+                    .get_research_stage_content(&task.id, &stage.stage_key, None)
+                    .unwrap();
+                assert!(note.content_md.contains("已保存当前主题"));
+            }
             let run_id = stage.run_id.as_deref().unwrap();
             assert_eq!(
                 store.get_agent_run(run_id).unwrap().input["output_expansion_attempt"],
@@ -2428,11 +2598,22 @@ mod tests {
             .unwrap();
         assert!(!sections.is_empty());
         assert!(!scope["integration_manifest"].to_string().contains("[S1]"));
-        json!({"summary":"综合判断仍需反例验证","content_md":"整体机制需要同时考虑条件与反例；不把多处同源引用视为独立验证。","findings":[{"finding":"适用条件仍需独立实验","status":"partial","citation_indices":[],"limitations":["缺少跨版本反例与独立实验"]}],"section_checks":sections.iter().map(|section|json!({"question_id":section["question_id"],"revision":section["revision"],"assessment":"insufficient","note":"保留本主题限定，当前不能独立验证全部判断"})).collect::<Vec<_>>()} ).to_string()
+        let cited = scope["frozen_sources"]
+            .as_array()
+            .is_some_and(|sources| !sources.is_empty());
+        let body = if cited {
+            "完整公式 $$d_k=d_v=128$$，适用条件与反例需要验证。[S1]"
+        } else {
+            "适用条件与反例仍需独立实验。"
+        };
+        json!({"summary":"综合判断仍需反例验证","chapters":[{"title":"机制的可核验范围","summary":"在已有条件下回顾机制","content_md":body,"findings":[{"finding":"适用条件仍需独立实验","status":"partial","citation_indices":if cited {vec![1]} else {vec![]},"limitations":["缺少跨版本反例与独立实验"]}]}],"section_checks":sections.iter().map(|section|json!({"question_id":section["question_id"],"revision":section["revision"],"assessment":"insufficient","note":"保留本主题限定，当前不能独立验证全部判断"})).collect::<Vec<_>>()} ).to_string()
     }
     #[async_trait]
     impl AgentRuntime for PhasedRuntime {
         async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+            if request.prompt.contains("<report_review>") {
+                return Ok(r#"{"issues":[]}"#.into());
+            }
             self.calls.lock().unwrap().push(request.prompt.clone());
             if request
                 .prompt
@@ -2484,11 +2665,14 @@ mod tests {
     {
         struct LongReportRuntime {
             presentation_calls: Arc<Mutex<usize>>,
-            research_calls: Arc<Mutex<[usize; 3]>>,
+            research_calls: Arc<Mutex<[usize; 5]>>,
         }
         #[async_trait]
         impl AgentRuntime for LongReportRuntime {
             async fn prompt(&self, request: AgentPromptRequest) -> Result<String, BrainError> {
+                if request.prompt.contains("<report_review>") {
+                    return Ok(r#"{"issues":[]}"#.into());
+                }
                 if request
                     .prompt
                     .contains("<research_phase>plan</research_phase>")
@@ -2533,7 +2717,88 @@ mod tests {
                     .contains("<research_phase>synthesis</research_phase>")
                 {
                     self.research_calls.lock().unwrap()[2] += 1;
-                    return Ok(synthesis_answer(&request.prompt));
+                    return Err(BrainError::KnowledgeValidation(
+                        "超出可用预算时不应请求一次写完".into(),
+                    ));
+                }
+                if request
+                    .prompt
+                    .contains("<research_phase>report_outline</research_phase>")
+                {
+                    self.research_calls.lock().unwrap()[2] += 1;
+                    return Ok(json!({
+                        "thesis":"架构决定适用范围",
+                        "chapters":(0..10).map(|i| json!({
+                            "id":format!("chapter{i}"),
+                            "title":format!("架构的比较维度 {i}"),
+                            "purpose":format!("论证第 {i} 项限制"),
+                            "question_ids":[format!("q{i}")],
+                            "body_tokens":4000,
+                        })).collect::<Vec<_>>(),
+                    })
+                    .to_string());
+                }
+                if request
+                    .prompt
+                    .contains("<research_phase>report_chapter</research_phase>")
+                {
+                    let attempt = {
+                        let mut counts = self.research_calls.lock().unwrap();
+                        counts[3] += 1;
+                        counts[3]
+                    };
+                    let scope: Value = serde_json::from_str(
+                        request
+                            .prompt
+                            .split_once("<phase_scope>\n")
+                            .unwrap()
+                            .1
+                            .split_once("\n</phase_scope>")
+                            .unwrap()
+                            .0,
+                    )
+                    .unwrap();
+                    let id = scope["chapter"]["id"].as_str().unwrap();
+                    let i = id
+                        .strip_prefix("chapter")
+                        .unwrap()
+                        .parse::<usize>()
+                        .unwrap();
+                    if i == 9 && attempt == 10 {
+                        return Err(BrainError::KnowledgeValidation("模拟末章写作中断".into()));
+                    }
+                    assert!(scope["frozen_sources"][0]["citation"] == "[S1]");
+                    assert!(request.prompt.contains(&format!("LATE_q{i}")));
+                    return Ok(json!({
+                        "title":format!("架构的比较维度 {i}"),
+                        "summary":"只在记录的范围成立",
+                        "content_md":format!("{}\n\n$$d_k=d_v=128$$\n\nLATE_q{i} important boundary. [S1]", "Detailed mechanism with necessary conditions.\n\n".repeat(300)),
+                        "findings":[{"finding":format!("LATE_q{i} 保留适用条件"),"status":"partial","citation_indices":[1],"limitations":["缺少独立实验"]}],
+                    }).to_string());
+                }
+                if request
+                    .prompt
+                    .contains("<research_phase>report_edit</research_phase>")
+                {
+                    self.research_calls.lock().unwrap()[4] += 1;
+                    for i in 0..10 {
+                        assert!(request.prompt.contains(&format!("LATE_q{i}")));
+                    }
+                    return Ok(json!({
+                        "summary":"统一回顾后确认的范围",
+                        "chapters":(0..10).map(|i| json!({
+                            "id":format!("chapter{i}"),
+                            "title":format!("比较维度 {i}"),
+                            "transition":"从适用条件进入本节的比较。",
+                        })).collect::<Vec<_>>(),
+                        "section_checks":(0..10).map(|i|json!({
+                           "question_id":format!("q{i}"),
+                           "revision":3,
+                           "assessment":"insufficient",
+                           "note":"有待复查其他规模的证据",
+                        })).collect::<Vec<_>>(),
+                    })
+                    .to_string());
                 }
                 super::super::tests::FakeRuntime.prompt(request).await
             }
@@ -2558,7 +2823,7 @@ mod tests {
                 "openai-completions",
                 "https://example.com/v1",
                 "projection-test",
-                "keychain",
+                "local_file",
                 "",
                 true,
                 true,
@@ -2599,7 +2864,7 @@ mod tests {
             .set(&provider.provider_id, "fixture-only")
             .unwrap();
         let presentation_calls = Arc::new(Mutex::new(0));
-        let research_calls = Arc::new(Mutex::new([0; 3]));
+        let research_calls = Arc::new(Mutex::new([0; 5]));
         let service = BookWikiService::new(
             store.clone(),
             Arc::new(LongReportRuntime {
@@ -2619,9 +2884,12 @@ mod tests {
                 "presentation",
             )
             .unwrap();
+        let error = service.execute_task(&task.id).await.unwrap_err();
+        assert!(error.to_string().contains("模拟末章写作中断"));
+        assert_eq!(*research_calls.lock().unwrap(), [1, 10, 1, 10, 0]);
         let result = service.execute_task(&task.id).await.unwrap();
         assert_eq!(*presentation_calls.lock().unwrap(), 2);
-        assert_eq!(*research_calls.lock().unwrap(), [1, 10, 1]);
+        assert_eq!(*research_calls.lock().unwrap(), [1, 10, 1, 11, 1]);
         assert_eq!(result.task.status, "completed");
         let workspace = store.get_research_workspace(&task.id).unwrap().unwrap();
         let synthesis_run = workspace
@@ -2639,7 +2907,11 @@ mod tests {
         assert_eq!(inspected_topics.as_array().unwrap().len(), 10);
         assert_eq!(inspected_topics[9]["question_id"], "q9");
         assert_eq!(inspected_topics[9]["title"], "核心架构");
-        assert!(result.task.result_summary.len() > 90000);
+        assert!(result.task.result_summary.len() > 120000);
+        assert!(result
+            .task
+            .result_summary
+            .contains("## 比较维度 0\n\n从适用条件进入本节的比较。"));
         assert!(result.task.result_summary.contains("LATE_q9"));
         assert_eq!(result.artifacts.len(), 1);
         let run = store
@@ -2651,7 +2923,7 @@ mod tests {
         );
         assert_eq!(
             run.input["presentation_materialization"]["section_count"],
-            11
+            10
         );
         assert_eq!(run.input["output_expansion_attempt"], 1);
         let parent_id = run.input["research_retry_parent_run_id"].as_str().unwrap();
@@ -2688,13 +2960,24 @@ mod tests {
                     }
                     return super::super::tests::FakeRuntime.prompt(request).await;
                 }
-                PhasedRuntime {
+                let is_plan = request
+                    .prompt
+                    .contains("<research_phase>plan</research_phase>");
+                let answer = PhasedRuntime {
                     calls: Arc::new(Mutex::new(Vec::new())),
                     failed: Arc::new(Mutex::new(true)),
                     synthesis_failure_pending: Arc::new(Mutex::new(false)),
                 }
                 .prompt(request)
-                .await
+                .await?;
+                if !is_plan {
+                    return Ok(answer);
+                }
+                let mut plan: serde_json::Value = serde_json::from_str(&answer).unwrap();
+                for question in plan["questions"].as_array_mut().unwrap() {
+                    question["expected_output_tokens"] = json!(600);
+                }
+                Ok(plan.to_string())
             }
         }
         let dir = tempfile::tempdir().unwrap();
@@ -2715,7 +2998,7 @@ mod tests {
                 "openai-completions",
                 "https://example.com/v1",
                 "capped-test",
-                "keychain",
+                "local_file",
                 "",
                 true,
                 true,
@@ -3061,11 +3344,9 @@ mod tests {
                 .count(),
             1
         );
-        assert!(result.task.result_summary.contains("跨章节对照记录"));
-        assert_eq!(
-            result.task.result_summary.matches("LATE_FINDING").count(),
-            2
-        );
+        assert!(result.task.result_summary.contains("## 机制的可核验范围"));
+        assert!(!result.task.result_summary.contains("LATE_FINDING"));
+        assert!(!result.task.result_summary.contains("跨章节对照记录"));
         assert!(result.task.result_summary.contains("$$d_k=d_v=128$$"));
         let workspace = store.get_research_workspace(&task.id).unwrap().unwrap();
         assert!(workspace.stages.iter().all(|s| s.status == "completed"));
@@ -3074,6 +3355,11 @@ mod tests {
             .iter()
             .find(|s| s.stage_key == "section:boundary")
             .unwrap();
+        assert!(store
+            .get_research_stage_content(&task.id, &section.stage_key, None)
+            .unwrap()
+            .content_md
+            .contains("LATE_FINDING"));
         let run = store
             .get_agent_run(section.run_id.as_deref().unwrap())
             .unwrap();
@@ -3200,6 +3486,6 @@ mod tests {
                 .count(),
             2
         );
-        assert!(result.task.result_summary.contains("跨章节对照记录"));
+        assert!(result.task.result_summary.contains("## 机制的可核验范围"));
     }
 }

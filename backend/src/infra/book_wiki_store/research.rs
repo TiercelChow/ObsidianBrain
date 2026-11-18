@@ -3,9 +3,9 @@
 use super::{insert_agent_run_event, stable_id, BookWikiStore};
 use crate::error::BrainError;
 use crate::models::book_wiki::{
-    ResearchBaselineSummary, ResearchBrief, ResearchEvidenceReference, ResearchFinding,
-    ResearchPlan, ResearchSectionOutput, ResearchStageContent, ResearchStageSummary,
-    ResearchSynthesisOutput, ResearchUnpublishedOutput, ResearchWorkspace,
+    PresentationPagination, ResearchBaselineSummary, ResearchBrief, ResearchEvidenceReference,
+    ResearchFinding, ResearchPlan, ResearchSectionOutput, ResearchStageContent,
+    ResearchStageSummary, ResearchSynthesisOutput, ResearchUnpublishedOutput, ResearchWorkspace,
 };
 use chrono::Utc;
 use pulldown_cmark::{Event, Options, Parser, Tag};
@@ -13,6 +13,15 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
+
+#[path = "research_author.rs"]
+mod author;
+#[path = "report_review.rs"]
+mod report_review;
+pub(crate) use author::{
+    ResearchAuthorCheckpoint, ResearchAuthorSource, ResearchChapter, ResearchManuscript,
+};
+pub(crate) use report_review::{apply_report_review_edits, ReportReviewApproval, ReportReviewEdit};
 
 /// A stage completion must still own this exact attempt and claim. A stale
 /// worker cannot save after lease recovery even if its model eventually returns.
@@ -383,40 +392,6 @@ pub(super) fn validate_run_lease(conn: &Connection, run: &str) -> Result<(), Bra
     check_run(conn, &claim, run, false)
 }
 
-/// Candidate creation is a write even though it still requires human review.
-/// Fence it in the same transaction, not through a prior non-atomic check.
-pub(super) fn validate_report_candidate_write(
-    conn: &Connection,
-    run: &str,
-) -> Result<Option<String>, BrainError> {
-    let raw: String = conn.query_row(
-        "SELECT input_json FROM agent_runs WHERE id=?1",
-        [run],
-        |row| row.get(0),
-    )?;
-    let input: Value = decode(&raw)?;
-    if input["research_stage_key"].as_str() != Some("report") {
-        return Ok(None);
-    }
-    let task = input["knowledge_task_id"]
-        .as_str()
-        .ok_or_else(|| invalid("报告缺少研究任务身份"))?;
-    let (base, epoch) = live_task(conn, task, false)?;
-    if input["research_claim_attempt"].as_i64() != Some(epoch) {
-        return Err(invalid("旧研究报告执行器不能向新尝试写入知识候选"));
-    }
-    let report = read_content(conn, task, "report")?;
-    if report.stage.status != "completed" || report.content_run_id.as_deref() != Some(run) {
-        return Err(invalid("当前完整报告尚未保存，不能创建回写候选"));
-    }
-    for reference in &report.evidence {
-        if !current_reference(conn, &base, reference)? {
-            return Err(invalid("研究报告依据已变化，不能提交过期候选"));
-        }
-    }
-    Ok(Some(task.to_string()))
-}
-
 fn stage_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<ResearchStageSummary> {
     Ok(ResearchStageSummary {
         stage_key: row.get(0)?,
@@ -490,6 +465,24 @@ fn validate_citation_spelling(content: &str) -> Result<(), BrainError> {
                 }
             }
             _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn validate_note_sources(
+    conn: &Connection,
+    base: &str,
+    task: &str,
+    question: &str,
+) -> Result<(), BrainError> {
+    let note = read_content(conn, task, &format!("section:{question}"))?;
+    if note.stage.status != "completed" {
+        return Err(conflict("取证阶段已变化，请重试成稿"));
+    }
+    for origin in &note.evidence {
+        if !current_reference(conn, base, origin)? {
+            return Err(conflict("报告依赖的原文已变化，请复核受影响的取证阶段"));
         }
     }
     Ok(())
@@ -576,10 +569,21 @@ fn section_evidence(
     run: &str,
     output: &ResearchSectionOutput,
 ) -> Result<Vec<ResearchEvidenceReference>, BrainError> {
+    section_evidence_with_limits(conn, base, run, output, 120_000, 64)
+}
+
+fn section_evidence_with_limits(
+    conn: &Connection,
+    base: &str,
+    run: &str,
+    output: &ResearchSectionOutput,
+    content_limit: usize,
+    finding_limit: usize,
+) -> Result<Vec<ResearchEvidenceReference>, BrainError> {
     if !text(&output.summary, 2000)
-        || !text(&output.content_md, 120_000)
+        || !text(&output.content_md, content_limit)
         || output.findings.is_empty()
-        || output.findings.len() > 64
+        || output.findings.len() > finding_limit
     {
         return Err(invalid(
             "章节必须有完整正文、概述与证据矩阵，不能通过截尾或空成果推进阶段",
@@ -666,6 +670,33 @@ fn preserve(conn: &Connection, task: &str, key: &str, now: &str) -> Result<(), B
         conn.execute("INSERT OR IGNORE INTO knowledge_research_stage_versions(task_id,stage_key,revision,snapshot_json,created_at) VALUES(?1,?2,?3,?4,?5)",params![task,key,content.stage.revision,encode(&content)?,now])?;
     }
     Ok(())
+}
+
+pub(super) fn saved_report_for_presentation(
+    conn: &Connection,
+    task: &str,
+    base: &str,
+) -> Result<(String, String), BrainError> {
+    let report = read_content(conn, task, "report")?;
+    let run_id = report
+        .content_run_id
+        .filter(|_| report.stage.status == "completed" && !report.content_md.trim().is_empty())
+        .ok_or_else(|| invalid("重新生成演示需要已保存的完整研究报告"))?;
+    let incomplete: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM knowledge_research_stages
+         WHERE task_id=?1 AND stage_key<>'presentation' AND status<>'completed')",
+        [task],
+        |row| row.get(0),
+    )?;
+    if incomplete {
+        return Err(invalid("请完成并校验研究报告后重新生成演示"));
+    }
+    for reference in &report.evidence {
+        if !current_reference(conn, base, reference)? {
+            return Err(conflict("报告引用的原文已变化，请复核研究报告后再生成演示"));
+        }
+    }
+    Ok((run_id, report.content_md))
 }
 
 fn capture_baseline(conn: &Connection, base: &str, entry: &str) -> Result<Value, BrainError> {
@@ -867,11 +898,22 @@ impl BookWikiStore {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn save_research_synthesis(
         &self,
         claim: &ResearchStageClaim,
         run: &str,
         output: &ResearchSynthesisOutput,
+    ) -> Result<(), BrainError> {
+        self.save_research_synthesis_inner(claim, run, output, None)
+    }
+
+    fn save_research_synthesis_inner(
+        &self,
+        claim: &ResearchStageClaim,
+        run: &str,
+        output: &ResearchSynthesisOutput,
+        editorial_ranges: Option<&[Value]>,
     ) -> Result<(), BrainError> {
         let now = Utc::now().to_rfc3339();
         self.db.transaction(|conn| {
@@ -886,19 +928,42 @@ impl BookWikiStore {
             let mut seen=HashSet::new();
             if output.section_checks.len()!=plan.questions.len() { return Err(invalid("交叉核验必须逐项记录所有主题的对照结果，不能省略章节")) }
             let mut body=output.content_md.clone();
-            body.push_str("\n\n### 跨章节对照记录\n\n以下为模型的公开对照判断，不是独立事实证明；原始章节保留，条件不同不得抹平。\n\n");
+            if editorial_ranges.is_none() {
+                body.push_str("\n\n### 跨章节对照记录\n\n以下为模型的公开对照判断，不是独立事实证明；原始章节保留，条件不同不得抹平。\n\n");
+            }
             for check in &output.section_checks {
-                if !seen.insert(&check.question_id) || !matches!(check.assessment.as_str(),"consistent"|"qualified"|"conflict"|"insufficient") || !text(&check.note,4000) { return Err(invalid("交叉核验主题、判定或说明不符合合同")) }
+                if !seen.insert(&check.question_id) || !text(&check.note,4000) { return Err(invalid("交叉核验的主题须唯一且有说明")) }
+                if !matches!(check.assessment.as_str(),"consistent"|"qualified"|"conflict"|"insufficient") { return Err(invalid("交叉核验的 assessment 只接受 consistent、qualified、conflict 或 insufficient；部分条件支持使用 qualified")) }
                 let question=plan.questions.iter().find(|q|q.id==check.question_id).ok_or_else(||invalid("交叉核验引用了未规划主题"))?;
                 let current:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM knowledge_research_stages WHERE task_id=?1 AND stage_key=?2 AND status='completed' AND revision=?3)",params![claim.task_id,format!("section:{}",check.question_id),check.revision],|row|row.get(0))?;
                 if !current { return Err(conflict("交叉核验对应的章节版本已变化，不能写入过期综合")) }
+                if editorial_ranges.is_some() {
+                    validate_note_sources(conn, &base, &claim.task_id, &question.id)?;
+                }
                 if projected && check.assessment!="insufficient" && !manifest_pages_cover(&manifest_pages,&check.question_id) { return Err(invalid("综合输入为容量投影，当前主题的完整发现矩阵未读完；不能标记口径一致、条件成立或冲突。请分页读完矩阵，或诚实标记依据不足")) }
                 let label=match check.assessment.as_str(){"consistent"=>"口径一致（模型自报）","qualified"=>"条件成立","conflict"=>"存在冲突",_=>"依据不足"};
-                body.push_str(&format!("- **{}** · {}：{}\n",question.title,label,check.note));
+                if editorial_ranges.is_none() {
+                    body.push_str(&format!("- **{}** · {}：{}\n",question.title,label,check.note));
+                }
             }
             let section=ResearchSectionOutput{summary:output.summary.clone(),content_md:body,findings:output.findings.clone()};
             if section.findings.iter().any(|finding|finding.baseline_entry_id.is_some() || finding.baseline_claim_id.is_some()) { return Err(invalid("综合阶段不得冒充具体对象的历史核验")) }
-            let references=section_evidence(conn,&base,run,&section)?;
+            let references=if let Some(ranges)=editorial_ranges {
+                section_evidence_with_limits(conn,&base,run,&section,16*1024*1024,ranges.len()*64)?
+            } else {
+                section_evidence(conn,&base,run,&section)?
+            };
+            if let Some(ranges)=editorial_ranges {
+                let visible = references.iter().map(|reference| reference.citation_index).collect::<HashSet<_>>();
+                // Section checks are diagnostic metadata for the synthesis run.
+                // Only the manuscript, findings and chapter summaries supply report citations.
+                for range in ranges {
+                    if !body_indices(range["summary"].as_str().unwrap_or_default())?.is_subset(&visible) {
+                        return Err(invalid("章节摘要只能引用正文和发现使用的依据"));
+                    }
+                }
+                conn.execute("UPDATE agent_runs SET output_json=json_set(output_json,'$.editorial_ranges',json(?2),'$.section_checks',json(?3)) WHERE id=?1",params![run,encode(&ranges)?,encode(&output.section_checks)?])?;
+            }
             preserve(conn,&claim.task_id,&claim.stage_key,&now)?;
             conn.execute("UPDATE knowledge_research_stages SET status='completed',summary=?3,content_md=?4,findings_json=?5,evidence_json=?6,content_run_id=?7,error=NULL,revision=revision+1,updated_at=?8 WHERE task_id=?1 AND stage_key=?2",params![claim.task_id,claim.stage_key,section.summary,section.content_md,encode(&section.findings)?,encode(&references)?,run,now])?;
             preserve(conn,&claim.task_id,&claim.stage_key,&now)?;
@@ -1028,6 +1093,7 @@ impl BookWikiStore {
                 "SELECT id FROM agent_runs
                  WHERE json_extract(input_json, '$.knowledge_task_id') = ?1
                    AND json_extract(input_json, '$.research_stage_key') = ?2
+                   AND json_extract(input_json, '$.research_author_checkpoint') IS NULL
                    AND task_type LIKE 'knowledge_task_%'
                    AND error LIKE '%stop_reason=max_tokens%'
                  ORDER BY created_at DESC, rowid DESC LIMIT 1",
@@ -1191,7 +1257,7 @@ impl BookWikiStore {
             for (ordinal,question) in plan.questions.iter().enumerate() {
                 conn.execute("INSERT INTO knowledge_research_stages(task_id,stage_key,title,kind,ordinal,status,updated_at) VALUES(?1,?2,?3,'section',?4,'pending',?5)",params![claim.task_id,format!("section:{}",question.id),question.title,ordinal as i64+1,now])?;
             }
-            for (offset,key,title) in [(1,"synthesis","综合结论与交叉核验"),(2,"report","完整报告"),(3,"validation","引用与结构校验"),(4,"presentation","演示交付")] {
+            for (offset,key,title) in [(1,"synthesis","报告成稿与交叉核验"),(2,"report","完整报告"),(3,"validation","报告审稿与校验"),(4,"presentation","演示交付")] {
                 if key=="presentation" {
                     let requested:bool=conn.query_row("SELECT deliverable_type='presentation' FROM knowledge_tasks WHERE id=?1",[&claim.task_id],|row|row.get(0))?;
                     if !requested {continue}
@@ -1241,9 +1307,8 @@ impl BookWikiStore {
         })
     }
 
-    /// Deterministic assembly of validated chapters. This is an application
-    /// run, not a new LLM read or fictitious bill. Imported snapshots explicitly
-    /// name the original Run in which their exact text was actually exposed.
+    /// Publishes the author's report and copies its referenced excerpts. Pending
+    /// tasks with a saved, older synthesis retain their original report format.
     pub(crate) fn assemble_research_report(
         &self,
         claim: &ResearchStageClaim,
@@ -1258,9 +1323,16 @@ impl BookWikiStore {
             let plan:ResearchPlan=decode(&plan_raw)?;
             let brief_raw:String=conn.query_row("SELECT brief_json FROM knowledge_tasks WHERE id=?1",[&claim.task_id],|row|row.get(0))?;
             let brief:ResearchBrief=decode(&brief_raw)?;
+            let authored_ranges:Option<String>=conn.query_row("SELECT json_extract(r.output_json, '$.editorial_ranges') FROM knowledge_research_stages s JOIN agent_runs r ON r.id=s.content_run_id WHERE s.task_id=?1 AND s.stage_key='synthesis' AND s.status='completed'",[&claim.task_id],|row|row.get(0))?;
+            let authored_ranges=authored_ranges.as_deref().map(decode::<Vec<Value>>).transpose()?;
+            if authored_ranges.is_some() {
+                for question in &plan.questions {
+                    validate_note_sources(conn, &base, &claim.task_id, &question.id)?;
+                }
+            }
             let mut body=format!("# {}\n\n",plan.report_title.as_deref().unwrap_or(&plan.goal));
             let front_loaded=brief.confirmed && matches!(brief.purpose.as_str(),"decision"|"reference");
-            if !front_loaded {append_report_context(&mut body,&plan,false)}
+            if !front_loaded && authored_ranges.is_none() {append_report_context(&mut body,&plan,false)}
             let mut findings=Vec::<ResearchFinding>::new();
             let mut references=Vec::<ResearchEvidenceReference>::new();
             let mut identities=HashMap::new();
@@ -1272,7 +1344,9 @@ impl BookWikiStore {
                 _=>"综合结论与交叉核验",
             };
             let synthesis=("synthesis".into(),"_synthesis".into(),synthesis_title.into());
-            if front_loaded {
+            if authored_ranges.is_some() {
+                sections=vec![synthesis];
+            } else if front_loaded {
                 sections.insert(0,synthesis);
             } else {
                 sections.push(synthesis);
@@ -1298,6 +1372,8 @@ impl BookWikiStore {
                         }
                         existing["research_origins"].as_array_mut().ok_or_else(||invalid("组合依据缺少来源身份"))?.push(provenance);
                         snapshot=existing;
+                    } else if let Some(origins)=snapshot["research_origins"].as_array_mut() {
+                        origins.push(provenance);
                     } else {snapshot["research_origins"]=json!([provenance])}
                     let raw=encode(&snapshot)?;
                     mapping.insert(origin.citation_index,index);
@@ -1310,23 +1386,29 @@ impl BookWikiStore {
                 }
                 let byte_start=body.len();
                 let section_summary=relabel(&section.stage.summary,&mapping)?;
-                append_report_section(&mut body,&title,if brief.confirmed {""} else {&section_summary},&relabel(&section.content_md,&mapping)?);
-                if front_loaded && key=="synthesis" {append_report_context(&mut body,&plan,true)}
                 let finding_start=findings.len();
+                if let Some(ranges)=&authored_ranges {
+                    section_ranges=author::publish_authored_sections(&mut body,&section.content_md,ranges,&mapping)?;
+                } else {
+                    append_report_section(&mut body,&title,if brief.confirmed {""} else {&section_summary},&relabel(&section.content_md,&mapping)?);
+                    if front_loaded && key=="synthesis" {append_report_context(&mut body,&plan,true)}
+                }
                 for mut finding in section.findings {
                     finding.finding=relabel(&finding.finding,&mapping)?;
                     finding.limitations=finding.limitations.iter().map(|value|relabel(value,&mapping)).collect::<Result<Vec<_>,_>>()?;
                     finding.citation_indices=finding.citation_indices.iter().map(|index|mapping.get(index).copied().ok_or_else(||invalid("研究发现引用缺失"))).collect::<Result<Vec<_>,_>>()?;
                     findings.push(finding);
                 }
-                section_ranges.push(json!({"question_id":question_id,"title":title,"summary":section_summary,"byte_start":byte_start,"byte_end":body.len(),"finding_start":finding_start,"finding_end":findings.len()}));
+                if authored_ranges.is_none() {
+                    section_ranges.push(json!({"question_id":question_id,"title":title,"summary":section_summary,"byte_start":byte_start,"byte_end":body.len(),"finding_start":finding_start,"finding_end":findings.len()}));
+                }
             }
             if body.len()>16*1024*1024 {return Err(invalid("完整报告超出存储安全边界，不能截尾伪装完成"))}
             let missing=findings.iter().filter(|finding|finding.status!="supported").count();
-            let summary=format!("{} 个主题完整保存，{} 项发现，{} 项部分支持、缺口或争议；这是成果覆盖统计，不是事实正确性证明",plan.questions.len(),findings.len(),missing);
+            let summary=format!("{} 个主题完成取证，{} 个报告章节，{} 项发现，{} 项部分支持、缺口或争议。",plan.questions.len(),section_ranges.len(),findings.len(),missing);
             preserve(conn,&claim.task_id,&claim.stage_key,&now)?;
             conn.execute("UPDATE knowledge_research_stages SET status='completed',summary=?3,content_md=?4,findings_json=?5,evidence_json=?6,error=NULL,content_run_id=?8,revision=revision+1,updated_at=?7 WHERE task_id=?1 AND stage_key=?2",params![claim.task_id,claim.stage_key,summary,body,encode(&findings)?,encode(&references)?,now,run])?;
-            conn.execute("UPDATE agent_runs SET status='completed',output_json=?2,finished_at=?3,usage_source='unavailable' WHERE id=?1 AND status='running'",params![run,encode(&json!({"answer":body,"assembly_only":true,"section_ranges":section_ranges,"billing_usage":"not_applicable"}))?,now])?;
+            conn.execute("UPDATE agent_runs SET status='completed',output_json=?2,finished_at=?3,usage_source='unavailable' WHERE id=?1 AND status='running'",params![run,encode(&json!({"answer":body,"assembly_only":true,"authored_report":authored_ranges.is_some(),"section_ranges":section_ranges,"billing_usage":"not_applicable"}))?,now])?;
             insert_agent_run_event(conn,run,"run.completed",Some("completed"),&summary,&encode(&json!({"origin":"application_assembly","chapters":plan.questions.len(),"evidence":references.len(),"billing_usage":"not_applicable"}))?,&now)?;
             preserve(conn,&claim.task_id,&claim.stage_key,&now)?;
             conn.execute("UPDATE knowledge_research_workspaces SET updated_at=?2 WHERE task_id=?1",params![claim.task_id,now])?;
@@ -1334,35 +1416,105 @@ impl BookWikiStore {
         })
     }
 
-    /// Structural/current-evidence checks only. This does not pretend to prove
-    /// the natural-language conclusions or independent source coverage.
     pub(crate) fn check_research_report(
         &self,
         claim: &ResearchStageClaim,
         run: &str,
+        approval: Option<&ReportReviewApproval>,
     ) -> Result<(), BrainError> {
         let now = Utc::now().to_rfc3339();
         self.db.transaction(|conn| {
-            let (base,kind)=owned_stage(conn,claim,false)?;
-            if kind!="validation" {return Err(invalid("核验交付必须在核验阶段执行"))}
-            check_run(conn,claim,run,false)?;
-            let report=read_content(conn,&claim.task_id,"report")?;
-            if report.stage.status!="completed" {return Err(invalid("没有完整报告可供核验"))}
-            for reference in &report.evidence {
-                if !current_reference(conn,&base,reference)? {return Err(invalid("报告依据已变化，请复核对应章节"))}
-            }
-            let visible=report.evidence.iter().map(|reference|reference.citation_index).collect::<HashSet<_>>();
-            if !body_indices(&report.content_md)?.is_subset(&visible) {return Err(invalid("报告存在未实际读取的引用"))}
+            let report=report_review::report_for_validation(conn,claim,run,approval,&now)?;
             let gaps=report.findings.iter().filter(|finding|finding.status!="supported").count();
-            let summary=format!("结构与当前引用校验通过；{} 项部分支持、缺口或争议仍需读者判断。此校验不是事实正确性证明。",gaps);
-            let content=format!("## 交付校验\n\n- 研究章节已完整保存，未用部分章节伪装全书结论。\n- 引用来自章节内的实际读取记录，版本与当前知识库匹配。\n- 章节引用已统一编号，原始 Run 与读取范围可追溯。\n- 已记录 {} 项证据缺口或分歧；模型自报支持不等于独立事实核验。\n\n{}",gaps,summary);
+            let (summary, review_details) = if let Some(approval)=approval {
+                let summary = format!("已独立核对 {} 个报告段落、表格行或标题，修订 {} 处。已记录的 {} 项证据缺口或分歧可继续查阅。",approval.reviewed_blocks,approval.edits.len(),gaps);
+                let scope = if approval.excerpts_limited { "部分长来源按相关节选核对。" } else { "以报告已读的证据版本核对。" };
+                (summary,json!({"validation_scope":"independent_editorial_review_and_structural_checks","review_run_ids":approval.runs,
+                    "reviewed_blocks":approval.reviewed_blocks,"excerpt_limited":approval.excerpts_limited,"review_scope_note":scope,"repairs":approval.edits.len()}))
+            } else {
+                (format!("结构与当前引用校验通过，已记录 {gaps} 项部分支持、缺口或争议。"),
+                 json!({"validation_scope":"structure_and_current_citation_versions_not_entailment"}))
+            };
+            let scope=review_details["review_scope_note"].as_str().unwrap_or_default();
+            let content=format!("## 交付校验\n\n{summary}\n\n{scope}\n\n- 引用来自实际读取记录，版本与当前知识库匹配。\n- 原始 Run 与读取范围可追溯。");
+            let mut output=review_details;
+            output["answer"]=json!(content);
+            output["report_run_id"]=json!(report.content_run_id);
             preserve(conn,&claim.task_id,&claim.stage_key,&now)?;
             conn.execute("UPDATE knowledge_research_stages SET status='completed',summary=?3,content_md=?4,error=NULL,content_run_id=?6,revision=revision+1,updated_at=?5 WHERE task_id=?1 AND stage_key=?2",params![claim.task_id,claim.stage_key,summary,content,now,run])?;
-            conn.execute("UPDATE agent_runs SET status='completed',output_json=?2,finished_at=?3 WHERE id=?1 AND status='running'",params![run,encode(&json!({"answer":content,"validation_scope":"structure_and_current_citation_versions_not_entailment"}))?,now])?;
-            insert_agent_run_event(conn,run,"run.completed",Some("completed"),&summary,"{\"application_validation\":true}",&now)?;
+            conn.execute("UPDATE agent_runs SET status='completed',output_json=?2,finished_at=?3 WHERE id=?1 AND status='running'",params![run,encode(&output)?,now])?;
+            insert_agent_run_event(conn,run,"run.completed",Some("completed"),&summary,&encode(&json!({"application_validation":true,"independent_review":approval.is_some()}))?,&now)?;
             preserve(conn,&claim.task_id,&claim.stage_key,&now)?;
             conn.execute("UPDATE knowledge_research_workspaces SET updated_at=?2 WHERE task_id=?1",params![claim.task_id,now])?;
             Ok(())
+        })
+    }
+
+    pub(crate) fn queue_presentation_regeneration(
+        &self,
+        task_id: &str,
+        expected_updated_at: &str,
+        pagination: PresentationPagination,
+    ) -> Result<crate::models::book_wiki::KnowledgeTask, BrainError> {
+        pagination
+            .validate()
+            .map_err(BrainError::KnowledgeValidation)?;
+        let now = Utc::now().to_rfc3339();
+        self.db.transaction(|conn| {
+            let (base, brief): (String, String) = conn
+                .query_row(
+                    "SELECT t.knowledge_base_id, t.brief_json FROM knowledge_tasks t
+                 JOIN knowledge_bases b ON b.id=t.knowledge_base_id
+                 WHERE t.id=?1 AND t.updated_at=?2 AND t.deliverable_type='presentation'
+                   AND t.status IN ('completed','failed','cancelled') AND b.lifecycle='active'",
+                    params![task_id, expected_updated_at],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?
+                .ok_or_else(|| conflict("任务已更新或当前不能重新生成演示，请刷新后再试"))?;
+            saved_report_for_presentation(conn, task_id, &base)?;
+            let mut brief: ResearchBrief = decode(&brief)?;
+            brief.presentation_pagination = pagination;
+            preserve(conn, task_id, "presentation", &now)?;
+            conn.execute(
+                "UPDATE knowledge_research_stages
+                 SET status='pending', run_id=NULL, claim_id=NULL, claimed_attempt=NULL,
+                     error=NULL, revision=revision+1, updated_at=?2
+                 WHERE task_id=?1 AND stage_key='presentation'",
+                params![task_id, now],
+            )?;
+            conn.execute(
+                "UPDATE knowledge_research_workspaces SET updated_at=?2 WHERE task_id=?1",
+                params![task_id, now],
+            )?;
+            conn.execute(
+                "UPDATE knowledge_tasks
+                 SET brief_json=?3, status='queued', presentation_only=1, attempt_count=0,
+                     cancel_requested=0, next_attempt_at=?2, lease_expires_at=NULL,
+                     last_heartbeat_at=NULL, artifact_state='pending', updated_at=?2
+                 WHERE id=?1",
+                params![task_id, now, encode(&brief)?],
+            )?;
+            Ok(())
+        })?;
+        self.get_task(task_id)
+    }
+
+    pub(crate) fn report_for_presentation_regeneration(
+        &self,
+        task_id: &str,
+    ) -> Result<Option<(String, String)>, BrainError> {
+        self.db.with_connection(|conn| {
+            let only: bool = conn.query_row(
+                "SELECT presentation_only FROM knowledge_tasks WHERE id=?1",
+                [task_id],
+                |row| row.get(0),
+            )?;
+            if !only {
+                return Ok(None);
+            }
+            let (base, _) = live_task(conn, task_id, false)?;
+            saved_report_for_presentation(conn, task_id, &base).map(Some)
         })
     }
 
@@ -2416,7 +2568,7 @@ mod tests {
         let validation = store.claim_research_stage(&task, "validation").unwrap();
         let validation_run = attach(&store, &base, &task, &validation);
         store
-            .check_research_report(&validation, &validation_run)
+            .check_research_report(&validation, &validation_run, None)
             .unwrap();
         store
             .sync_markdown_sources(
@@ -2694,7 +2846,7 @@ mod tests {
             .is_err());
         let claim = store.claim_research_stage(&task, "validation").unwrap();
         let run = attach(&store, &base, &task, &claim);
-        store.check_research_report(&claim, &run).unwrap();
+        store.check_research_report(&claim, &run, None).unwrap();
         store
             .fail_research_task(&task, attempt, "模拟后续交付失败", true)
             .unwrap();
@@ -2739,7 +2891,7 @@ mod tests {
         store.assemble_research_report(&claim, &run).unwrap();
         let claim = store.claim_research_stage(&task, "validation").unwrap();
         let run = attach(&store, &base, &task, &claim);
-        store.check_research_report(&claim, &run).unwrap();
+        store.check_research_report(&claim, &run, None).unwrap();
         let claim = store.claim_research_stage(&task, "presentation").unwrap();
         let run = attach(&store, &base, &task, &claim);
         store
@@ -3017,46 +3169,6 @@ mod tests {
             .list_agent_run_citations(&synthesis_run)
             .unwrap()
             .is_empty());
-    }
-
-    #[test]
-    fn test_report_candidate_creation_is_atomic_and_old_epoch_cannot_write_after_requeue() {
-        let (store, _dir, base, task) = fixture();
-        setup_plan(&store, &base, &task);
-        complete_section(&store, &base, &task, "section:mechanism");
-        complete_section(&store, &base, &task, "section:boundary");
-        let claim = store.claim_research_stage(&task, "report").unwrap();
-        let run = attach(&store, &base, &task, &claim);
-        let report = store.assemble_research_report(&claim, &run).unwrap();
-        let candidate = json!({"entry_type":"synthesis","slug":"research-result","title":"研究结果","summary":"摘要","content_md":report.content_md,"aliases":[],"confidence":0.7,"citations":["span","span2"],"claims":[],"relations":[]});
-        store
-            .create_semantic_change_set(
-                &base,
-                &run,
-                "研究结果",
-                "待人工审核",
-                "current-report",
-                std::slice::from_ref(&candidate),
-            )
-            .unwrap();
-        assert_eq!(
-            store.get_task(&task).unwrap().knowledge_change_state,
-            "proposed"
-        );
-        store.request_task_cancel(&task).unwrap();
-        store.cancel_task_execution(&task).unwrap();
-        store.start_task_execution(&task).unwrap();
-        assert!(store
-            .create_semantic_change_set(
-                &base,
-                &run,
-                "迟到结果",
-                "旧尝试",
-                "late-report",
-                &[candidate]
-            )
-            .is_err());
-        assert_eq!(store.list_change_sets(&base, None).unwrap().len(), 1);
     }
 
     #[test]

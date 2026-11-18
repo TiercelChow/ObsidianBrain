@@ -523,9 +523,9 @@ async function useSelection(action: 'ask' | 'explain' | 'candidate' | 'research'
       sourcePath: currentSourcePath(),
       selection: text,
     })
-    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || '知识候选提交失败')
-    ElMessage.success('已加入待审核知识候选')
-    await router.push({ path: '/knowledge/wiki', query: { base, review: response.result.id } })
+    if (response.status !== 'success' || !response.result) throw new Error(response.error?.message || 'Wiki 摘录草稿保存失败')
+    ElMessage.success('已保存为 Wiki 摘录草稿')
+    await router.push({ path: '/knowledge/wiki', query: { base, page: response.result.page.id } })
   } catch (selectionError) {
     ElMessage.error((selectionError as Error).message)
   }

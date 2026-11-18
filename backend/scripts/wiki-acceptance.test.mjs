@@ -7,6 +7,7 @@ import {
   acceptanceBookId,
   assertIsolatedTarget,
   assertLocalTarget,
+  assertQaVariant,
   assertTaskScope,
   canonicalHealth,
   compilationNeedsPolling,
@@ -18,7 +19,7 @@ import {
 
 const workspace = '/tmp/obsidianbrain-wiki-acceptance.example'
 const book = { id: acceptanceBookId(workspace), path: path.join(workspace, 'sources') }
-const health = { vault: { path: path.join(workspace, 'vault') }, components: { obsidian: 'disabled' } }
+const health = { storage: { path: workspace, exists: true } }
 
 test('task observation is read-only and limited to an explicitly selected task in the isolated book', () => {
   const task = { id: 'owned-task', knowledge_base_id: 'test-base', status: 'running' }
@@ -32,10 +33,22 @@ test('task observation is read-only and limited to an explicitly selected task i
 })
 
 test('compile observation stops at human review without approving or looping forever', () => {
-  assert.equal(compilationNeedsPolling({ compile_state: 'compiling', compile_phase: 'request_sent' }), true)
-  assert.equal(compilationNeedsPolling({ compile_state: 'compiling', compile_phase: 'waiting_review' }), false)
-  assert.equal(compilationNeedsPolling({ compile_state: 'failed', compile_phase: 'failed' }), false)
-  assert.equal(compilationNeedsPolling({ compile_state: 'ready', compile_phase: 'idle' }), false)
+  assert.equal(compilationNeedsPolling({ status: 'running', phase: 'writing' }), true)
+  for (const status of ['partial', 'ready', 'failed']) {
+    assert.equal(compilationNeedsPolling({ status }), false)
+  }
+  assert.equal(compilationNeedsPolling(null), false)
+})
+
+test('the raw arm rejects a published Wiki and the topic arm requires current published pages', () => {
+  const empty = { pages: [] }
+  const current = { pages: [{ page_id: 'topic', needs_review: false }] }
+  const stale = { pages: [{ page_id: 'topic', needs_review: true }] }
+  assert.doesNotThrow(() => assertQaVariant(empty, 'raw'))
+  assert.doesNotThrow(() => assertQaVariant(current, 'topics'))
+  assert.throws(() => assertQaVariant(current, 'raw'), /原文对照/)
+  assert.throws(() => assertQaVariant(stale, 'topics'), /已发布/)
+  assert.throws(() => assertQaVariant(empty, 'topics'), /已发布/)
 })
 
 test('only the exact isolated loopback origin is accepted', () => {
@@ -45,11 +58,11 @@ test('only the exact isolated loopback origin is accepted', () => {
   }
 })
 
-test('mutations require an isolated vault and an empty or owned bookshelf', () => {
+test('mutations require a matching storage root and an empty or owned bookshelf', () => {
   assert.doesNotThrow(() => assertIsolatedTarget(health, [], workspace))
   assert.doesNotThrow(() => assertIsolatedTarget(health, [book], workspace))
-  assert.throws(() => assertIsolatedTarget({ ...health, vault: { path: '/Users/example/vault' } }, [], workspace), /Vault/)
-  assert.throws(() => assertIsolatedTarget({ ...health, components: { obsidian: 'ok' } }, [], workspace), /Obsidian/)
+  assert.throws(() => assertIsolatedTarget({ storage: { path: '/Users/example/config', exists: true } }, [], workspace), /数据目录/)
+  assert.throws(() => assertIsolatedTarget({ vault: { path: workspace } }, [], workspace), /数据目录/)
   assert.throws(() => assertIsolatedTarget(health, [{ id: 'personal-book', path: '/personal' }], workspace), /书架/)
   assert.throws(() => assertIsolatedTarget(health, [{ ...book, path: '/personal' }], workspace), /书架/)
   assert.throws(() => assertIsolatedTarget(health, [book, book], workspace), /书架/)
@@ -61,9 +74,9 @@ test('health paths are canonicalized so macOS temporary directory aliases match 
   t.after(() => rm(temporary, { recursive: true, force: true }))
   const alias = path.join(temporary, 'alias')
   await symlink(temporary, alias)
-  const snapshot = { vault: { path: alias }, components: { obsidian: 'disabled' } }
-  assert.equal((await canonicalHealth(snapshot)).vault.path, await realpath(temporary))
-  assert.equal(snapshot.vault.path, alias)
+  const snapshot = { storage: { path: alias, exists: true } }
+  assert.equal((await canonicalHealth(snapshot)).storage.path, await realpath(temporary))
+  assert.equal(snapshot.storage.path, alias)
 })
 
 test('SSE parsing preserves Chinese deltas across buffers, CRLF and keepalives', () => {

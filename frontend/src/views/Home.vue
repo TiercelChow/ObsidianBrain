@@ -128,7 +128,7 @@ const attention = computed(() => {
     {label:'今日安排',icon:Calendar,value:data?.tasks.error ? '—' : data?.tasks.data?.today_count ?? '—',hint:'顶层任务 · 今日开始或截止',to:{path:'/tasks',query:{focus:'today'}}},
     {label:'已逾期',icon:Warning,value:data?.tasks.error ? '—' : data?.tasks.data?.overdue_count ?? '—',hint:'顶层任务 · 尚未关闭',to:{path:'/tasks',query:{focus:'overdue'}}},
     {label:'Wiki 运行中',icon:Collection,value:data?.wiki.error ? '—' : data?.wiki.data?.running_count ?? '—',hint:'编译与研究 · 含排队',to:{path:'/knowledge',query:{activity:'running'}}},
-    {label:'等待审核',icon:EditPen,value:data?.wiki.error ? '—' : data?.wiki.data?.review_count ?? '—',hint:'知识候选 · 由你决定',to:{path:'/knowledge/wiki',query:{pending:'1'}}},
+    {label:'等待审核',icon:EditPen,value:data?.wiki.error ? '—' : data?.wiki.data?.review_count ?? '—',hint:'主题草稿 · 待发布',to:{path:'/knowledge/wiki',query:{pending:'1'}}},
   ]
 })
 function importanceLabel(value:string) { return ({urgent:'紧急',high:'重要',normal:'普通',low:'低优先'} as Record<string,string>)[value] || '普通' }
