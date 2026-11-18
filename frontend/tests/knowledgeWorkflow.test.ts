@@ -307,6 +307,8 @@ test('knowledge tasks expose durable execution controls and real presentation ar
   assert.match(view, /PPTX 生成失败，研究报告已保留/)
   assert.match(view, /v-if="!reportVerified"[\s\S]*?报告待复核/)
   assert.match(view, /reportVerified\.value && reportRunId\.value/)
+  assert.match(view, /查看分页预览/)
+  assert.match(view, /查看大纲和编辑页/)
   assert.match(view, /task\.artifact_state === 'failed'/)
   assert.match(api, /PresentationQualityReport/)
   assert.match(api, /validation_details/)

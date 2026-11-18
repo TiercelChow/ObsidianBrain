@@ -55,6 +55,8 @@ mod topic_review;
 pub use adaptive::{AdaptiveBudgetPolicy, AdaptiveRunBudget};
 pub(crate) use topic_review::topic_review_snapshot;
 mod conversation_memory;
+mod presentation_edit;
+pub(crate) use presentation_edit::PresentationArtifactRevision;
 mod research;
 pub(crate) use research::{
     apply_report_review_edits, validate_plan as validate_research_plan, ReportReviewApproval,

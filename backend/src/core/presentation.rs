@@ -13,7 +13,11 @@ use crate::models::book_wiki::{
     MIN_PRESENTATION_SLIDES,
 };
 
+mod editing;
 mod grounding;
+pub(super) use editing::{
+    edit_page_text, page_editing_content, render_pptx_page_revision, PresentationPageEditingContent,
+};
 pub(super) use grounding::{presentation_source_number_labels, validate_presentation_grounding};
 
 const LEGACY_MIN_CONTENT_SLIDES: usize = 4;

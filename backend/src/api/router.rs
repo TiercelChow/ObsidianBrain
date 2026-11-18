@@ -8,7 +8,10 @@ use tower_http::trace::TraceLayer;
 
 use crate::api::handlers::agent_mcp::agent_mcp;
 use crate::api::handlers::health::health_check;
-use crate::api::handlers::knowledge_artifact::download_knowledge_artifact;
+use crate::api::handlers::knowledge_artifact::{
+    download_knowledge_artifact, edit_presentation_page, preview_presentation_outline,
+    read_presentation_outline,
+};
 use crate::api::handlers::knowledge_backup::{
     download_knowledge_backup, upload_and_restore_knowledge_backup,
 };
@@ -79,6 +82,16 @@ pub fn create_router(ctx: Arc<AppContext>) -> Router {
         .route(
             "/knowledge/artifacts/:artifact_id",
             get(download_knowledge_artifact),
+        )
+        .route(
+            "/knowledge/artifacts/:artifact_id/presentation",
+            get(read_presentation_outline)
+                .post(edit_presentation_page)
+                .layer(DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route(
+            "/knowledge/tasks/:task_id/presentation-outline",
+            post(preview_presentation_outline).layer(DefaultBodyLimit::max(2 * 1024)),
         )
         .route(
             "/knowledge/backups/:filename",

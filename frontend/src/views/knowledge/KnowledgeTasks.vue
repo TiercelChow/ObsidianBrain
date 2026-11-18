@@ -130,7 +130,7 @@
         <MotionSwap class="task-result-switch" :view-key="resultTab" contained horizontal>
         <div v-if="resultTab === 'report'" class="task-result-scroll" role="region" aria-label="研究报告">
           <div v-if="!reportVerified" class="artifact-failure" role="status"><strong>报告待复核</strong><span>可查看当前稿件。复核结果和恢复入口在研究阶段。</span></div>
-          <div v-else-if="activeTask.artifact_state === 'failed'" class="artifact-failure" role="status"><strong>PPTX 生成失败，研究报告已保留</strong><span>可在下方阅读完整报告，或重新生成演示。</span></div>
+          <div v-else-if="activeTask.artifact_state === 'failed'" class="artifact-failure" role="status"><strong>PPTX 生成失败，研究报告已保留</strong><span>可在下方阅读完整报告，或查看分页预览后重新生成演示。</span></div>
           <div class="task-result-content">
             <KnowledgeAnswerMarkdown :content="reportContent" :evidence-count="activeEvidence.length" @citation="openEvidence" />
           </div>
@@ -141,8 +141,11 @@
             <el-button v-if="!editingPagination" @click="startPresentationRegeneration">重新生成演示</el-button>
             <template v-else>
               <PresentationPaginationFields v-model="regenerationPagination" />
+              <PresentationOutlinePreview v-if="paginationPreview" :preview="paginationPreview" @citation="openEvidence" />
+              <p v-if="paginationPreviewError" class="pagination-preview-error" role="alert">{{ paginationPreviewError }}</p>
               <div class="knowledge-modal-actions">
                 <el-button :disabled="regeneratingPresentation" @click="editingPagination = false">取消</el-button>
+                <el-button :loading="previewingPagination" :disabled="regeneratingPresentation" @click="loadPaginationPreview">查看分页预览</el-button>
                 <el-button type="primary" :loading="regeneratingPresentation" @click="regeneratePresentation">生成新版演示</el-button>
               </div>
             </template>
@@ -154,6 +157,10 @@
                 <span class="artifact-copy"><b>{{ artifact.title }}</b><small>{{ formatBytes(artifact.size_bytes) }} · {{ artifact.validation_message }}</small></span>
                 <a data-icon-only class="ui-icon-action" :href="knowledgeArtifactDownloadUrl(artifact.id)" download :aria-label="`下载演示文稿：${artifact.title}`" :title="artifact.title"><el-icon><Download /></el-icon></a>
               </div>
+              <button v-if="artifact.artifact_type === 'pptx' && artifact.validation_state === 'valid' && artifact.agent_run_id"
+                type="button" class="artifact-outline-button" @click="openPresentationEditor(artifact.id)">
+                {{ reportVerified ? '查看大纲和编辑页' : '查看演示大纲' }}
+              </button>
               <div v-if="artifactQuality(artifact)" class="artifact-quality" aria-label="演示文稿质量摘要">
                 <span><b>{{ artifactQuality(artifact)?.slide_count }}</b><small>总页数</small></span>
                 <span><b>{{ artifactQuality(artifact)?.layout_count }}</b><small>构图</small></span>
@@ -270,6 +277,7 @@
       </div>
     </MotionModal>
     <KnowledgeCitationPreview v-model="sourcePreviewVisible" :entry="sourcePreviewEntry" :run-id="reportRunId || undefined" :source-index="sourcePreviewIndex" />
+    <PresentationPageEditor v-model="presentationEditorVisible" :artifact-id="presentationEditorArtifact" :can-edit="reportVerified" @saved="onPresentationEditSaved" />
   </KnowledgePageShell>
 </template>
 
@@ -287,6 +295,10 @@ import KnowledgeResearchWorkspace from '@/components/knowledge/KnowledgeResearch
 import KnowledgeCitationPreview from '@/components/knowledge/KnowledgeCitationPreview.vue'
 import KnowledgePageShell from '@/components/knowledge/KnowledgePageShell.vue'
 import PresentationPaginationFields from '@/components/knowledge/PresentationPaginationFields.vue'
+import PresentationOutlinePreview from '@/components/knowledge/PresentationOutlinePreview.vue'
+import PresentationPageEditor from '@/components/knowledge/PresentationPageEditor.vue'
+import { previewPresentationOutline, type PresentationOutlinePreview as PaginationPreview } from '@/api/wikiPresentation'
+import { isAxiosError } from 'axios'
 import { canFocusDocument } from '@/utils/modalFocusPolicy'
 import { knowledgeRunDiagnostics } from '@/utils/knowledgeRunDiagnostics'
 import { researchTaskCapacityFailure, researchTaskStallFailure, researchTaskStartupFailure, researchTaskTurnLimitFailure } from '@/utils/knowledgeRuntimePolicy'
@@ -344,6 +356,12 @@ const activeTask = ref<KnowledgeTask | null>(null)
 const editingPagination = ref(false)
 const regenerationPagination = ref<PresentationPagination>({ mode: 'auto' })
 const regeneratingPresentation = ref(false)
+const paginationPreview = ref<PaginationPreview | null>(null)
+const paginationPreviewError = ref('')
+const previewingPagination = ref(false)
+const presentationEditorVisible = ref(false)
+const presentationEditorArtifact = ref('')
+let paginationPreviewRequest = 0
 const hasTurnLimitFailure = computed(() => researchTaskTurnLimitFailure(activeTask.value))
 const hasCapacityFailure = computed(() => researchTaskCapacityFailure(activeTask.value))
 const hasStallFailure = computed(() => researchTaskStallFailure(activeTask.value))
@@ -394,8 +412,14 @@ let inspectionRequestId = 0
 let resultRequestId = 0
 let taskPollTimer: ReturnType<typeof setTimeout> | undefined
 let tasksRequestId = 0
-watch(resultVisible, visible => { if (!visible) { ++resultRequestId; ++inspectionRequestId; loadingResultId.value = ''; editingPagination.value = false } })
+watch(resultVisible, visible => { if (!visible) { ++resultRequestId; ++inspectionRequestId; loadingResultId.value = ''; editingPagination.value = false; presentationEditorVisible.value = false } })
 watch(() => activeTask.value?.id, () => { editingPagination.value = false })
+watch([editingPagination, regenerationPagination, reportRunId], () => {
+  ++paginationPreviewRequest
+  paginationPreview.value = null
+  paginationPreviewError.value = ''
+  previewingPagination.value = false
+})
 watch(createVisible, visible => { if (!visible) { ++briefPreviewRequestId; ++baseRefreshRequestId; readinessLoading.value = false } })
 
 watch(() => draft.taskType, taskType => {
@@ -765,6 +789,35 @@ function startPresentationRegeneration() {
   editingPagination.value = true
 }
 
+async function loadPaginationPreview() {
+  const task = activeTask.value
+  if (!task || !canRegeneratePresentation.value) return
+  const request = ++paginationPreviewRequest
+  paginationPreviewError.value = ''
+  previewingPagination.value = true
+  try {
+    const preview = await previewPresentationOutline(task.id, reportRunId.value, regenerationPagination.value)
+    if (request === paginationPreviewRequest && resultVisible.value && viewActive) paginationPreview.value = preview
+  } catch (error) {
+    if (request === paginationPreviewRequest) paginationPreviewError.value = isAxiosError(error)
+      ? error.response?.data?.message || error.message
+      : (error as Error).message
+  } finally {
+    if (request === paginationPreviewRequest) previewingPagination.value = false
+  }
+}
+
+function openPresentationEditor(artifactId: string) {
+  presentationEditorArtifact.value = artifactId
+  presentationEditorVisible.value = true
+}
+
+function onPresentationEditSaved(artifact: KnowledgeArtifact) {
+  if (!viewActive || activeTask.value?.id !== artifact.knowledge_task_id) return
+  activeArtifacts.value = [artifact, ...activeArtifacts.value.filter(existing => existing.id !== artifact.id)]
+  ElMessage.success('已保存逐页修订')
+}
+
 async function regeneratePresentation() {
   const task = activeTask.value
   if (!task || !canRegeneratePresentation.value || regeneratingPresentation.value) return
@@ -982,6 +1035,8 @@ onBeforeUnmount(() => { viewActive = false; ++inspectionRequestId; ++resultReque
 .artifact-copy b { font-size: 12px; }
 .artifact-copy small { color: var(--text-faint); font-size: 9px; }
 .artifact-main-row > a { min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 9px; border: 0; border-radius: 9px; background: color-mix(in srgb, var(--bg-base) 48%, transparent); color: var(--accent); font: inherit; font-size: 10px; font-weight: 700; text-decoration: none; cursor: pointer; }
+.artifact-outline-button { margin: 0 12px 8px; min-height: 32px; padding: 0 9px; border: 1px solid var(--accent-border); border-radius: 8px; color: var(--accent); background: var(--bg-glass-subtle); font: inherit; font-size: 11px; cursor: pointer; }
+.pagination-preview-error { margin: 0; color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
 .artifact-quality { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; border-top: 1px solid var(--accent-border); background: var(--accent-border); }
 .artifact-quality span { min-width: 0; display: grid; gap: 2px; padding: 9px 11px; background: color-mix(in srgb, var(--bg-base) 74%, transparent); }
 .artifact-quality b { overflow: hidden; color: var(--text-primary); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }

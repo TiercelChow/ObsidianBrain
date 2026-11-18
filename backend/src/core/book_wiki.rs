@@ -7,7 +7,12 @@ use std::time::Duration;
 
 mod harness_skills;
 mod model_json;
+mod presentation_edit;
 mod presentation_material;
+pub(crate) use presentation_edit::{
+    PresentationOutlinePreview, PresentationPageEditRequest, PresentationPlanPreviewRequest,
+    SavedPresentationOutline,
+};
 #[cfg(test)]
 mod prompt_tests;
 mod qa_policy;
@@ -5908,6 +5913,70 @@ mod tests {
         );
         let file = artifact_root.join(&regenerated.artifacts[0].relative_path);
         assert_eq!(validate_pptx(&file).unwrap().slide_count, 3);
+        let parent = &regenerated.artifacts[0];
+        let preview = service
+            .preview_presentation_outline(
+                &presentation_task.id,
+                serde_json::from_value(serde_json::json!({
+                    "report_run_id": regenerated.run_id,
+                    "pagination": {"mode":"fixed","total_slides":3}
+                }))
+                .unwrap(),
+            )
+            .expect("presentation pagination preview");
+        let preview = serde_json::to_value(preview).unwrap();
+        assert_eq!(preview["paging"]["preferred_total"], 3);
+        assert_eq!(preview["findings"][0]["citation_indices"][0], 1);
+        let outline =
+            serde_json::to_value(service.saved_presentation_outline(&parent.id).unwrap()).unwrap();
+        assert!(outline["read_only_reason"].is_null());
+        assert_eq!(outline["pages"][0]["citations"][0], "S1");
+        let edits = |takeaway: &str| {
+            serde_json::from_value(serde_json::json!({
+                "report_run_id": regenerated.run_id,
+                "page": 2,
+                "changes": {"/takeaway":takeaway}
+            }))
+            .unwrap()
+        };
+        assert!(service
+            .edit_presentation_page(&parent.id, edits("假造数值 12 ms"))
+            .is_err());
+        let start = std::sync::Barrier::new(2);
+        let (first, second) = std::thread::scope(|scope| {
+            let first = scope.spawn(|| {
+                start.wait();
+                service.edit_presentation_page(&parent.id, edits("这三层分别承担不同职责。"))
+            });
+            let second = scope.spawn(|| {
+                start.wait();
+                service.edit_presentation_page(&parent.id, edits("三个层次承担不同职责。"))
+            });
+            (first.join().unwrap(), second.join().unwrap())
+        });
+        assert!(matches!(
+            (&first, &second),
+            (Ok(_), Err(BrainError::KnowledgeConflict(_)))
+                | (Err(BrainError::KnowledgeConflict(_)), Ok(_))
+        ));
+        let changed = first.or(second).expect("save one locally edited slide");
+        assert_eq!(changed.validation_details["edited_page"], 2);
+        assert_eq!(changed.validation_details["revises_artifact_id"], parent.id);
+        assert_ne!(changed.relative_path, parent.relative_path);
+        assert!(file.is_file());
+        let result_with_edit = service.get_task_result(&presentation_task.id).unwrap();
+        assert_eq!(result_with_edit.run_id, regenerated.run_id);
+        assert_eq!(result_with_edit.task, regenerated.task);
+        assert_eq!(result_with_edit.artifacts.len(), 3);
+        let edited_run = store
+            .get_agent_run(changed.agent_run_id.as_deref().unwrap())
+            .unwrap();
+        assert_eq!(edited_run.runtime, "application");
+        assert_eq!(edited_run.input["research_run_id"], regenerated.run_id);
+        assert!(service
+            .edit_presentation_page(&parent.id, edits("不能覆盖并发保存的最新版本。"))
+            .is_err());
+
         service
             .queue_presentation_regeneration(
                 &presentation_task.id,
@@ -5935,7 +6004,10 @@ mod tests {
             .get_task_result(&presentation_task.id)
             .expect("previous report retained");
         assert_eq!(restored.run_id, presentation.run_id);
-        assert_eq!(restored.artifacts.len(), 2);
+        assert_eq!(restored.artifacts.len(), 3);
+        assert!(service
+            .edit_presentation_page(&changed.id, edits("过期证据不可继续修订。"))
+            .is_err());
     }
 
     #[tokio::test]
