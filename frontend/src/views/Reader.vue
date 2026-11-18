@@ -165,6 +165,7 @@
         @mouseup="captureMarkdownSelection"
         @touchend="captureMarkdownSelection"
       >
+        <ReaderBookmarkMarkers v-if="displayedFile" :pane="contentRef" :file="displayedFile" :bookmarks="bookmarks" :ready="fileKind==='md'?renderedHtml:fileKind==='epub'?epubReady:pdfPageCount" @open="openBookmarks" />
         <transition
           :name="transitionDir"
           @enter="onArticleEnter"
@@ -186,7 +187,6 @@
             v-else-if="renderedHtml"
             :key="displayedFile"
             class="markdown-body"
-            :class="{'has-reader-bookmarks':bookmarks.some(item=>item.file_path===displayedFile)}"
             v-html="renderedHtml"
           ></article>
           <div v-else key="empty" class="center-state">
@@ -199,7 +199,6 @@
         <div v-if="fileLoading" class="loadbar"><span></span></div>
         <!-- error banner (old content remains behind) -->
         <div v-if="error" class="error-banner"><el-icon aria-hidden="true"><WarningFilled /></el-icon><span>{{ error }}</span></div>
-        <ReaderBookmarkMarkers v-if="displayedFile" :pane="contentRef" :file="displayedFile" :bookmarks="bookmarks" :ready="fileKind==='md'?renderedHtml:fileKind==='epub'?epubReady:pdfPageCount" @open="openBookmarks" />
       </main>
 
       <!-- Right: TOC -->
@@ -1584,7 +1583,6 @@ onBeforeUnmount(()=>{bookmarkRequest++;stopBookmarkHold()})
 }
 /* Tighter page-header spacing — the Reader is a tool page, not a content page. */
 .reader-page .page-header { margin-bottom: 6px; }
-.markdown-body.has-reader-bookmarks { padding-inline-start:32px; }
 .reader-bookmarks-trigger { flex:none; }
 .reader-document-label > .el-icon { font-size:12px; vertical-align:-1px; }
 .reader-progress-notice { display:flex; align-items:center; justify-content:space-between; gap:12px; flex:none; margin:0; color:var(--text-secondary); font-size:12px; line-height:1.5; }

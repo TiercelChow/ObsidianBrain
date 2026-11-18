@@ -24,6 +24,33 @@ function pdfFixture(){
   return Buffer.from(file)
 }
 const pdf=pdfFixture()
+const settlePaint=page=>page.evaluate(async()=>{await Promise.all(document.getAnimations().filter(animation=>animation.effect?.getTiming().iterations!==Infinity).map(animation=>animation.finished.catch(()=>{})))})
+
+async function assertEdgeRibbon(page, marker) {
+  await marker.locator('.reader-bookmark-ribbon').waitFor({timeout:2500})
+  await page.waitForFunction(()=>{
+    const pane=document.querySelector('.pane-center')
+    const ribbon=pane?.querySelector('.reader-bookmark-ribbon')
+    return ribbon && Math.abs(ribbon.getBoundingClientRect().right-(pane.getBoundingClientRect().left+pane.clientLeft+pane.clientWidth))<1.5
+  },null,{timeout:2500})
+  const appearance=await marker.evaluate(button=>{
+    const ribbon=button.querySelector('.reader-bookmark-ribbon')
+    const tail=ribbon.querySelector('.reader-bookmark-tail')
+    const root=getComputedStyle(document.documentElement)
+    const ink=getComputedStyle(tail,'::after').backgroundColor.match(/[\d.]+/g).map(Number)
+    const base=root.getPropertyValue('--bg-base').trim().slice(1).match(/../g).map(n=>parseInt(n,16))
+    const luma=rgb=>rgb.slice(0,3).reduce((sum,value,i)=>{
+      const channel=value/255
+      return sum+[.2126,.7152,.0722][i]*(channel<=.04045?channel/12.92:((channel+.055)/1.055)**2.4)
+    },0)
+    const luminances=[luma(ink),luma(base)].sort((a,b)=>b-a)
+    return { height:button.offsetHeight, width:button.offsetWidth, tint:getComputedStyle(ribbon).backgroundImage, shape:getComputedStyle(tail).clipPath, contrast:(luminances[0]+.05)/(luminances[1]+.05) }
+  })
+  assert.ok(appearance.height>=44 && appearance.width>=44,'Ribbon has a full touch target')
+  assert.match(appearance.tint,/linear-gradient/)
+  assert.match(appearance.shape,/polygon/)
+  assert.ok(appearance.contrast>=4.5,JSON.stringify(appearance))
+}
 const vite=await createServer({root:fileURLToPath(new URL('../',import.meta.url)),configFile:fileURLToPath(new URL('../vite.config.ts',import.meta.url)),server:{host:'127.0.0.1',port:5232,strictPort:true,open:false},plugins:[{name:'deny-user-data',configureServer(server){server.middlewares.use('/v1',(_req,res)=>{res.statusCode=403;res.end('Isolated bookmark verification')})}}]})
 let browser
 const results=[],errors=[],unexpected=[]
@@ -66,6 +93,7 @@ try{
     await page.goto(`${origin}/reader?book=a&view=read`)
     const article=page.locator('.pane-center>article.markdown-body').last()
     await article.getByRole('heading',{name:'第一章',exact:true}).waitFor()
+    const originalPadding=await article.evaluate(el=>getComputedStyle(el).paddingInlineStart)
     const open=async()=>{await page.getByRole('button',{name:width<768?/，本书书签$/:/^本书书签$/}).first().click();await page.getByRole('dialog',{name:'本书书签',exact:true}).waitFor()}
     const create=async(title,body)=>{
       await page.getByRole('button',{name:'添加当前位置书签'}).click()
@@ -91,13 +119,21 @@ try{
     await page.locator('.bookmark-markdown .hljs-keyword').first().waitFor()
     for(const theme of ['light','dark','eye-care']){
       await page.evaluate(async theme=>(await import('/src/stores/app.ts')).useAppStore().setTheme(theme),theme)
-      await page.evaluate(async()=>{await Promise.all(document.getAnimations().filter(animation=>animation.effect?.getTiming().iterations!==Infinity).map(animation=>animation.finished.catch(()=>{})))})
+      await settlePaint(page)
       assert.equal(await page.locator('html').evaluate(el=>el.scrollWidth>innerWidth),false)
       await page.screenshot({path:join(directory,`${width}-${theme}.png`)})
     }
     await page.getByRole('button',{name:'转到原文'}).click()
+    await page.locator('.bookmarks-panel').waitFor({state:'hidden'})
     const marker=page.getByRole('button',{name:'查看书签：第一条书签',exact:true})
     await marker.waitFor()
+    assert.equal(await article.evaluate(el=>getComputedStyle(el).paddingInlineStart),originalPadding,'A bookmark must not shift the article')
+    for(const theme of ['light','dark','eye-care']){
+      await page.evaluate(async theme=>(await import('/src/stores/app.ts')).useAppStore().setTheme(theme),theme)
+      await assertEdgeRibbon(page,marker)
+      await settlePaint(page)
+      await page.screenshot({path:join(directory,`${width}-${theme}-ribbon.png`)})
+    }
     if(width>768){
       await page.locator('.reader-fullscreen-btn').click()
       await page.waitForFunction(()=>!!document.fullscreenElement)
@@ -130,12 +166,14 @@ try{
     await article.getByRole('heading',{name:'第一章',exact:true}).waitFor()
     await article.getByRole('link',{name:'PDF',exact:true}).click()
     await page.locator('.pdf-page-wrap[data-page-num="3"]').waitFor()
+    await article.waitFor({state:'detached'})
     await page.locator('.pane-center').dispatchEvent('wheel',{deltaY:120})
     await page.locator('.pane-center').evaluate(root=>{
       const page=root.querySelector('.pdf-page-wrap[data-page-num="2"]'),rect=page.getBoundingClientRect()
       root.scrollTop+=rect.top-root.getBoundingClientRect().top+rect.height*.6-200
     })
     const pageTwo=page.locator('.pdf-page-wrap[data-page-num="2"]')
+    await pageTwo.locator('.pdf-canvas.is-rendered').waitFor()
     const rect=await pageTwo.boundingBox()
     await page.mouse.click(rect.x+60,rect.y+rect.height*.6)
     await open();await create('PDF 书签','PDF **页内**笔记')
@@ -151,7 +189,15 @@ try{
       const root=document.querySelector('.pane-center'),page=root.querySelector('.pdf-page-wrap[data-page-num="2"]')
       return page && Math.abs(page.getBoundingClientRect().top+page.clientHeight*.6-root.getBoundingClientRect().top-64)<8
     })
-    await open();await page.getByRole('button',{name:'查看笔记：PDF 书签',exact:true}).click();await page.getByRole('button',{name:'编辑书签',exact:true}).click()
+    const pdfMarker=page.getByRole('button',{name:'查看书签：PDF 书签',exact:true})
+    await assertEdgeRibbon(page,pdfMarker)
+    if(width<768)await page.locator('.pane-center').dispatchEvent('touchmove')
+    await page.getByRole('button',{name:'放大 PDF',exact:true}).click()
+    await page.waitForFunction(()=>{const pane=document.querySelector('.pane-center');return pane.scrollWidth-pane.clientWidth>15})
+    await page.locator('.pane-center').evaluate(el=>{el.scrollLeft=el.scrollWidth-el.clientWidth})
+    await page.waitForFunction(()=>document.querySelector('.pane-center').scrollLeft>15)
+    await assertEdgeRibbon(page,pdfMarker)
+    await pdfMarker.click();await page.getByRole('button',{name:'编辑书签',exact:true}).click()
     await page.getByRole('textbox',{name:'笔记',exact:true}).fill('冲突时保留的草稿')
     failNextSave=true
     await page.getByRole('button',{name:'保存',exact:true}).click()

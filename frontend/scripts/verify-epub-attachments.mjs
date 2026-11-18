@@ -405,11 +405,17 @@ try {
     assert.equal(bookmarks[0].location.kind, 'epub')
     assert.equal(bookmarks[0].location.chapter, 'OPS/one.xhtml')
     await page.getByRole('button', { name: '关闭书签' }).click()
+    const ribbon = page.getByRole('button', { name: '查看书签：EPUB 重点', exact: true })
+    await ribbon.locator('.reader-bookmark-tail').waitFor()
+    await ribbon.click()
+    await page.getByRole('button', { name: '编辑书签', exact: true }).waitFor()
+    await page.getByRole('button', { name: '关闭书签' }).click()
     await page
       .locator('.epub-chapter-bar')
       .getByRole('button', { name: '下一章' })
       .click()
     await frame.getByRole('heading', { name: '第二章', exact: true }).waitFor()
+    await ribbon.waitFor({ state: 'detached' })
     await assertEpubPalette(page, 'eye-care')
     await page
       .getByRole('button', { name: width < 768 ? /，本书书签$/ : /^本书书签$/ })
@@ -420,6 +426,7 @@ try {
       .click()
     await page.getByRole('button', { name: '转到原文' }).click()
     await frame.getByRole('heading', { name: '第一章', exact: true }).waitFor()
+    await ribbon.locator('.reader-bookmark-tail').waitFor()
     await page.waitForFunction(
       () => document.querySelector('.pane-center').scrollTop > 500,
     )
